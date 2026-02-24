@@ -38,7 +38,7 @@ const ChartsPanel = ({
   return (
     <Card
       {...CARD_PROPS}
-      className={`!rounded-2xl ${hasApiInfoPanel ? 'lg:col-span-3' : ''}`}
+      className={`!rounded-2xl dashboard-kie-panel-card ${hasApiInfoPanel ? 'lg:col-span-3' : ''}`}
       title={
         <div className='flex flex-col lg:flex-row lg:items-center lg:justify-between w-full gap-3'>
           <div className={FLEX_CENTER_GAP2}>
@@ -59,7 +59,7 @@ const ChartsPanel = ({
       }
       bodyStyle={{ padding: 0 }}
     >
-      <div className='h-96 p-2'>
+      <div className='h-96 p-2 dashboard-kie-chart-body'>
         {activeChartTab === '1' && (
           <VChart spec={spec_line} option={CHART_CONFIG} />
         )}

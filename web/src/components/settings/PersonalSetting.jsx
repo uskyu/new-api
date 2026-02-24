@@ -448,7 +448,7 @@ const PersonalSetting = () => {
   };
 
   return (
-    <div className='mt-[60px]'>
+    <div className='console-kie-page-shell console-kie-personal-page'>
       <div className='flex justify-center'>
         <div className='w-full max-w-7xl mx-auto px-2'>
           {/* 顶部用户信息区域 */}

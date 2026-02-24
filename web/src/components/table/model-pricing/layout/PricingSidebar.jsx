@@ -91,7 +91,7 @@ const PricingSidebar = ({
     });
 
   return (
-    <div className='p-2'>
+    <div className='p-2 pricing-sidebar-panel'>
       <div className='flex items-center justify-between mb-6'>
         <div className='text-lg font-semibold text-gray-800'>{t('筛选')}</div>
         <Button

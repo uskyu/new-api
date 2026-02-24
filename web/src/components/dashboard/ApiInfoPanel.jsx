@@ -38,7 +38,7 @@ const ApiInfoPanel = ({
   return (
     <Card
       {...CARD_PROPS}
-      className='bg-gray-50 border-0 !rounded-2xl'
+      className='bg-gray-50 border-0 !rounded-2xl dashboard-kie-panel-card dashboard-kie-api-card'
       title={
         <div className={FLEX_CENTER_GAP2}>
           <Server size={16} />
@@ -51,7 +51,7 @@ const ApiInfoPanel = ({
         {apiInfoData.length > 0 ? (
           apiInfoData.map((api) => (
             <React.Fragment key={api.id}>
-              <div className='flex p-2 hover:bg-white rounded-lg transition-colors cursor-pointer'>
+              <div className='flex p-2 rounded-lg transition-colors cursor-pointer dashboard-kie-api-item'>
                 <div className='flex-shrink-0 mr-3'>
                   <Avatar size='extra-small' color={api.color}>
                     {api.route.substring(0, 2)}
@@ -69,7 +69,7 @@ const ApiInfoPanel = ({
                         color='white'
                         shape='circle'
                         onClick={() => handleSpeedTest(api.url)}
-                        className='cursor-pointer hover:opacity-80 text-xs'
+                        className='cursor-pointer hover:opacity-80 text-xs dashboard-kie-api-action-tag'
                       >
                         {t('测速')}
                       </Tag>
@@ -81,7 +81,7 @@ const ApiInfoPanel = ({
                         onClick={() =>
                           window.open(api.url, '_blank', 'noopener,noreferrer')
                         }
-                        className='cursor-pointer hover:opacity-80 text-xs'
+                        className='cursor-pointer hover:opacity-80 text-xs dashboard-kie-api-action-tag'
                       >
                         {t('跳转')}
                       </Tag>

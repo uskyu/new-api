@@ -22,14 +22,14 @@ import { Card, Skeleton } from '@douyinfe/semi-ui';
 
 const THEME_COLORS = {
   allVendors: {
-    primary: '37 99 235',
-    background: 'rgba(59, 130, 246, 0.1)',
-    border: 'rgba(59, 130, 246, 0.2)',
+    primary: '92 76 61',
+    background: 'rgba(170, 145, 118, 0.22)',
+    border: 'rgba(170, 145, 118, 0.34)',
   },
   specific: {
-    primary: '16 185 129',
-    background: 'rgba(16, 185, 129, 0.1)',
-    border: 'rgba(16, 185, 129, 0.2)',
+    primary: '66 106 95',
+    background: 'rgba(109, 149, 138, 0.24)',
+    border: 'rgba(109, 149, 138, 0.34)',
   },
   neutral: {
     background: 'rgba(156, 163, 175, 0.1)',
@@ -48,11 +48,8 @@ const SIZES = {
 
 const SKELETON_STYLES = {
   cover: (primaryColor) => ({
-    '--palette-primary-darkerChannel': primaryColor,
-    backgroundImage: `linear-gradient(0deg, rgba(var(--palette-primary-darkerChannel) / 80%), rgba(var(--palette-primary-darkerChannel) / 80%)), url('/cover-4.webp')`,
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    backgroundRepeat: 'no-repeat',
+    '--palette-pricing-header-channel': primaryColor,
+    background: `linear-gradient(135deg, rgba(var(--palette-pricing-header-channel) / 90%), rgba(var(--palette-pricing-header-channel) / 72%))`,
   }),
   title: {
     backgroundColor: 'rgba(255, 255, 255, 0.25)',
@@ -100,7 +97,7 @@ const PricingVendorIntroSkeleton = memo(
   ({ isAllVendors = false, isMobile = false }) => {
     const placeholder = (
       <Card
-        className='!rounded-2xl shadow-sm border-0'
+        className='!rounded-2xl shadow-sm border-0 pricing-vendor-intro-card'
         cover={
           <div
             className='relative h-full'

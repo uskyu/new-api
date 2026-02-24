@@ -37,6 +37,7 @@ const UserArea = ({
   isSelfUseMode,
   logout,
   navigate,
+  isPublicHeader,
   t,
 }) => {
   const dropdownRef = useRef(null);
@@ -119,7 +120,11 @@ const UserArea = ({
           <Button
             theme='borderless'
             type='tertiary'
-            className='flex items-center gap-1.5 !p-1 !rounded-full hover:!bg-semi-color-fill-1 dark:hover:!bg-gray-700 !bg-semi-color-fill-0 dark:!bg-semi-color-fill-1 dark:hover:!bg-semi-color-fill-2'
+            className={
+              isPublicHeader
+                ? 'home-kie-header-user-btn'
+                : 'flex items-center gap-1.5 !p-1 !rounded-full hover:!bg-semi-color-fill-1 dark:hover:!bg-gray-700 !bg-semi-color-fill-0 dark:!bg-semi-color-fill-1 dark:hover:!bg-semi-color-fill-2'
+            }
           >
             <Avatar
               size='extra-small'
@@ -143,6 +148,32 @@ const UserArea = ({
     );
   } else {
     const showRegisterButton = !isSelfUseMode;
+
+    if (isPublicHeader) {
+      const ctaPath = showRegisterButton ? '/register' : '/login';
+      const ctaText = showRegisterButton ? t('立即体验') : t('登录');
+
+      return (
+        <div className='home-kie-header-auth'>
+          {showRegisterButton && (
+            <Link to='/login' className='hidden lg:flex'>
+              <Button
+                theme='borderless'
+                type='tertiary'
+                className='home-kie-header-login-btn'
+              >
+                <span>{t('登录')}</span>
+              </Button>
+            </Link>
+          )}
+          <Link to={ctaPath} className='flex'>
+            <Button theme='solid' type='primary' className='home-kie-header-cta-btn'>
+              <span>{ctaText}</span>
+            </Button>
+          </Link>
+        </div>
+      );
+    }
 
     const commonSizingAndLayoutClass =
       'flex items-center justify-center !py-[10px] !px-1.5';

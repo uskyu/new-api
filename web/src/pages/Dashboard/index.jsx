@@ -21,8 +21,10 @@ import React from 'react';
 import Dashboard from '../../components/dashboard';
 
 const Detail = () => (
-  <div className='mt-[60px] px-2'>
-    <Dashboard />
+  <div className='dashboard-kie-page'>
+    <div className='dashboard-kie-inner'>
+      <Dashboard />
+    </div>
   </div>
 );
 

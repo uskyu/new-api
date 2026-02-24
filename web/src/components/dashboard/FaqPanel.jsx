@@ -38,7 +38,7 @@ const FaqPanel = ({
   return (
     <Card
       {...CARD_PROPS}
-      className='shadow-sm !rounded-2xl lg:col-span-1'
+      className='shadow-sm !rounded-2xl lg:col-span-1 dashboard-kie-panel-card'
       title={
         <div className={FLEX_CENTER_GAP2}>
           <HelpCircle size={16} />
