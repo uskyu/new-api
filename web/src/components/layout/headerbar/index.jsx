@@ -46,6 +46,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     theme,
     headerNavModules,
     pricingRequireAuth,
+    location,
     logout,
     handleLanguageChange,
     handleThemeToggle,
@@ -63,9 +64,13 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
   } = useNotifications(statusState);
 
   const { mainNavLinks } = useNavigation(t, docsLink, headerNavModules);
+  const isPublicHeader = true;
+  const isPricingHeader = location.pathname.startsWith('/pricing');
 
   return (
-    <header className='text-semi-color-text-0 sticky top-0 z-50 transition-colors duration-300 bg-white/75 dark:bg-zinc-900/75 backdrop-blur-lg'>
+    <header
+      className={`text-semi-color-text-0 sticky top-0 z-50 transition-colors duration-300 ${isPublicHeader ? `home-kie-header ${isPricingHeader ? 'home-kie-header-pricing' : ''}` : 'bg-white/75 dark:bg-zinc-900/75 backdrop-blur-lg'}`}
+    >
       <NoticeModal
         visible={noticeVisible}
         onClose={handleNoticeClose}
@@ -74,8 +79,14 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
         unreadKeys={getUnreadKeys()}
       />
 
-      <div className='w-full px-2'>
-        <div className='flex items-center justify-between h-16'>
+      <div className={isPublicHeader ? 'home-kie-header-inner' : 'w-full px-2'}>
+        <div
+          className={
+            isPublicHeader
+              ? 'home-kie-header-main'
+              : 'flex items-center justify-between h-16'
+          }
+        >
           <div className='flex items-center'>
             <MobileMenuButton
               isConsoleRoute={isConsoleRoute}
@@ -95,6 +106,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
               systemName={systemName}
               isSelfUseMode={isSelfUseMode}
               isDemoSiteMode={isDemoSiteMode}
+              isPublicHeader={isPublicHeader}
               t={t}
             />
           </div>
@@ -105,6 +117,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
             isLoading={isLoading}
             userState={userState}
             pricingRequireAuth={pricingRequireAuth}
+            isPublicHeader={isPublicHeader}
           />
 
           <ActionButtons
@@ -121,6 +134,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
             isSelfUseMode={isSelfUseMode}
             logout={logout}
             navigate={navigate}
+            isPublicHeader={isPublicHeader}
             t={t}
           />
         </div>

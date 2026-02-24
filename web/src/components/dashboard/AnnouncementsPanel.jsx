@@ -37,13 +37,13 @@ const AnnouncementsPanel = ({
   return (
     <Card
       {...CARD_PROPS}
-      className='shadow-sm !rounded-2xl lg:col-span-2'
+      className='shadow-sm !rounded-2xl lg:col-span-2 dashboard-kie-panel-card'
       title={
         <div className='flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2 w-full'>
           <div className='flex items-center gap-2'>
             <Bell size={16} />
             {t('系统公告')}
-            <Tag color='white' shape='circle'>
+            <Tag color='white' shape='circle' className='dashboard-kie-legend-tag'>
               {t('显示最新20条')}
             </Tag>
           </div>

@@ -66,6 +66,7 @@ const PageLayout = () => {
     location.pathname.includes('/console') &&
     !location.pathname.startsWith('/console/chat') &&
     location.pathname !== '/console/playground';
+  const isConsoleDashboardRoute = location.pathname === '/console';
 
   const isConsoleRoute = location.pathname.startsWith('/console');
   const showSider = isConsoleRoute && (!isMobile || drawerOpen);
@@ -188,7 +189,13 @@ const PageLayout = () => {
               flex: '1 0 auto',
               overflowY: isMobile ? 'visible' : 'hidden',
               WebkitOverflowScrolling: 'touch',
-              padding: shouldInnerPadding ? (isMobile ? '5px' : '24px') : '0',
+              padding: shouldInnerPadding
+                ? isConsoleDashboardRoute
+                  ? '0'
+                  : isMobile
+                    ? '5px'
+                    : '24px'
+                : '0',
               position: 'relative',
             }}
           >

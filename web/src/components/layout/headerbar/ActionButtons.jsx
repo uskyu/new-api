@@ -38,23 +38,35 @@ const ActionButtons = ({
   isSelfUseMode,
   logout,
   navigate,
+  isPublicHeader,
   t,
 }) => {
   return (
-    <div className='flex items-center gap-2 md:gap-3'>
-      <NewYearButton isNewYear={isNewYear} />
+    <div
+      className={
+        isPublicHeader ? 'home-kie-header-actions' : 'flex items-center gap-2 md:gap-3'
+      }
+    >
+      <NewYearButton isNewYear={isNewYear} isPublicHeader={isPublicHeader} />
 
       <NotificationButton
         unreadCount={unreadCount}
         onNoticeOpen={onNoticeOpen}
+        isPublicHeader={isPublicHeader}
         t={t}
       />
 
-      <ThemeToggle theme={theme} onThemeToggle={onThemeToggle} t={t} />
+      <ThemeToggle
+        theme={theme}
+        onThemeToggle={onThemeToggle}
+        isPublicHeader={isPublicHeader}
+        t={t}
+      />
 
       <LanguageSelector
         currentLang={currentLang}
         onLanguageChange={onLanguageChange}
+        isPublicHeader={isPublicHeader}
         t={t}
       />
 
@@ -65,6 +77,7 @@ const ActionButtons = ({
         isSelfUseMode={isSelfUseMode}
         logout={logout}
         navigate={navigate}
+        isPublicHeader={isPublicHeader}
         t={t}
       />
     </div>

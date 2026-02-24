@@ -33,33 +33,35 @@ const StatsCards = ({
   const navigate = useNavigate();
   const { t } = useTranslation();
   return (
-    <div className='mb-4'>
+    <div className='mb-4 dashboard-kie-block'>
       <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
         {groupedStatsData.map((group, idx) => (
           <Card
             key={idx}
             {...CARD_PROPS}
-            className={`${group.color} border-0 !rounded-2xl w-full`}
+            className={`${group.color} border-0 !rounded-2xl w-full dashboard-kie-stat-card`}
             title={group.title}
           >
             <div className='space-y-4'>
               {group.items.map((item, itemIdx) => (
                 <div
                   key={itemIdx}
-                  className='flex items-center justify-between cursor-pointer'
+                  className='flex items-center justify-between cursor-pointer dashboard-kie-stat-row'
                   onClick={item.onClick}
                 >
                   <div className='flex items-center'>
                     <Avatar
-                      className='mr-3'
+                      className='mr-3 dashboard-kie-stat-avatar'
                       size='small'
                       color={item.avatarColor}
                     >
                       {item.icon}
                     </Avatar>
                     <div>
-                      <div className='text-xs text-gray-500'>{item.title}</div>
-                      <div className='text-lg font-semibold'>
+                      <div className='text-xs text-gray-500 dashboard-kie-stat-label'>
+                        {item.title}
+                      </div>
+                      <div className='text-lg font-semibold dashboard-kie-stat-value'>
                         <Skeleton
                           loading={loading}
                           active
@@ -85,6 +87,7 @@ const StatsCards = ({
                       color='white'
                       shape='circle'
                       size='large'
+                      className='dashboard-kie-topup-tag'
                       onClick={(e) => {
                         e.stopPropagation();
                         navigate('/console/topup');

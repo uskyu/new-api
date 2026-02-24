@@ -49,8 +49,8 @@ const CARD_STYLES = {
   container:
     'w-12 h-12 rounded-2xl flex items-center justify-center relative shadow-md',
   icon: 'w-8 h-8 flex items-center justify-center',
-  selected: 'border-blue-500 bg-blue-50',
-  default: 'border-gray-200 hover:border-gray-300',
+  selected: 'pricing-model-card-selected',
+  default: 'pricing-model-card-default',
 };
 
 const PricingCardView = ({
@@ -322,7 +322,7 @@ const PricingCardView = ({
                           content={t('倍率是为了方便换算不同价格的模型')}
                         >
                           <IconHelpCircle
-                            className='text-blue-500 cursor-pointer'
+                            className='pricing-ratio-help cursor-pointer'
                             size='small'
                             onClick={(e) => {
                               e.stopPropagation();

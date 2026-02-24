@@ -388,7 +388,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
 
   return (
     <div
-      className='sidebar-container'
+      className='sidebar-container sidebar-kie'
       style={{
         width: 'var(--sidebar-current-width)',
       }}
@@ -401,7 +401,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         showAdmin={isAdmin()}
       >
         <Nav
-          className='sidebar-nav'
+          className='sidebar-nav sidebar-kie-nav'
           defaultIsCollapsed={collapsed}
           isCollapsed={collapsed}
           onCollapseChange={toggleCollapsed}
@@ -491,7 +491,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       </SkeletonWrapper>
 
       {/* 底部折叠按钮 */}
-      <div className='sidebar-collapse-button'>
+      <div className='sidebar-collapse-button sidebar-kie-collapse'>
         <SkeletonWrapper
           loading={showSkeleton}
           type='button'

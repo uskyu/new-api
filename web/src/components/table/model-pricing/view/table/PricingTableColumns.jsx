@@ -194,7 +194,7 @@ export const getPricingTableColumns = ({
         <span>{t('倍率')}</span>
         <Tooltip content={t('倍率是为了方便换算不同价格的模型')}>
           <IconHelpCircle
-            className='text-blue-500 cursor-pointer'
+            className='pricing-ratio-help cursor-pointer'
             onClick={() => {
               setModalImageUrl('/ratio.png');
               setIsModalOpenurl(true);

@@ -29,29 +29,31 @@ const DashboardHeader = ({
   loading,
   t,
 }) => {
-  const ICON_BUTTON_CLASS = 'text-white hover:bg-opacity-80 !rounded-full';
+  const ICON_BUTTON_CLASS = 'dashboard-kie-header-btn';
 
   return (
-    <div className='flex items-center justify-between mb-4'>
+    <div className='dashboard-kie-header'>
       <h2
-        className='text-2xl font-semibold text-gray-800 transition-opacity duration-1000 ease-in-out'
+        className='dashboard-kie-greeting transition-opacity duration-1000 ease-in-out'
         style={{ opacity: greetingVisible ? 1 : 0 }}
       >
         {getGreeting}
       </h2>
-      <div className='flex gap-3'>
+      <div className='dashboard-kie-header-actions'>
         <Button
           type='tertiary'
           icon={<Search size={16} />}
           onClick={showSearchModal}
-          className={`bg-green-500 hover:bg-green-600 ${ICON_BUTTON_CLASS}`}
+          className={ICON_BUTTON_CLASS}
+          aria-label={t('搜索条件')}
         />
         <Button
           type='tertiary'
           icon={<RefreshCw size={16} />}
           onClick={refresh}
           loading={loading}
-          className={`bg-blue-500 hover:bg-blue-600 ${ICON_BUTTON_CLASS}`}
+          className={ICON_BUTTON_CLASS}
+          aria-label={t('刷新')}
         />
       </div>
     </div>

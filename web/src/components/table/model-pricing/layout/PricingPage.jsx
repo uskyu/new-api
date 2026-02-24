@@ -40,15 +40,15 @@ const PricingPage = () => {
   };
 
   return (
-    <div className='bg-white'>
-      <Layout className='pricing-layout'>
+    <div className='console-kie-pricing-page'>
+      <Layout className='pricing-layout console-kie-pricing-layout'>
         {!isMobile && (
-          <Sider className='pricing-scroll-hide pricing-sidebar'>
+          <Sider className='pricing-scroll-hide pricing-sidebar console-kie-pricing-sidebar'>
             <PricingSidebar {...allProps} />
           </Sider>
         )}
 
-        <Content className='pricing-scroll-hide pricing-content'>
+        <Content className='pricing-scroll-hide pricing-content console-kie-pricing-content'>
           <PricingContent
             {...allProps}
             isMobile={isMobile}

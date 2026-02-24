@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import {
   Button,
   Typography,
@@ -41,27 +41,26 @@ import {
 import { Link } from 'react-router-dom';
 import NoticeModal from '../../components/layout/NoticeModal';
 import {
-  Moonshot,
   OpenAI,
-  XAI,
-  Zhipu,
-  Volcengine,
-  Cohere,
-  Claude,
   Gemini,
   Suno,
-  Minimax,
-  Wenxin,
-  Spark,
-  Qingyan,
+  Midjourney,
   DeepSeek,
   Qwen,
-  Midjourney,
-  Grok,
-  AzureAI,
-  Hunyuan,
-  Xinference,
+  Claude,
+  Minimax,
 } from '@lobehub/icons';
+import {
+  Video,
+  Image,
+  Music,
+  DollarSign,
+  FlaskConical,
+  PlugZap,
+  Gauge,
+  ShieldCheck,
+  LifeBuoy,
+} from 'lucide-react';
 
 const { Text } = Typography;
 
@@ -81,6 +80,127 @@ const Home = () => {
   const [endpointIndex, setEndpointIndex] = useState(0);
   const isChinese = i18n.language.startsWith('zh');
 
+  const modelCards = useMemo(
+    () => [
+      {
+        title: 'Google Veo 3.1',
+        desc: t('Google 视频模型，支持高质量镜头运动与稳定场景表达。'),
+        tag: t('视频生成'),
+        tagIcon: <Video size={14} />,
+        logo: <Gemini.Color size={30} />,
+      },
+      {
+        title: 'Runway Aleph',
+        desc: t('面向复杂编辑任务的视频模型，可进行对象替换与风格控制。'),
+        tag: t('视频生成'),
+        tagIcon: <Video size={14} />,
+        logo: <Minimax.Color size={30} />,
+      },
+      {
+        title: 'Suno API',
+        desc: t('高质量音乐生成能力，适用于歌词转旋律与多风格创作。'),
+        tag: t('音乐生成'),
+        tagIcon: <Music size={14} />,
+        logo: <Suno size={30} />,
+      },
+      {
+        title: '4o Image API',
+        desc: t('面向图像生成与编辑，具备稳定细节表现和风格一致性。'),
+        tag: t('图像生成'),
+        tagIcon: <Image size={14} />,
+        logo: <OpenAI size={30} />,
+      },
+      {
+        title: 'Flux Kontext',
+        desc: t('擅长高保真视觉生成，适用于产品图、海报与场景素材。'),
+        tag: t('图像生成'),
+        tagIcon: <Image size={14} />,
+        logo: <DeepSeek.Color size={30} />,
+      },
+      {
+        title: 'Nano Banana',
+        desc: t('轻量图像模型，兼顾响应速度与稳定输出效果。'),
+        tag: t('图像生成'),
+        tagIcon: <Image size={14} />,
+        logo: <Qwen.Color size={30} />,
+      },
+    ],
+    [t],
+  );
+
+  const featureCards = useMemo(
+    () => [
+      {
+        title: t('灵活计费，按量付费'),
+        desc: t('点数体系透明，支持精细成本控制，适配团队从试验到生产。'),
+        icon: <DollarSign size={26} />,
+      },
+      {
+        title: t('Playground 免费试用'),
+        desc: t('可在接入前快速验证模型效果，优化参数并沉淀调用模板。'),
+        icon: <FlaskConical size={26} />,
+      },
+      {
+        title: t('快速接入，文档完善'),
+        desc: t('统一接口风格与示例，几分钟内完成从测试到上线的迁移。'),
+        icon: <PlugZap size={26} />,
+      },
+      {
+        title: t('高性能与可扩展性'),
+        desc: t('支持高并发请求分发与多模型路由，满足持续增长的业务需求。'),
+        icon: <Gauge size={26} />,
+      },
+      {
+        title: t('企业级安全能力'),
+        desc: t('支持密钥隔离、权限控制与审计日志，降低平台运行风险。'),
+        icon: <ShieldCheck size={26} />,
+      },
+      {
+        title: t('7x24 监控与支持'),
+        desc: t('持续监控核心链路状态，保障关键服务稳定与可观测。'),
+        icon: <LifeBuoy size={26} />,
+      },
+    ],
+    [t],
+  );
+
+  const showcaseCards = useMemo(
+    () => [
+      {
+        title: t('AI 视频生成 APIs'),
+        desc: t(
+          '通过统一接口接入视频生成模型，兼顾画面质量、速度与成本，适配营销、教育与媒体内容生产。',
+        ),
+        cta: t('获取密钥'),
+        theme: 'video',
+      },
+      {
+        title: t('AI 图像生成 APIs'),
+        desc: t(
+          '支持图像生成与编辑能力，适用于产品视觉、创意海报与高一致性素材输出。',
+        ),
+        cta: t('查看文档'),
+        theme: 'image',
+      },
+      {
+        title: t('AI 音乐生成 APIs'),
+        desc: t(
+          '以 API 方式批量生成音乐内容，支持旋律、结构与风格控制，适配创作与商业化应用。',
+        ),
+        cta: t('立即体验'),
+        theme: 'music',
+      },
+    ],
+    [t],
+  );
+
+  const heroStats = [
+    { label: t('稳定性'), value: '99.9%' },
+    { label: t('平均响应'), value: '24.6s' },
+    { label: t('运维支持'), value: '24/7' },
+    { label: t('安全评级'), value: '#1' },
+  ];
+
   const displayHomePageContent = async () => {
     setHomePageContent(localStorage.getItem('home_page_content') || '');
     const res = await API.get('/api/home_page_content');
@@ -93,7 +213,6 @@ const Home = () => {
       setHomePageContent(content);
       localStorage.setItem('home_page_content', content);
 
-      // 如果内容是 URL，则发送主题模式
       if (data.startsWith('https://')) {
         const iframe = document.querySelector('iframe');
         if (iframe) {
@@ -156,183 +275,200 @@ const Home = () => {
         isMobile={isMobile}
       />
       {homePageContentLoaded && homePageContent === '' ? (
-        <div className='w-full overflow-x-hidden'>
-          {/* Banner 部分 */}
-          <div className='w-full border-b border-semi-color-border min-h-[500px] md:min-h-[600px] lg:min-h-[700px] relative overflow-x-hidden'>
-            {/* 背景模糊晕染球 */}
-            <div className='blur-ball blur-ball-indigo' />
-            <div className='blur-ball blur-ball-teal' />
-            <div className='flex items-center justify-center h-full px-4 py-20 md:py-24 lg:py-32 mt-10'>
-              {/* 居中内容区 */}
-              <div className='flex flex-col items-center justify-center text-center max-w-4xl mx-auto'>
-                <div className='flex flex-col items-center justify-center mb-6 md:mb-8'>
-                  <h1
-                    className={`text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold text-semi-color-text-0 leading-tight ${isChinese ? 'tracking-wide md:tracking-wider' : ''}`}
+        <div className='home-kie-layout'>
+          <section className='home-kie-hero'>
+            <div className='home-kie-orbit' />
+            <div className='home-kie-hero-inner'>
+              <h1
+                className={`home-kie-hero-title ${isChinese ? 'home-kie-hero-title-cn' : ''}`}
+              >
+                {t('一套 API 覆盖视频、图像与音乐模型')}
+              </h1>
+              <p className='home-kie-hero-subtitle'>
+                {t(
+                  '统一接入主流多模态能力，降低接入成本并提升交付速度，让 AI 产品更快上线。',
+                )}
+              </p>
+
+              <div className='home-kie-hero-actions'>
+                <Link to='/console'>
+                  <Button
+                    theme='solid'
+                    type='primary'
+                    size={isMobile ? 'default' : 'large'}
+                    className='home-kie-cta-primary'
+                    icon={<IconPlay />}
                   >
-                    <>
-                      {t('统一的')}
-                      <br />
-                      <span className='shine-text'>{t('大模型接口网关')}</span>
-                    </>
-                  </h1>
-                  <p className='text-base md:text-lg lg:text-xl text-semi-color-text-1 mt-4 md:mt-6 max-w-xl'>
-                    {t('更好的价格，更好的稳定性，只需要将模型基址替换为：')}
-                  </p>
-                  {/* BASE URL 与端点选择 */}
-                  <div className='flex flex-col md:flex-row items-center justify-center gap-4 w-full mt-4 md:mt-6 max-w-md'>
-                    <Input
-                      readonly
-                      value={serverAddress}
-                      className='flex-1 !rounded-full'
+                    {t('探索 AI API')}
+                  </Button>
+                </Link>
+                {isDemoSiteMode && statusState?.status?.version ? (
+                  <Button
+                    size={isMobile ? 'default' : 'large'}
+                    className='home-kie-cta-secondary'
+                    icon={<IconGithubLogo />}
+                    onClick={() =>
+                      window.open(
+                        'https://github.com/QuantumNous/new-api',
+                        '_blank',
+                      )
+                    }
+                  >
+                    {statusState.status.version}
+                  </Button>
+                ) : (
+                  docsLink && (
+                    <Button
                       size={isMobile ? 'default' : 'large'}
-                      suffix={
-                        <div className='flex items-center gap-2'>
-                          <ScrollList
-                            bodyHeight={32}
-                            style={{ border: 'unset', boxShadow: 'unset' }}
-                          >
-                            <ScrollItem
-                              mode='wheel'
-                              cycled={true}
-                              list={endpointItems}
-                              selectedIndex={endpointIndex}
-                              onSelect={({ index }) => setEndpointIndex(index)}
-                            />
-                          </ScrollList>
-                          <Button
-                            type='primary'
-                            onClick={handleCopyBaseURL}
-                            icon={<IconCopy />}
-                            className='!rounded-full'
-                          />
-                        </div>
-                      }
-                    />
-                  </div>
-                </div>
+                      className='home-kie-cta-secondary'
+                      icon={<IconFile />}
+                      onClick={() => window.open(docsLink, '_blank')}
+                    >
+                      {t('API 文档')}
+                    </Button>
+                  )
+                )}
+              </div>
 
-                {/* 操作按钮 */}
-                <div className='flex flex-row gap-4 justify-center items-center'>
-                  <Link to='/console'>
-                    <Button
-                      theme='solid'
-                      type='primary'
-                      size={isMobile ? 'default' : 'large'}
-                      className='!rounded-3xl px-8 py-2'
-                      icon={<IconPlay />}
-                    >
-                      {t('获取密钥')}
-                    </Button>
-                  </Link>
-                  {isDemoSiteMode && statusState?.status?.version ? (
-                    <Button
-                      size={isMobile ? 'default' : 'large'}
-                      className='flex items-center !rounded-3xl px-6 py-2'
-                      icon={<IconGithubLogo />}
-                      onClick={() =>
-                        window.open(
-                          'https://github.com/QuantumNous/new-api',
-                          '_blank',
-                        )
-                      }
-                    >
-                      {statusState.status.version}
-                    </Button>
-                  ) : (
-                    docsLink && (
-                      <Button
-                        size={isMobile ? 'default' : 'large'}
-                        className='flex items-center !rounded-3xl px-6 py-2'
-                        icon={<IconFile />}
-                        onClick={() => window.open(docsLink, '_blank')}
+              <div className='home-kie-endpoint-panel'>
+                <Text className='home-kie-endpoint-label'>
+                  {t('替换模型基址即可接入')}
+                </Text>
+                <Input
+                  readonly
+                  value={serverAddress}
+                  size={isMobile ? 'default' : 'large'}
+                  className='home-kie-endpoint-input'
+                  suffix={
+                    <div className='home-kie-endpoint-suffix'>
+                      <ScrollList
+                        bodyHeight={30}
+                        style={{ border: 'unset', boxShadow: 'unset' }}
                       >
-                        {t('文档')}
-                      </Button>
-                    )
-                  )}
-                </div>
+                        <ScrollItem
+                          mode='wheel'
+                          cycled={true}
+                          list={endpointItems}
+                          selectedIndex={endpointIndex}
+                          onSelect={({ index }) => setEndpointIndex(index)}
+                        />
+                      </ScrollList>
+                      <Button
+                        type='primary'
+                        onClick={handleCopyBaseURL}
+                        icon={<IconCopy />}
+                      />
+                    </div>
+                  }
+                />
+              </div>
 
-                {/* 框架兼容性图标 */}
-                <div className='mt-12 md:mt-16 lg:mt-20 w-full'>
-                  <div className='flex items-center mb-6 md:mb-8 justify-center'>
-                    <Text
-                      type='tertiary'
-                      className='text-lg md:text-xl lg:text-2xl font-light'
-                    >
-                      {t('支持众多的大模型供应商')}
-                    </Text>
+              <div className='home-kie-stats'>
+                {heroStats.map((item) => (
+                  <div key={item.label} className='home-kie-stat-item'>
+                    <div className='home-kie-stat-value'>{item.value}</div>
+                    <div className='home-kie-stat-label'>{item.label}</div>
                   </div>
-                  <div className='flex flex-wrap items-center justify-center gap-3 sm:gap-4 md:gap-6 lg:gap-8 max-w-5xl mx-auto px-4'>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Moonshot size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <OpenAI size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <XAI size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Zhipu.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Volcengine.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Cohere.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Claude.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Gemini.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Suno size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Minimax.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Wenxin.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Spark.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Qingyan.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <DeepSeek.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Qwen.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Midjourney size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Grok size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <AzureAI.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Hunyuan.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Xinference.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Typography.Text className='!text-lg sm:!text-xl md:!text-2xl lg:!text-3xl font-bold'>
-                        30+
-                      </Typography.Text>
-                    </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className='home-kie-section'>
+            <h2 className='home-kie-section-title'>
+              {t('今日可接入的热门 AI 模型')}
+            </h2>
+            <div className='home-kie-model-grid'>
+              {modelCards.map((card) => (
+                <article key={card.title} className='home-kie-model-card'>
+                  <div className='home-kie-model-head'>
+                    <div className='home-kie-model-logo'>{card.logo}</div>
+                    <span className='home-kie-model-tag'>
+                      {card.tagIcon}
+                      {card.tag}
+                    </span>
+                  </div>
+                  <h3>{card.title}</h3>
+                  <p>{card.desc}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className='home-kie-section'>
+            <h2 className='home-kie-section-title'>
+              {t('为什么选择 New API 进行 API 集成')}
+            </h2>
+            <div className='home-kie-feature-grid'>
+              {featureCards.map((item) => (
+                <article key={item.title} className='home-kie-feature-card'>
+                  <div className='home-kie-feature-icon'>{item.icon}</div>
+                  <h3>{item.title}</h3>
+                  <p>{item.desc}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className='home-kie-section home-kie-showcases'>
+            {showcaseCards.map((item, index) => (
+              <div
+                key={item.title}
+                className={`home-kie-showcase-row ${index % 2 === 1 ? 'reverse' : ''}`}
+              >
+                <div className='home-kie-showcase-text'>
+                  <h3>{item.title}</h3>
+                  <p>{item.desc}</p>
+                  <Button
+                    type='primary'
+                    size='large'
+                    className='home-kie-showcase-btn'
+                  >
+                    {item.cta}
+                  </Button>
+                </div>
+                <div className={`home-kie-showcase-media ${item.theme}`}>
+                  <div className='home-kie-showcase-chip'>
+                    {t('积分')} 8,051
+                  </div>
+                  <div className='home-kie-showcase-preview'>
+                    {item.theme === 'video' && <Gemini.Color size={56} />}
+                    {item.theme === 'image' && <OpenAI size={56} />}
+                    {item.theme === 'music' && <Suno size={56} />}
+                  </div>
+                  <div className='home-kie-showcase-track'>
+                    {item.theme === 'video' && t('视频生成工作台')}
+                    {item.theme === 'image' && t('图像生成工作台')}
+                    {item.theme === 'music' && t('音乐生成控制台')}
+                  </div>
+                  <div className='home-kie-showcase-progress'>
+                    <span />
+                    <span />
+                    <span />
                   </div>
                 </div>
               </div>
+            ))}
+          </section>
+
+          <section className='home-kie-section home-kie-brand-strip'>
+            <div className='home-kie-brand-item'>
+              <Claude.Color size={24} />
+              <span>Claude</span>
             </div>
-          </div>
+            <div className='home-kie-brand-item'>
+              <Midjourney size={24} />
+              <span>Midjourney</span>
+            </div>
+            <div className='home-kie-brand-item'>
+              <DeepSeek.Color size={24} />
+              <span>DeepSeek</span>
+            </div>
+            <div className='home-kie-brand-item'>
+              <Qwen.Color size={24} />
+              <span>Qwen</span>
+            </div>
+          </section>
         </div>
       ) : (
         <div className='overflow-x-hidden w-full'>
