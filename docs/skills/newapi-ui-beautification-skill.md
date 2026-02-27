@@ -4,7 +4,7 @@ description: End-to-end workflow for KIE-style UI beautification, image build, a
 version: 1.0.0
 ---
 
-![newapi_ui_001 preview](../../example_PNG/001.png)
+![newapi_ui_001 preview](https://raw.githubusercontent.com/uskyu/new-api/newapi_ui_001/example_PNG/001.png)
 
 # New API UI Beautification Skill
 
