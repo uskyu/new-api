@@ -18,13 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useContext, useEffect, useMemo, useState } from 'react';
-import {
-  Button,
-  Typography,
-  Input,
-  ScrollList,
-  ScrollItem,
-} from '@douyinfe/semi-ui';
+import { Button } from '@douyinfe/semi-ui';
 import { API, showError, copy, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { API_ENDPOINTS } from '../../constants/common.constant';
@@ -41,28 +35,13 @@ import {
 import { Link } from 'react-router-dom';
 import NoticeModal from '../../components/layout/NoticeModal';
 import {
-  OpenAI,
-  Gemini,
-  Suno,
-  Midjourney,
-  DeepSeek,
-  Qwen,
-  Claude,
-  Minimax,
-} from '@lobehub/icons';
-import {
-  Video,
-  Image,
-  Music,
-  DollarSign,
-  FlaskConical,
-  PlugZap,
+  ArrowRight,
+  Check,
   Gauge,
-  ShieldCheck,
   LifeBuoy,
+  PlugZap,
+  ShieldCheck,
 } from 'lucide-react';
-
-const { Text } = Typography;
 
 const Home = () => {
   const { t, i18n } = useTranslation();
@@ -76,130 +55,82 @@ const Home = () => {
   const docsLink = statusState?.status?.docs_link || '';
   const serverAddress =
     statusState?.status?.server_address || `${window.location.origin}`;
-  const endpointItems = API_ENDPOINTS.map((e) => ({ value: e }));
+  const endpointItems = API_ENDPOINTS.length
+    ? API_ENDPOINTS
+    : ['/v1/chat/completions'];
   const [endpointIndex, setEndpointIndex] = useState(0);
   const isChinese = i18n.language.startsWith('zh');
 
-  const modelCards = useMemo(
+  const heroMetrics = useMemo(
     () => [
       {
-        title: 'Google Veo 3.1',
-        desc: t('Google 视频模型，支持高质量镜头运动与稳定场景表达。'),
-        tag: t('视频生成'),
-        tagIcon: <Video size={14} />,
-        logo: <Gemini.Color size={30} />,
+        label: t('稳定性'),
+        value: '99.9%',
       },
       {
-        title: 'Runway Aleph',
-        desc: t('面向复杂编辑任务的视频模型，可进行对象替换与风格控制。'),
-        tag: t('视频生成'),
-        tagIcon: <Video size={14} />,
-        logo: <Minimax.Color size={30} />,
+        label: t('平均响应'),
+        value: '24ms',
       },
       {
-        title: 'Suno API',
-        desc: t('高质量音乐生成能力，适用于歌词转旋律与多风格创作。'),
-        tag: t('音乐生成'),
-        tagIcon: <Music size={14} />,
-        logo: <Suno size={30} />,
+        label: t('运维支持'),
+        value: '24/7',
       },
       {
-        title: '4o Image API',
-        desc: t('面向图像生成与编辑，具备稳定细节表现和风格一致性。'),
-        tag: t('图像生成'),
-        tagIcon: <Image size={14} />,
-        logo: <OpenAI size={30} />,
-      },
-      {
-        title: 'Flux Kontext',
-        desc: t('擅长高保真视觉生成，适用于产品图、海报与场景素材。'),
-        tag: t('图像生成'),
-        tagIcon: <Image size={14} />,
-        logo: <DeepSeek.Color size={30} />,
-      },
-      {
-        title: 'Nano Banana',
-        desc: t('轻量图像模型，兼顾响应速度与稳定输出效果。'),
-        tag: t('图像生成'),
-        tagIcon: <Image size={14} />,
-        logo: <Qwen.Color size={30} />,
+        label: t('安全评级'),
+        value: 'ISO 27001',
       },
     ],
     [t],
   );
 
-  const featureCards = useMemo(
+  const coreCards = useMemo(
     () => [
-      {
-        title: t('灵活计费，按量付费'),
-        desc: t('点数体系透明，支持精细成本控制，适配团队从试验到生产。'),
-        icon: <DollarSign size={26} />,
-      },
-      {
-        title: t('Playground 免费试用'),
-        desc: t('可在接入前快速验证模型效果，优化参数并沉淀调用模板。'),
-        icon: <FlaskConical size={26} />,
-      },
       {
         title: t('快速接入，文档完善'),
         desc: t('统一接口风格与示例，几分钟内完成从测试到上线的迁移。'),
-        icon: <PlugZap size={26} />,
+        icon: <PlugZap size={24} />,
       },
       {
         title: t('高性能与可扩展性'),
         desc: t('支持高并发请求分发与多模型路由，满足持续增长的业务需求。'),
-        icon: <Gauge size={26} />,
+        icon: <Gauge size={24} />,
       },
       {
         title: t('企业级安全能力'),
         desc: t('支持密钥隔离、权限控制与审计日志，降低平台运行风险。'),
-        icon: <ShieldCheck size={26} />,
+        icon: <ShieldCheck size={24} />,
       },
       {
         title: t('7x24 监控与支持'),
         desc: t('持续监控核心链路状态，保障关键服务稳定与可观测。'),
-        icon: <LifeBuoy size={26} />,
+        icon: <LifeBuoy size={24} />,
       },
     ],
     [t],
   );
 
-  const showcaseCards = useMemo(
+  const advantageCards = useMemo(
     () => [
-      {
-        title: t('AI 视频生成 APIs'),
-        desc: t(
-          '通过统一接口接入视频生成模型，兼顾画面质量、速度与成本，适配营销、教育与媒体内容生产。',
-        ),
-        cta: t('获取密钥'),
-        theme: 'video',
-      },
-      {
-        title: t('AI 图像生成 APIs'),
-        desc: t(
-          '支持图像生成与编辑能力，适用于产品视觉、创意海报与高一致性素材输出。',
-        ),
-        cta: t('查看文档'),
-        theme: 'image',
-      },
-      {
-        title: t('AI 音乐生成 APIs'),
-        desc: t(
-          '以 API 方式批量生成音乐内容，支持旋律、结构与风格控制，适配创作与商业化应用。',
-        ),
-        cta: t('立即体验'),
-        theme: 'music',
-      },
+      [
+        t('点数体系透明，支持精细成本控制，适配团队从试验到生产。'),
+        t('可在接入前快速验证模型效果，优化参数并沉淀调用模板。'),
+        t('统一接口风格与示例，几分钟内完成从测试到上线的迁移。'),
+      ],
+      [
+        t('支持高并发请求分发与多模型路由，满足持续增长的业务需求。'),
+        t('支持密钥隔离、权限控制与审计日志，降低平台运行风险。'),
+        t('持续监控核心链路状态，保障关键服务稳定与可观测。'),
+      ],
+      [
+        t('Google 视频模型，支持高质量镜头运动与稳定场景表达。'),
+        t('面向图像生成与编辑，具备稳定细节表现和风格一致性。'),
+        t('高质量音乐生成能力，适用于歌词转旋律与多风格创作。'),
+      ],
     ],
     [t],
   );
 
-  const heroStats = [
-    { label: t('稳定性'), value: '99.9%' },
-    { label: t('平均响应'), value: '24.6s' },
-    { label: t('运维支持'), value: '24/7' },
-    { label: t('安全评级'), value: '#1' },
-  ];
+  const rotatingEndpoint = endpointItems[endpointIndex] || endpointItems[0];
 
   const displayHomePageContent = async () => {
     setHomePageContent(localStorage.getItem('home_page_content') || '');
@@ -275,134 +206,120 @@ const Home = () => {
         isMobile={isMobile}
       />
       {homePageContentLoaded && homePageContent === '' ? (
-        <div className='home-kie-layout'>
-          <section className='home-kie-hero'>
-            <div className='home-kie-orbit' />
-            <div className='home-kie-hero-inner'>
-              <h1
-                className={`home-kie-hero-title ${isChinese ? 'home-kie-hero-title-cn' : ''}`}
-              >
-                {t('一套 API 覆盖视频、图像与音乐模型')}
-              </h1>
-              <p className='home-kie-hero-subtitle'>
-                {t(
-                  '统一接入主流多模态能力，降低接入成本并提升交付速度，让 AI 产品更快上线。',
-                )}
-              </p>
+        <div className='home-kie-layout home-v2-layout'>
+          <section className='home-v2-hero'>
+            <div className='home-v2-hero-grid'>
+              <div className='home-v2-hero-copy'>
+                <div className='home-v2-hero-badge'>{t('企业级安全能力')}</div>
+                <h1
+                  className={`home-v2-hero-title ${isChinese ? 'home-v2-hero-title-cn' : ''}`}
+                >
+                  {t('一套 API 覆盖视频、图像与音乐模型')}
+                </h1>
+                <p className='home-v2-hero-subtitle'>
+                  {t(
+                    '统一接入主流多模态能力，降低接入成本并提升交付速度，让 AI 产品更快上线。',
+                  )}
+                </p>
 
-              <div className='home-kie-hero-actions'>
-                <Link to='/console'>
-                  <Button
-                    theme='solid'
-                    type='primary'
-                    size={isMobile ? 'default' : 'large'}
-                    className='home-kie-cta-primary'
-                    icon={<IconPlay />}
-                  >
-                    {t('探索 AI API')}
-                  </Button>
-                </Link>
-                {isDemoSiteMode && statusState?.status?.version ? (
-                  <Button
-                    size={isMobile ? 'default' : 'large'}
-                    className='home-kie-cta-secondary'
-                    icon={<IconGithubLogo />}
-                    onClick={() =>
-                      window.open(
-                        'https://github.com/QuantumNous/new-api',
-                        '_blank',
-                      )
-                    }
-                  >
-                    {statusState.status.version}
-                  </Button>
-                ) : (
-                  docsLink && (
+                <div className='home-v2-hero-actions'>
+                  <Link to='/console'>
+                    <Button
+                      theme='solid'
+                      type='primary'
+                      size={isMobile ? 'default' : 'large'}
+                      className='home-v2-cta-primary'
+                      icon={<IconPlay />}
+                    >
+                      {t('立即体验')}
+                    </Button>
+                  </Link>
+                  {isDemoSiteMode && statusState?.status?.version ? (
                     <Button
                       size={isMobile ? 'default' : 'large'}
-                      className='home-kie-cta-secondary'
+                      className='home-v2-cta-secondary'
+                      icon={<IconGithubLogo />}
+                      onClick={() =>
+                        window.open(
+                          'https://github.com/QuantumNous/new-api',
+                          '_blank',
+                        )
+                      }
+                    >
+                      {statusState.status.version}
+                    </Button>
+                  ) : (
+                    <Button
+                      size={isMobile ? 'default' : 'large'}
+                      className='home-v2-cta-secondary'
                       icon={<IconFile />}
-                      onClick={() => window.open(docsLink, '_blank')}
+                      onClick={() => {
+                        if (docsLink) {
+                          window.open(docsLink, '_blank');
+                          return;
+                        }
+                        window.open('/pricing', '_self');
+                      }}
                     >
                       {t('API 文档')}
                     </Button>
-                  )
-                )}
+                  )}
+                </div>
+
+                <div className='home-v2-trusted'>
+                  <span className='home-v2-trusted-label'>4SAPI</span>
+                  <span>OPENAI</span>
+                  <span>ANTHROPIC</span>
+                  <span>GOOGLE</span>
+                  <span>GROK</span>
+                </div>
               </div>
 
-              <div className='home-kie-endpoint-panel'>
-                <Text className='home-kie-endpoint-label'>
-                  {t('替换模型基址即可接入')}
-                </Text>
-                <Input
-                  readonly
-                  value={serverAddress}
-                  size={isMobile ? 'default' : 'large'}
-                  className='home-kie-endpoint-input'
-                  suffix={
-                    <div className='home-kie-endpoint-suffix'>
-                      <ScrollList
-                        bodyHeight={30}
-                        style={{ border: 'unset', boxShadow: 'unset' }}
-                      >
-                        <ScrollItem
-                          mode='wheel'
-                          cycled={true}
-                          list={endpointItems}
-                          selectedIndex={endpointIndex}
-                          onSelect={({ index }) => setEndpointIndex(index)}
-                        />
-                      </ScrollList>
-                      <Button
-                        type='primary'
-                        onClick={handleCopyBaseURL}
-                        icon={<IconCopy />}
-                      />
+              <div className='home-v2-console'>
+                <div className='home-v2-console-head'>
+                  <div className='home-v2-console-dots'>
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <div className='home-v2-console-chip'>ISO 27001</div>
+                </div>
+                <div className='home-v2-console-uptime'>
+                  <div className='home-v2-console-uptime-label'>{t('稳定性')}</div>
+                  <div className='home-v2-console-uptime-value'>99.9%</div>
+                  <div className='home-v2-console-progress'>
+                    <span />
+                  </div>
+                </div>
+                <div className='home-v2-console-grid'>
+                  {heroMetrics.slice(1, 3).map((item) => (
+                    <div key={item.label} className='home-v2-console-metric'>
+                      <span>{item.label}</span>
+                      <strong>{item.value}</strong>
                     </div>
-                  }
-                />
-              </div>
-
-              <div className='home-kie-stats'>
-                {heroStats.map((item) => (
-                  <div key={item.label} className='home-kie-stat-item'>
-                    <div className='home-kie-stat-value'>{item.value}</div>
-                    <div className='home-kie-stat-label'>{item.label}</div>
+                  ))}
+                </div>
+                <div className='home-v2-console-bottom'>
+                  <div className='home-v2-console-bottom-icon'>
+                    <ShieldCheck size={20} />
                   </div>
-                ))}
+                  <div className='home-v2-console-bottom-text'>
+                    <p>{t('企业级安全能力')}</p>
+                    <span>{rotatingEndpoint}</span>
+                  </div>
+                </div>
               </div>
             </div>
           </section>
 
-          <section className='home-kie-section'>
-            <h2 className='home-kie-section-title'>
-              {t('今日可接入的热门 AI 模型')}
-            </h2>
-            <div className='home-kie-model-grid'>
-              {modelCards.map((card) => (
-                <article key={card.title} className='home-kie-model-card'>
-                  <div className='home-kie-model-head'>
-                    <div className='home-kie-model-logo'>{card.logo}</div>
-                    <span className='home-kie-model-tag'>
-                      {card.tagIcon}
-                      {card.tag}
-                    </span>
-                  </div>
-                  <h3>{card.title}</h3>
-                  <p>{card.desc}</p>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className='home-kie-section'>
-            <h2 className='home-kie-section-title'>
+          <section className='home-kie-section home-v2-core'>
+            <h2 className='home-v2-section-title'>
               {t('为什么选择 New API 进行 API 集成')}
             </h2>
-            <div className='home-kie-feature-grid'>
-              {featureCards.map((item) => (
-                <article key={item.title} className='home-kie-feature-card'>
-                  <div className='home-kie-feature-icon'>{item.icon}</div>
+            <div className='home-v2-core-grid'>
+              {coreCards.map((item) => (
+                <article key={item.title} className='home-v2-core-card'>
+                  <div className='home-v2-core-icon'>{item.icon}</div>
                   <h3>{item.title}</h3>
                   <p>{item.desc}</p>
                 </article>
@@ -410,65 +327,74 @@ const Home = () => {
             </div>
           </section>
 
-          <section className='home-kie-section home-kie-showcases'>
-            {showcaseCards.map((item, index) => (
-              <div
-                key={item.title}
-                className={`home-kie-showcase-row ${index % 2 === 1 ? 'reverse' : ''}`}
-              >
-                <div className='home-kie-showcase-text'>
-                  <h3>{item.title}</h3>
-                  <p>{item.desc}</p>
+          <section className='home-kie-section home-v2-advantages'>
+            <h2 className='home-v2-section-title'>{t('今日可接入的热门 AI 模型')}</h2>
+            <p className='home-v2-section-subtitle'>
+              {t(
+                '统一接入主流多模态能力，降低接入成本并提升交付速度，让 AI 产品更快上线。',
+              )}
+            </p>
+
+            <div className='home-v2-adv-grid'>
+              {advantageCards.map((items, index) => (
+                <article key={`adv-${index}`} className='home-v2-adv-card'>
+                  {items.map((item) => (
+                    <div key={item} className='home-v2-adv-item'>
+                      <Check size={16} />
+                      <span>{item}</span>
+                    </div>
+                  ))}
+                </article>
+              ))}
+
+              <article className='home-v2-support-card'>
+                <div className='home-v2-support-main'>
+                  <div className='home-v2-support-icon'>
+                    <LifeBuoy size={24} />
+                  </div>
+                  <div>
+                    <h3>{t('7x24 监控与支持')}</h3>
+                    <p>{t('持续监控核心链路状态，保障关键服务稳定与可观测。')}</p>
+                  </div>
+                </div>
+
+                <div className='home-v2-support-copy'>
+                  <span>{serverAddress}</span>
                   <Button
                     type='primary'
-                    size='large'
-                    className='home-kie-showcase-btn'
+                    className='home-v2-copy-btn'
+                    icon={<IconCopy />}
+                    onClick={handleCopyBaseURL}
                   >
-                    {item.cta}
+                    {t('复制')}
                   </Button>
                 </div>
-                <div className={`home-kie-showcase-media ${item.theme}`}>
-                  <div className='home-kie-showcase-chip'>
-                    {t('积分')} 8,051
-                  </div>
-                  <div className='home-kie-showcase-preview'>
-                    {item.theme === 'video' && <Gemini.Color size={56} />}
-                    {item.theme === 'image' && <OpenAI size={56} />}
-                    {item.theme === 'music' && <Suno size={56} />}
-                  </div>
-                  <div className='home-kie-showcase-track'>
-                    {item.theme === 'video' && t('视频生成工作台')}
-                    {item.theme === 'image' && t('图像生成工作台')}
-                    {item.theme === 'music' && t('音乐生成控制台')}
-                  </div>
-                  <div className='home-kie-showcase-progress'>
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                </div>
-              </div>
-            ))}
+              </article>
+            </div>
           </section>
 
-          <section className='home-kie-section home-kie-brand-strip'>
-            <div className='home-kie-brand-item'>
-              <Claude.Color size={24} />
-              <span>Claude</span>
-            </div>
-            <div className='home-kie-brand-item'>
-              <Midjourney size={24} />
-              <span>Midjourney</span>
-            </div>
-            <div className='home-kie-brand-item'>
-              <DeepSeek.Color size={24} />
-              <span>DeepSeek</span>
-            </div>
-            <div className='home-kie-brand-item'>
-              <Qwen.Color size={24} />
-              <span>Qwen</span>
-            </div>
-          </section>
+          <div className='home-v2-floating-actions'>
+            <Button
+              className='home-v2-float-btn home-v2-float-primary'
+              icon={<LifeBuoy size={18} />}
+              onClick={() => window.open('/about', '_self')}
+            >
+              {t('联系我们')}
+            </Button>
+            <Button
+              className='home-v2-float-btn home-v2-float-secondary'
+              icon={<ArrowRight size={18} />}
+              onClick={() => {
+                if (docsLink) {
+                  window.open(docsLink, '_blank');
+                  return;
+                }
+                window.open('/pricing', '_self');
+              }}
+            >
+              {t('API 文档')}
+            </Button>
+          </div>
         </div>
       ) : (
         <div className='overflow-x-hidden w-full'>

@@ -2,9 +2,18 @@ name: Build UI Beautification Image
 
 on:
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag to publish
+        required: false
+        default: newapi_ui_001
   push:
     branches:
       - ui-beautification-version
+      - newapi_ui_001
+
+env:
+  IMAGE_TAG: ${{ github.event.inputs.image_tag || github.ref_name }}
 
 jobs:
   build-and-push:
@@ -34,8 +43,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/new-api:ui-beautification
-            ghcr.io/${{ github.repository_owner }}/new-api:ui-beautification-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/new-api:${{ env.IMAGE_TAG }}
+            ghcr.io/${{ github.repository_owner }}/new-api:${{ env.IMAGE_TAG }}-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
