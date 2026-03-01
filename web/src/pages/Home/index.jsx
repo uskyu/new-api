@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Typography,
@@ -79,6 +79,14 @@ const Home = () => {
   const endpointItems = API_ENDPOINTS.map((e) => ({ value: e }));
   const [endpointIndex, setEndpointIndex] = useState(0);
   const isChinese = i18n.language.startsWith('zh');
+  const heroRef = useRef(null);
+  const pointerFrameRef = useRef(null);
+  const pointerStateRef = useRef({
+    x: 0,
+    y: 0,
+    targetX: 0,
+    targetY: 0,
+  });
 
   const modelCards = useMemo(
     () => [
@@ -267,6 +275,77 @@ const Home = () => {
     return () => clearInterval(timer);
   }, [endpointItems.length]);
 
+  useEffect(() => {
+    const hero = heroRef.current;
+    if (!hero || isMobile) {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (mediaQuery.matches) {
+      return;
+    }
+
+    const smoothStep = () => {
+      const state = pointerStateRef.current;
+      state.x += (state.targetX - state.x) * 0.16;
+      state.y += (state.targetY - state.y) * 0.16;
+
+      hero.style.setProperty('--guide-x', `${state.x}px`);
+      hero.style.setProperty('--guide-y', `${state.y}px`);
+
+      if (
+        Math.abs(state.targetX - state.x) < 0.2 &&
+        Math.abs(state.targetY - state.y) < 0.2
+      ) {
+        pointerFrameRef.current = null;
+        return;
+      }
+
+      pointerFrameRef.current = window.requestAnimationFrame(smoothStep);
+    };
+
+    const triggerFrame = () => {
+      if (!pointerFrameRef.current) {
+        pointerFrameRef.current = window.requestAnimationFrame(smoothStep);
+      }
+    };
+
+    const setTargetToCenter = () => {
+      const rect = hero.getBoundingClientRect();
+      const state = pointerStateRef.current;
+      state.targetX = rect.width * 0.5;
+      state.targetY = rect.height * 0.34;
+      triggerFrame();
+    };
+
+    const handlePointerMove = (event) => {
+      const rect = hero.getBoundingClientRect();
+      const state = pointerStateRef.current;
+      state.targetX = event.clientX - rect.left;
+      state.targetY = event.clientY - rect.top;
+      triggerFrame();
+    };
+
+    const handlePointerLeave = () => {
+      setTargetToCenter();
+    };
+
+    setTargetToCenter();
+
+    hero.addEventListener('pointermove', handlePointerMove);
+    hero.addEventListener('pointerleave', handlePointerLeave);
+
+    return () => {
+      hero.removeEventListener('pointermove', handlePointerMove);
+      hero.removeEventListener('pointerleave', handlePointerLeave);
+      if (pointerFrameRef.current) {
+        window.cancelAnimationFrame(pointerFrameRef.current);
+        pointerFrameRef.current = null;
+      }
+    };
+  }, [isMobile]);
+
   return (
     <div className='w-full overflow-x-hidden'>
       <NoticeModal
@@ -275,9 +354,11 @@ const Home = () => {
         isMobile={isMobile}
       />
       {homePageContentLoaded && homePageContent === '' ? (
-        <div className='home-kie-layout'>
-          <section className='home-kie-hero'>
+        <div className='home-kie-layout home-kie-fade-seq'>
+          <section ref={heroRef} className='home-kie-hero home-kie-mouse-guide'>
             <div className='home-kie-orbit' />
+            <div className='home-kie-cursor-guide' aria-hidden='true' />
+            <div className='home-kie-cursor-ring' aria-hidden='true' />
             <div className='home-kie-hero-inner'>
               <h1
                 className={`home-kie-hero-title ${isChinese ? 'home-kie-hero-title-cn' : ''}`}
@@ -296,7 +377,7 @@ const Home = () => {
                     theme='solid'
                     type='primary'
                     size={isMobile ? 'default' : 'large'}
-                    className='home-kie-cta-primary'
+                    className='home-kie-cta-primary spring-damp-button'
                     icon={<IconPlay />}
                   >
                     {t('探索 AI API')}
@@ -305,7 +386,7 @@ const Home = () => {
                 {isDemoSiteMode && statusState?.status?.version ? (
                   <Button
                     size={isMobile ? 'default' : 'large'}
-                    className='home-kie-cta-secondary'
+                    className='home-kie-cta-secondary spring-damp-button'
                     icon={<IconGithubLogo />}
                     onClick={() =>
                       window.open(
@@ -320,7 +401,7 @@ const Home = () => {
                   docsLink && (
                     <Button
                       size={isMobile ? 'default' : 'large'}
-                      className='home-kie-cta-secondary'
+                      className='home-kie-cta-secondary spring-damp-button'
                       icon={<IconFile />}
                       onClick={() => window.open(docsLink, '_blank')}
                     >
@@ -365,7 +446,7 @@ const Home = () => {
 
               <div className='home-kie-stats'>
                 {heroStats.map((item) => (
-                  <div key={item.label} className='home-kie-stat-item'>
+                  <div key={item.label} className='home-kie-stat-item spring-damp-item'>
                     <div className='home-kie-stat-value'>{item.value}</div>
                     <div className='home-kie-stat-label'>{item.label}</div>
                   </div>
@@ -380,7 +461,7 @@ const Home = () => {
             </h2>
             <div className='home-kie-model-grid'>
               {modelCards.map((card) => (
-                <article key={card.title} className='home-kie-model-card'>
+                <article key={card.title} className='home-kie-model-card spring-damp-card'>
                   <div className='home-kie-model-head'>
                     <div className='home-kie-model-logo'>{card.logo}</div>
                     <span className='home-kie-model-tag'>
@@ -401,7 +482,7 @@ const Home = () => {
             </h2>
             <div className='home-kie-feature-grid'>
               {featureCards.map((item) => (
-                <article key={item.title} className='home-kie-feature-card'>
+                <article key={item.title} className='home-kie-feature-card spring-damp-card'>
                   <div className='home-kie-feature-icon'>{item.icon}</div>
                   <h3>{item.title}</h3>
                   <p>{item.desc}</p>
@@ -422,7 +503,7 @@ const Home = () => {
                   <Button
                     type='primary'
                     size='large'
-                    className='home-kie-showcase-btn'
+                    className='home-kie-showcase-btn spring-damp-button'
                   >
                     {item.cta}
                   </Button>
