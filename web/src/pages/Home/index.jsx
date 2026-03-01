@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useContext, useEffect, useMemo, useState } from 'react';
-import { Button } from '@douyinfe/semi-ui';
+import { Button, Modal } from '@douyinfe/semi-ui';
 import { API, showError, copy, showSuccess } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { API_ENDPOINTS } from '../../constants/common.constant';
@@ -50,6 +50,7 @@ const Home = () => {
   const [homePageContentLoaded, setHomePageContentLoaded] = useState(false);
   const [homePageContent, setHomePageContent] = useState('');
   const [noticeVisible, setNoticeVisible] = useState(false);
+  const [contactVisible, setContactVisible] = useState(false);
   const isMobile = useIsMobile();
   const isDemoSiteMode = statusState?.status?.demo_site_enabled || false;
   const docsLink = statusState?.status?.docs_link || '';
@@ -131,6 +132,63 @@ const Home = () => {
   );
 
   const rotatingEndpoint = endpointItems[endpointIndex] || endpointItems[0];
+  const wechatSearchId = 'geb13860463399';
+
+  const updateInteractiveCard = (cardNode, clientX, clientY) => {
+    if (!cardNode) {
+      return;
+    }
+    const rect = cardNode.getBoundingClientRect();
+    const relX = (clientX - rect.left) / rect.width;
+    const relY = (clientY - rect.top) / rect.height;
+    const rotateY = (relX - 0.5) * 7;
+    const rotateX = (0.5 - relY) * 7;
+    const moveX = (relX - 0.5) * 6;
+    const moveY = (relY - 0.5) * 6;
+    cardNode.style.setProperty('--card-rotate-x', `${rotateX.toFixed(2)}deg`);
+    cardNode.style.setProperty('--card-rotate-y', `${rotateY.toFixed(2)}deg`);
+    cardNode.style.setProperty('--card-translate-x', `${moveX.toFixed(2)}px`);
+    cardNode.style.setProperty('--card-translate-y', `${moveY.toFixed(2)}px`);
+    cardNode.style.setProperty('--card-glow-x', `${(relX * 100).toFixed(2)}%`);
+    cardNode.style.setProperty('--card-glow-y', `${(relY * 100).toFixed(2)}%`);
+    cardNode.style.setProperty('--card-glow-opacity', '1');
+  };
+
+  const resetInteractiveCard = (cardNode) => {
+    if (!cardNode) {
+      return;
+    }
+    cardNode.style.setProperty('--card-rotate-x', '0deg');
+    cardNode.style.setProperty('--card-rotate-y', '0deg');
+    cardNode.style.setProperty('--card-translate-x', '0px');
+    cardNode.style.setProperty('--card-translate-y', '0px');
+    cardNode.style.setProperty('--card-glow-x', '50%');
+    cardNode.style.setProperty('--card-glow-y', '50%');
+    cardNode.style.setProperty('--card-glow-opacity', '0');
+  };
+
+  const handleCardPointerMove = (event) => {
+    if (
+      isMobile ||
+      (typeof window !== 'undefined' &&
+        window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    ) {
+      return;
+    }
+    updateInteractiveCard(event.currentTarget, event.clientX, event.clientY);
+  };
+
+  const handleCardPointerLeave = (event) => {
+    resetInteractiveCard(event.currentTarget);
+  };
+
+  const interactiveCardProps = isMobile
+    ? {}
+    : {
+        onMouseMove: handleCardPointerMove,
+        onMouseLeave: handleCardPointerLeave,
+      };
 
   const displayHomePageContent = async () => {
     setHomePageContent(localStorage.getItem('home_page_content') || '');
@@ -162,6 +220,13 @@ const Home = () => {
 
   const handleCopyBaseURL = async () => {
     const ok = await copy(serverAddress);
+    if (ok) {
+      showSuccess(t('已复制到剪切板'));
+    }
+  };
+
+  const handleCopyWechatId = async () => {
+    const ok = await copy(wechatSearchId);
     if (ok) {
       showSuccess(t('已复制到剪切板'));
     }
@@ -205,6 +270,27 @@ const Home = () => {
         onClose={() => setNoticeVisible(false)}
         isMobile={isMobile}
       />
+      <Modal
+        title={t('联系我们')}
+        visible={contactVisible}
+        onCancel={() => setContactVisible(false)}
+        footer={null}
+        centered
+        className='home-v2-contact-modal-wrap'
+      >
+        <div className='home-v2-contact-modal'>
+          <div className='home-v2-contact-modal-tag'>{t('微信')}</div>
+          <div className='home-v2-contact-modal-id'>{wechatSearchId}</div>
+          <div className='home-v2-contact-modal-actions'>
+            <Button className='home-v2-contact-copy-btn' onClick={handleCopyWechatId}>
+              {t('复制')}
+            </Button>
+            <Button type='primary' onClick={() => setContactVisible(false)}>
+              {t('关闭')}
+            </Button>
+          </div>
+        </div>
+      </Modal>
       {homePageContentLoaded && homePageContent === '' ? (
         <div className='home-kie-layout home-v2-layout'>
           <section className='home-v2-hero'>
@@ -267,7 +353,6 @@ const Home = () => {
                 </div>
 
                 <div className='home-v2-trusted'>
-                  <span className='home-v2-trusted-label'>4SAPI</span>
                   <span>OPENAI</span>
                   <span>ANTHROPIC</span>
                   <span>GOOGLE</span>
@@ -275,14 +360,19 @@ const Home = () => {
                 </div>
               </div>
 
-              <div className='home-v2-console'>
+              <div
+                className='home-v2-console home-v2-glass-card home-v2-interactive-card'
+                {...interactiveCardProps}
+              >
                 <div className='home-v2-console-head'>
                   <div className='home-v2-console-dots'>
                     <span />
                     <span />
                     <span />
                   </div>
-                  <div className='home-v2-console-chip'>ISO 27001</div>
+                  <div className='home-v2-console-chip home-v2-console-chip-bounce'>
+                    ISO 27001
+                  </div>
                 </div>
                 <div className='home-v2-console-uptime'>
                   <div className='home-v2-console-uptime-label'>{t('稳定性')}</div>
@@ -318,7 +408,11 @@ const Home = () => {
             </h2>
             <div className='home-v2-core-grid'>
               {coreCards.map((item) => (
-                <article key={item.title} className='home-v2-core-card'>
+                <article
+                  key={item.title}
+                  className='home-v2-core-card home-v2-glass-card home-v2-interactive-card'
+                  {...interactiveCardProps}
+                >
                   <div className='home-v2-core-icon'>{item.icon}</div>
                   <h3>{item.title}</h3>
                   <p>{item.desc}</p>
@@ -337,7 +431,11 @@ const Home = () => {
 
             <div className='home-v2-adv-grid'>
               {advantageCards.map((items, index) => (
-                <article key={`adv-${index}`} className='home-v2-adv-card'>
+                <article
+                  key={`adv-${index}`}
+                  className='home-v2-adv-card home-v2-glass-card home-v2-interactive-card'
+                  {...interactiveCardProps}
+                >
                   {items.map((item) => (
                     <div key={item} className='home-v2-adv-item'>
                       <Check size={16} />
@@ -347,7 +445,10 @@ const Home = () => {
                 </article>
               ))}
 
-              <article className='home-v2-support-card'>
+              <article
+                className='home-v2-support-card home-v2-glass-card home-v2-interactive-card'
+                {...interactiveCardProps}
+              >
                 <div className='home-v2-support-main'>
                   <div className='home-v2-support-icon'>
                     <LifeBuoy size={24} />
@@ -373,11 +474,29 @@ const Home = () => {
             </div>
           </section>
 
+          <section className='home-kie-section home-v2-contact'>
+            <article className='home-v2-contact-card home-v2-glass-card'>
+              <div className='home-v2-contact-copy'>
+                <h3>{t('联系方式')}</h3>
+                <p>{t('微信')}</p>
+              </div>
+              <div className='home-v2-contact-actions'>
+                <span className='home-v2-contact-id'>{wechatSearchId}</span>
+                <Button className='home-v2-contact-copy-btn' onClick={handleCopyWechatId}>
+                  {t('复制')}
+                </Button>
+                <Button type='primary' onClick={() => setContactVisible(true)}>
+                  {t('联系我们')}
+                </Button>
+              </div>
+            </article>
+          </section>
+
           <div className='home-v2-floating-actions'>
             <Button
               className='home-v2-float-btn home-v2-float-primary'
               icon={<LifeBuoy size={18} />}
-              onClick={() => window.open('/about', '_self')}
+              onClick={() => setContactVisible(true)}
             >
               {t('联系我们')}
             </Button>
