@@ -132,7 +132,8 @@ const Home = () => {
   );
 
   const rotatingEndpoint = endpointItems[endpointIndex] || endpointItems[0];
-  const wechatSearchId = 'geb13860463399';
+  const contactChannelLabel = '***';
+  const contactIdPlaceholder = 'wx_fake_contact_001';
 
   const updateInteractiveCard = (cardNode, clientX, clientY) => {
     if (!cardNode) {
@@ -226,7 +227,7 @@ const Home = () => {
   };
 
   const handleCopyWechatId = async () => {
-    const ok = await copy(wechatSearchId);
+    const ok = await copy(contactIdPlaceholder);
     if (ok) {
       showSuccess(t('已复制到剪切板'));
     }
@@ -279,8 +280,8 @@ const Home = () => {
         className='home-v2-contact-modal-wrap'
       >
         <div className='home-v2-contact-modal'>
-          <div className='home-v2-contact-modal-tag'>{t('微信')}</div>
-          <div className='home-v2-contact-modal-id'>{wechatSearchId}</div>
+          <div className='home-v2-contact-modal-tag'>{contactChannelLabel}</div>
+          <div className='home-v2-contact-modal-id'>{contactIdPlaceholder}</div>
           <div className='home-v2-contact-modal-actions'>
             <Button className='home-v2-contact-copy-btn' onClick={handleCopyWechatId}>
               {t('复制')}
@@ -478,10 +479,10 @@ const Home = () => {
             <article className='home-v2-contact-card home-v2-glass-card'>
               <div className='home-v2-contact-copy'>
                 <h3>{t('联系方式')}</h3>
-                <p>{t('微信')}</p>
+                <p>{contactChannelLabel}</p>
               </div>
               <div className='home-v2-contact-actions'>
-                <span className='home-v2-contact-id'>{wechatSearchId}</span>
+                <span className='home-v2-contact-id'>{contactIdPlaceholder}</span>
                 <Button className='home-v2-contact-copy-btn' onClick={handleCopyWechatId}>
                   {t('复制')}
                 </Button>
