@@ -133,7 +133,7 @@ const Home = () => {
 
   const rotatingEndpoint = endpointItems[endpointIndex] || endpointItems[0];
   const contactChannelLabel = '***';
-  const contactIdPlaceholder = 'wx_fake_contact_001';
+  const contactIdPlaceholder = 'XXXXXXXX';
 
   const updateInteractiveCard = (cardNode, clientX, clientY) => {
     if (!cardNode) {
