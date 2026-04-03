@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -59,6 +60,13 @@ type AgentUpgradeReviewPayload struct {
 	Approve    bool   `json:"approve"`
 	TargetRate int    `json:"target_rate"`
 	Remark     string `json:"remark"`
+}
+
+type AgentWithdrawRequestPayload struct {
+	AccountName string `json:"account_name"`
+	AccountNo   string `json:"account_no"`
+	Amount      string `json:"amount"`
+	Remark      string `json:"remark"`
 }
 
 func writeAgentConflict(c *gin.Context, err error) bool {
@@ -344,6 +352,86 @@ func GetAgentSelfPromoLinkStats(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, stats)
+}
+
+func CreateAgentWithdrawRequest(c *gin.Context) {
+	var req AgentWithdrawRequestPayload
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiErrorMsg(c, "无效的参数")
+		return
+	}
+	amountDecimal, err := decimal.NewFromString(strings.TrimSpace(req.Amount))
+	if err != nil {
+		common.ApiErrorMsg(c, "提现金额格式错误")
+		return
+	}
+	amount := amountDecimal.Mul(decimal.NewFromInt(100)).Round(0).IntPart()
+	request, err := model.CreateAgentWithdrawRequest(c.GetInt("id"), req.AccountName, req.AccountNo, amount, req.Remark)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, request)
+}
+
+func GetAgentSelfWithdrawRequests(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	status := c.Query("status")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	requests, total, err := model.GetAgentWithdrawRequests(pageInfo, c.GetInt("id"), status, startDate, endDate)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(requests)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func GetAgentWithdrawRequests(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	status := c.Query("status")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	requests, total, err := model.GetAgentWithdrawRequests(pageInfo, 0, status, startDate, endDate)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(requests)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func ExportAgentWithdrawRequests(c *gin.Context) {
+	status := c.Query("status")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	content, batchNo, err := model.ExportAgentWithdrawRequests(status, startDate, endDate)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	filename := fmt.Sprintf("agent-withdraw-%s.csv", batchNo)
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	c.Data(200, "text/csv; charset=utf-8", content)
+}
+
+func ImportAgentWithdrawResults(c *gin.Context) {
+	file, _, err := c.Request.FormFile("file")
+	if err != nil {
+		common.ApiErrorMsg(c, "请上传导入文件")
+		return
+	}
+	defer file.Close()
+	result, err := model.ImportAgentWithdrawResults(file)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
 }
 
 func CreateAgentSelfPromoLink(c *gin.Context) {

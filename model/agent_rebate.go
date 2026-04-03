@@ -1,10 +1,14 @@
 package model
 
 import (
+	"bytes"
+	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/shopspring/decimal"
@@ -28,8 +32,12 @@ const (
 	AgentRebateSourceEPay   = "epay"
 	AgentRebateSourceManual = "manual"
 
-	AgentAdjustmentTypeIncrease = "increase"
-	AgentAdjustmentTypeDecrease = "decrease"
+	AgentAdjustmentTypeIncrease   = "increase"
+	AgentAdjustmentTypeDecrease   = "decrease"
+	AgentLedgerTypeRebateIncome   = "rebate_income"
+	AgentLedgerTypeAdminAdjust    = "admin_adjust"
+	AgentLedgerTypeWithdrawFreeze = "withdraw_freeze"
+	AgentLedgerTypeWithdrawPaid   = "withdraw_paid"
 
 	AgentRateSourceGroup  = "group"
 	AgentRateSourceCustom = "custom"
@@ -37,6 +45,12 @@ const (
 	AgentUpgradeRequestPending  = "pending"
 	AgentUpgradeRequestApproved = "approved"
 	AgentUpgradeRequestRejected = "rejected"
+
+	AgentWithdrawStatusPending  = "pending"
+	AgentWithdrawStatusExported = "exported"
+	AgentWithdrawStatusPaid     = "paid"
+
+	AgentWithdrawChannelAlipay = "alipay"
 
 	DefaultAgentRebateGroupName = "default"
 )
@@ -75,6 +89,7 @@ type AgentProfile struct {
 	RebateGroupId       int    `json:"rebate_group_id" gorm:"type:int;not null;default:0;index"`
 	CustomRate          int    `json:"custom_rate" gorm:"type:int;not null;default:0"`
 	RebateBalanceAmount int64  `json:"rebate_balance_amount" gorm:"type:bigint;not null;default:0"`
+	RebateFrozenAmount  int64  `json:"rebate_frozen_amount" gorm:"type:bigint;not null;default:0"`
 	RebateTotalAmount   int64  `json:"rebate_total_amount" gorm:"type:bigint;not null;default:0"`
 	Remark              string `json:"remark" gorm:"type:varchar(255);default:''"`
 	CreatedAt           int64  `json:"created_at" gorm:"bigint"`
@@ -183,6 +198,71 @@ type AgentUpgradeRequest struct {
 	UpdatedAt          int64  `json:"updated_at" gorm:"bigint"`
 }
 
+type AgentWithdrawAccount struct {
+	Id          int    `json:"id"`
+	AgentUserId int    `json:"agent_user_id" gorm:"not null;uniqueIndex"`
+	ChannelType string `json:"channel_type" gorm:"type:varchar(32);not null;default:'alipay'"`
+	AccountNo   string `json:"account_no" gorm:"type:varchar(128);not null"`
+	AccountName string `json:"account_name" gorm:"type:varchar(64);not null"`
+	CreatedAt   int64  `json:"created_at" gorm:"bigint"`
+	UpdatedAt   int64  `json:"updated_at" gorm:"bigint"`
+}
+
+func (a *AgentWithdrawAccount) BeforeCreate(tx *gorm.DB) error {
+	now := common.GetTimestamp()
+	a.CreatedAt = now
+	a.UpdatedAt = now
+	return nil
+}
+
+func (a *AgentWithdrawAccount) BeforeUpdate(tx *gorm.DB) error {
+	a.UpdatedAt = common.GetTimestamp()
+	return nil
+}
+
+type AgentWithdrawRequest struct {
+	Id                  int    `json:"id"`
+	AgentUserId         int    `json:"agent_user_id" gorm:"not null;index"`
+	Amount              int64  `json:"amount" gorm:"type:bigint;not null;default:0"`
+	Status              string `json:"status" gorm:"type:varchar(32);not null;default:'pending';index"`
+	AccountNoSnapshot   string `json:"account_no_snapshot" gorm:"type:varchar(128);not null"`
+	AccountNameSnapshot string `json:"account_name_snapshot" gorm:"type:varchar(64);not null"`
+	ExportBatchNo       string `json:"export_batch_no" gorm:"type:varchar(64);default:'';index"`
+	ExternalOrderNo     string `json:"external_order_no" gorm:"type:varchar(128);default:'';index"`
+	Remark              string `json:"remark" gorm:"type:varchar(255);default:''"`
+	CreatedAt           int64  `json:"created_at" gorm:"bigint;index"`
+	ProcessedAt         int64  `json:"processed_at" gorm:"bigint"`
+}
+
+func (r *AgentWithdrawRequest) BeforeCreate(tx *gorm.DB) error {
+	if r.CreatedAt == 0 {
+		r.CreatedAt = common.GetTimestamp()
+	}
+	return nil
+}
+
+type AgentBalanceLedger struct {
+	Id            int    `json:"id"`
+	AgentUserId   int    `json:"agent_user_id" gorm:"not null;index"`
+	ChangeType    string `json:"change_type" gorm:"type:varchar(32);not null;index"`
+	Amount        int64  `json:"amount" gorm:"type:bigint;not null"`
+	BalanceBefore int64  `json:"balance_before" gorm:"type:bigint;not null;default:0"`
+	BalanceAfter  int64  `json:"balance_after" gorm:"type:bigint;not null;default:0"`
+	FrozenBefore  int64  `json:"frozen_before" gorm:"type:bigint;not null;default:0"`
+	FrozenAfter   int64  `json:"frozen_after" gorm:"type:bigint;not null;default:0"`
+	ReferenceType string `json:"reference_type" gorm:"type:varchar(32);default:'';index"`
+	ReferenceId   int    `json:"reference_id" gorm:"type:int;not null;default:0;index"`
+	Remark        string `json:"remark" gorm:"type:varchar(255);default:''"`
+	CreatedAt     int64  `json:"created_at" gorm:"bigint;index"`
+}
+
+func (l *AgentBalanceLedger) BeforeCreate(tx *gorm.DB) error {
+	if l.CreatedAt == 0 {
+		l.CreatedAt = common.GetTimestamp()
+	}
+	return nil
+}
+
 func (r *AgentUpgradeRequest) BeforeCreate(tx *gorm.DB) error {
 	now := common.GetTimestamp()
 	r.CreatedAt = now
@@ -218,6 +298,7 @@ type AgentProfileView struct {
 	EffectiveRateSource string `json:"effective_rate_source"`
 	ParentMaxRate       int    `json:"parent_max_rate"`
 	RebateBalanceAmount int64  `json:"rebate_balance_amount"`
+	RebateFrozenAmount  int64  `json:"rebate_frozen_amount"`
 	RebateTotalAmount   int64  `json:"rebate_total_amount"`
 	Remark              string `json:"remark"`
 	CreatedAt           int64  `json:"created_at"`
@@ -225,13 +306,14 @@ type AgentProfileView struct {
 }
 
 type AgentSelfSummary struct {
-	AgentEnabled          bool              `json:"agent_enabled"`
-	AgentInitialized      bool              `json:"agent_initialized"`
-	IsAgent               bool              `json:"is_agent"`
-	Profile               *AgentProfileView `json:"profile,omitempty"`
-	RecentRebateCount     int64             `json:"recent_rebate_count"`
-	RecentRebateAmount    int64             `json:"recent_rebate_amount"`
-	RecentAdjustmentCount int64             `json:"recent_adjustment_count"`
+	AgentEnabled          bool                  `json:"agent_enabled"`
+	AgentInitialized      bool                  `json:"agent_initialized"`
+	IsAgent               bool                  `json:"is_agent"`
+	Profile               *AgentProfileView     `json:"profile,omitempty"`
+	WithdrawAccount       *AgentWithdrawAccount `json:"withdraw_account,omitempty"`
+	RecentRebateCount     int64                 `json:"recent_rebate_count"`
+	RecentRebateAmount    int64                 `json:"recent_rebate_amount"`
+	RecentAdjustmentCount int64                 `json:"recent_adjustment_count"`
 }
 
 type AgentPromoLinkView struct {
@@ -285,6 +367,28 @@ type AgentAdminOverview struct {
 	DownlineUserCount   int64 `json:"downline_user_count"`
 	RebateBalanceAmount int64 `json:"rebate_balance_amount"`
 	RebateTotalAmount   int64 `json:"rebate_total_amount"`
+}
+
+type AgentWithdrawRequestView struct {
+	Id                  int    `json:"id"`
+	AgentUserId         int    `json:"agent_user_id"`
+	Username            string `json:"username"`
+	DisplayName         string `json:"display_name"`
+	Email               string `json:"email"`
+	Amount              int64  `json:"amount"`
+	Status              string `json:"status"`
+	AccountNoSnapshot   string `json:"account_no_snapshot"`
+	AccountNameSnapshot string `json:"account_name_snapshot"`
+	ExportBatchNo       string `json:"export_batch_no"`
+	ExternalOrderNo     string `json:"external_order_no"`
+	Remark              string `json:"remark"`
+	CreatedAt           int64  `json:"created_at"`
+	ProcessedAt         int64  `json:"processed_at"`
+}
+
+type AgentWithdrawImportResult struct {
+	Processed  int   `json:"processed"`
+	RequestIds []int `json:"request_ids"`
 }
 
 type AgentUpgradeRequestView struct {
@@ -490,7 +594,7 @@ func SettleAgentRebateTx(tx *gorm.DB, topUp *TopUp, sourceType string) error {
 		return nil
 	}
 	var profile AgentProfile
-	if err := tx.Where("user_id = ?", invitee.InviterId).First(&profile).Error; err != nil {
+	if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("user_id = ?", invitee.InviterId).First(&profile).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}
@@ -529,10 +633,26 @@ func SettleAgentRebateTx(tx *gorm.DB, topUp *TopUp, sourceType string) error {
 	if err := tx.Create(&record).Error; err != nil {
 		return err
 	}
-	return tx.Model(&AgentProfile{}).Where("id = ?", profile.Id).Updates(map[string]interface{}{
-		"rebate_balance_amount": gorm.Expr("rebate_balance_amount + ?", rebateAmount),
-		"rebate_total_amount":   gorm.Expr("rebate_total_amount + ?", rebateAmount),
-	}).Error
+	balanceBefore := profile.RebateBalanceAmount
+	balanceAfter := balanceBefore + rebateAmount
+	if err := tx.Model(&AgentProfile{}).Where("id = ?", profile.Id).Updates(map[string]interface{}{
+		"rebate_balance_amount": balanceAfter,
+		"rebate_total_amount":   profile.RebateTotalAmount + rebateAmount,
+	}).Error; err != nil {
+		return err
+	}
+	return createAgentBalanceLedgerTx(tx, &AgentBalanceLedger{
+		AgentUserId:   profile.UserId,
+		ChangeType:    AgentLedgerTypeRebateIncome,
+		Amount:        rebateAmount,
+		BalanceBefore: balanceBefore,
+		BalanceAfter:  balanceAfter,
+		FrozenBefore:  profile.RebateFrozenAmount,
+		FrozenAfter:   profile.RebateFrozenAmount,
+		ReferenceType: "rebate_record",
+		ReferenceId:   record.Id,
+		Remark:        sourceType,
+	})
 }
 
 func getEffectiveAgentRebateRateTx(tx *gorm.DB, profile *AgentProfile) (int, error) {
@@ -697,6 +817,287 @@ func buildAgentRateConflictErrorFromOverrides(tx *gorm.DB, overrides map[int]int
 		return err
 	}
 	return buildAgentRateConflictError(conflicts)
+}
+
+func createAgentBalanceLedgerTx(tx *gorm.DB, ledger *AgentBalanceLedger) error {
+	if tx == nil || ledger == nil {
+		return errors.New("invalid balance ledger")
+	}
+	return tx.Create(ledger).Error
+}
+
+func upsertAgentWithdrawAccountTx(tx *gorm.DB, agentUserId int, accountName string, accountNo string) (*AgentWithdrawAccount, error) {
+	if tx == nil {
+		return nil, errors.New("tx is nil")
+	}
+	accountName = strings.TrimSpace(accountName)
+	accountNo = strings.TrimSpace(accountNo)
+	if accountName == "" || accountNo == "" {
+		return nil, errors.New("withdraw account info is incomplete")
+	}
+	var account AgentWithdrawAccount
+	err := tx.Where("agent_user_id = ?", agentUserId).First(&account).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		account = AgentWithdrawAccount{
+			AgentUserId: agentUserId,
+			ChannelType: AgentWithdrawChannelAlipay,
+			AccountNo:   accountNo,
+			AccountName: accountName,
+		}
+		if err := tx.Create(&account).Error; err != nil {
+			return nil, err
+		}
+		return &account, nil
+	}
+	account.AccountName = accountName
+	account.AccountNo = accountNo
+	account.ChannelType = AgentWithdrawChannelAlipay
+	if err := tx.Save(&account).Error; err != nil {
+		return nil, err
+	}
+	return &account, nil
+}
+
+func GetAgentWithdrawAccount(agentUserId int) (*AgentWithdrawAccount, error) {
+	if agentUserId <= 0 {
+		return nil, errors.New("invalid agent user id")
+	}
+	var account AgentWithdrawAccount
+	if err := DB.Where("agent_user_id = ?", agentUserId).First(&account).Error; err != nil {
+		return nil, err
+	}
+	return &account, nil
+}
+
+func CreateAgentWithdrawRequest(agentUserId int, accountName string, accountNo string, amount int64, remark string) (*AgentWithdrawRequest, error) {
+	if agentUserId <= 0 {
+		return nil, errors.New("invalid agent user id")
+	}
+	if amount <= 0 {
+		return nil, errors.New("withdraw amount must be greater than 0")
+	}
+	request := &AgentWithdrawRequest{}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		profile := &AgentProfile{}
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("user_id = ?", agentUserId).First(profile).Error; err != nil {
+			return err
+		}
+		if profile.Status != AgentStatusEnabled {
+			return errors.New("agent is disabled")
+		}
+		if profile.RebateBalanceAmount < amount {
+			return errors.New("agent rebate balance is insufficient")
+		}
+		account, err := upsertAgentWithdrawAccountTx(tx, agentUserId, accountName, accountNo)
+		if err != nil {
+			return err
+		}
+		balanceBefore := profile.RebateBalanceAmount
+		frozenBefore := profile.RebateFrozenAmount
+		balanceAfter := balanceBefore - amount
+		frozenAfter := frozenBefore + amount
+		if err := tx.Model(profile).Updates(map[string]interface{}{
+			"rebate_balance_amount": balanceAfter,
+			"rebate_frozen_amount":  frozenAfter,
+		}).Error; err != nil {
+			return err
+		}
+		request.AgentUserId = agentUserId
+		request.Amount = amount
+		request.Status = AgentWithdrawStatusPending
+		request.AccountNoSnapshot = account.AccountNo
+		request.AccountNameSnapshot = account.AccountName
+		request.Remark = strings.TrimSpace(remark)
+		if err := tx.Create(request).Error; err != nil {
+			return err
+		}
+		return createAgentBalanceLedgerTx(tx, &AgentBalanceLedger{
+			AgentUserId:   agentUserId,
+			ChangeType:    AgentLedgerTypeWithdrawFreeze,
+			Amount:        amount,
+			BalanceBefore: balanceBefore,
+			BalanceAfter:  balanceAfter,
+			FrozenBefore:  frozenBefore,
+			FrozenAfter:   frozenAfter,
+			ReferenceType: "withdraw_request",
+			ReferenceId:   request.Id,
+			Remark:        "withdraw request created",
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return request, nil
+}
+
+func GetAgentWithdrawRequests(pageInfo *common.PageInfo, agentUserId int, status string, startDate string, endDate string) ([]*AgentWithdrawRequestView, int64, error) {
+	var requests []*AgentWithdrawRequestView
+	var total int64
+	tx := DB.Table("agent_withdraw_requests AS awr").
+		Select("awr.id, awr.agent_user_id, u.username, u.display_name, u.email, awr.amount, awr.status, awr.account_no_snapshot, awr.account_name_snapshot, awr.export_batch_no, awr.external_order_no, awr.remark, awr.created_at, awr.processed_at").
+		Joins("LEFT JOIN users AS u ON u.id = awr.agent_user_id")
+	if agentUserId > 0 {
+		tx = tx.Where("awr.agent_user_id = ?", agentUserId)
+	}
+	status = strings.TrimSpace(status)
+	if status != "" {
+		tx = tx.Where("awr.status = ?", status)
+	}
+	if startTs, endTs, ok := parseWithdrawDateRange(startDate, endDate); ok {
+		tx = tx.Where("awr.created_at >= ? AND awr.created_at <= ?", startTs, endTs)
+	}
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := tx.Order("awr.id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&requests).Error; err != nil {
+		return nil, 0, err
+	}
+	return requests, total, nil
+}
+
+func parseWithdrawDateRange(startDate string, endDate string) (int64, int64, bool) {
+	startDate = strings.TrimSpace(startDate)
+	endDate = strings.TrimSpace(endDate)
+	if startDate == "" || endDate == "" {
+		return 0, 0, false
+	}
+	startTime, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return 0, 0, false
+	}
+	endTime, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return 0, 0, false
+	}
+	return startTime.Unix(), endTime.Add(24*time.Hour - time.Second).Unix(), true
+}
+
+func ExportAgentWithdrawRequests(status string, startDate string, endDate string) ([]byte, string, error) {
+	batchNo := fmt.Sprintf("WD-%d", common.GetTimestamp())
+	buffer := &bytes.Buffer{}
+	writer := csv.NewWriter(buffer)
+	if err := writer.Write([]string{"request_id", "username", "email", "account_name", "account_no", "amount", "status", "external_order_no"}); err != nil {
+		return nil, "", err
+	}
+	pageInfo := &common.PageInfo{Page: 1, PageSize: 100000}
+	requests, _, err := GetAgentWithdrawRequests(pageInfo, 0, status, startDate, endDate)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, request := range requests {
+		if request.Status == AgentWithdrawStatusPending {
+			if err := DB.Model(&AgentWithdrawRequest{}).Where("id = ?", request.Id).Updates(map[string]interface{}{
+				"status":          AgentWithdrawStatusExported,
+				"export_batch_no": batchNo,
+			}).Error; err != nil {
+				return nil, "", err
+			}
+			request.Status = AgentWithdrawStatusExported
+			request.ExportBatchNo = batchNo
+		}
+		if err := writer.Write([]string{
+			strconv.Itoa(request.Id),
+			request.Username,
+			request.Email,
+			request.AccountNameSnapshot,
+			request.AccountNoSnapshot,
+			decimal.NewFromInt(request.Amount).Div(decimal.NewFromInt(100)).StringFixed(2),
+			request.Status,
+			request.ExternalOrderNo,
+		}); err != nil {
+			return nil, "", err
+		}
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return nil, "", err
+	}
+	return buffer.Bytes(), batchNo, nil
+}
+
+func ImportAgentWithdrawResults(reader io.Reader) (*AgentWithdrawImportResult, error) {
+	if reader == nil {
+		return nil, errors.New("import file is required")
+	}
+	csvReader := csv.NewReader(reader)
+	records, err := csvReader.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	result := &AgentWithdrawImportResult{Processed: 0, RequestIds: make([]int, 0)}
+	if len(records) <= 1 {
+		return result, nil
+	}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		for idx, row := range records {
+			if idx == 0 {
+				continue
+			}
+			if len(row) < 8 {
+				continue
+			}
+			requestId, parseErr := strconv.Atoi(strings.TrimSpace(row[0]))
+			if parseErr != nil || requestId <= 0 {
+				continue
+			}
+			externalOrderNo := strings.TrimSpace(row[7])
+			if externalOrderNo == "" {
+				continue
+			}
+			withdrawRequest := &AgentWithdrawRequest{}
+			if err := tx.Set("gorm:query_option", "FOR UPDATE").First(withdrawRequest, requestId).Error; err != nil {
+				return err
+			}
+			if withdrawRequest.Status == AgentWithdrawStatusPaid {
+				continue
+			}
+			profile := &AgentProfile{}
+			if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("user_id = ?", withdrawRequest.AgentUserId).First(profile).Error; err != nil {
+				return err
+			}
+			balanceBefore := profile.RebateBalanceAmount
+			frozenBefore := profile.RebateFrozenAmount
+			frozenAfter := frozenBefore - withdrawRequest.Amount
+			if frozenAfter < 0 {
+				return errors.New("withdraw frozen amount is insufficient")
+			}
+			if err := tx.Model(profile).Updates(map[string]interface{}{
+				"rebate_frozen_amount": frozenAfter,
+			}).Error; err != nil {
+				return err
+			}
+			withdrawRequest.Status = AgentWithdrawStatusPaid
+			withdrawRequest.ExternalOrderNo = externalOrderNo
+			withdrawRequest.ProcessedAt = common.GetTimestamp()
+			if err := tx.Save(withdrawRequest).Error; err != nil {
+				return err
+			}
+			if err := createAgentBalanceLedgerTx(tx, &AgentBalanceLedger{
+				AgentUserId:   withdrawRequest.AgentUserId,
+				ChangeType:    AgentLedgerTypeWithdrawPaid,
+				Amount:        withdrawRequest.Amount,
+				BalanceBefore: balanceBefore,
+				BalanceAfter:  balanceBefore,
+				FrozenBefore:  frozenBefore,
+				FrozenAfter:   frozenAfter,
+				ReferenceType: "withdraw_request",
+				ReferenceId:   withdrawRequest.Id,
+				Remark:        externalOrderNo,
+			}); err != nil {
+				return err
+			}
+			result.Processed++
+			result.RequestIds = append(result.RequestIds, withdrawRequest.Id)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func convertMoneyToMinorUnit(amount float64) int64 {
@@ -878,7 +1279,18 @@ func AdjustAgentRebateBalance(agentUserId int, operatorUserId int, deltaAmount i
 		if err := tx.Create(adjustment).Error; err != nil {
 			return err
 		}
-		return nil
+		return createAgentBalanceLedgerTx(tx, &AgentBalanceLedger{
+			AgentUserId:   agentUserId,
+			ChangeType:    AgentLedgerTypeAdminAdjust,
+			Amount:        deltaAmount,
+			BalanceBefore: balanceBefore,
+			BalanceAfter:  balanceAfter,
+			FrozenBefore:  profile.RebateFrozenAmount,
+			FrozenAfter:   profile.RebateFrozenAmount,
+			ReferenceType: "rebate_adjustment",
+			ReferenceId:   adjustment.Id,
+			Remark:        adjustment.Reason,
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -891,7 +1303,7 @@ func GetAgentProfiles(pageInfo *common.PageInfo, keyword string) ([]*AgentProfil
 	var profiles []*AgentProfileView
 	var total int64
 	tx := DB.Table("agent_profiles AS ap").
-		Select("ap.id, ap.user_id, u.username, u.display_name, COALESCE(ar.parent_agent_user_id, 0) AS parent_agent_user_id, COALESCE(pu.username, '') AS parent_agent_username, ap.status, ap.rebate_group_id, ag.name AS rebate_group_name, ap.custom_rate, ap.rebate_balance_amount, ap.rebate_total_amount, ap.remark, ap.created_at, ap.updated_at").
+		Select("ap.id, ap.user_id, u.username, u.display_name, COALESCE(ar.parent_agent_user_id, 0) AS parent_agent_user_id, COALESCE(pu.username, '') AS parent_agent_username, ap.status, ap.rebate_group_id, ag.name AS rebate_group_name, ap.custom_rate, ap.rebate_balance_amount, ap.rebate_frozen_amount, ap.rebate_total_amount, ap.remark, ap.created_at, ap.updated_at").
 		Joins("LEFT JOIN users AS u ON u.id = ap.user_id").
 		Joins("LEFT JOIN agent_rebate_groups AS ag ON ag.id = ap.rebate_group_id").
 		Joins("LEFT JOIN agent_relationships AS ar ON ar.child_agent_user_id = ap.user_id AND ar.status = ?", AgentStatusEnabled).
@@ -972,16 +1384,44 @@ func GetAgentProfileViewByUserId(userId int) (*AgentProfileView, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid user id")
 	}
-	profiles, _, err := GetAgentProfiles(&common.PageInfo{Page: 1, PageSize: 1}, strconv.Itoa(userId))
+	var profile AgentProfileView
+	err := DB.Table("agent_profiles AS ap").
+		Select("ap.id, ap.user_id, u.username, u.display_name, COALESCE(ar.parent_agent_user_id, 0) AS parent_agent_user_id, COALESCE(pu.username, '') AS parent_agent_username, ap.status, ap.rebate_group_id, ag.name AS rebate_group_name, ap.custom_rate, ap.rebate_balance_amount, ap.rebate_frozen_amount, ap.rebate_total_amount, ap.remark, ap.created_at, ap.updated_at").
+		Joins("LEFT JOIN users AS u ON u.id = ap.user_id").
+		Joins("LEFT JOIN agent_rebate_groups AS ag ON ag.id = ap.rebate_group_id").
+		Joins("LEFT JOIN agent_relationships AS ar ON ar.child_agent_user_id = ap.user_id AND ar.status = ?", AgentStatusEnabled).
+		Joins("LEFT JOIN users AS pu ON pu.id = ar.parent_agent_user_id").
+		Where("ap.user_id = ?", userId).
+		Take(&profile).Error
 	if err != nil {
 		return nil, err
 	}
-	for _, profile := range profiles {
-		if profile.UserId == userId {
-			return profile, nil
+	profile.AgentLevel = AgentLevelPrimary
+	if profile.ParentAgentUserId > 0 {
+		profile.AgentLevel = AgentLevelSecondary
+	}
+	profile.EffectiveRate = profile.CustomRate
+	if profile.EffectiveRate == 0 {
+		profile.EffectiveRateSource = AgentRateSourceGroup
+		groupRate, groupErr := GetAgentGroupRateById(profile.RebateGroupId)
+		if groupErr == nil {
+			profile.EffectiveRate = groupRate
+		} else if common.AgentDefaultRebateRate > 0 {
+			profile.EffectiveRate = common.AgentDefaultRebateRate
+		}
+	} else {
+		profile.EffectiveRateSource = AgentRateSourceCustom
+	}
+	if profile.ParentAgentUserId > 0 {
+		parentProfile, parentErr := GetAgentProfileByUserId(profile.ParentAgentUserId)
+		if parentErr == nil {
+			parentRate, rateErr := getEffectiveAgentRebateRateTx(DB, parentProfile)
+			if rateErr == nil {
+				profile.ParentMaxRate = parentRate
+			}
 		}
 	}
-	return nil, gorm.ErrRecordNotFound
+	return &profile, nil
 }
 
 func GetAgentRebateRecords(pageInfo *common.PageInfo, agentUserId int) ([]*AgentRebateRecord, int64, error) {
@@ -1017,6 +1457,9 @@ func GetAgentSelfSummary(userId int) (*AgentSelfSummary, error) {
 	}
 	summary.IsAgent = true
 	summary.Profile = profile
+	if account, err := GetAgentWithdrawAccount(userId); err == nil {
+		summary.WithdrawAccount = account
+	}
 	var recentRebateAmount int64
 	if err := DB.Model(&AgentRebateRecord{}).Where("agent_user_id = ?", userId).Count(&summary.RecentRebateCount).Error; err != nil {
 		return nil, err

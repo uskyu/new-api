@@ -72,7 +72,7 @@ func InitializeAgentModule(defaultRate int) (*AgentBootstrapStatus, error) {
 }
 
 func detectAgentMigrationGaps(db *gorm.DB) []string {
-	missing := make([]string, 0, 8)
+	missing := make([]string, 0, 11)
 	if db == nil {
 		return append(missing, "database")
 	}
@@ -97,8 +97,20 @@ func detectAgentMigrationGaps(db *gorm.DB) []string {
 	if !db.Migrator().HasTable(&model.AgentUpgradeRequest{}) {
 		missing = append(missing, "agent_upgrade_requests")
 	}
+	if !db.Migrator().HasTable(&model.AgentWithdrawAccount{}) {
+		missing = append(missing, "agent_withdraw_accounts")
+	}
+	if !db.Migrator().HasTable(&model.AgentWithdrawRequest{}) {
+		missing = append(missing, "agent_withdraw_requests")
+	}
+	if !db.Migrator().HasTable(&model.AgentBalanceLedger{}) {
+		missing = append(missing, "agent_balance_ledgers")
+	}
 	if !db.Migrator().HasColumn(&model.User{}, "promo_link_id") {
 		missing = append(missing, "users.promo_link_id")
+	}
+	if !db.Migrator().HasColumn(&model.AgentProfile{}, "rebate_frozen_amount") {
+		missing = append(missing, "agent_profiles.rebate_frozen_amount")
 	}
 	return missing
 }

@@ -66,6 +66,18 @@ export default function AgentCenter() {
     targetRatePercent: 0,
     remark: '',
   });
+  const [withdrawRequests, setWithdrawRequests] = useState([]);
+  const [withdrawRequestsTotal, setWithdrawRequestsTotal] = useState(0);
+  const [withdrawRequestsPage, setWithdrawRequestsPage] = useState(1);
+  const [withdrawRequestsLoading, setWithdrawRequestsLoading] = useState(false);
+  const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
+  const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
+  const [withdrawForm, setWithdrawForm] = useState({
+    accountName: '',
+    accountNo: '',
+    amount: '',
+    remark: '',
+  });
 
   const loadSummary = useCallback(async () => {
     setSummaryLoading(true);
@@ -213,6 +225,36 @@ export default function AgentCenter() {
     }
   }, [summary?.is_agent, t]);
 
+  const loadWithdrawRequests = useCallback(
+    async (page = withdrawRequestsPage) => {
+      if (!summary?.is_agent) {
+        setWithdrawRequests([]);
+        setWithdrawRequestsTotal(0);
+        return;
+      }
+      setWithdrawRequestsLoading(true);
+      try {
+        const res = await API.get('/api/agent/self/withdraw-requests', {
+          params: {
+            p: page,
+            page_size: DEFAULT_PAGE_SIZE,
+          },
+        });
+        if (!res.data.success) {
+          showError(res.data.message);
+          return;
+        }
+        setWithdrawRequests(res.data.data?.items || []);
+        setWithdrawRequestsTotal(res.data.data?.total || 0);
+      } catch (error) {
+        showError(error.message || t('获取提现记录失败'));
+      } finally {
+        setWithdrawRequestsLoading(false);
+      }
+    },
+    [summary?.is_agent, t, withdrawRequestsPage],
+  );
+
   useEffect(() => {
     loadSummary();
   }, [loadSummary]);
@@ -224,6 +266,7 @@ export default function AgentCenter() {
       loadPromoLinks();
       loadPromoLinkStats();
       loadDownlines();
+      loadWithdrawRequests(1);
     }
   }, [summary?.is_agent]);
 
@@ -235,8 +278,9 @@ export default function AgentCenter() {
       await loadPromoLinks();
       await loadPromoLinkStats();
       await loadDownlines();
+      await loadWithdrawRequests(1);
     }
-  }, [loadAdjustments, loadDownlines, loadPromoLinkStats, loadPromoLinks, loadRebates, loadSummary, summary?.is_agent]);
+  }, [loadAdjustments, loadDownlines, loadPromoLinkStats, loadPromoLinks, loadRebates, loadSummary, loadWithdrawRequests, summary?.is_agent]);
 
   const handleCopyPromoLink = async (record) => {
     const landingPath = record.landing_page || '/';
@@ -321,6 +365,40 @@ export default function AgentCenter() {
       showError(error.message || t('提交代理开通申请失败'));
     } finally {
       setUpgradeSubmitting(false);
+    }
+  };
+
+  const handleOpenWithdraw = () => {
+    setWithdrawForm({
+      accountName: summary?.withdraw_account?.account_name || '',
+      accountNo: summary?.withdraw_account?.account_no || '',
+      amount: '',
+      remark: '',
+    });
+    setWithdrawModalVisible(true);
+  };
+
+  const handleSubmitWithdraw = async () => {
+    setWithdrawSubmitting(true);
+    try {
+      const res = await API.post('/api/agent/self/withdraw-request', {
+        account_name: withdrawForm.accountName,
+        account_no: withdrawForm.accountNo,
+        amount: withdrawForm.amount,
+        remark: withdrawForm.remark,
+      });
+      if (!res.data.success) {
+        showError(res.data.message);
+        return;
+      }
+      showSuccess(t('提现申请已提交'));
+      setWithdrawModalVisible(false);
+      await loadSummary();
+      await loadWithdrawRequests(1);
+    } catch (error) {
+      showError(error.message || t('提交提现申请失败'));
+    } finally {
+      setWithdrawSubmitting(false);
     }
   };
 
@@ -464,6 +542,28 @@ export default function AgentCenter() {
     [t],
   );
 
+  const withdrawColumns = useMemo(
+    () => [
+      { title: t('申请单ID'), dataIndex: 'id' },
+      {
+        title: t('金额'),
+        dataIndex: 'amount',
+        render: (_, record) => formatAmount(record.amount),
+      },
+      { title: t('状态'), dataIndex: 'status' },
+      { title: t('支付宝账号'), dataIndex: 'account_no_snapshot' },
+      { title: t('姓名'), dataIndex: 'account_name_snapshot' },
+      { title: t('批次号'), dataIndex: 'export_batch_no' },
+      { title: t('打款订单号'), dataIndex: 'external_order_no' },
+      {
+        title: t('申请时间'),
+        dataIndex: 'created_at',
+        render: (_, record) => timestamp2string(record.created_at),
+      },
+    ],
+    [t],
+  );
+
   return (
     <div className='mt-[60px] px-2'>
       <Space vertical align='start' style={{ width: '100%' }} spacing={16}>
@@ -492,11 +592,20 @@ export default function AgentCenter() {
                 description={t('管理员为您开通代理资料后，这里会显示返利余额和流水。')}
               />
             ) : (
-              <div className='grid grid-cols-1 md:grid-cols-4 gap-4 w-full'>
+              <div className='grid grid-cols-1 md:grid-cols-5 gap-4 w-full'>
                 <Card>
                   <Text type='secondary'>{t('返利余额')}</Text>
                   <Title heading={3} style={{ margin: '8px 0 0' }}>
                     {formatAmount(summary?.profile?.rebate_balance_amount)}
+                  </Title>
+                  <Button type='primary' style={{ marginTop: 12 }} onClick={handleOpenWithdraw}>
+                    {t('提现')}
+                  </Button>
+                </Card>
+                <Card>
+                  <Text type='secondary'>{t('冻结金额')}</Text>
+                  <Title heading={3} style={{ margin: '8px 0 0' }}>
+                    {formatAmount(summary?.profile?.rebate_frozen_amount)}
                   </Title>
                 </Card>
                 <Card>
@@ -628,6 +737,32 @@ export default function AgentCenter() {
                 />
               </Space>
             </Card>
+
+            <Card style={{ width: '100%' }}>
+              <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
+                <Title heading={5} style={{ margin: 0 }}>
+                  {t('提现记录')}
+                </Title>
+                <Table
+                  rowKey='id'
+                  columns={withdrawColumns}
+                  dataSource={withdrawRequests}
+                  loading={withdrawRequestsLoading}
+                  pagination={false}
+                  empty={<Empty title={t('暂无提现记录')} />}
+                />
+                <Pagination
+                  currentPage={withdrawRequestsPage}
+                  pageSize={DEFAULT_PAGE_SIZE}
+                  total={withdrawRequestsTotal}
+                  onPageChange={(page) => {
+                    setWithdrawRequestsPage(page);
+                    loadWithdrawRequests(page);
+                  }}
+                  showTotal
+                />
+              </Space>
+            </Card>
           </>
         )}
       </Space>
@@ -654,6 +789,37 @@ export default function AgentCenter() {
             placeholder={t('备注')}
             value={promoLinkForm.remark}
             onChange={(value) => setPromoLinkForm((prev) => ({ ...prev, remark: value }))}
+          />
+        </Space>
+      </Modal>
+
+      <Modal
+        title={t('申请提现')}
+        visible={withdrawModalVisible}
+        onCancel={() => setWithdrawModalVisible(false)}
+        onOk={handleSubmitWithdraw}
+        confirmLoading={withdrawSubmitting}
+      >
+        <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
+          <Input
+            placeholder={t('姓名')}
+            value={withdrawForm.accountName}
+            onChange={(value) => setWithdrawForm((prev) => ({ ...prev, accountName: value }))}
+          />
+          <Input
+            placeholder={t('支付宝账号')}
+            value={withdrawForm.accountNo}
+            onChange={(value) => setWithdrawForm((prev) => ({ ...prev, accountNo: value }))}
+          />
+          <Input
+            placeholder={t('提现金额')}
+            value={withdrawForm.amount}
+            onChange={(value) => setWithdrawForm((prev) => ({ ...prev, amount: value }))}
+          />
+          <Input
+            placeholder={t('备注')}
+            value={withdrawForm.remark}
+            onChange={(value) => setWithdrawForm((prev) => ({ ...prev, remark: value }))}
           />
         </Space>
       </Modal>

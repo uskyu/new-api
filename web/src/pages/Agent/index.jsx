@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Button,
@@ -114,6 +114,12 @@ export default function Agent() {
     landingPage: '',
     remark: '',
   });
+  const [withdrawRequests, setWithdrawRequests] = useState([]);
+  const [withdrawRequestsLoading, setWithdrawRequestsLoading] = useState(false);
+  const [withdrawStatusFilter, setWithdrawStatusFilter] = useState('');
+  const [withdrawStartDate, setWithdrawStartDate] = useState('');
+  const [withdrawEndDate, setWithdrawEndDate] = useState('');
+  const withdrawImportRef = useRef(null);
 
   const showConflictModal = useCallback(
     (message, conflicts = []) => {
@@ -272,6 +278,34 @@ export default function Agent() {
     [promoLinksPage, status?.initialized, t],
   );
 
+  const loadWithdrawRequests = useCallback(async () => {
+    if (!status?.initialized) {
+      setWithdrawRequests([]);
+      return;
+    }
+    setWithdrawRequestsLoading(true);
+    try {
+      const res = await API.get('/api/agent/withdraw-requests', {
+        params: {
+          p: 1,
+          page_size: 50,
+          status: withdrawStatusFilter,
+          start_date: withdrawStartDate,
+          end_date: withdrawEndDate,
+        },
+      });
+      if (!res.data.success) {
+        showError(res.data.message);
+        return;
+      }
+      setWithdrawRequests(res.data.data?.items || []);
+    } catch (error) {
+      showError(error.message || t('获取提现申请失败'));
+    } finally {
+      setWithdrawRequestsLoading(false);
+    }
+  }, [status?.initialized, t, withdrawEndDate, withdrawStartDate, withdrawStatusFilter]);
+
   const loadPromoLinkStats = useCallback(
     async (agentUserId = activeAgentScope?.userId || 0) => {
       if (!status?.initialized || !agentUserId) {
@@ -341,6 +375,7 @@ export default function Agent() {
       loadProfiles(1, keyword);
       loadAdjustments();
       loadPromoLinks(1);
+      loadWithdrawRequests();
     }
   }, [status?.migration_ready, status?.initialized]);
 
@@ -351,6 +386,7 @@ export default function Agent() {
     await loadProfiles(profilesPage, keyword);
     await loadAdjustments();
     await loadPromoLinks(promoLinksPage);
+    await loadWithdrawRequests();
     await loadPromoLinkStats(activeAgentScope?.userId || 0);
     await loadDownlines(activeAgentScope?.userId || 0, downlinesPage);
   };
@@ -625,6 +661,54 @@ export default function Agent() {
     showError(t('复制失败，请手动复制'));
   };
 
+  const handleExportWithdrawRequests = async () => {
+    try {
+      const res = await API.get('/api/agent/withdraw-requests/export', {
+        params: {
+          status: withdrawStatusFilter,
+          start_date: withdrawStartDate,
+          end_date: withdrawEndDate,
+        },
+        responseType: 'blob',
+      });
+      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `agent-withdraw-${Date.now()}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      showSuccess(t('提现数据已导出'));
+      await loadWithdrawRequests();
+    } catch (error) {
+      showError(error.message || t('导出提现数据失败'));
+    }
+  };
+
+  const handleImportWithdrawResults = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await API.post('/api/agent/withdraw-requests/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (!res.data.success) {
+        showError(res.data.message);
+        return;
+      }
+      showSuccess(t('提现回执已导入'));
+      await refreshAll();
+    } catch (error) {
+      showError(error.message || t('导入提现回执失败'));
+    } finally {
+      event.target.value = '';
+    }
+  };
+
   const profileColumns = [
     { title: t('用户ID'), dataIndex: 'user_id' },
     { title: t('用户名'), dataIndex: 'username' },
@@ -836,6 +920,27 @@ export default function Agent() {
       dataIndex: 'latest_topup_time',
       render: (_, record) =>
         record.latest_topup_time ? timestamp2string(record.latest_topup_time) : '-',
+    },
+  ];
+
+  const withdrawColumns = [
+    { title: t('申请单ID'), dataIndex: 'id' },
+    { title: t('用户名'), dataIndex: 'username' },
+    { title: t('邮箱'), dataIndex: 'email' },
+    {
+      title: t('提现金额'),
+      dataIndex: 'amount',
+      render: (_, record) => formatAmount(record.amount),
+    },
+    { title: t('状态'), dataIndex: 'status' },
+    { title: t('支付宝账号'), dataIndex: 'account_no_snapshot' },
+    { title: t('姓名'), dataIndex: 'account_name_snapshot' },
+    { title: t('批次号'), dataIndex: 'export_batch_no' },
+    { title: t('打款订单号'), dataIndex: 'external_order_no' },
+    {
+      title: t('申请时间'),
+      dataIndex: 'created_at',
+      render: (_, record) => timestamp2string(record.created_at),
     },
   ];
 
@@ -1204,11 +1309,68 @@ export default function Agent() {
                 loading={promoLinkStatsLoading}
                 pagination={false}
                 empty={<Empty title={t('暂无推广链接统计')} />}
-              />
-            </Space>
-          </Card>
+                />
+              </Space>
+            </Card>
 
-          <Card style={{ width: '100%' }}>
+            <Card style={{ width: '100%' }}>
+              <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
+                <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
+                  <Title heading={5} style={{ margin: 0 }}>
+                    {t('提现申请列表')}
+                  </Title>
+                  <Space>
+                    <Input
+                      placeholder={t('开始日期 YYYY-MM-DD')}
+                      value={withdrawStartDate}
+                      onChange={setWithdrawStartDate}
+                      style={{ width: 170 }}
+                    />
+                    <Input
+                      placeholder={t('结束日期 YYYY-MM-DD')}
+                      value={withdrawEndDate}
+                      onChange={setWithdrawEndDate}
+                      style={{ width: 170 }}
+                    />
+                    <Select
+                      value={withdrawStatusFilter}
+                      onChange={setWithdrawStatusFilter}
+                      optionList={[
+                        { label: t('全部状态'), value: '' },
+                        { label: t('待处理'), value: 'pending' },
+                        { label: t('已导出'), value: 'exported' },
+                        { label: t('已打款'), value: 'paid' },
+                      ]}
+                      style={{ width: 140 }}
+                    />
+                    <Button onClick={loadWithdrawRequests}>{t('筛选')}</Button>
+                    <Button type='secondary' onClick={handleExportWithdrawRequests}>
+                      {t('导出')}
+                    </Button>
+                    <Button type='primary' onClick={() => withdrawImportRef.current?.click()}>
+                      {t('导入回执')}
+                    </Button>
+                    <input
+                      ref={withdrawImportRef}
+                      type='file'
+                      accept='.csv,text/csv'
+                      style={{ display: 'none' }}
+                      onChange={handleImportWithdrawResults}
+                    />
+                  </Space>
+                </div>
+                <Table
+                  rowKey='id'
+                  columns={withdrawColumns}
+                  dataSource={withdrawRequests}
+                  loading={withdrawRequestsLoading}
+                  pagination={false}
+                  empty={<Empty title={t('暂无提现申请')} />}
+                />
+              </Space>
+            </Card>
+
+            <Card style={{ width: '100%' }}>
             <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
               <Title heading={5} style={{ margin: 0 }}>
                 {t('下级用户概况')}

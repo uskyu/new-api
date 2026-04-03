@@ -1,6 +1,8 @@
 package model
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -11,9 +13,12 @@ import (
 func ensureAgentTestTables(t *testing.T) {
 	t.Helper()
 	require.NoError(t, DB.AutoMigrate(&User{}, &TopUp{}, &AgentRebateGroup{}, &AgentProfile{}, &AgentPromoLink{}, &AgentRebateRecord{}))
-	require.NoError(t, DB.AutoMigrate(&AgentRebateAdjustment{}, &AgentRelationship{}, &AgentUpgradeRequest{}))
+	require.NoError(t, DB.AutoMigrate(&AgentRebateAdjustment{}, &AgentRelationship{}, &AgentUpgradeRequest{}, &AgentWithdrawAccount{}, &AgentWithdrawRequest{}, &AgentBalanceLedger{}))
 	t.Cleanup(func() {
 		session := DB.Session(&gorm.Session{AllowGlobalUpdate: true})
+		_ = session.Delete(&AgentBalanceLedger{}).Error
+		_ = session.Delete(&AgentWithdrawRequest{}).Error
+		_ = session.Delete(&AgentWithdrawAccount{}).Error
 		_ = session.Delete(&AgentUpgradeRequest{}).Error
 		_ = session.Delete(&AgentRelationship{}).Error
 		_ = session.Delete(&AgentRebateAdjustment{}).Error
@@ -359,4 +364,53 @@ func TestAgentUpgradeRequestAndRateConflict(t *testing.T) {
 	var conflictErr *AgentRateConflictError
 	require.ErrorAs(t, err, &conflictErr)
 	require.NotEmpty(t, conflictErr.Conflicts)
+}
+
+func TestAgentWithdrawWorkflow(t *testing.T) {
+	ensureAgentTestTables(t)
+	agent := createAgentTestUser(t, "agent_withdraw", "AFF16")
+	require.NoError(t, DB.Create(&AgentProfile{
+		UserId:              agent.Id,
+		Status:              AgentStatusEnabled,
+		RebateBalanceAmount: 10000,
+	}).Error)
+
+	request, err := CreateAgentWithdrawRequest(agent.Id, "张三", "alipay-001", 2500, "withdraw")
+	require.NoError(t, err)
+	require.Equal(t, AgentWithdrawStatusPending, request.Status)
+
+	profile, err := GetAgentProfileByUserId(agent.Id)
+	require.NoError(t, err)
+	require.Equal(t, int64(7500), profile.RebateBalanceAmount)
+	require.Equal(t, int64(2500), profile.RebateFrozenAmount)
+
+	content, batchNo, err := ExportAgentWithdrawRequests(AgentWithdrawStatusPending, "", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, batchNo)
+	require.Contains(t, string(content), "request_id")
+
+	var exported AgentWithdrawRequest
+	require.NoError(t, DB.First(&exported, request.Id).Error)
+	require.Equal(t, AgentWithdrawStatusExported, exported.Status)
+
+	importContent := strings.Join([]string{
+		"request_id,username,email,account_name,account_no,amount,status,external_order_no",
+		fmt.Sprintf("%d,%s,%s,%s,%s,%s,%s,%s", request.Id, agent.Username, agent.Email, "张三", "alipay-001", "25.00", AgentWithdrawStatusExported, "TX-123"),
+	}, "\n")
+	result, err := ImportAgentWithdrawResults(strings.NewReader(importContent))
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Processed)
+
+	require.NoError(t, DB.First(&exported, request.Id).Error)
+	require.Equal(t, AgentWithdrawStatusPaid, exported.Status)
+	require.Equal(t, "TX-123", exported.ExternalOrderNo)
+
+	profile, err = GetAgentProfileByUserId(agent.Id)
+	require.NoError(t, err)
+	require.Equal(t, int64(7500), profile.RebateBalanceAmount)
+	require.Equal(t, int64(0), profile.RebateFrozenAmount)
+
+	var ledgers []AgentBalanceLedger
+	require.NoError(t, DB.Where("agent_user_id = ?", agent.Id).Find(&ledgers).Error)
+	require.Len(t, ledgers, 2)
 }
