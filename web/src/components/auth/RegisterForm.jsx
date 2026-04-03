@@ -28,6 +28,8 @@ import {
   updateAPI,
   getSystemName,
   getOAuthProviderIcon,
+  getStoredAffiliateCode,
+  clearStoredAffiliateCode,
   setUserData,
   onDiscordOAuthClicked,
   onCustomOAuthClicked,
@@ -113,11 +115,6 @@ const RegisterForm = () => {
 
   const logo = getLogo();
   const systemName = getSystemName();
-
-  let affCode = new URLSearchParams(window.location.search).get('aff');
-  if (affCode) {
-    localStorage.setItem('aff', affCode);
-  }
 
   const status = useMemo(() => {
     if (statusState?.status) return statusState.status;
@@ -231,16 +228,14 @@ const RegisterForm = () => {
       }
       setRegisterLoading(true);
       try {
-        if (!affCode) {
-          affCode = localStorage.getItem('aff');
-        }
-        inputs.aff_code = affCode;
+        inputs.aff_code = getStoredAffiliateCode();
         const res = await API.post(
           `/api/user/register?turnstile=${turnstileToken}`,
           inputs,
         );
         const { success, message } = res.data;
         if (success) {
+          clearStoredAffiliateCode();
           navigate('/login');
           showSuccess('注册成功！');
         } else {

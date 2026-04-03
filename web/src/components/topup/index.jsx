@@ -538,7 +538,7 @@ const TopUp = () => {
     const res = await API.get('/api/user/aff');
     const { success, message, data } = res.data;
     if (success) {
-      let link = `${window.location.origin}/register?aff=${data}`;
+      let link = `${window.location.origin}/?aff=${data}`;
       setAffLink(link);
     } else {
       showError(message);

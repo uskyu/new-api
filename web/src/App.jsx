@@ -17,11 +17,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { lazy, Suspense, useContext, useMemo } from 'react';
+import React, { lazy, Suspense, useContext, useEffect, useMemo } from 'react';
 import { Route, Routes, useLocation, useParams } from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
 import User from './pages/User';
-import { AuthRedirect, PrivateRoute, AdminRoute } from './helpers';
+import {
+  AuthRedirect,
+  PrivateRoute,
+  AdminRoute,
+  captureAffiliateCodeFromSearch,
+} from './helpers';
 import RegisterForm from './components/auth/RegisterForm';
 import LoginForm from './components/auth/LoginForm';
 import NotFound from './pages/NotFound';
@@ -35,6 +40,7 @@ import Channel from './pages/Channel';
 import Token from './pages/Token';
 import Redemption from './pages/Redemption';
 import TopUp from './pages/TopUp';
+import AgentCenter from './pages/AgentCenter';
 import Log from './pages/Log';
 import Chat from './pages/Chat';
 import Chat2Link from './pages/Chat2Link';
@@ -45,6 +51,7 @@ import ModelPage from './pages/Model';
 import ModelDeploymentPage from './pages/ModelDeployment';
 import Playground from './pages/Playground';
 import Subscription from './pages/Subscription';
+import Agent from './pages/Agent';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
@@ -64,6 +71,10 @@ function DynamicOAuth2Callback() {
 function App() {
   const location = useLocation();
   const [statusState] = useContext(StatusContext);
+
+  useEffect(() => {
+    captureAffiliateCodeFromSearch(location.search);
+  }, [location.search]);
 
   // 获取模型广场权限配置
   const pricingRequireAuth = useMemo(() => {
@@ -136,6 +147,14 @@ function App() {
           element={
             <AdminRoute>
               <Channel />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/agent'
+          element={
+            <AdminRoute>
+              <Agent />
             </AdminRoute>
           }
         />
@@ -274,6 +293,14 @@ function App() {
               <Suspense fallback={<Loading></Loading>} key={location.pathname}>
                 <TopUp />
               </Suspense>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/agent-center'
+          element={
+            <PrivateRoute>
+              <AgentCenter />
             </PrivateRoute>
           }
         />

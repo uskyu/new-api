@@ -269,6 +269,32 @@ func SetApiRouter(router *gin.Engine) {
 			}
 		}
 
+		agentRoute := apiRouter.Group("/agent")
+		{
+			agentRoute.GET("/status", middleware.AdminAuth(), controller.GetAgentBootstrapStatus)
+			agentRoute.GET("/overview", middleware.AdminAuth(), controller.GetAgentAdminOverview)
+			agentRoute.POST("/init", middleware.RootAuth(), controller.InitializeAgentModule)
+			agentRoute.GET("/self", middleware.UserAuth(), controller.GetAgentSelfSummary)
+			agentRoute.GET("/self/promo-links", middleware.UserAuth(), controller.GetAgentSelfPromoLinks)
+			agentRoute.GET("/self/promo-link-stats", middleware.UserAuth(), controller.GetAgentSelfPromoLinkStats)
+			agentRoute.POST("/self/promo-link", middleware.UserAuth(), controller.CreateAgentSelfPromoLink)
+			agentRoute.DELETE("/self/promo-link/:id", middleware.UserAuth(), controller.DeleteAgentSelfPromoLink)
+			agentRoute.GET("/self/rebates", middleware.UserAuth(), controller.GetAgentSelfRebateRecords)
+			agentRoute.GET("/self/adjustments", middleware.UserAuth(), controller.GetAgentSelfAdjustments)
+			agentRoute.GET("/groups", middleware.AdminAuth(), controller.GetAgentRebateGroups)
+			agentRoute.GET("/promo-link-stats", middleware.AdminAuth(), controller.GetAgentPromoLinkStats)
+			agentRoute.GET("/downlines", middleware.AdminAuth(), controller.GetAgentDownlineUsers)
+			agentRoute.GET("/promo-links", middleware.AdminAuth(), controller.GetAgentPromoLinks)
+			agentRoute.POST("/group", middleware.AdminAuth(), controller.UpsertAgentRebateGroup)
+			agentRoute.GET("/profiles", middleware.AdminAuth(), controller.GetAgentProfiles)
+			agentRoute.POST("/promo-link", middleware.AdminAuth(), controller.UpsertAgentPromoLink)
+			agentRoute.POST("/profile", middleware.AdminAuth(), controller.UpsertAgentProfile)
+			agentRoute.POST("/adjust", middleware.AdminAuth(), controller.AdjustAgentBalance)
+			agentRoute.DELETE("/group/:id", middleware.AdminAuth(), controller.DeleteAgentRebateGroup)
+			agentRoute.DELETE("/promo-link/:id", middleware.AdminAuth(), controller.DeleteAgentPromoLink)
+			agentRoute.GET("/adjustments", middleware.AdminAuth(), controller.GetAgentAdjustments)
+		}
+
 		redemptionRoute := apiRouter.Group("/redemption")
 		redemptionRoute.Use(middleware.AdminAuth())
 		{

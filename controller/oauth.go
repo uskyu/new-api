@@ -265,9 +265,16 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	// Handle affiliate code
 	affCode := session.Get("aff")
 	inviterId := 0
+	promoLinkId := 0
+	var err error
 	if affCode != nil {
-		inviterId, _ = model.GetUserIdByAffCode(affCode.(string))
+		inviterId, promoLinkId, err = model.ResolveRegistrationAttribution(affCode.(string))
+		if err != nil {
+			return nil, err
+		}
 	}
+	user.InviterId = inviterId
+	user.PromoLinkId = promoLinkId
 
 	// Use transaction to ensure user creation and OAuth binding are atomic
 	if genericProvider, ok := provider.(*oauth.GenericOAuthProvider); ok {

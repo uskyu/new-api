@@ -20,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 )
 
 func GetTopUpInfo(c *gin.Context) {
@@ -82,20 +83,20 @@ func GetTopUpInfo(c *gin.Context) {
 		"enable_online_topup": operation_setting.PayAddress != "" && operation_setting.EpayId != "" && operation_setting.EpayKey != "",
 		"enable_stripe_topup": setting.StripeApiSecret != "" && setting.StripeWebhookSecret != "" && setting.StripePriceId != "",
 		"enable_creem_topup":  setting.CreemApiKey != "" && setting.CreemProducts != "[]",
-		"enable_waffo_topup": enableWaffo,
+		"enable_waffo_topup":  enableWaffo,
 		"waffo_pay_methods": func() interface{} {
 			if enableWaffo {
 				return setting.GetWaffoPayMethods()
 			}
 			return nil
 		}(),
-		"creem_products": setting.CreemProducts,
-		"pay_methods":         payMethods,
-		"min_topup":           operation_setting.MinTopUp,
-		"stripe_min_topup":    setting.StripeMinTopUp,
-		"waffo_min_topup":     setting.WaffoMinTopUp,
-		"amount_options":      operation_setting.GetPaymentSetting().AmountOptions,
-		"discount":            operation_setting.GetPaymentSetting().AmountDiscount,
+		"creem_products":   setting.CreemProducts,
+		"pay_methods":      payMethods,
+		"min_topup":        operation_setting.MinTopUp,
+		"stripe_min_topup": setting.StripeMinTopUp,
+		"waffo_min_topup":  setting.WaffoMinTopUp,
+		"amount_options":   operation_setting.GetPaymentSetting().AmountOptions,
+		"discount":         operation_setting.GetPaymentSetting().AmountDiscount,
 	}
 	common.ApiSuccess(c, data)
 }
@@ -341,24 +342,47 @@ func EpayNotify(c *gin.Context) {
 			return
 		}
 		if topUp.Status == "pending" {
-			topUp.Status = "success"
-			err := topUp.Update()
+			quotaToAdd := 0
+			err := model.DB.Transaction(func(tx *gorm.DB) error {
+				refCol := "`trade_no`"
+				if common.UsingPostgreSQL {
+					refCol = `"trade_no"`
+				}
+				lockedTopUp := &model.TopUp{}
+				if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", verifyInfo.ServiceTradeNo).First(lockedTopUp).Error; err != nil {
+					return err
+				}
+				if lockedTopUp.Status == common.TopUpStatusSuccess {
+					return nil
+				}
+				if lockedTopUp.Status != common.TopUpStatusPending {
+					return nil
+				}
+				lockedTopUp.Status = common.TopUpStatusSuccess
+				lockedTopUp.CompleteTime = common.GetTimestamp()
+				if err := tx.Save(lockedTopUp).Error; err != nil {
+					return err
+				}
+				dAmount := decimal.NewFromInt(int64(lockedTopUp.Amount))
+				dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+				quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
+				if err := tx.Model(&model.User{}).Where("id = ?", lockedTopUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+					return err
+				}
+				if err := model.SettleAgentRebateTx(tx, lockedTopUp, model.AgentRebateSourceEPay); err != nil {
+					return err
+				}
+				topUp = lockedTopUp
+				return nil
+			})
 			if err != nil {
-				log.Printf("易支付回调更新订单失败: %v", topUp)
+				log.Printf("易支付回调处理订单失败: %v", err)
 				return
 			}
-			//user, _ := model.GetUserById(topUp.UserId, false)
-			//user.Quota += topUp.Amount * 500000
-			dAmount := decimal.NewFromInt(int64(topUp.Amount))
-			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
-			err = model.IncreaseUserQuota(topUp.UserId, quotaToAdd, true)
-			if err != nil {
-				log.Printf("易支付回调更新用户失败: %v", topUp)
-				return
+			if quotaToAdd > 0 {
+				log.Printf("易支付回调更新用户成功 %v", topUp)
+				model.RecordLog(topUp.UserId, model.LogTypeTopup, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money))
 			}
-			log.Printf("易支付回调更新用户成功 %v", topUp)
-			model.RecordLog(topUp.UserId, model.LogTypeTopup, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money))
 		}
 	} else {
 		log.Printf("易支付异常回调: %v", verifyInfo)
@@ -463,4 +487,3 @@ func AdminCompleteTopUp(c *gin.Context) {
 	}
 	common.ApiSuccess(c, nil)
 }
-
