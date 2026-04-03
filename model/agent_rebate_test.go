@@ -11,9 +11,11 @@ import (
 func ensureAgentTestTables(t *testing.T) {
 	t.Helper()
 	require.NoError(t, DB.AutoMigrate(&User{}, &TopUp{}, &AgentRebateGroup{}, &AgentProfile{}, &AgentPromoLink{}, &AgentRebateRecord{}))
-	require.NoError(t, DB.AutoMigrate(&AgentRebateAdjustment{}))
+	require.NoError(t, DB.AutoMigrate(&AgentRebateAdjustment{}, &AgentRelationship{}, &AgentUpgradeRequest{}))
 	t.Cleanup(func() {
 		session := DB.Session(&gorm.Session{AllowGlobalUpdate: true})
+		_ = session.Delete(&AgentUpgradeRequest{}).Error
+		_ = session.Delete(&AgentRelationship{}).Error
 		_ = session.Delete(&AgentRebateAdjustment{}).Error
 		_ = session.Delete(&AgentRebateRecord{}).Error
 		_ = session.Delete(&AgentPromoLink{}).Error
@@ -323,4 +325,38 @@ func TestAgentPromoLinkStatsAndDownlines(t *testing.T) {
 	require.Equal(t, invitee.Id, downlines[0].UserId)
 	require.Equal(t, int64(8800), downlines[0].TopupAmount)
 	require.Equal(t, int64(1056), downlines[0].RebateAmount)
+}
+
+func TestAgentUpgradeRequestAndRateConflict(t *testing.T) {
+	ensureAgentTestTables(t)
+	operator := createAgentTestUser(t, "admin_phase2", "AFF13")
+	parent := createAgentTestUser(t, "parent_agent", "AFF14")
+	child := createAgentTestUser(t, "child_agent", "AFF15")
+	group := &AgentRebateGroup{Name: "parent-group", RebateRate: 3000, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+	_, err := UpsertAgentProfile(operator.Id, &AgentProfile{UserId: parent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id})
+	require.NoError(t, err)
+	require.NoError(t, DB.Model(child).Update("inviter_id", parent.Id).Error)
+
+	request, err := CreateAgentUpgradeRequest(parent.Id, child.Id, 2500, "upgrade child")
+	require.NoError(t, err)
+	require.Equal(t, AgentUpgradeRequestPending, request.Status)
+
+	approved, err := ReviewAgentUpgradeRequest(request.Id, operator.Id, true, 2500, "approved")
+	require.NoError(t, err)
+	require.Equal(t, AgentUpgradeRequestApproved, approved.Status)
+
+	childProfile, err := GetAgentProfileByUserId(child.Id)
+	require.NoError(t, err)
+	require.Equal(t, 2500, childProfile.CustomRate)
+
+	relation, err := getAgentRelationshipByChildTx(DB, child.Id)
+	require.NoError(t, err)
+	require.Equal(t, parent.Id, relation.ParentAgentUserId)
+
+	_, err = UpsertAgentRebateGroup(operator.Id, &AgentRebateGroup{Id: group.Id, Name: group.Name, RebateRate: 2000, Status: AgentStatusEnabled})
+	require.Error(t, err)
+	var conflictErr *AgentRateConflictError
+	require.ErrorAs(t, err, &conflictErr)
+	require.NotEmpty(t, conflictErr.Conflicts)
 }

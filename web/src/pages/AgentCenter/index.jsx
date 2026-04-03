@@ -5,6 +5,7 @@ import {
   Card,
   Empty,
   Input,
+  InputNumber,
   Modal,
   Pagination,
   Space,
@@ -53,6 +54,16 @@ export default function AgentCenter() {
   const [promoLinkForm, setPromoLinkForm] = useState({
     name: '',
     code: '',
+    remark: '',
+  });
+  const [downlines, setDownlines] = useState([]);
+  const [downlinesLoading, setDownlinesLoading] = useState(false);
+  const [upgradeModalVisible, setUpgradeModalVisible] = useState(false);
+  const [upgradeSubmitting, setUpgradeSubmitting] = useState(false);
+  const [upgradeForm, setUpgradeForm] = useState({
+    targetUserId: 0,
+    username: '',
+    targetRatePercent: 0,
     remark: '',
   });
 
@@ -177,6 +188,31 @@ export default function AgentCenter() {
     }
   }, [summary?.is_agent, t]);
 
+  const loadDownlines = useCallback(async () => {
+    if (!summary?.is_agent) {
+      setDownlines([]);
+      return;
+    }
+    setDownlinesLoading(true);
+    try {
+      const res = await API.get('/api/agent/self/downlines', {
+        params: {
+          p: 1,
+          page_size: 50,
+        },
+      });
+      if (!res.data.success) {
+        showError(res.data.message);
+        return;
+      }
+      setDownlines(res.data.data?.items || []);
+    } catch (error) {
+      showError(error.message || t('获取直属下级失败'));
+    } finally {
+      setDownlinesLoading(false);
+    }
+  }, [summary?.is_agent, t]);
+
   useEffect(() => {
     loadSummary();
   }, [loadSummary]);
@@ -187,6 +223,7 @@ export default function AgentCenter() {
       loadAdjustments(1);
       loadPromoLinks();
       loadPromoLinkStats();
+      loadDownlines();
     }
   }, [summary?.is_agent]);
 
@@ -197,8 +234,9 @@ export default function AgentCenter() {
       await loadAdjustments(1);
       await loadPromoLinks();
       await loadPromoLinkStats();
+      await loadDownlines();
     }
-  }, [loadAdjustments, loadPromoLinkStats, loadPromoLinks, loadRebates, loadSummary, summary?.is_agent]);
+  }, [loadAdjustments, loadDownlines, loadPromoLinkStats, loadPromoLinks, loadRebates, loadSummary, summary?.is_agent]);
 
   const handleCopyPromoLink = async (record) => {
     const landingPath = record.landing_page || '/';
@@ -252,6 +290,38 @@ export default function AgentCenter() {
         await loadPromoLinkStats();
       },
     });
+  };
+
+  const handleOpenUpgrade = (record) => {
+    setUpgradeForm({
+      targetUserId: record.user_id,
+      username: record.username,
+      targetRatePercent: 0,
+      remark: '',
+    });
+    setUpgradeModalVisible(true);
+  };
+
+  const handleSubmitUpgrade = async () => {
+    setUpgradeSubmitting(true);
+    try {
+      const res = await API.post('/api/agent/self/upgrade-request', {
+        target_user_id: upgradeForm.targetUserId,
+        target_rate: Math.round(Number(upgradeForm.targetRatePercent || 0) * 100),
+        remark: upgradeForm.remark,
+      });
+      if (!res.data.success) {
+        showError(res.data.message);
+        return;
+      }
+      showSuccess(t('已成功开通代理'));
+      setUpgradeModalVisible(false);
+      await loadDownlines();
+    } catch (error) {
+      showError(error.message || t('提交代理开通申请失败'));
+    } finally {
+      setUpgradeSubmitting(false);
+    }
   };
 
   const rebateColumns = useMemo(
@@ -363,6 +433,37 @@ export default function AgentCenter() {
     [t],
   );
 
+  const downlineColumns = useMemo(
+    () => [
+      { title: t('用户ID'), dataIndex: 'user_id' },
+      { title: t('用户名'), dataIndex: 'username' },
+      { title: t('显示名称'), dataIndex: 'display_name' },
+      { title: t('来源渠道'), dataIndex: 'promo_link_name' },
+      {
+        title: t('是否代理'),
+        dataIndex: 'is_agent',
+        render: (_, record) =>
+          record.is_agent ? <Tag color='blue'>{t('是')}</Tag> : <Tag>{t('否')}</Tag>,
+      },
+      {
+        title: t('充值金额'),
+        dataIndex: 'topup_amount',
+        render: (_, record) => formatAmount(record.topup_amount),
+      },
+      {
+        title: t('操作'),
+        dataIndex: 'operate',
+        render: (_, record) =>
+          record.is_agent ? (
+            <Text type='secondary'>{t('已是代理')}</Text>
+          ) : (
+            <a onClick={() => handleOpenUpgrade(record)}>{t('立即开通代理')}</a>
+          ),
+      },
+    ],
+    [t],
+  );
+
   return (
     <div className='mt-[60px] px-2'>
       <Space vertical align='start' style={{ width: '100%' }} spacing={16}>
@@ -463,6 +564,22 @@ export default function AgentCenter() {
             <Card style={{ width: '100%' }}>
               <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
                 <Title heading={5} style={{ margin: 0 }}>
+                  {t('我的直属下级')}
+                </Title>
+                <Table
+                  rowKey='user_id'
+                  columns={downlineColumns}
+                  dataSource={downlines}
+                  loading={downlinesLoading}
+                  pagination={false}
+                  empty={<Empty title={t('暂无直属下级')} />}
+                />
+              </Space>
+            </Card>
+
+            <Card style={{ width: '100%' }}>
+              <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
+                <Title heading={5} style={{ margin: 0 }}>
                   {t('返利流水')}
                 </Title>
                 <Table
@@ -537,6 +654,36 @@ export default function AgentCenter() {
             placeholder={t('备注')}
             value={promoLinkForm.remark}
             onChange={(value) => setPromoLinkForm((prev) => ({ ...prev, remark: value }))}
+          />
+        </Space>
+      </Modal>
+
+      <Modal
+        title={t('立即开通代理')}
+        visible={upgradeModalVisible}
+        onCancel={() => setUpgradeModalVisible(false)}
+        onOk={handleSubmitUpgrade}
+        confirmLoading={upgradeSubmitting}
+      >
+        <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
+          <Text>
+            {t('目标用户：')}
+            {upgradeForm.username}
+          </Text>
+          <InputNumber
+            min={0}
+            step={0.1}
+            suffix='%'
+            value={upgradeForm.targetRatePercent}
+            onChange={(value) =>
+              setUpgradeForm((prev) => ({ ...prev, targetRatePercent: value || 0 }))
+            }
+            style={{ width: '100%' }}
+          />
+          <Input
+            placeholder={t('备注')}
+            value={upgradeForm.remark}
+            onChange={(value) => setUpgradeForm((prev) => ({ ...prev, remark: value }))}
           />
         </Space>
       </Modal>

@@ -36,6 +36,8 @@ func setupAgentBootstrapTestDB(t *testing.T) *gorm.DB {
 		&model.AgentPromoLink{},
 		&model.AgentRebateRecord{},
 		&model.AgentRebateAdjustment{},
+		&model.AgentRelationship{},
+		&model.AgentUpgradeRequest{},
 	))
 	model.InitOptionMap()
 

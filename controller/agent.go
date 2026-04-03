@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
@@ -46,6 +47,33 @@ type UpsertAgentRebateGroupRequest struct {
 	RebateRate int    `json:"rebate_rate"`
 	Status     int    `json:"status"`
 	Remark     string `json:"remark"`
+}
+
+type AgentUpgradeRequestPayload struct {
+	TargetUserId int    `json:"target_user_id"`
+	TargetRate   int    `json:"target_rate"`
+	Remark       string `json:"remark"`
+}
+
+type AgentUpgradeReviewPayload struct {
+	Approve    bool   `json:"approve"`
+	TargetRate int    `json:"target_rate"`
+	Remark     string `json:"remark"`
+}
+
+func writeAgentConflict(c *gin.Context, err error) bool {
+	var conflictErr *model.AgentRateConflictError
+	if !errors.As(err, &conflictErr) {
+		return false
+	}
+	c.JSON(200, gin.H{
+		"success": false,
+		"message": conflictErr.Error(),
+		"data": gin.H{
+			"conflicts": conflictErr.Conflicts,
+		},
+	})
+	return true
 }
 
 func GetAgentBootstrapStatus(c *gin.Context) {
@@ -103,6 +131,9 @@ func UpsertAgentRebateGroup(c *gin.Context) {
 		Remark:     req.Remark,
 	})
 	if err != nil {
+		if writeAgentConflict(c, err) {
+			return
+		}
 		common.ApiError(c, err)
 		return
 	}
@@ -149,6 +180,9 @@ func UpsertAgentProfile(c *gin.Context) {
 		Remark:        req.Remark,
 	})
 	if err != nil {
+		if writeAgentConflict(c, err) {
+			return
+		}
 		common.ApiError(c, err)
 		return
 	}
@@ -224,6 +258,71 @@ func GetAgentSelfAdjustments(c *gin.Context) {
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(adjustments)
 	common.ApiSuccess(c, pageInfo)
+}
+
+func GetAgentSelfDownlines(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	keyword := c.Query("keyword")
+	users, total, err := model.GetAgentDownlineUsers(pageInfo, c.GetInt("id"), keyword)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(users)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func CreateAgentUpgradeRequest(c *gin.Context) {
+	var req AgentUpgradeRequestPayload
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiErrorMsg(c, "无效的参数")
+		return
+	}
+	profile, err := model.DirectUpgradeDownlineToAgent(c.GetInt("id"), req.TargetUserId, req.TargetRate, req.Remark)
+	if err != nil {
+		if writeAgentConflict(c, err) {
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, profile)
+}
+
+func GetAgentUpgradeRequests(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	status := c.Query("status")
+	requests, total, err := model.GetAgentUpgradeRequests(pageInfo, status)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(requests)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func ReviewAgentUpgradeRequest(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiErrorMsg(c, "无效的申请 ID")
+		return
+	}
+	var req AgentUpgradeReviewPayload
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiErrorMsg(c, "无效的参数")
+		return
+	}
+	request, err := model.ReviewAgentUpgradeRequest(id, c.GetInt("id"), req.Approve, req.TargetRate, req.Remark)
+	if err != nil {
+		if writeAgentConflict(c, err) {
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, request)
 }
 
 func GetAgentSelfPromoLinks(c *gin.Context) {

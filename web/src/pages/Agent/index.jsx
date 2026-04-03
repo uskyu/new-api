@@ -115,6 +115,26 @@ export default function Agent() {
     remark: '',
   });
 
+  const showConflictModal = useCallback(
+    (message, conflicts = []) => {
+      Modal.error({
+        title: t('代理比例冲突'),
+        content: (
+          <Space vertical align='start' style={{ width: '100%' }}>
+            <Text>{message}</Text>
+            {conflicts.map((conflict) => (
+              <Text key={`${conflict.parent_agent_user_id}-${conflict.agent_user_id}`}>
+                {conflict.agent_username} ({formatRate(conflict.agent_rate)}) / {conflict.parent_agent_name}{' '}
+                {t('上限')} {formatRate(conflict.parent_allowed_rate)}
+              </Text>
+            ))}
+          </Space>
+        ),
+      });
+    },
+    [t],
+  );
+
   const loadStatus = useCallback(async () => {
     setStatusLoading(true);
     try {
@@ -368,6 +388,10 @@ export default function Agent() {
         remark: groupForm.remark,
       });
       if (!res.data.success) {
+        if (res.data.data?.conflicts?.length) {
+          showConflictModal(res.data.message, res.data.data.conflicts);
+          return;
+        }
         showError(res.data.message);
         return;
       }
@@ -472,6 +496,10 @@ export default function Agent() {
         remark: profileForm.remark,
       });
       if (!res.data.success) {
+        if (res.data.data?.conflicts?.length) {
+          showConflictModal(res.data.message, res.data.data.conflicts);
+          return;
+        }
         showError(res.data.message);
         return;
       }
@@ -602,6 +630,16 @@ export default function Agent() {
     { title: t('用户名'), dataIndex: 'username' },
     { title: t('显示名称'), dataIndex: 'display_name' },
     {
+      title: t('代理级别'),
+      dataIndex: 'agent_level',
+      render: (_, record) => (record.agent_level === 2 ? t('二级代理') : t('一级代理')),
+    },
+    {
+      title: t('直属上级'),
+      dataIndex: 'parent_agent_username',
+      render: (_, record) => record.parent_agent_username || '-',
+    },
+    {
       title: t('状态'),
       dataIndex: 'status',
       render: (_, record) => getStatusTag(record.status, t),
@@ -615,6 +653,17 @@ export default function Agent() {
       title: t('生效比例'),
       dataIndex: 'effective_rate',
       render: (_, record) => formatRate(record.effective_rate),
+    },
+    {
+      title: t('比例来源'),
+      dataIndex: 'effective_rate_source',
+      render: (_, record) =>
+        record.effective_rate_source === 'custom' ? t('自定义覆盖') : t('分组'),
+    },
+    {
+      title: t('上级上限'),
+      dataIndex: 'parent_max_rate',
+      render: (_, record) => (record.parent_max_rate > 0 ? formatRate(record.parent_max_rate) : '-'),
     },
     {
       title: t('返利余额'),
