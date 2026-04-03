@@ -33,6 +33,19 @@ function formatRate(rate) {
   return `${(Number(rate || 0) / 100).toFixed(2)}%`;
 }
 
+function getWithdrawStatusTag(status, t) {
+  if (status === 'pending') {
+    return <Tag color='orange'>{t('待处理')}</Tag>;
+  }
+  if (status === 'exported') {
+    return <Tag color='blue'>{t('已导出')}</Tag>;
+  }
+  if (status === 'paid') {
+    return <Tag color='green'>{t('已打款')}</Tag>;
+  }
+  return <Tag>{status || '-'}</Tag>;
+}
+
 export default function AgentCenter() {
   const { t } = useTranslation();
   const [summary, setSummary] = useState(null);
@@ -550,7 +563,11 @@ export default function AgentCenter() {
         dataIndex: 'amount',
         render: (_, record) => formatAmount(record.amount),
       },
-      { title: t('状态'), dataIndex: 'status' },
+      {
+        title: t('状态'),
+        dataIndex: 'status',
+        render: (_, record) => getWithdrawStatusTag(record.status, t),
+      },
       { title: t('支付宝账号'), dataIndex: 'account_no_snapshot' },
       { title: t('姓名'), dataIndex: 'account_name_snapshot' },
       { title: t('批次号'), dataIndex: 'export_batch_no' },

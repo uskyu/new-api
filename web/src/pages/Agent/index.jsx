@@ -47,6 +47,19 @@ function getStatusTag(status, t) {
   );
 }
 
+function getWithdrawStatusTag(status, t) {
+  if (status === 'pending') {
+    return <Tag color='orange'>{t('待处理')}</Tag>;
+  }
+  if (status === 'exported') {
+    return <Tag color='blue'>{t('已导出')}</Tag>;
+  }
+  if (status === 'paid') {
+    return <Tag color='green'>{t('已打款')}</Tag>;
+  }
+  return <Tag>{status || '-'}</Tag>;
+}
+
 export default function Agent() {
   const { t } = useTranslation();
   const [status, setStatus] = useState(null);
@@ -700,7 +713,8 @@ export default function Agent() {
         showError(res.data.message);
         return;
       }
-      showSuccess(t('提现回执已导入'));
+      const processed = res.data.data?.processed || 0;
+      showSuccess(`${t('提现回执已导入')} (${processed})`);
       await refreshAll();
     } catch (error) {
       showError(error.message || t('导入提现回执失败'));
@@ -932,7 +946,11 @@ export default function Agent() {
       dataIndex: 'amount',
       render: (_, record) => formatAmount(record.amount),
     },
-    { title: t('状态'), dataIndex: 'status' },
+    {
+      title: t('状态'),
+      dataIndex: 'status',
+      render: (_, record) => getWithdrawStatusTag(record.status, t),
+    },
     { title: t('支付宝账号'), dataIndex: 'account_no_snapshot' },
     { title: t('姓名'), dataIndex: 'account_name_snapshot' },
     { title: t('批次号'), dataIndex: 'export_batch_no' },
@@ -1128,6 +1146,63 @@ export default function Agent() {
               </Space>
             </Card>
 
+            <Card style={{ width: '100%' }}>
+              <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
+                <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
+                  <Title heading={5} style={{ margin: 0 }}>
+                    {t('提现申请列表')}
+                  </Title>
+                  <Space>
+                    <input
+                      type='date'
+                      value={withdrawStartDate}
+                      onChange={(e) => setWithdrawStartDate(e.target.value)}
+                      style={{ width: 170, height: 32, padding: '0 12px', border: '1px solid var(--semi-color-border)', borderRadius: 6 }}
+                    />
+                    <input
+                      type='date'
+                      value={withdrawEndDate}
+                      onChange={(e) => setWithdrawEndDate(e.target.value)}
+                      style={{ width: 170, height: 32, padding: '0 12px', border: '1px solid var(--semi-color-border)', borderRadius: 6 }}
+                    />
+                    <Select
+                      value={withdrawStatusFilter}
+                      onChange={setWithdrawStatusFilter}
+                      optionList={[
+                        { label: t('全部状态'), value: '' },
+                        { label: t('待处理'), value: 'pending' },
+                        { label: t('已导出'), value: 'exported' },
+                        { label: t('已打款'), value: 'paid' },
+                      ]}
+                      style={{ width: 140 }}
+                    />
+                    <Button onClick={loadWithdrawRequests}>{t('筛选')}</Button>
+                    <Button type='secondary' onClick={handleExportWithdrawRequests}>
+                      {t('导出')}
+                    </Button>
+                    <Button type='primary' onClick={() => withdrawImportRef.current?.click()}>
+                      {t('导入回执')}
+                    </Button>
+                    <input
+                      ref={withdrawImportRef}
+                      type='file'
+                      accept='.csv,text/csv'
+                      style={{ display: 'none' }}
+                      onChange={handleImportWithdrawResults}
+                    />
+                  </Space>
+                </div>
+                <Table
+                  rowKey='id'
+                  columns={withdrawColumns}
+                  dataSource={withdrawRequests}
+                  loading={withdrawRequestsLoading}
+                  pagination={false}
+                  empty={<Empty title={t('暂无提现申请')} />}
+                />
+              </Space>
+            </Card>
+
           </>
         ) : (
           <Card style={{ width: '100%' }}>
@@ -1309,63 +1384,6 @@ export default function Agent() {
                 loading={promoLinkStatsLoading}
                 pagination={false}
                 empty={<Empty title={t('暂无推广链接统计')} />}
-                />
-              </Space>
-            </Card>
-
-            <Card style={{ width: '100%' }}>
-              <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
-                <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
-                  <Title heading={5} style={{ margin: 0 }}>
-                    {t('提现申请列表')}
-                  </Title>
-                  <Space>
-                    <Input
-                      placeholder={t('开始日期 YYYY-MM-DD')}
-                      value={withdrawStartDate}
-                      onChange={setWithdrawStartDate}
-                      style={{ width: 170 }}
-                    />
-                    <Input
-                      placeholder={t('结束日期 YYYY-MM-DD')}
-                      value={withdrawEndDate}
-                      onChange={setWithdrawEndDate}
-                      style={{ width: 170 }}
-                    />
-                    <Select
-                      value={withdrawStatusFilter}
-                      onChange={setWithdrawStatusFilter}
-                      optionList={[
-                        { label: t('全部状态'), value: '' },
-                        { label: t('待处理'), value: 'pending' },
-                        { label: t('已导出'), value: 'exported' },
-                        { label: t('已打款'), value: 'paid' },
-                      ]}
-                      style={{ width: 140 }}
-                    />
-                    <Button onClick={loadWithdrawRequests}>{t('筛选')}</Button>
-                    <Button type='secondary' onClick={handleExportWithdrawRequests}>
-                      {t('导出')}
-                    </Button>
-                    <Button type='primary' onClick={() => withdrawImportRef.current?.click()}>
-                      {t('导入回执')}
-                    </Button>
-                    <input
-                      ref={withdrawImportRef}
-                      type='file'
-                      accept='.csv,text/csv'
-                      style={{ display: 'none' }}
-                      onChange={handleImportWithdrawResults}
-                    />
-                  </Space>
-                </div>
-                <Table
-                  rowKey='id'
-                  columns={withdrawColumns}
-                  dataSource={withdrawRequests}
-                  loading={withdrawRequestsLoading}
-                  pagination={false}
-                  empty={<Empty title={t('暂无提现申请')} />}
                 />
               </Space>
             </Card>
