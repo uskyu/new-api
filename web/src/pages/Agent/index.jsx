@@ -128,6 +128,8 @@ export default function Agent() {
     remark: '',
   });
   const [withdrawRequests, setWithdrawRequests] = useState([]);
+  const [withdrawRequestsTotal, setWithdrawRequestsTotal] = useState(0);
+  const [withdrawRequestsPage, setWithdrawRequestsPage] = useState(1);
   const [withdrawRequestsLoading, setWithdrawRequestsLoading] = useState(false);
   const [withdrawStatusFilter, setWithdrawStatusFilter] = useState('');
   const [withdrawStartDate, setWithdrawStartDate] = useState('');
@@ -291,17 +293,18 @@ export default function Agent() {
     [promoLinksPage, status?.initialized, t],
   );
 
-  const loadWithdrawRequests = useCallback(async () => {
+  const loadWithdrawRequests = useCallback(async (page = withdrawRequestsPage) => {
     if (!status?.initialized) {
       setWithdrawRequests([]);
+      setWithdrawRequestsTotal(0);
       return;
     }
     setWithdrawRequestsLoading(true);
     try {
       const res = await API.get('/api/agent/withdraw-requests', {
         params: {
-          p: 1,
-          page_size: 50,
+          p: page,
+          page_size: DEFAULT_PAGE_SIZE,
           status: withdrawStatusFilter,
           start_date: withdrawStartDate,
           end_date: withdrawEndDate,
@@ -312,12 +315,13 @@ export default function Agent() {
         return;
       }
       setWithdrawRequests(res.data.data?.items || []);
+      setWithdrawRequestsTotal(res.data.data?.total || 0);
     } catch (error) {
       showError(error.message || t('获取提现申请失败'));
     } finally {
       setWithdrawRequestsLoading(false);
     }
-  }, [status?.initialized, t, withdrawEndDate, withdrawStartDate, withdrawStatusFilter]);
+  }, [status?.initialized, t, withdrawEndDate, withdrawRequestsPage, withdrawStartDate, withdrawStatusFilter]);
 
   const loadPromoLinkStats = useCallback(
     async (agentUserId = activeAgentScope?.userId || 0) => {
@@ -721,6 +725,11 @@ export default function Agent() {
     } finally {
       event.target.value = '';
     }
+  };
+
+  const handleSearchWithdrawRequests = async () => {
+    setWithdrawRequestsPage(1);
+    await loadWithdrawRequests(1);
   };
 
   const profileColumns = [
@@ -1149,9 +1158,14 @@ export default function Agent() {
             <Card style={{ width: '100%' }}>
               <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
                 <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
-                  <Title heading={5} style={{ margin: 0 }}>
-                    {t('提现申请列表')}
-                  </Title>
+                  <div>
+                    <Title heading={5} style={{ margin: 0 }}>
+                      {t('提现申请列表')}
+                    </Title>
+                    <Text type='secondary'>
+                      {t('导出后请在 CSV 最后一列填写打款订单号，再导入回执，系统会按申请单ID匹配并标记已打款。')}
+                    </Text>
+                  </div>
                   <Space>
                     <input
                       type='date'
@@ -1176,7 +1190,7 @@ export default function Agent() {
                       ]}
                       style={{ width: 140 }}
                     />
-                    <Button onClick={loadWithdrawRequests}>{t('筛选')}</Button>
+                    <Button onClick={handleSearchWithdrawRequests}>{t('筛选')}</Button>
                     <Button type='secondary' onClick={handleExportWithdrawRequests}>
                       {t('导出')}
                     </Button>
@@ -1199,6 +1213,15 @@ export default function Agent() {
                   loading={withdrawRequestsLoading}
                   pagination={false}
                   empty={<Empty title={t('暂无提现申请')} />}
+                />
+                <Pagination
+                  total={withdrawRequestsTotal}
+                  currentPage={withdrawRequestsPage}
+                  pageSize={DEFAULT_PAGE_SIZE}
+                  onPageChange={(page) => {
+                    setWithdrawRequestsPage(page);
+                    loadWithdrawRequests(page);
+                  }}
                 />
               </Space>
             </Card>
