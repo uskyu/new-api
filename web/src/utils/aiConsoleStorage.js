@@ -48,6 +48,7 @@ export function openDatabase() {
         });
         messageStore.createIndex('sessionId', 'sessionId', { unique: false });
         messageStore.createIndex('createdAt', 'createdAt', { unique: false });
+        messageStore.createIndex('sortIndex', 'sortIndex', { unique: false });
       }
     };
 
@@ -107,7 +108,14 @@ export async function loadSessionMessages(sessionId) {
     return ensureRequestSuccess(request);
   });
 
-  return messages.sort((left, right) => left.createAt - right.createAt);
+  return messages.sort((left, right) => {
+    const leftOrder = Number.isInteger(left.sortIndex) ? left.sortIndex : 0;
+    const rightOrder = Number.isInteger(right.sortIndex) ? right.sortIndex : 0;
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+    return left.createAt - right.createAt;
+  });
 }
 
 export async function replaceSessionMessages(sessionId, messages) {
@@ -132,8 +140,8 @@ export async function replaceSessionMessages(sessionId, messages) {
     const writeTx = db.transaction(STORE_MESSAGES, 'readwrite');
     const writeStore = writeTx.objectStore(STORE_MESSAGES);
 
-    messages.forEach((message) => {
-      writeStore.put({ ...message, sessionId });
+    messages.forEach((message, index) => {
+      writeStore.put({ ...message, sessionId, sortIndex: index });
     });
 
     return new Promise((resolve, reject) => {

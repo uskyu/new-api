@@ -18,7 +18,6 @@ import { useMessageActions } from '../../hooks/playground/useMessageActions';
 import {
   DEBUG_TABS,
   MESSAGE_ROLES,
-  MESSAGE_STATUS,
 } from '../../constants/playground.constants';
 import {
   buildApiPayload,
@@ -425,6 +424,15 @@ const AIConsole = () => {
         <div className='absolute right-[-8%] top-[15%] h-80 w-80 rounded-full bg-[#bfdbfe]/60 blur-3xl' />
         <div className='absolute bottom-[-10%] left-[20%] h-72 w-72 rounded-full bg-[#e2e8f0]/90 blur-3xl' />
       </div>
+
+      {isMobile && showMobileSidebar && (
+        <button
+          type='button'
+          className='absolute inset-0 z-10 mt-[64px] bg-black/10 backdrop-blur-[1px]'
+          onClick={() => setShowMobileSidebar(false)}
+          aria-label={t('关闭侧栏')}
+        />
+      )}
 
       <div className='relative flex h-full gap-4 p-3 sm:p-4 lg:p-5'>
         <aside className='hidden h-full w-[320px] shrink-0 lg:block'>

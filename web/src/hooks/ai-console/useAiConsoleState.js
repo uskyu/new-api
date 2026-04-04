@@ -324,6 +324,7 @@ export default function useAiConsoleState() {
         return;
       }
 
+      suppressNextPersistRef.current = true;
       const targetSession = sessions.find((session) => session.id === sessionId);
       persistCurrentSessionId(sessionId);
       setCurrentSessionId(sessionId);
