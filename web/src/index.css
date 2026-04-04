@@ -317,6 +317,21 @@ code {
   color: var(--semi-color-text-0) !important;
 }
 
+.ai-console-page .semi-chat-inputBox,
+.ai-console-page .semi-chat-inputBox-inner,
+.ai-console-page .semi-chat-inputBox-container,
+.ai-console-page .semi-chat-inputBox-inputArea,
+.ai-console-page .semi-chat-inputBox-textarea,
+.ai-console-page .semi-chat-inputBox-textarea.semi-input-textarea-wrapper,
+.ai-console-page .semi-chat-inputBox-textarea textarea {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.ai-console-page .semi-chat-inputBox-textarea textarea {
+  min-height: 24px;
+}
+
 .semi-chat-chatBox-action {
   column-gap: 0 !important;
 }

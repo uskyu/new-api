@@ -29,6 +29,7 @@ const AIConsoleChatPanel = ({
   messages,
   roleInfo,
   styleState,
+  hideHeader = false,
   draftImages,
   onAddImage,
   onRemoveImage,
@@ -115,21 +116,23 @@ const AIConsoleChatPanel = ({
     <div className='relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[30px] border border-white/70 bg-white/55 shadow-[0_32px_100px_rgba(15,23,42,0.10)] backdrop-blur-2xl'>
       <div className='absolute inset-x-0 top-0 h-24 bg-gradient-to-r from-sky-100/60 via-white/20 to-emerald-100/40 blur-2xl' />
 
-      <div className='relative border-b border-white/60 px-5 py-4 sm:px-6'>
-        <div className='flex items-center gap-3'>
-          <div className='flex h-11 w-11 items-center justify-center rounded-[18px] bg-white/85 shadow-[0_16px_36px_rgba(15,23,42,0.08)] backdrop-blur-xl'>
-            <MessageSquare size={20} className='text-sky-600' />
-          </div>
-          <div className='min-w-0'>
-            <Typography.Title heading={5} className='!mb-0 !text-slate-900'>
-              {t('AI 控制台')}
-            </Typography.Title>
-            <Typography.Text className='!text-sm !text-slate-500'>
-              {t('输入问题，或上传图片继续')}
-            </Typography.Text>
+      {!hideHeader && (
+        <div className='relative border-b border-white/60 px-5 py-4 sm:px-6'>
+          <div className='flex items-center gap-3'>
+            <div className='flex h-11 w-11 items-center justify-center rounded-[18px] bg-white/85 shadow-[0_16px_36px_rgba(15,23,42,0.08)] backdrop-blur-xl'>
+              <MessageSquare size={20} className='text-sky-600' />
+            </div>
+            <div className='min-w-0'>
+              <Typography.Title heading={5} className='!mb-0 !text-slate-900'>
+                {t('AI 控制台')}
+              </Typography.Title>
+              <Typography.Text className='!text-sm !text-slate-500'>
+                {t('输入问题，或上传图片继续')}
+              </Typography.Text>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className='relative min-h-0 flex-1'>
         <Chat

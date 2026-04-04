@@ -433,8 +433,8 @@ const AIConsole = () => {
 
         <main className='flex min-w-0 flex-1 flex-col gap-3'>
           <div className='lg:hidden'>
-            <div className='rounded-[28px] border border-white/70 bg-white/75 p-3 shadow-[0_20px_60px_rgba(15,23,42,0.10)] backdrop-blur-2xl'>
-              <div className='flex items-center gap-2'>
+            <div className='pointer-events-none absolute left-3 top-3 z-20 sm:left-4 sm:top-4'>
+              <div className='pointer-events-auto flex items-center gap-2 rounded-full border border-white/70 bg-white/80 p-2 shadow-[0_16px_36px_rgba(15,23,42,0.10)] backdrop-blur-xl'>
                 <Button
                   theme='borderless'
                   type='tertiary'
@@ -442,46 +442,23 @@ const AIConsole = () => {
                   className='!rounded-full !bg-black/5'
                   onClick={() => setShowMobileSidebar((previous) => !previous)}
                 />
-                <Button
-                  theme='solid'
-                  type='primary'
-                  icon={<MessageSquarePlus size={16} />}
-                  className='!h-10 !rounded-2xl !bg-[#111827] !text-white'
-                  onClick={() => createSession()}
-                >
-                  {t('新对话')}
-                </Button>
               </div>
-
-              <div className='mt-3 grid gap-3'>
-                <NativeSelect
-                  value={selectedGroup}
-                  options={groupOptions}
-                  onChange={setSelectedGroup}
-                  placeholder={t('选择分组')}
-                />
-                <NativeSelect
-                  value={selectedModel}
-                  options={modelOptions}
-                  onChange={setSelectedModel}
-                  placeholder={t('选择模型')}
-                />
-              </div>
-
-              {showMobileSidebar && (
-                <div className='mt-3 max-h-[42vh] overflow-y-auto'>
-                  {sidebarContent}
-                </div>
-              )}
             </div>
+
+            {showMobileSidebar && (
+              <div className='absolute inset-y-3 left-3 z-20 w-[min(82vw,320px)] sm:left-4 sm:inset-y-4'>
+                {sidebarContent}
+              </div>
+            )}
           </div>
 
-          <div className='min-h-0 flex-1'>
+          <div className='min-h-0 flex-1 lg:flex-none lg:h-full'>
             <AIConsoleChatPanel
               chatRef={chatRef}
               messages={messages}
               roleInfo={roleInfo}
               styleState={styleState}
+              hideHeader={isMobile}
               draftImages={draftImages}
               onAddImage={handleAddDraftImage}
               onRemoveImage={handleRemoveDraftImage}
