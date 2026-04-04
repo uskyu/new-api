@@ -62,6 +62,7 @@ import {
   LayoutDashboard,
   TerminalSquare,
   MessageSquare,
+  Sparkles,
   Key,
   BarChart3,
   Image as ImageIcon,
@@ -118,6 +119,8 @@ export function getLucideIcon(key, selected = false) {
   switch (key) {
     case 'detail':
       return <LayoutDashboard {...commonProps} color={iconColor} />;
+    case 'ai_console':
+      return <Sparkles {...commonProps} color={iconColor} />;
     case 'playground':
       return <TerminalSquare {...commonProps} color={iconColor} />;
     case 'chat':
