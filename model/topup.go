@@ -1,4 +1,4 @@
-package model
+﻿package model
 
 import (
 	"errors"
@@ -74,6 +74,9 @@ func Recharge(referenceId string, customerId string) (err error) {
 			return errors.New("充值订单不存在")
 		}
 
+		if topUp.Status == common.TopUpStatusSuccess {
+			return nil
+		}
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
 		}

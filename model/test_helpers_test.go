@@ -9,6 +9,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -72,7 +73,11 @@ func openTestDB(t *testing.T, dialect TestDBDialect) *gorm.DB {
 		common.UsingSQLite = false
 		common.UsingMySQL = false
 		common.UsingPostgreSQL = true
-		t.Fatalf("PostgreSQL test dialect is not yet implemented")
+		dsn := os.Getenv("TEST_POSTGRES_DSN")
+		if dsn == "" {
+			t.Fatalf("TEST_POSTGRES_DSN is not set")
+		}
+		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	default:
 		t.Fatalf("unsupported test dialect %s", dialect)
 	}

@@ -16,12 +16,13 @@ func ensureAgentTestTables(t *testing.T) {
 	db := DB
 	require.NotNil(t, db)
 	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &AgentRebateGroup{}, &AgentProfile{}, &AgentPromoLink{}, &AgentRebateRecord{}))
-	require.NoError(t, db.AutoMigrate(&AgentRebateAdjustment{}, &AgentRelationship{}, &AgentUpgradeRequest{}, &AgentWithdrawAccount{}, &AgentWithdrawRequest{}, &AgentBalanceLedger{}))
+	require.NoError(t, db.AutoMigrate(&AgentRebateAdjustment{}, &AgentRelationship{}, &AgentUpgradeRequest{}, &AgentWithdrawAccount{}, &AgentWithdrawRequest{}, &AgentBalanceLedger{}, &Log{}))
 	t.Cleanup(func() {
 		if db == nil {
 			return
 		}
 		session := db.Session(&gorm.Session{AllowGlobalUpdate: true})
+		_ = session.Delete(&Log{}).Error
 		_ = session.Delete(&AgentBalanceLedger{}).Error
 		_ = session.Delete(&AgentWithdrawRequest{}).Error
 		_ = session.Delete(&AgentWithdrawAccount{}).Error
