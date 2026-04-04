@@ -248,106 +248,38 @@ func InitLogDB() (err error) {
 }
 
 func migrateDB() error {
-	// Migrate price_amount column from float/double to decimal for existing tables
-	migrateSubscriptionPlanPriceAmount()
-	// Migrate model_limits column from varchar to text for existing tables
-	if err := migrateTokenModelLimitsToText(); err != nil {
+	if err := runCompatMigrations(preSchemaCompatMigrations()...); err != nil {
 		return err
 	}
 
-	err := DB.AutoMigrate(
-		&Channel{},
-		&Token{},
-		&User{},
-		&AgentRebateGroup{},
-		&AgentProfile{},
-		&AgentPromoLink{},
-		&AgentRebateRecord{},
-		&AgentRebateAdjustment{},
-		&AgentRelationship{},
-		&AgentUpgradeRequest{},
-		&AgentWithdrawAccount{},
-		&AgentWithdrawRequest{},
-		&AgentBalanceLedger{},
-		&PasskeyCredential{},
-		&Option{},
-		&Redemption{},
-		&Ability{},
-		&Log{},
-		&Midjourney{},
-		&TopUp{},
-		&QuotaData{},
-		&Task{},
-		&Model{},
-		&Vendor{},
-		&PrefillGroup{},
-		&Setup{},
-		&TwoFA{},
-		&TwoFABackupCode{},
-		&Checkin{},
-		&SubscriptionOrder{},
-		&UserSubscription{},
-		&SubscriptionPreConsumeRecord{},
-		&CustomOAuthProvider{},
-		&UserOAuthBinding{},
-	)
-	if err != nil {
+	if err := DB.AutoMigrate(CoreSchemaModels()...); err != nil {
 		return err
 	}
-	if common.UsingSQLite {
-		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
-			return err
-		}
-	} else {
-		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
-			return err
-		}
+	if err := runCompatMigrations(postSchemaCompatMigrations()...); err != nil {
+		return err
 	}
 	return nil
 }
 
 func migrateDBFast() error {
+	if err := runCompatMigrations(preSchemaCompatMigrations()...); err != nil {
+		return err
+	}
 
 	var wg sync.WaitGroup
 
 	migrations := []struct {
 		model interface{}
 		name  string
-	}{
-		{&Channel{}, "Channel"},
-		{&Token{}, "Token"},
-		{&User{}, "User"},
-		{&AgentRebateGroup{}, "AgentRebateGroup"},
-		{&AgentProfile{}, "AgentProfile"},
-		{&AgentPromoLink{}, "AgentPromoLink"},
-		{&AgentRebateRecord{}, "AgentRebateRecord"},
-		{&AgentRebateAdjustment{}, "AgentRebateAdjustment"},
-		{&AgentRelationship{}, "AgentRelationship"},
-		{&AgentUpgradeRequest{}, "AgentUpgradeRequest"},
-		{&AgentWithdrawAccount{}, "AgentWithdrawAccount"},
-		{&AgentWithdrawRequest{}, "AgentWithdrawRequest"},
-		{&AgentBalanceLedger{}, "AgentBalanceLedger"},
-		{&PasskeyCredential{}, "PasskeyCredential"},
-		{&Option{}, "Option"},
-		{&Redemption{}, "Redemption"},
-		{&Ability{}, "Ability"},
-		{&Log{}, "Log"},
-		{&Midjourney{}, "Midjourney"},
-		{&TopUp{}, "TopUp"},
-		{&QuotaData{}, "QuotaData"},
-		{&Task{}, "Task"},
-		{&Model{}, "Model"},
-		{&Vendor{}, "Vendor"},
-		{&PrefillGroup{}, "PrefillGroup"},
-		{&Setup{}, "Setup"},
-		{&TwoFA{}, "TwoFA"},
-		{&TwoFABackupCode{}, "TwoFABackupCode"},
-		{&Checkin{}, "Checkin"},
-		{&SubscriptionOrder{}, "SubscriptionOrder"},
-		{&UserSubscription{}, "UserSubscription"},
-		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
-		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
-		{&UserOAuthBinding{}, "UserOAuthBinding"},
+	}{}
+	for _, schemaModel := range CoreSchemaModels() {
+		migrations = append(migrations, struct {
+			model interface{}
+			name  string
+		}{
+			model: schemaModel,
+			name:  fmt.Sprintf("%T", schemaModel),
+		})
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
@@ -372,14 +304,8 @@ func migrateDBFast() error {
 			return err
 		}
 	}
-	if common.UsingSQLite {
-		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
-			return err
-		}
-	} else {
-		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
-			return err
-		}
+	if err := runCompatMigrations(postSchemaCompatMigrations()...); err != nil {
+		return err
 	}
 	common.SysLog("database migrated")
 	return nil

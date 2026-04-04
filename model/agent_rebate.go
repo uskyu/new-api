@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model/queryx"
 	"github.com/shopspring/decimal"
 
 	"gorm.io/gorm"
@@ -1908,88 +1909,16 @@ func DeleteAgentPromoLink(id int, operatorUserId int) error {
 }
 
 func GetAgentPromoLinkStats(agentUserId int) ([]*AgentPromoLinkStat, error) {
-	var stats []*AgentPromoLinkStat
-	tx := DB.Table("agent_promo_links AS apl").
-		Select(`apl.id AS promo_link_id, apl.agent_user_id, apl.name, apl.code, apl.status, apl.landing_page,
-COALESCE(user_stats.invitee_count, 0) AS invitee_count,
-COALESCE(topup_stats.topup_count, 0) AS topup_count,
-COALESCE(topup_stats.topup_amount, 0) AS topup_amount,
-COALESCE(rebate_stats.rebate_amount, 0) AS rebate_amount,
-COALESCE(user_stats.last_invitee_id, 0) AS last_invitee_id,
-COALESCE(user_stats.last_invitee_name, '') AS last_invitee_name`).
-		Joins(`LEFT JOIN (
-			SELECT u.promo_link_id,
-			COUNT(*) AS invitee_count,
-			MAX(u.id) AS last_invitee_id,
-			MAX(u.username) AS last_invitee_name
-			FROM users AS u
-			WHERE u.promo_link_id > 0 AND u.deleted_at IS NULL
-			GROUP BY u.promo_link_id
-		) AS user_stats ON user_stats.promo_link_id = apl.id`).
-		Joins(`LEFT JOIN (
-			SELECT u.promo_link_id,
-			COUNT(t.id) AS topup_count,
-			COALESCE(SUM(CAST(ROUND(t.money * 100, 0) AS BIGINT)), 0) AS topup_amount
-			FROM users AS u
-			LEFT JOIN top_ups AS t ON t.user_id = u.id AND t.status = ?
-			WHERE u.promo_link_id > 0 AND u.deleted_at IS NULL
-			GROUP BY u.promo_link_id
-		) AS topup_stats ON topup_stats.promo_link_id = apl.id`, common.TopUpStatusSuccess).
-		Joins(`LEFT JOIN (
-			SELECT promo_link_id,
-			COALESCE(SUM(rebate_amount), 0) AS rebate_amount
-			FROM agent_rebate_records
-			WHERE promo_link_id > 0 AND status = ?
-			GROUP BY promo_link_id
-		) AS rebate_stats ON rebate_stats.promo_link_id = apl.id`, AgentRebateRecordSettled)
-	if agentUserId > 0 {
-		tx = tx.Where("apl.agent_user_id = ?", agentUserId)
-	}
+	stats := make([]*AgentPromoLinkStat, 0)
+	tx := queryx.BuildAgentPromoLinkStatsQuery(DB, agentUserId, AgentRebateRecordSettled)
 	err := tx.Order("apl.id desc").Scan(&stats).Error
 	return stats, err
 }
 
 func GetAgentDownlineUsers(pageInfo *common.PageInfo, agentUserId int, keyword string) ([]*AgentDownlineUserView, int64, error) {
-	var users []*AgentDownlineUserView
+	users := make([]*AgentDownlineUserView, 0)
+	tx := queryx.BuildAgentDownlineUsersQuery(DB, agentUserId, keyword, AgentStatusEnabled, AgentRebateRecordSettled)
 	var total int64
-	tx := DB.Table("users AS u").
-		Select(`u.id AS user_id, u.username, u.display_name, u.inviter_id, u.promo_link_id,
-COALESCE(apl.name, '') AS promo_link_name,
-CASE WHEN child_profile.user_id IS NULL THEN false ELSE true END AS is_agent,
-COALESCE(topup_stats.topup_count, 0) AS topup_count,
-COALESCE(topup_stats.topup_amount, 0) AS topup_amount,
-COALESCE(rebate_stats.rebate_amount, 0) AS rebate_amount,
-COALESCE(topup_stats.latest_topup_time, 0) AS latest_topup_time,
-COALESCE(rebate_stats.latest_rebate_time, 0) AS latest_rebate_time`).
-		Joins("LEFT JOIN agent_promo_links AS apl ON apl.id = u.promo_link_id").
-		Joins("LEFT JOIN agent_profiles AS child_profile ON child_profile.user_id = u.id AND child_profile.status = ?", AgentStatusEnabled).
-		Joins(`LEFT JOIN (
-			SELECT user_id,
-			COUNT(id) AS topup_count,
-			COALESCE(SUM(CAST(ROUND(money * 100, 0) AS BIGINT)), 0) AS topup_amount,
-			MAX(complete_time) AS latest_topup_time
-			FROM top_ups
-			WHERE status = ?
-			GROUP BY user_id
-		) AS topup_stats ON topup_stats.user_id = u.id`, common.TopUpStatusSuccess).
-		Joins(`LEFT JOIN (
-			SELECT invitee_user_id,
-			COALESCE(SUM(rebate_amount), 0) AS rebate_amount,
-			MAX(settled_at) AS latest_rebate_time
-			FROM agent_rebate_records
-			WHERE status = ?
-			GROUP BY invitee_user_id
-		) AS rebate_stats ON rebate_stats.invitee_user_id = u.id`, AgentRebateRecordSettled).
-		Where("u.inviter_id = ? AND u.deleted_at IS NULL", agentUserId)
-	keyword = strings.TrimSpace(keyword)
-	if keyword != "" {
-		like := "%" + keyword + "%"
-		if keywordInt, err := strconv.Atoi(keyword); err == nil {
-			tx = tx.Where("u.id = ? OR u.username LIKE ? OR u.display_name LIKE ?", keywordInt, like, like)
-		} else {
-			tx = tx.Where("u.username LIKE ? OR u.display_name LIKE ?", like, like)
-		}
-	}
 	if err := tx.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}

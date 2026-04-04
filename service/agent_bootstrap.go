@@ -6,7 +6,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
-
 	"gorm.io/gorm"
 )
 
@@ -28,7 +27,11 @@ func GetAgentBootstrapStatus() (*AgentBootstrapStatus, error) {
 		Initialized: common.AgentInitialized,
 		DefaultRate: common.AgentDefaultRebateRate,
 	}
-	status.MissingResources = detectAgentMigrationGaps(model.DB)
+	missingResources, err := model.CheckAgentSchemaReady()
+	if err != nil {
+		return nil, err
+	}
+	status.MissingResources = missingResources
 	status.MigrationReady = len(status.MissingResources) == 0
 	if group, err := model.GetDefaultAgentRebateGroup(); err == nil {
 		status.DefaultGroupId = group.Id
@@ -69,48 +72,4 @@ func InitializeAgentModule(defaultRate int) (*AgentBootstrapStatus, error) {
 		return nil, err
 	}
 	return GetAgentBootstrapStatus()
-}
-
-func detectAgentMigrationGaps(db *gorm.DB) []string {
-	missing := make([]string, 0, 11)
-	if db == nil {
-		return append(missing, "database")
-	}
-	if !db.Migrator().HasTable(&model.AgentRebateGroup{}) {
-		missing = append(missing, "agent_rebate_groups")
-	}
-	if !db.Migrator().HasTable(&model.AgentProfile{}) {
-		missing = append(missing, "agent_profiles")
-	}
-	if !db.Migrator().HasTable(&model.AgentPromoLink{}) {
-		missing = append(missing, "agent_promo_links")
-	}
-	if !db.Migrator().HasTable(&model.AgentRebateRecord{}) {
-		missing = append(missing, "agent_rebate_records")
-	}
-	if !db.Migrator().HasTable(&model.AgentRebateAdjustment{}) {
-		missing = append(missing, "agent_rebate_adjustments")
-	}
-	if !db.Migrator().HasTable(&model.AgentRelationship{}) {
-		missing = append(missing, "agent_relationships")
-	}
-	if !db.Migrator().HasTable(&model.AgentUpgradeRequest{}) {
-		missing = append(missing, "agent_upgrade_requests")
-	}
-	if !db.Migrator().HasTable(&model.AgentWithdrawAccount{}) {
-		missing = append(missing, "agent_withdraw_accounts")
-	}
-	if !db.Migrator().HasTable(&model.AgentWithdrawRequest{}) {
-		missing = append(missing, "agent_withdraw_requests")
-	}
-	if !db.Migrator().HasTable(&model.AgentBalanceLedger{}) {
-		missing = append(missing, "agent_balance_ledgers")
-	}
-	if !db.Migrator().HasColumn(&model.User{}, "promo_link_id") {
-		missing = append(missing, "users.promo_link_id")
-	}
-	if !db.Migrator().HasColumn(&model.AgentProfile{}, "rebate_frozen_amount") {
-		missing = append(missing, "agent_profiles.rebate_frozen_amount")
-	}
-	return missing
 }

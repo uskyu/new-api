@@ -6,16 +6,22 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/common/dbx"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
 func ensureAgentTestTables(t *testing.T) {
 	t.Helper()
-	require.NoError(t, DB.AutoMigrate(&User{}, &TopUp{}, &AgentRebateGroup{}, &AgentProfile{}, &AgentPromoLink{}, &AgentRebateRecord{}))
-	require.NoError(t, DB.AutoMigrate(&AgentRebateAdjustment{}, &AgentRelationship{}, &AgentUpgradeRequest{}, &AgentWithdrawAccount{}, &AgentWithdrawRequest{}, &AgentBalanceLedger{}))
+	db := DB
+	require.NotNil(t, db)
+	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &AgentRebateGroup{}, &AgentProfile{}, &AgentPromoLink{}, &AgentRebateRecord{}))
+	require.NoError(t, db.AutoMigrate(&AgentRebateAdjustment{}, &AgentRelationship{}, &AgentUpgradeRequest{}, &AgentWithdrawAccount{}, &AgentWithdrawRequest{}, &AgentBalanceLedger{}))
 	t.Cleanup(func() {
-		session := DB.Session(&gorm.Session{AllowGlobalUpdate: true})
+		if db == nil {
+			return
+		}
+		session := db.Session(&gorm.Session{AllowGlobalUpdate: true})
 		_ = session.Delete(&AgentBalanceLedger{}).Error
 		_ = session.Delete(&AgentWithdrawRequest{}).Error
 		_ = session.Delete(&AgentWithdrawAccount{}).Error
@@ -46,7 +52,7 @@ func createAgentTestUser(t *testing.T, username string, affCode string) *User {
 }
 
 func TestResolveRegistrationAttribution(t *testing.T) {
-	ensureAgentTestTables(t)
+	setupAgentTestDB(t, TestDBDialectSQLite)
 	agent := createAgentTestUser(t, "agent_user", "AFF1")
 	promoLink := &AgentPromoLink{
 		AgentUserId: agent.Id,
@@ -73,7 +79,7 @@ func TestResolveRegistrationAttribution(t *testing.T) {
 }
 
 func TestSettleAgentRebateTx(t *testing.T) {
-	ensureAgentTestTables(t)
+	setupAgentTestDB(t, TestDBDialectSQLite)
 	common.AgentEnabled = true
 	common.AgentInitialized = true
 	common.AgentDefaultRebateRate = 0
@@ -144,7 +150,7 @@ func TestSettleAgentRebateTx(t *testing.T) {
 }
 
 func TestAdjustAgentRebateBalance(t *testing.T) {
-	ensureAgentTestTables(t)
+	setupAgentTestDB(t, TestDBDialectSQLite)
 	agent := createAgentTestUser(t, "agent_adjust", "AFF4")
 	operator := createAgentTestUser(t, "admin_adjust", "AFF5")
 	profile := &AgentProfile{
@@ -179,7 +185,7 @@ func TestAdjustAgentRebateBalance(t *testing.T) {
 }
 
 func TestUpsertAndDeleteAgentPromoLink(t *testing.T) {
-	ensureAgentTestTables(t)
+	setupAgentTestDB(t, TestDBDialectSQLite)
 	agent := createAgentTestUser(t, "agent_promo", "AFF6")
 	operator := createAgentTestUser(t, "admin_promo", "AFF7")
 	require.NoError(t, DB.Create(&AgentProfile{UserId: agent.Id, Status: AgentStatusEnabled}).Error)
@@ -220,7 +226,7 @@ func TestUpsertAndDeleteAgentPromoLink(t *testing.T) {
 }
 
 func TestUpsertAgentProfileAutoCreatesDefaultPromoLink(t *testing.T) {
-	ensureAgentTestTables(t)
+	setupAgentTestDB(t, TestDBDialectSQLite)
 	operator := createAgentTestUser(t, "admin_auto_link", "AFF11")
 	agent := createAgentTestUser(t, "agent_auto_link", "AFF12")
 
@@ -240,7 +246,7 @@ func TestUpsertAgentProfileAutoCreatesDefaultPromoLink(t *testing.T) {
 }
 
 func TestUpsertAndDeleteAgentRebateGroup(t *testing.T) {
-	ensureAgentTestTables(t)
+	setupAgentTestDB(t, TestDBDialectSQLite)
 	operator := createAgentTestUser(t, "admin_group", "AFF8")
 
 	group, err := UpsertAgentRebateGroup(operator.Id, &AgentRebateGroup{
@@ -272,7 +278,7 @@ func TestUpsertAndDeleteAgentRebateGroup(t *testing.T) {
 }
 
 func TestAgentPromoLinkStatsAndDownlines(t *testing.T) {
-	ensureAgentTestTables(t)
+	setupAgentTestDB(t, TestDBDialectSQLite)
 	common.AgentEnabled = true
 	common.AgentInitialized = true
 	t.Cleanup(func() {
@@ -333,7 +339,7 @@ func TestAgentPromoLinkStatsAndDownlines(t *testing.T) {
 }
 
 func TestAgentUpgradeRequestAndRateConflict(t *testing.T) {
-	ensureAgentTestTables(t)
+	setupAgentTestDB(t, TestDBDialectSQLite)
 	operator := createAgentTestUser(t, "admin_phase2", "AFF13")
 	parent := createAgentTestUser(t, "parent_agent", "AFF14")
 	child := createAgentTestUser(t, "child_agent", "AFF15")
@@ -367,7 +373,7 @@ func TestAgentUpgradeRequestAndRateConflict(t *testing.T) {
 }
 
 func TestAgentWithdrawWorkflow(t *testing.T) {
-	ensureAgentTestTables(t)
+	setupAgentTestDB(t, TestDBDialectSQLite)
 	agent := createAgentTestUser(t, "agent_withdraw", "AFF16")
 	require.NoError(t, DB.Create(&AgentProfile{
 		UserId:              agent.Id,
@@ -413,4 +419,56 @@ func TestAgentWithdrawWorkflow(t *testing.T) {
 	var ledgers []AgentBalanceLedger
 	require.NoError(t, DB.Where("agent_user_id = ?", agent.Id).Find(&ledgers).Error)
 	require.Len(t, ledgers, 2)
+}
+
+func TestAgentMoneyCentsExprDialects(t *testing.T) {
+	prevMySQL := common.UsingMySQL
+	prevPostgres := common.UsingPostgreSQL
+	prevSQLite := common.UsingSQLite
+	defer func() {
+		common.UsingMySQL = prevMySQL
+		common.UsingPostgreSQL = prevPostgres
+		common.UsingSQLite = prevSQLite
+	}()
+
+	cases := []struct {
+		name string
+		set  func()
+		want string
+	}{
+		{
+			name: "sqlite",
+			set: func() {
+				common.UsingSQLite = true
+				common.UsingMySQL = false
+				common.UsingPostgreSQL = false
+			},
+			want: "COALESCE(SUM(CAST(ROUND(t.money * 100, 0) AS INTEGER)), 0)",
+		},
+		{
+			name: "mysql",
+			set: func() {
+				common.UsingMySQL = true
+				common.UsingSQLite = false
+				common.UsingPostgreSQL = false
+			},
+			want: "COALESCE(SUM(CAST(ROUND(t.money * 100, 0) AS SIGNED)), 0)",
+		},
+		{
+			name: "postgres",
+			set: func() {
+				common.UsingPostgreSQL = true
+				common.UsingSQLite = false
+				common.UsingMySQL = false
+			},
+			want: "COALESCE(SUM(CAST(ROUND(t.money * 100, 0) AS BIGINT)), 0)",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.set()
+			require.Equal(t, tc.want, dbx.SumMoneyCentsExpr("t.money"))
+		})
+	}
 }

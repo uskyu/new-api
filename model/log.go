@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/common/dbx"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -437,7 +438,7 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 }
 
 func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) (token int) {
-	tx := LOG_DB.Table("logs").Select("ifnull(sum(prompt_tokens),0) + ifnull(sum(completion_tokens),0)")
+	tx := LOG_DB.Table("logs").Select(dbx.CoalesceExpr("sum(prompt_tokens)", "0") + " + " + dbx.CoalesceExpr("sum(completion_tokens)", "0"))
 	if username != "" {
 		tx = tx.Where("username = ?", username)
 	}
