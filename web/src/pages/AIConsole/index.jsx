@@ -1,5 +1,5 @@
 import React, { useContext, useMemo, useRef, useState } from 'react';
-import { Button, Empty, Input, Spin, Typography } from '@douyinfe/semi-ui';
+import { Button, Empty, Input, Spin } from '@douyinfe/semi-ui';
 import {
   Check,
   MessageSquarePlus,
@@ -129,9 +129,7 @@ const NativeSelect = ({ value, options, onChange, placeholder }) => (
     onChange={(event) => onChange(event.target.value)}
     className='h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
   >
-    {options.length === 0 ? (
-      <option value=''>{placeholder}</option>
-    ) : null}
+    {options.length === 0 ? <option value=''>{placeholder}</option> : null}
     {options.map((option) => (
       <option key={option.value} value={option.value}>
         {option.label}
@@ -177,6 +175,7 @@ const AIConsole = () => {
     renameSession,
     removeSession,
     clearCurrentSession,
+    markSessionActivity,
   } = useAiConsoleState();
 
   const saveMessagesImmediately = React.useCallback(
@@ -225,6 +224,7 @@ const AIConsole = () => {
         buildMessageContent(trimmed, draftImages, draftImages.length > 0),
       );
 
+      markSessionActivity();
       setMessages((previous) => {
         const requestMessages = [...previous, userMessage];
         const nextMessages = [...requestMessages, loadingMessage];
@@ -249,6 +249,7 @@ const AIConsole = () => {
       draftImages,
       selectedGroup,
       selectedModel,
+      markSessionActivity,
       sendRequest,
       setDraftImages,
       setMessages,
@@ -418,7 +419,7 @@ const AIConsole = () => {
   );
 
   return (
-    <div className='mt-[64px] h-[calc(100vh-64px)] overflow-hidden bg-[#eef2f7]'>
+    <div className='ai-console-page mt-[64px] h-[calc(100vh-64px)] overflow-hidden bg-[#eef2f7]'>
       <div className='pointer-events-none absolute inset-0 mt-[64px] overflow-hidden'>
         <div className='absolute left-[-8%] top-[-12%] h-72 w-72 rounded-full bg-[#c7d2fe]/70 blur-3xl' />
         <div className='absolute right-[-8%] top-[15%] h-80 w-80 rounded-full bg-[#bfdbfe]/60 blur-3xl' />
@@ -473,17 +474,6 @@ const AIConsole = () => {
                 </div>
               )}
             </div>
-          </div>
-
-          <div className='rounded-[24px] border border-white/70 bg-white/55 px-4 py-3 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur-2xl'>
-            <Typography.Title heading={6} className='!mb-1 !text-slate-900'>
-              {t('AI 控制台')}
-            </Typography.Title>
-            <Typography.Text className='!text-sm !text-slate-500'>
-              {selectedGroup
-                ? `${t('当前分组')}：${selectedGroup} · ${selectedModel}`
-                : selectedModel}
-            </Typography.Text>
           </div>
 
           <div className='min-h-0 flex-1'>

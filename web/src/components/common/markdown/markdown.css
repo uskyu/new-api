@@ -447,3 +447,37 @@ pre:hover .copy-code-button {
   animation: fade-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
   will-change: opacity, transform;
 }
+
+/* AI Console user bubbles use a softer light surface instead of the default blue */
+.ai-console-page .user-message,
+.ai-console-page .user-message .markdown-body,
+.ai-console-page .user-message h1,
+.ai-console-page .user-message h2,
+.ai-console-page .user-message h3,
+.ai-console-page .user-message h4,
+.ai-console-page .user-message h5,
+.ai-console-page .user-message h6,
+.ai-console-page .user-message p,
+.ai-console-page .user-message span,
+.ai-console-page .user-message div,
+.ai-console-page .user-message li,
+.ai-console-page .user-message td,
+.ai-console-page .user-message th {
+  color: var(--semi-color-text-0) !important;
+}
+
+.ai-console-page .user-message blockquote {
+  color: var(--semi-color-text-1) !important;
+  border-left-color: rgba(148, 163, 184, 0.45) !important;
+  background-color: rgba(241, 245, 249, 0.92) !important;
+}
+
+.ai-console-page .user-message code:not(pre code) {
+  color: var(--semi-color-text-0) !important;
+  background-color: rgba(226, 232, 240, 0.92) !important;
+}
+
+.ai-console-page .user-message a,
+.ai-console-page .user-message a:hover {
+  color: var(--semi-color-link) !important;
+}

@@ -102,6 +102,8 @@ export default function useAiConsoleState() {
   const [draftImages, setDraftImages] = useState([]);
 
   const initializedRef = useRef(false);
+  const suppressNextPersistRef = useRef(false);
+  const activityRef = useRef(false);
 
   const currentSession = useMemo(
     () => sessions.find((session) => session.id === currentSessionId) || null,
@@ -184,6 +186,7 @@ export default function useAiConsoleState() {
       return;
     }
 
+    suppressNextPersistRef.current = true;
     const loadedMessages = await loadSessionMessages(sessionId);
     setMessages(loadedMessages);
     setDraftImages([]);
@@ -248,6 +251,11 @@ export default function useAiConsoleState() {
   }, [selectedGroup, selectedModel]);
 
   useEffect(() => {
+    if (suppressNextPersistRef.current) {
+      suppressNextPersistRef.current = false;
+      return;
+    }
+
     if (!ready || !currentSessionId) {
       return;
     }
@@ -269,13 +277,16 @@ export default function useAiConsoleState() {
         model: selectedModel,
         group: selectedGroup,
         title: derivedTitle,
-        updatedAt: Date.now(),
+        updatedAt: activityRef.current
+          ? Date.now()
+          : currentSession?.updatedAt || Date.now(),
         lastMessagePreview: getPreviewText(messages),
       };
 
       await putSession(nextSession);
       await replaceSessionMessages(currentSessionId, messages);
       setSessions((previous) => upsertSession(previous, nextSession));
+      activityRef.current = false;
     };
 
     const timeoutId = setTimeout(() => {
@@ -371,6 +382,10 @@ export default function useAiConsoleState() {
     }
   }, [currentSession, currentSessionId]);
 
+  const markSessionActivity = useCallback(() => {
+    activityRef.current = true;
+  }, []);
+
   const removeSession = useCallback(
     async (sessionId) => {
       await deleteSession(sessionId);
@@ -425,5 +440,6 @@ export default function useAiConsoleState() {
     renameSession,
     removeSession,
     clearCurrentSession,
+    markSessionActivity,
   };
 }
