@@ -17,6 +17,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -33,9 +34,15 @@ func setupTopupControllerTestDB(t *testing.T) *gorm.DB {
 		db  *gorm.DB
 		err error
 	)
-	if dsn := os.Getenv("TEST_MYSQL_DSN"); dsn != "" {
+	if dsn := os.Getenv("TEST_POSTGRES_DSN"); dsn != "" {
+		common.UsingSQLite = false
+		common.UsingMySQL = false
+		common.UsingPostgreSQL = true
+		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	} else if dsn := os.Getenv("TEST_MYSQL_DSN"); dsn != "" {
 		common.UsingSQLite = false
 		common.UsingMySQL = true
+		common.UsingPostgreSQL = false
 		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	} else {
 		dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
