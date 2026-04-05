@@ -166,6 +166,181 @@ code {
   font-weight: 500;
 }
 
+.sidebar-ai-card {
+  position: relative;
+  display: block;
+  margin: 6px 10px 2px;
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  background:
+    linear-gradient(145deg, rgba(250, 252, 255, 0.96), rgba(216, 244, 255, 0.72)),
+    linear-gradient(180deg, rgba(148, 163, 184, 0.08), rgba(255, 255, 255, 0));
+  box-shadow:
+    0 18px 38px rgba(14, 116, 144, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  text-decoration: none;
+  transform: translateZ(0);
+  transition:
+    transform 0.22s ease,
+    box-shadow 0.22s ease,
+    border-color 0.22s ease;
+}
+
+.sidebar-ai-card::after {
+  content: '';
+  position: absolute;
+  top: -35%;
+  left: -42%;
+  width: 64%;
+  height: 190%;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0.18) 28%,
+    rgba(255, 255, 255, 0.82) 48%,
+    rgba(255, 255, 255, 0.18) 68%,
+    rgba(255, 255, 255, 0)
+  );
+  transform: translate3d(-170%, 0, 0) rotate(18deg);
+  opacity: 0.9;
+  mix-blend-mode: screen;
+  animation: sidebar-ai-card-sheen 4.8s ease-in-out infinite;
+}
+
+.sidebar-ai-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(125, 211, 252, 0.85);
+  box-shadow:
+    0 22px 46px rgba(14, 116, 144, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.sidebar-ai-card-selected {
+  border-color: rgba(56, 189, 248, 0.95);
+  box-shadow:
+    0 24px 48px rgba(2, 132, 199, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.sidebar-ai-card-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px 12px;
+}
+
+.sidebar-ai-card-icon,
+.sidebar-ai-card-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sidebar-ai-card-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 12px;
+  color: #0f766e;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(219, 244, 255, 0.78));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 8px 18px rgba(15, 118, 110, 0.14);
+}
+
+.sidebar-ai-card-badge {
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  border-radius: 9999px;
+  color: rgba(8, 145, 178, 0.9);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.sidebar-ai-card-title {
+  min-width: 0;
+  flex: 1;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.sidebar-ai-card-glow,
+.sidebar-ai-card-reflection,
+.sidebar-ai-card-wave {
+  position: absolute;
+  pointer-events: none;
+}
+
+.sidebar-ai-card-glow {
+  inset: auto auto -32px -18px;
+  width: 112px;
+  height: 112px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.26), rgba(34, 211, 238, 0));
+}
+
+.sidebar-ai-card-reflection {
+  top: -18px;
+  left: -12px;
+  width: 130%;
+  height: 28px;
+  background: linear-gradient(110deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0.08) 45%, rgba(255, 255, 255, 0.34) 70%, rgba(255, 255, 255, 0));
+  transform: rotate(-8deg);
+  opacity: 0.92;
+}
+
+.sidebar-ai-card-wave {
+  right: -22px;
+  bottom: -26px;
+  border-radius: 9999px;
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.22), rgba(14, 165, 233, 0.08));
+}
+
+.sidebar-ai-card-wave-primary {
+  width: 118px;
+  height: 58px;
+  transform: rotate(-6deg);
+}
+
+.sidebar-ai-card-wave-secondary {
+  right: 6px;
+  bottom: -16px;
+  width: 88px;
+  height: 40px;
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.16), rgba(34, 211, 238, 0.02));
+  transform: rotate(10deg);
+}
+
+@keyframes sidebar-ai-card-sheen {
+  0% {
+    transform: translate3d(-170%, 0, 0) rotate(18deg);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0;
+  }
+  32% {
+    transform: translate3d(148%, 0, 0) rotate(18deg);
+    opacity: 0.95;
+  }
+  42% {
+    opacity: 0;
+  }
+  100% {
+    transform: translate3d(148%, 0, 0) rotate(18deg);
+    opacity: 0;
+  }
+}
+
 /* 图标容器样式 */
 .sidebar-icon-container {
   width: 22px;

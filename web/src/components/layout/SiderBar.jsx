@@ -20,7 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Sparkles, Waves } from 'lucide-react';
 import { Nav, Divider, Button } from '@douyinfe/semi-ui';
 import { getLucideIcon } from '../../helpers/render';
 import { isAdmin, isRoot, showError } from '../../helpers';
@@ -213,7 +213,13 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       },
     ];
 
-    return items.filter((item) => isModuleVisible('chat', item.itemKey));
+    return items
+      .map((item) =>
+        item.itemKey === 'ai_console'
+          ? { ...item, text: t('AI 对话') }
+          : item,
+      )
+      .filter((item) => isModuleVisible('chat', item.itemKey));
   }, [chatItems, isModuleVisible, t]);
 
   useEffect(() => {
@@ -297,6 +303,41 @@ const SiderBar = ({ onNavigate = () => {} }) => {
   }, [collapsed]);
 
   const selectedColor = 'var(--semi-color-primary)';
+
+  const renderAIChatCard = (item) => {
+    const isSelected = selectedKeys.includes(item.itemKey);
+
+    if (collapsed) {
+      return renderNavItem(item);
+    }
+
+    return (
+      <Link
+        key={item.itemKey}
+        to={item.to}
+        onClick={() => {
+          setSelectedKeys([item.itemKey]);
+          onNavigate();
+        }}
+        className={`sidebar-ai-card ${isSelected ? 'sidebar-ai-card-selected' : ''}`}
+      >
+        <div className='sidebar-ai-card-glow' />
+        <div className='sidebar-ai-card-reflection' />
+        <div className='sidebar-ai-card-wave sidebar-ai-card-wave-primary' />
+        <div className='sidebar-ai-card-wave sidebar-ai-card-wave-secondary' />
+
+        <div className='sidebar-ai-card-content'>
+          <div className='sidebar-ai-card-icon'>
+            <Sparkles size={16} strokeWidth={2.1} />
+          </div>
+          <div className='sidebar-ai-card-title'>{item.text}</div>
+          <div className='sidebar-ai-card-badge'>
+            <Waves size={13} strokeWidth={2} />
+          </div>
+        </div>
+      </Link>
+    );
+  };
 
   const renderNavItem = (item) => {
     if (item.className === 'tableHiddle') {
@@ -427,7 +468,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           {hasSectionVisibleModules('chat') && (
             <div className='sidebar-section'>
               {!collapsed && <div className='sidebar-group-label'>{t('聊天')}</div>}
-              {chatMenuItems.map((item) => renderSubItem(item))}
+              {chatMenuItems.map((item) =>
+                item.itemKey === 'ai_console'
+                  ? renderAIChatCard(item)
+                  : renderSubItem(item),
+              )}
             </div>
           )}
 
