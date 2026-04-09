@@ -229,6 +229,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
+		if service.AdvanceFallbackGroupOnError(c, retryParam, newAPIError) {
+			continue
+		}
+
 		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break
 		}
@@ -298,6 +302,15 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		}, nil
 	}
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
+	if selectGroup != "" {
+		service.EnsureRequestedGroup(c, info.TokenGroup)
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, selectGroup)
+		if info.TokenGroup == "auto" {
+			common.SetContextKey(c, constant.ContextKeyAutoGroup, selectGroup)
+		}
+		service.TrackSelectedGroup(c, selectGroup)
+		info.UsingGroup = selectGroup
+	}
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 

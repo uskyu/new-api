@@ -38,6 +38,7 @@ export default function GroupRatioSettings(props) {
     GroupGroupRatio: '',
     'group_ratio_setting.group_special_usable_group': '',
     AutoGroups: '',
+    GroupFallbacks: '',
     DefaultUseAutoGroup: false,
   });
   const refForm = useRef();
@@ -248,6 +249,61 @@ export default function GroupRatioSettings(props) {
                 },
               ]}
               onChange={(value) => setInputs({ ...inputs, AutoGroups: value })}
+            />
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col xs={24} sm={16}>
+            <Form.TextArea
+              label={t('分组降级规则')}
+              placeholder={t('请输入 JSON 对象，键为原分组，值为降级分组数组')}
+              extraText={t(
+                '示例: {"cheap-a": ["mid-b", "high-c"], "mid-b": ["high-c"], "high-c": []}',
+              )}
+              field={'GroupFallbacks'}
+              autosize={{ minRows: 4, maxRows: 10 }}
+              trigger='blur'
+              stopValidateWithError
+              rules={[
+                {
+                  validator: (rule, value) => {
+                    if (!value || value.trim() === '') {
+                      return true;
+                    }
+                    try {
+                      const parsed = JSON.parse(value);
+                      if (
+                        typeof parsed !== 'object' ||
+                        parsed === null ||
+                        Array.isArray(parsed)
+                      ) {
+                        return false;
+                      }
+                      for (const key in parsed) {
+                        if (typeof key !== 'string') {
+                          return false;
+                        }
+                        const candidate = parsed[key];
+                        if (!Array.isArray(candidate)) {
+                          return false;
+                        }
+                        if (
+                          !candidate.every(
+                            (item) => typeof item === 'string',
+                          )
+                        ) {
+                          return false;
+                        }
+                      }
+                      return true;
+                    } catch {
+                      return false;
+                    }
+                  },
+                  message: t('请输入合法 JSON 对象，值为字符串数组'),
+                },
+              ]}
+              onChange={(value) => setInputs({ ...inputs, GroupFallbacks: value })}
             />
           </Col>
         </Row>

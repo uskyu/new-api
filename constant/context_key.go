@@ -41,16 +41,19 @@ const (
 	ContextKeyAutoGroup           ContextKey = "auto_group"
 	ContextKeyAutoGroupIndex      ContextKey = "auto_group_index"
 	ContextKeyAutoGroupRetryIndex ContextKey = "auto_group_retry_index"
+	ContextKeyFallbackGroupIndex  ContextKey = "fallback_group_index"
+	ContextKeyFallbackGroupChain  ContextKey = "fallback_group_chain"
 
 	/* user related keys */
-	ContextKeyUserId      ContextKey = "id"
-	ContextKeyUserSetting ContextKey = "user_setting"
-	ContextKeyUserQuota   ContextKey = "user_quota"
-	ContextKeyUserStatus  ContextKey = "user_status"
-	ContextKeyUserEmail   ContextKey = "user_email"
-	ContextKeyUserGroup   ContextKey = "user_group"
-	ContextKeyUsingGroup  ContextKey = "group"
-	ContextKeyUserName    ContextKey = "username"
+	ContextKeyUserId         ContextKey = "id"
+	ContextKeyUserSetting    ContextKey = "user_setting"
+	ContextKeyUserQuota      ContextKey = "user_quota"
+	ContextKeyUserStatus     ContextKey = "user_status"
+	ContextKeyUserEmail      ContextKey = "user_email"
+	ContextKeyUserGroup      ContextKey = "user_group"
+	ContextKeyUsingGroup     ContextKey = "group"
+	ContextKeyUserName       ContextKey = "username"
+	ContextKeyRequestedGroup ContextKey = "requested_group"
 
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 

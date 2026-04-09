@@ -44,6 +44,7 @@ const RatioSetting = () => {
     AudioRatio: '',
     AudioCompletionRatio: '',
     AutoGroups: '',
+    GroupFallbacks: '',
     DefaultUseAutoGroup: false,
     ExposeRatioEnabled: false,
     UserUsableGroups: '',

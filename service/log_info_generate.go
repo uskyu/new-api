@@ -75,9 +75,34 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendRequestConversionChain(relayInfo, other)
 	appendFinalRequestFormat(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
+	appendGroupFallbackInfo(ctx, relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
 	appendStreamStatus(relayInfo, other)
 	return other
+}
+
+func appendGroupFallbackInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if ctx == nil || relayInfo == nil || other == nil {
+		return
+	}
+	requestedGroup := common.GetContextKeyString(ctx, constant.ContextKeyRequestedGroup)
+	if requestedGroup == "" {
+		requestedGroup = relayInfo.TokenGroup
+	}
+	if requestedGroup == "" || requestedGroup == "auto" {
+		return
+	}
+
+	other["requested_group"] = requestedGroup
+	fallbackChain := common.GetContextKeyStringSlice(ctx, constant.ContextKeyFallbackGroupChain)
+	if len(fallbackChain) > 0 {
+		other["fallback_chain"] = fallbackChain
+	}
+	if relayInfo.UsingGroup != "" && relayInfo.UsingGroup != requestedGroup {
+		other["fallback_hit"] = true
+		other["fallback_from_group"] = requestedGroup
+		other["fallback_to_group"] = relayInfo.UsingGroup
+	}
 }
 
 func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
