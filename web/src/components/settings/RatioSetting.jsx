@@ -45,6 +45,7 @@ const RatioSetting = () => {
     AudioCompletionRatio: '',
     AutoGroups: '',
     GroupFallbacks: '',
+    EnableModelGroupAutoFallback: false,
     DefaultUseAutoGroup: false,
     ExposeRatioEnabled: false,
     UserUsableGroups: '',
@@ -66,7 +67,9 @@ const RatioSetting = () => {
             // 如果后端返回的不是合法 JSON，直接展示
           }
         }
-        if (['DefaultUseAutoGroup', 'ExposeRatioEnabled'].includes(item.key)) {
+        if (
+          ['DefaultUseAutoGroup', 'ExposeRatioEnabled', 'EnableModelGroupAutoFallback'].includes(item.key)
+        ) {
           newInputs[item.key] = toBoolean(item.value);
         } else {
           newInputs[item.key] = item.value;

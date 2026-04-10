@@ -1,15 +1,44 @@
 package service
 
 import (
+	"sort"
+	"strings"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
 func GetFallbackGroupChain(group string) []string {
 	return buildGroupFallbackChain(setting.GetGroupFallbacksCopy(), group)
+}
+
+func GetModelAwareFallbackGroupChain(ctx *gin.Context, requestedGroup, modelName string) []string {
+	if requestedGroup == "" || requestedGroup == "auto" {
+		return nil
+	}
+
+	chain := GetFallbackGroupChain(requestedGroup)
+	if len(chain) == 0 {
+		chain = []string{requestedGroup}
+	}
+
+	userGroup := common.GetContextKeyString(ctx, constant.ContextKeyUserGroup)
+	allowedGroups := GetUserUsableGroups(userGroup)
+	modelGroups := model.GetModelEnableGroups(modelName)
+	if len(modelGroups) == 0 {
+		normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
+		if normalizedModel != "" && normalizedModel != modelName {
+			modelGroups = model.GetModelEnableGroups(normalizedModel)
+		}
+	}
+	chain = buildModelGroupFallbackCandidates(requestedGroup, chain, allowedGroups, modelGroups)
+	common.SetContextKey(ctx, constant.ContextKeyFallbackGroupChain, chain)
+	return chain
 }
 
 func EnsureRequestedGroup(c *gin.Context, requestedGroup string) {
@@ -38,6 +67,70 @@ func TrackSelectedGroup(c *gin.Context, selectedGroup string) {
 		chain = append(chain, selectedGroup)
 	}
 	common.SetContextKey(c, constant.ContextKeyFallbackGroupChain, chain)
+}
+
+func buildModelGroupFallbackCandidates(requestedGroup string, fallbackChain []string, allowedGroups map[string]string, modelGroups []string) []string {
+	normalizedRequested := strings.TrimSpace(requestedGroup)
+	if normalizedRequested == "" {
+		return nil
+	}
+
+	allowedSet := types.NewSet[string]()
+	for group := range allowedGroups {
+		allowedSet.Add(strings.TrimSpace(group))
+	}
+	allowedSet.Add(normalizedRequested)
+
+	modelSet := types.NewSet[string]()
+	for _, group := range modelGroups {
+		if normalized := strings.TrimSpace(group); normalized != "" {
+			modelSet.Add(normalized)
+		}
+	}
+	modelKnown := modelSet.Len() > 0
+
+	seen := types.NewSet[string]()
+	result := make([]string, 0, len(fallbackChain)+allowedSet.Len())
+	seen.Add(normalizedRequested)
+	result = append(result, normalizedRequested)
+
+	for _, group := range fallbackChain {
+		normalized := strings.TrimSpace(group)
+		if normalized == "" || seen.Contains(normalized) {
+			continue
+		}
+		if !allowedSet.Contains(normalized) {
+			continue
+		}
+		if normalized != normalizedRequested {
+			if !modelKnown || !modelSet.Contains(normalized) {
+				continue
+			}
+		}
+		seen.Add(normalized)
+		result = append(result, normalized)
+	}
+
+	if setting.EnableModelGroupAutoFallback && modelKnown {
+		candidateGroups := make([]string, 0, len(allowedGroups))
+		for group := range allowedGroups {
+			candidateGroups = append(candidateGroups, group)
+		}
+		sort.Strings(candidateGroups)
+		for _, group := range candidateGroups {
+			normalized := strings.TrimSpace(group)
+			if normalized == "" || seen.Contains(normalized) {
+				continue
+			}
+			if !modelSet.Contains(normalized) || !allowedSet.Contains(normalized) {
+				continue
+			}
+			seen.Add(normalized)
+			result = append(result, normalized)
+		}
+	}
+
+	return result
 }
 
 func buildGroupFallbackChain(cfg map[string][]string, start string) []string {
@@ -80,7 +173,7 @@ func ShouldFallbackForError(c *gin.Context, err *types.NewAPIError) bool {
 	if requestedGroup == "" || requestedGroup == "auto" {
 		return false
 	}
-	if len(GetFallbackGroupChain(requestedGroup)) <= 1 {
+	if len(common.GetContextKeyStringSlice(c, constant.ContextKeyFallbackGroupChain)) <= 1 {
 		return false
 	}
 	if types.IsSkipRetryError(err) {
@@ -120,8 +213,7 @@ func AdvanceFallbackGroupOnError(c *gin.Context, retryParam *RetryParam, err *ty
 		return false
 	}
 
-	requestedGroup := common.GetContextKeyString(c, constant.ContextKeyRequestedGroup)
-	chain := GetFallbackGroupChain(requestedGroup)
+	chain := common.GetContextKeyStringSlice(c, constant.ContextKeyFallbackGroupChain)
 	if len(chain) <= 1 {
 		return false
 	}

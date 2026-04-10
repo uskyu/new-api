@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -76,6 +77,7 @@ func TestShouldFallbackForError_DefaultAllow(t *testing.T) {
 	defer func() {
 		_ = setting.UpdateGroupFallbacksByJSONString(`{}`)
 	}()
+	common.SetContextKey(c, constant.ContextKeyFallbackGroupChain, []string{"cheap-a", "mid-b"})
 
 	err := types.NewOpenAIError(errors.New("upstream overloaded"), types.ErrorCodeBadResponseStatusCode, 503)
 	if !ShouldFallbackForError(c, err) {
@@ -93,6 +95,7 @@ func TestShouldFallbackForError_WhitelistBlock(t *testing.T) {
 	defer func() {
 		_ = setting.UpdateGroupFallbacksByJSONString(`{}`)
 	}()
+	common.SetContextKey(c, constant.ContextKeyFallbackGroupChain, []string{"cheap-a", "mid-b"})
 
 	err := types.NewError(errors.New("bad model id"), types.ErrorCodeModelNotFound)
 	if ShouldFallbackForError(c, err) {
@@ -110,6 +113,7 @@ func TestAdvanceFallbackGroupOnError(t *testing.T) {
 	defer func() {
 		_ = setting.UpdateGroupFallbacksByJSONString(`{}`)
 	}()
+	common.SetContextKey(c, constant.ContextKeyFallbackGroupChain, []string{"cheap-a", "mid-b"})
 
 	retryParam := &RetryParam{
 		Ctx:        c,
@@ -126,5 +130,80 @@ func TestAdvanceFallbackGroupOnError(t *testing.T) {
 	}
 	if retryParam.GetRetry() != 0 {
 		t.Fatalf("retry should reset after fallback advance, got %d", retryParam.GetRetry())
+	}
+}
+
+func TestBuildModelGroupFallbackCandidates_FiltersExplicitChain(t *testing.T) {
+	prev := setting.EnableModelGroupAutoFallback
+	setting.SetModelGroupAutoFallback(false)
+	defer setting.SetModelGroupAutoFallback(prev)
+
+	chain := []string{"cheap-a", "mid-b", "vip"}
+	allowed := map[string]string{
+		"cheap-a": "",
+		"mid-b":   "",
+		"vip":     "",
+	}
+	modelGroups := []string{"cheap-a", "mid-b"}
+
+	got := buildModelGroupFallbackCandidates("cheap-a", chain, allowed, modelGroups)
+	want := []string{"cheap-a", "mid-b"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filtered fallback chain mismatch: got %v want %v", got, want)
+	}
+}
+
+func TestBuildModelGroupFallbackCandidates_AppendsDynamicFallbacks(t *testing.T) {
+	prev := setting.EnableModelGroupAutoFallback
+	setting.SetModelGroupAutoFallback(true)
+	defer setting.SetModelGroupAutoFallback(prev)
+
+	chain := []string{"cheap-a"}
+	allowed := map[string]string{
+		"cheap-a": "",
+		"stable":  "",
+	}
+	modelGroups := []string{"cheap-a", "stable"}
+
+	got := buildModelGroupFallbackCandidates("cheap-a", chain, allowed, modelGroups)
+	want := []string{"cheap-a", "stable"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dynamic fallback mismatch: got %v want %v", got, want)
+	}
+}
+
+func TestBuildModelGroupFallbackCandidates_SkipsWhenModelMissing(t *testing.T) {
+	prev := setting.EnableModelGroupAutoFallback
+	setting.SetModelGroupAutoFallback(true)
+	defer setting.SetModelGroupAutoFallback(prev)
+
+	chain := []string{"cheap-a", "stable"}
+	allowed := map[string]string{
+		"cheap-a": "",
+		"stable":  "",
+	}
+
+	got := buildModelGroupFallbackCandidates("cheap-a", chain, allowed, nil)
+	want := []string{"cheap-a"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected no fallback when model missing: got %v want %v", got, want)
+	}
+}
+
+func TestBuildModelGroupFallbackCandidates_RespectsUserGroups(t *testing.T) {
+	prev := setting.EnableModelGroupAutoFallback
+	setting.SetModelGroupAutoFallback(true)
+	defer setting.SetModelGroupAutoFallback(prev)
+
+	chain := []string{"cheap-a"}
+	allowed := map[string]string{
+		"cheap-a": "",
+	}
+	modelGroups := []string{"cheap-a", "vip"}
+
+	got := buildModelGroupFallbackCandidates("cheap-a", chain, allowed, modelGroups)
+	want := []string{"cheap-a"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("felt fallback violated user limits: got %v want %v", got, want)
 	}
 }

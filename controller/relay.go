@@ -301,6 +301,9 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			AutoBan: &autoBanInt,
 		}, nil
 	}
+	if info.TokenGroup != "auto" {
+		service.GetModelAwareFallbackGroupChain(c, info.TokenGroup, info.OriginModelName)
+	}
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 	if selectGroup != "" {
 		service.EnsureRequestedGroup(c, info.TokenGroup)

@@ -99,6 +99,7 @@ func Distribute() func(c *gin.Context) {
 					}
 				}
 				service.EnsureRequestedGroup(c, usingGroup)
+				service.GetModelAwareFallbackGroupChain(c, usingGroup, modelRequest.Model)
 
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
 					preferred, err := model.CacheGetChannel(preferredChannelID)

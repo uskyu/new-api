@@ -39,6 +39,7 @@ export default function GroupRatioSettings(props) {
     'group_ratio_setting.group_special_usable_group': '',
     AutoGroups: '',
     GroupFallbacks: '',
+    EnableModelGroupAutoFallback: false,
     DefaultUseAutoGroup: false,
   });
   const refForm = useRef();
@@ -316,6 +317,20 @@ export default function GroupRatioSettings(props) {
               field={'DefaultUseAutoGroup'}
               onChange={(value) =>
                 setInputs({ ...inputs, DefaultUseAutoGroup: value })
+              }
+            />
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col span={16}>
+            <Form.Switch
+              label={t('启用模型级自动兜底')}
+              extraText={t(
+                '当前分组失效时先走 GroupFallbacks，再在用户可用的其他分组里自动补位',
+              )}
+              field={'EnableModelGroupAutoFallback'}
+              onChange={(value) =>
+                setInputs({ ...inputs, EnableModelGroupAutoFallback: value })
               }
             />
           </Col>

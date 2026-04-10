@@ -61,7 +61,10 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 		)
 	}
 
-	groups := GetFallbackGroupChain(param.TokenGroup)
+	groups := common.GetContextKeyStringSlice(param.Ctx, constant.ContextKeyFallbackGroupChain)
+	if len(groups) == 0 || groups[0] != param.TokenGroup {
+		groups = GetModelAwareFallbackGroupChain(param.Ctx, param.TokenGroup, param.ModelName)
+	}
 	if len(groups) == 0 {
 		groups = []string{param.TokenGroup}
 	}
