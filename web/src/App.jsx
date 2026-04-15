@@ -63,6 +63,7 @@ const About = lazy(() => import('./pages/About'));
 const UserAgreement = lazy(() => import('./pages/UserAgreement'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const AIConsole = lazy(() => import('./pages/AIConsole'));
+const AIImage = lazy(() => import('./pages/AIImage'));
 
 function DynamicOAuth2Callback() {
   const { provider } = useParams();
@@ -173,6 +174,16 @@ function App() {
             <PrivateRoute>
               <Suspense fallback={<Loading></Loading>} key={location.pathname}>
                 <AIConsole />
+              </Suspense>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/ai-image'
+          element={
+            <PrivateRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <AIImage />
               </Suspense>
             </PrivateRoute>
           }

@@ -66,6 +66,8 @@ const NotificationSettings = ({
   const [sidebarModulesUser, setSidebarModulesUser] = useState({
     chat: {
       enabled: true,
+      ai_console: true,
+      ai_image: true,
       playground: true,
       chat: true,
     },
@@ -157,7 +159,13 @@ const NotificationSettings = ({
 
   const resetSidebarModules = () => {
     const defaultConfig = {
-      chat: { enabled: true, playground: true, chat: true },
+      chat: {
+        enabled: true,
+        ai_console: true,
+        ai_image: true,
+        playground: true,
+        chat: true,
+      },
       console: {
         enabled: true,
         detail: true,
@@ -250,6 +258,16 @@ const NotificationSettings = ({
       title: t('聊天区域'),
       description: t('操练场和聊天功能'),
       modules: [
+        {
+          key: 'ai_console',
+          title: t('AI 对话'),
+          description: t('独立 AI 对话页面'),
+        },
+        {
+          key: 'ai_image',
+          title: t('AI 绘图'),
+          description: t('Google 图片生成页面'),
+        },
         {
           key: 'playground',
           title: t('操练场'),

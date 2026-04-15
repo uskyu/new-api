@@ -104,6 +104,8 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 	// 聊天区域 - 所有用户都可以访问
 	defaultConfig["chat"] = map[string]interface{}{
 		"enabled":    true,
+		"ai_console": true,
+		"ai_image":   true,
 		"playground": true,
 		"chat":       true,
 	}

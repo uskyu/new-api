@@ -66,6 +66,7 @@ import {
   Key,
   BarChart3,
   Image as ImageIcon,
+  ImagePlus,
   CheckSquare,
   CreditCard,
   Layers,
@@ -121,6 +122,8 @@ export function getLucideIcon(key, selected = false) {
       return <LayoutDashboard {...commonProps} color={iconColor} />;
     case 'ai_console':
       return <Sparkles {...commonProps} color={iconColor} />;
+    case 'ai_image':
+      return <ImagePlus {...commonProps} color={iconColor} />;
     case 'playground':
       return <TerminalSquare {...commonProps} color={iconColor} />;
     case 'chat':

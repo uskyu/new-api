@@ -49,6 +49,7 @@ const routerMap = {
   models: '/console/models',
   deployment: '/console/deployment',
   ai_console: '/console/ai',
+  ai_image: '/console/ai-image',
   playground: '/console/playground',
   personal: '/console/personal',
 };
@@ -213,6 +214,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       },
     ];
 
+    items.splice(1, 0, {
+      text: t('AI 绘图'),
+      itemKey: 'ai_image',
+      to: '/console/ai-image',
+    });
+
     return items
       .map((item) =>
         item.itemKey === 'ai_console'
@@ -304,41 +311,6 @@ const SiderBar = ({ onNavigate = () => {} }) => {
 
   const selectedColor = 'var(--semi-color-primary)';
 
-  const renderAIChatCard = (item) => {
-    const isSelected = selectedKeys.includes(item.itemKey);
-
-    if (collapsed) {
-      return renderNavItem(item);
-    }
-
-    return (
-      <Link
-        key={item.itemKey}
-        to={item.to}
-        onClick={() => {
-          setSelectedKeys([item.itemKey]);
-          onNavigate();
-        }}
-        className={`sidebar-ai-card ${isSelected ? 'sidebar-ai-card-selected' : ''}`}
-      >
-        <div className='sidebar-ai-card-glow' />
-        <div className='sidebar-ai-card-reflection' />
-        <div className='sidebar-ai-card-wave sidebar-ai-card-wave-primary' />
-        <div className='sidebar-ai-card-wave sidebar-ai-card-wave-secondary' />
-
-        <div className='sidebar-ai-card-content'>
-          <div className='sidebar-ai-card-icon'>
-            <Sparkles size={16} strokeWidth={2.1} />
-          </div>
-          <div className='sidebar-ai-card-title'>{item.text}</div>
-          <div className='sidebar-ai-card-badge'>
-            <Waves size={13} strokeWidth={2} />
-          </div>
-        </div>
-      </Link>
-    );
-  };
-
   const renderNavItem = (item) => {
     if (item.className === 'tableHiddle') {
       return null;
@@ -352,7 +324,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         itemKey={item.itemKey}
         text={
           <span
-            className='truncate font-medium text-sm'
+            className={`truncate font-medium text-sm ${
+              item.itemKey === 'ai_console' || item.itemKey === 'ai_image'
+                ? 'sidebar-ai-nav-text'
+                : ''
+            }`}
             style={{ color: isSelected ? selectedColor : 'inherit' }}
           >
             {item.text}
@@ -468,11 +444,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           {hasSectionVisibleModules('chat') && (
             <div className='sidebar-section'>
               {!collapsed && <div className='sidebar-group-label'>{t('聊天')}</div>}
-              {chatMenuItems.map((item) =>
-                item.itemKey === 'ai_console'
-                  ? renderAIChatCard(item)
-                  : renderSubItem(item),
-              )}
+              {chatMenuItems.map((item) => renderSubItem(item))}
             </div>
           )}
 

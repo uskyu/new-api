@@ -51,6 +51,7 @@ const PageLayout = () => {
 
   const cardProPages = [
     '/console/ai',
+    '/console/ai-image',
     '/console/channel',
     '/console/log',
     '/console/redemption',
@@ -67,6 +68,7 @@ const PageLayout = () => {
   const shouldInnerPadding =
     location.pathname.includes('/console') &&
     location.pathname !== '/console/ai' &&
+    location.pathname !== '/console/ai-image' &&
     !location.pathname.startsWith('/console/chat') &&
     location.pathname !== '/console/playground';
 

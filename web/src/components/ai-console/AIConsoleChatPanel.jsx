@@ -40,8 +40,22 @@ const AIConsoleChatPanel = ({
   onToggleReasoningExpansion,
   onStopGenerator,
   onClearMessages,
+  headerTitle,
+  headerDescription,
+  placeholder,
+  emptyTitle,
+  emptyDescription,
+  headerIcon,
+  emptyIcon,
 }) => {
   const { t } = useTranslation();
+
+  const resolvedHeaderIcon = headerIcon || (
+    <MessageSquare size={20} className='text-sky-600' />
+  );
+  const resolvedEmptyIcon = emptyIcon || (
+    <Sparkles size={28} className='text-sky-500' />
+  );
 
   const renderInputArea = React.useCallback(
     (props) => (
@@ -101,15 +115,17 @@ const AIConsoleChatPanel = ({
         <Empty
           image={
             <div className='flex h-16 w-16 items-center justify-center rounded-[22px] bg-white/70 shadow-[0_20px_40px_rgba(15,23,42,0.08)] backdrop-blur-xl'>
-              <Sparkles size={28} className='text-sky-500' />
+              {resolvedEmptyIcon}
             </div>
           }
-          title={t('今天想让我帮你做什么？')}
-          description={t('直接输入问题，或者上传一张图片开始')}
+          title={emptyTitle || t('今天想让我帮你做什么？')}
+          description={
+            emptyDescription || t('直接输入问题，或者上传一张图片开始')
+          }
         />
       </div>
     ),
-    [t],
+    [emptyDescription, emptyTitle, resolvedEmptyIcon, t],
   );
 
   return (
@@ -120,14 +136,14 @@ const AIConsoleChatPanel = ({
         <div className='relative border-b border-white/60 px-5 py-4 sm:px-6'>
           <div className='flex items-center gap-3'>
             <div className='flex h-11 w-11 items-center justify-center rounded-[18px] bg-white/85 shadow-[0_16px_36px_rgba(15,23,42,0.08)] backdrop-blur-xl'>
-              <MessageSquare size={20} className='text-sky-600' />
+              {resolvedHeaderIcon}
             </div>
             <div className='min-w-0'>
               <Typography.Title heading={5} className='!mb-0 !text-slate-900'>
-                {t('AI 控制台')}
+                {headerTitle || t('AI 控制台')}
               </Typography.Title>
               <Typography.Text className='!text-sm !text-slate-500'>
-                {t('输入问题，或上传图片继续')}
+                {headerDescription || t('输入问题，或上传图片继续')}
               </Typography.Text>
             </div>
           </div>
@@ -156,7 +172,7 @@ const AIConsoleChatPanel = ({
           onStopGenerator={onStopGenerator}
           onClear={onClearMessages}
           className='h-full'
-          placeholder={t('输入问题，或上传图片继续')}
+          placeholder={placeholder || t('输入问题，或上传图片继续')}
           emptyContent={emptyContent}
         />
       </div>
