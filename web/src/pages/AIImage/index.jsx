@@ -6,6 +6,7 @@ import useAiImageState from '../../hooks/ai-image/useAiImageState';
 import { API_ENDPOINTS, MESSAGE_ROLES } from '../../constants/playground.constants';
 import {
   buildApiPayload,
+  copy,
   getUserIdFromLocalStorage,
   handleApiError,
   showError,
@@ -13,6 +14,7 @@ import {
 } from '../../helpers';
 
 const RESOLUTION_OPTIONS = ['1K', '2K', '4K'];
+const ASPECT_RATIO_OPTIONS = ['1:1', '3:2', '4:3', '16:9', '9:16'];
 const BATCH_COUNT_OPTIONS = [1, 2, 3, 4, 6, 8];
 
 const normalizeImageSource = (value, mimeType = 'image/png') => {
@@ -69,6 +71,8 @@ const extractGenerationRecord = (userMessage, assistantMessage) => {
 
   return {
     id: assistantMessage?.id || `record-${Date.now()}`,
+    userMessageId: userMessage?.id,
+    assistantMessageId: assistantMessage?.id,
     prompt,
     images: [...new Set(imageUrls)],
     createdAt: assistantMessage?.createAt || Date.now(),
@@ -85,7 +89,14 @@ const createImageAssistantMessage = (imageUrls, prompt) => ({
   status: 'complete',
 });
 
-const buildImagePayload = ({ prompt, draftImages, model, group, resolution }) => {
+const buildImagePayload = ({
+  prompt,
+  draftImages,
+  model,
+  group,
+  resolution,
+  aspectRatio,
+}) => {
   const payload = buildApiPayload(
     [
       {
@@ -108,6 +119,7 @@ const buildImagePayload = ({ prompt, draftImages, model, group, resolution }) =>
     google: {
       image_config: {
         image_size: resolution,
+        aspect_ratio: aspectRatio,
       },
     },
   };
@@ -176,7 +188,8 @@ const AIImage = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeRecordId, setActiveRecordId] = useState(null);
   const [resolution, setResolution] = useState('1K');
-  const [batchCount, setBatchCount] = useState(4);
+  const [aspectRatio, setAspectRatio] = useState('1:1');
+  const [batchCount, setBatchCount] = useState(1);
 
   const groupOptions = groups.map((group) => ({
     value: group.value,
@@ -231,6 +244,7 @@ const AIImage = () => {
         model: selectedModel,
         group: selectedGroup || '',
         resolution,
+        aspectRatio,
       });
 
       const response = await fetch(API_ENDPOINTS.CHAT_COMPLETIONS, {
@@ -254,7 +268,7 @@ const AIImage = () => {
 
       return parseImageResponse(response);
     },
-    [draftImages, resolution, selectedGroup, selectedModel],
+    [aspectRatio, draftImages, resolution, selectedGroup, selectedModel],
   );
 
   const appendGeneration = React.useCallback(
@@ -359,6 +373,65 @@ const AIImage = () => {
     showSuccess(t('已清空最近记录'));
   }, [clearCurrentSession, t]);
 
+  const handleCopyPrompt = React.useCallback(
+    async (record) => {
+      if (!record?.prompt) {
+        showError(t('没有可复制的提示词'));
+        return;
+      }
+
+      const ok = await copy(record.prompt);
+      if (ok) {
+        showSuccess(t('提示词已复制'));
+      } else {
+        showError(t('复制失败，请手动复制'));
+      }
+    },
+    [t],
+  );
+
+  const handleDownloadImage = React.useCallback(
+    (record) => {
+      const imageUrl = record?.images?.[0];
+      if (!imageUrl) {
+        showError(t('没有可下载的图片'));
+        return;
+      }
+
+      const anchor = document.createElement('a');
+      anchor.href = imageUrl;
+      anchor.download = `ai-image-${record.id || Date.now()}.png`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      showSuccess(t('开始下载图片'));
+    },
+    [t],
+  );
+
+  const handleDeleteRecord = React.useCallback(
+    (record) => {
+      if (!record) {
+        return;
+      }
+
+      setMessages((previous) =>
+        previous.filter(
+          (message) =>
+            message.id !== record.userMessageId &&
+            message.id !== record.assistantMessageId,
+        ),
+      );
+
+      if (activeRecordId === record.id) {
+        setActiveRecordId(null);
+      }
+
+      showSuccess(t('已从本地删除该记录'));
+    },
+    [activeRecordId, setMessages, t],
+  );
+
   if (!ready) {
     return (
       <div className='mt-[64px] flex h-[calc(100vh-64px)] items-center justify-center bg-[#eef2f7]'>
@@ -455,6 +528,21 @@ const AIImage = () => {
 
                   <label className='flex flex-col gap-2'>
                     <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
+                      {t('图像比例')}
+                    </span>
+                    <select
+                      value={aspectRatio}
+                      onChange={(event) => setAspectRatio(event.target.value)}
+                      className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                    >
+                      {ASPECT_RATIO_OPTIONS.map((item) => (
+                        <option key={item} value={item}>{item}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className='flex flex-col gap-2'>
+                    <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
                       {t('批量张数')}
                     </span>
                     <select
@@ -544,6 +632,10 @@ const AIImage = () => {
                     {t('清空记录')}
                   </Button>
                 </div>
+
+                <Typography.Text className='mt-3 block text-xs text-slate-500'>
+                  {t('图片仅保存在当前浏览器本地，删除浏览器缓存或记录后将会消失，请及时保存。')}
+                </Typography.Text>
               </div>
             </div>
 
@@ -605,9 +697,36 @@ const AIImage = () => {
                     onClick={() => setActiveRecordId(record.id)}
                   />
                   <div className='px-1'>
-                    <p className='line-clamp-2 text-sm text-slate-700'>
-                      {record.prompt || t('未命名提示词')}
-                    </p>
+                    <button
+                      type='button'
+                      className='w-full rounded-xl px-1 py-1 text-left text-sm leading-5 text-slate-700 transition hover:bg-slate-100/80'
+                      onClick={() => handleCopyPrompt(record)}
+                      title={record.prompt || t('未命名提示词')}
+                    >
+                      <span className='block line-clamp-2 break-words'>
+                        {record.prompt || t('未命名提示词')}
+                      </span>
+                    </button>
+                    <div className='mt-2 flex flex-wrap gap-2'>
+                      <Button
+                        theme='light'
+                        type='tertiary'
+                        size='small'
+                        className='!rounded-full'
+                        onClick={() => handleDownloadImage(record)}
+                      >
+                        {t('下载')}
+                      </Button>
+                      <Button
+                        theme='light'
+                        type='danger'
+                        size='small'
+                        className='!rounded-full'
+                        onClick={() => handleDeleteRecord(record)}
+                      >
+                        {t('本地删除')}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ))}

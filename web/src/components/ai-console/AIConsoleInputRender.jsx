@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Button, Typography } from '@douyinfe/semi-ui';
+import { Button, Modal, Typography } from '@douyinfe/semi-ui';
 import { ImagePlus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -21,10 +21,30 @@ const AIConsoleInputRender = ({
   const fileInputRef = useRef(null);
   const { clearContextNode, inputNode, sendNode, onClick } = detailProps;
 
+  const handleRequestClear = React.useCallback(
+    (event) => {
+      event?.stopPropagation?.();
+      if (!clearContextNode?.props?.onClick) {
+        return;
+      }
+
+      Modal.confirm({
+        title: t('确认清空'),
+        content: t('确定要清空当前对话内容吗？'),
+        okText: t('确定'),
+        cancelText: t('取消'),
+        onOk: () => clearContextNode.props.onClick(event),
+      });
+    },
+    [clearContextNode, t],
+  );
+
   const styledActionNode = (node, extraClassName, extraStyle = {}) =>
     node
       ? React.cloneElement(node, {
           className: `!rounded-full flex-shrink-0 transition-all ${extraClassName} ${node.props.className || ''}`,
+          onClick:
+            node === clearContextNode ? handleRequestClear : node.props.onClick,
           style: {
             ...node.props.style,
             width: '38px',
