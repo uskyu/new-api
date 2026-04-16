@@ -158,3 +158,64 @@ func TestEpayNotifyNoDoubleCredit(t *testing.T) {
 	expectedQuotaDelta := int(float64(topup.Amount) * common.QuotaPerUnit)
 	require.Equal(t, before.Quota+expectedQuotaDelta, after.Quota)
 }
+
+func TestEpayNotifyRejectsNonEpayOrders(t *testing.T) {
+	db := setupTopupControllerTestDB(t)
+
+	prevPayAddress := operation_setting.PayAddress
+	prevEpayID := operation_setting.EpayId
+	prevEpayKey := operation_setting.EpayKey
+	t.Cleanup(func() {
+		operation_setting.PayAddress = prevPayAddress
+		operation_setting.EpayId = prevEpayID
+		operation_setting.EpayKey = prevEpayKey
+	})
+	operation_setting.PayAddress = "https://pay.example.com"
+	operation_setting.EpayId = "partner-test"
+	operation_setting.EpayKey = "secret-test"
+
+	suffix := common.GetRandomString(6)
+	user := seedTopupControllerUser(t, db, suffix)
+	tradeNo := "notify_trade_mismatch_" + suffix
+	topup := &model.TopUp{
+		UserId:        user.Id,
+		Amount:        12,
+		Money:         12,
+		TradeNo:       tradeNo,
+		PaymentMethod: "stripe",
+		CreateTime:    common.GetTimestamp(),
+		Status:        common.TopUpStatusPending,
+	}
+	require.NoError(t, db.Create(topup).Error)
+
+	before, err := model.GetUserById(user.Id, false)
+	require.NoError(t, err)
+	require.NotNil(t, before)
+
+	params := epay.GenerateParams(map[string]string{
+		"pid":          operation_setting.EpayId,
+		"type":         "alipay",
+		"trade_no":     "epay_" + suffix,
+		"out_trade_no": tradeNo,
+		"name":         "topup",
+		"money":        "12",
+		"trade_status": epay.StatusTradeSuccess,
+	}, operation_setting.EpayKey)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = buildEpayNotifyRequest(t, params)
+	EpayNotify(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, "success", recorder.Body.String())
+
+	after, err := model.GetUserById(user.Id, false)
+	require.NoError(t, err)
+	require.NotNil(t, after)
+
+	updatedTopUp := model.GetTopUpByTradeNo(tradeNo)
+	require.NotNil(t, updatedTopUp)
+	require.Equal(t, common.TopUpStatusPending, updatedTopUp.Status)
+	require.Zero(t, updatedTopUp.CompleteTime)
+	require.Equal(t, before.Quota, after.Quota)
+}

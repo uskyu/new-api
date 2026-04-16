@@ -95,6 +95,48 @@ func runRechargeIdempotentTest(t *testing.T, dialect TestDBDialect) {
 	require.Equal(t, before.Quota+expectedQuotaDelta, after.Quota)
 }
 
+func runRechargeRejectsPaymentMethodMismatchTest(t *testing.T, dialect TestDBDialect) {
+	t.Helper()
+	setupAgentTestDB(t, dialect)
+
+	uniqueSuffix := common.GetRandomString(6)
+	customerID := "cust_mismatch_" + uniqueSuffix
+	user := createAgentTestUser(
+		t,
+		fmt.Sprintf("rm_%s_%s", dialect, uniqueSuffix),
+		fmt.Sprintf("RFM_%s_%s", dialect, uniqueSuffix),
+	)
+	referenceID := fmt.Sprintf("trade_%s_recharge_mismatch_%s", dialect, uniqueSuffix)
+	topup := &TopUp{
+		UserId:        user.Id,
+		Amount:        12,
+		Money:         12,
+		TradeNo:       referenceID,
+		PaymentMethod: "epay",
+		CreateTime:    common.GetTimestamp(),
+		Status:        common.TopUpStatusPending,
+	}
+	require.NoError(t, DB.Create(topup).Error)
+
+	before, err := GetUserById(user.Id, false)
+	require.NoError(t, err)
+	require.NotNil(t, before)
+
+	err = Recharge(referenceID, customerID)
+	require.Error(t, err)
+
+	after, err := GetUserById(user.Id, false)
+	require.NoError(t, err)
+	require.NotNil(t, after)
+
+	updatedTopUp := GetTopUpByTradeNo(referenceID)
+	require.NotNil(t, updatedTopUp)
+	require.Equal(t, common.TopUpStatusPending, updatedTopUp.Status)
+	require.Zero(t, updatedTopUp.CompleteTime)
+	require.Equal(t, before.Quota, after.Quota)
+	require.Empty(t, after.StripeCustomer)
+}
+
 func TestManualCompleteTopUpIdempotentSQLite(t *testing.T) {
 	runManualCompleteTopUpIdempotentTest(t, TestDBDialectSQLite)
 }
@@ -129,4 +171,8 @@ func TestRechargeIdempotentPostgres(t *testing.T) {
 		t.Skip("TEST_POSTGRES_DSN is not set")
 	}
 	runRechargeIdempotentTest(t, TestDBDialectPostgres)
+}
+
+func TestRechargeRejectsPaymentMethodMismatchSQLite(t *testing.T) {
+	runRechargeRejectsPaymentMethodMismatchTest(t, TestDBDialectSQLite)
 }
