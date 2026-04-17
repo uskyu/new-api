@@ -86,14 +86,34 @@ const buildModelOptions = (userModels, pricingModels = []) => {
           ? pricingMeta.supported_endpoint_types
           : [],
       };
-    })
-    .filter((model) =>
-      isGoogleImageModel(model.value, {
-        vendor_name: model.vendorName,
-        owner_by: model.ownerBy,
-        supported_endpoint_types: model.supportedEndpointTypes,
-      }),
+    });
+};
+
+const isTextCandidateModel = (modelName) => {
+  const lower = String(modelName || '').toLowerCase();
+  return (
+    !lower.includes('image') &&
+    !lower.includes('imagen')
+  );
+};
+
+const pickPromptOptimizerModel = (userModels = []) => {
+  const normalized = userModels.filter((model) => typeof model === 'string' && model.trim());
+  const candidates = normalized.filter((modelName) => {
+    const lower = modelName.toLowerCase();
+    return (
+      !lower.includes('image') &&
+      !lower.includes('imagen')
     );
+  });
+
+  return (
+    candidates.find((name) => name.toLowerCase().includes('gemini') && name.toLowerCase().includes('2.5') && name.toLowerCase().includes('flash')) ||
+    candidates.find((name) => name.toLowerCase().includes('gemini') && name.toLowerCase().includes('flash')) ||
+    candidates.find((name) => name.toLowerCase().includes('flash')) ||
+    candidates[0] ||
+    ''
+  );
 };
 
 const sanitizePreviewText = (value) => {
@@ -149,6 +169,7 @@ export default function useAiImageState() {
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [models, setModels] = useState([]);
+  const [textModels, setTextModels] = useState([]);
   const [groups, setGroups] = useState([]);
   const [selectedModel, setSelectedModel] = useState(
     storedPrefs.selectedModel || getDefaultModel(),
@@ -157,6 +178,9 @@ export default function useAiImageState() {
     storedPrefs.selectedGroup || '',
   );
   const [draftImages, setDraftImages] = useState([]);
+  const [promptOptimizerModel, setPromptOptimizerModel] = useState(
+    storedPrefs.promptOptimizerModel || '',
+  );
 
   const initializedRef = useRef(false);
   const suppressNextPersistRef = useRef(false);
@@ -178,6 +202,18 @@ export default function useAiImageState() {
       return model.enableGroups.includes(selectedGroup);
     });
   }, [models, selectedGroup]);
+
+  const filteredTextModels = useMemo(() => {
+    if (!selectedGroup) {
+      return textModels;
+    }
+    return textModels.filter((model) => {
+      if (!Array.isArray(model.enableGroups) || model.enableGroups.length === 0) {
+        return true;
+      }
+      return model.enableGroups.includes(selectedGroup);
+    });
+  }, [selectedGroup, textModels]);
 
   const refreshSessions = useCallback(async () => {
     const loaded = await loadAllSessions();
@@ -230,8 +266,19 @@ export default function useAiImageState() {
           ? pricingResult.value.data.data
           : [];
 
-      const nextModels = buildModelOptions(userModels, pricingModels);
-      setModels(nextModels);
+      const allModelOptions = buildModelOptions(userModels, pricingModels);
+      const nextImageModels = allModelOptions.filter((model) =>
+        isGoogleImageModel(model.value, {
+          vendor_name: model.vendorName,
+          owner_by: model.ownerBy,
+          supported_endpoint_types: model.supportedEndpointTypes,
+        }),
+      );
+      const nextTextModels = allModelOptions.filter((model) =>
+        isTextCandidateModel(model.value),
+      );
+      setModels(nextImageModels);
+      setTextModels(nextTextModels);
     } catch {
       // Keep empty model fallback if loading fails.
     }
@@ -291,9 +338,6 @@ export default function useAiImageState() {
 
   useEffect(() => {
     if (filteredModels.length === 0) {
-      if (selectedModel) {
-        setSelectedModel('');
-      }
       return;
     }
 
@@ -307,8 +351,24 @@ export default function useAiImageState() {
   }, [filteredModels, selectedModel]);
 
   useEffect(() => {
-    writeStoredPrefs({ selectedModel, selectedGroup });
-  }, [selectedGroup, selectedModel]);
+    if (filteredTextModels.length === 0) {
+      return;
+    }
+
+    const hasSelected = filteredTextModels.some(
+      (model) => model.value === promptOptimizerModel,
+    );
+    if (!hasSelected) {
+      setPromptOptimizerModel(
+        pickPromptOptimizerModel(filteredTextModels.map((item) => item.value)) ||
+          filteredTextModels[0].value,
+      );
+    }
+  }, [filteredTextModels, promptOptimizerModel]);
+
+  useEffect(() => {
+    writeStoredPrefs({ selectedModel, selectedGroup, promptOptimizerModel });
+  }, [promptOptimizerModel, selectedGroup, selectedModel]);
 
   useEffect(() => {
     if (suppressNextPersistRef.current) {
@@ -489,11 +549,14 @@ export default function useAiImageState() {
     setMessages,
     models: filteredModels,
     allModels: models,
+    textModels: filteredTextModels,
     groups,
     selectedModel,
     selectedGroup,
     setSelectedModel,
     setSelectedGroup,
+    promptOptimizerModel,
+    setPromptOptimizerModel,
     draftImages,
     setDraftImages,
     createSession,

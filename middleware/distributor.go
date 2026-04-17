@@ -81,7 +81,7 @@ func Distribute() func(c *gin.Context) {
 				}
 				var selectGroup string
 				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-				// check path is /pg/chat/completions
+				// check playground routes and allow overriding group with user-accessible groups
 				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
 					playgroundRequest := &dto.PlayGroundRequest{}
 					err = common.UnmarshalBodyReusable(c, playgroundRequest)
@@ -95,6 +95,16 @@ func Distribute() func(c *gin.Context) {
 							return
 						}
 						usingGroup = playgroundRequest.Group
+						common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
+					}
+				} else if strings.HasPrefix(c.Request.URL.Path, "/pg/v1beta/models/") {
+					requestedGroup := strings.TrimSpace(c.Query("group"))
+					if requestedGroup != "" {
+						if !service.GroupInUserUsableGroups(usingGroup, requestedGroup) && requestedGroup != usingGroup {
+							abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
+							return
+						}
+						usingGroup = requestedGroup
 						common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
 					}
 				}
@@ -271,12 +281,18 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		if _, ok := c.Get("relay_mode"); !ok {
 			c.Set("relay_mode", relayMode)
 		}
-	} else if strings.HasPrefix(c.Request.URL.Path, "/v1beta/models/") || strings.HasPrefix(c.Request.URL.Path, "/v1/models/") {
+	} else if strings.HasPrefix(c.Request.URL.Path, "/v1beta/models/") || strings.HasPrefix(c.Request.URL.Path, "/v1/models/") || strings.HasPrefix(c.Request.URL.Path, "/pg/v1beta/models/") {
 		// Gemini API 路径处理: /v1beta/models/gemini-2.0-flash:generateContent
 		relayMode := relayconstant.RelayModeGemini
 		modelName := extractModelNameFromGeminiPath(c.Request.URL.Path)
 		if modelName != "" {
 			modelRequest.Model = modelName
+		}
+		if strings.HasPrefix(c.Request.URL.Path, "/pg/v1beta/models/") {
+			modelRequest.Group = strings.TrimSpace(c.Query("group"))
+			if modelRequest.Group != "" {
+				common.SetContextKey(c, constant.ContextKeyTokenGroup, modelRequest.Group)
+			}
 		}
 		c.Set("relay_mode", relayMode)
 	} else if !strings.HasPrefix(c.Request.URL.Path, "/v1/audio/transcriptions") && !strings.Contains(c.Request.Header.Get("Content-Type"), "multipart/form-data") {

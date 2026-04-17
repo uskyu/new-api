@@ -7,6 +7,58 @@ const LOCAL_STORAGE_SESSION_KEY = 'ai_image_current_session';
 const LOCAL_STORAGE_PREFS_KEY = 'ai_image_prefs';
 const DEFAULT_MODEL = '';
 
+const sanitizeImageUrl = (value) => {
+  if (typeof value !== 'string') return value;
+  if (value.startsWith('data:image/')) {
+    return '[local-image-preview]';
+  }
+  if (value.startsWith('blob:')) {
+    return '[local-image-preview]';
+  }
+  return value;
+};
+
+const sanitizeMessageContent = (content) => {
+  if (!Array.isArray(content)) {
+    if (typeof content === 'string' && content.includes('data:image/')) {
+      return content.replace(/data:image\/[^)\s]+/g, '[local-image-preview]');
+    }
+    return content;
+  }
+  return content.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    if (item.type === 'image_url' && item.image_url) {
+      return {
+        ...item,
+        image_url:
+          typeof item.image_url === 'string'
+            ? sanitizeImageUrl(item.image_url)
+            : {
+                ...item.image_url,
+                url: sanitizeImageUrl(item.image_url.url),
+              },
+      };
+    }
+    return item;
+  });
+};
+
+const sanitizeMessageForStorage = (message) => ({
+  ...message,
+  content: sanitizeMessageContent(message?.content),
+  parts: Array.isArray(message?.parts)
+    ? message.parts.map((part) => ({
+        ...part,
+        image_url: part?.image_url
+          ? {
+              ...part.image_url,
+              url: sanitizeImageUrl(part.image_url.url),
+            }
+          : part?.image_url,
+      }))
+    : message?.parts,
+});
+
 const ensureRequestSuccess = (request) =>
   new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
@@ -141,7 +193,7 @@ export async function replaceSessionMessages(sessionId, messages) {
     const writeStore = writeTx.objectStore(STORE_MESSAGES);
 
     messages.forEach((message, index) => {
-      writeStore.put({ ...message, sessionId, sortIndex: index });
+      writeStore.put({ ...sanitizeMessageForStorage(message), sessionId, sortIndex: index });
     });
 
     return new Promise((resolve, reject) => {

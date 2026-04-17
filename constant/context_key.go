@@ -61,6 +61,8 @@ const (
 
 	// ContextKeyFileSourcesToCleanup stores file sources that need cleanup when request ends
 	ContextKeyFileSourcesToCleanup ContextKey = "file_sources_to_cleanup"
+	// ContextKeyAIImageMemoryReservation stores temporary in-memory reservation bytes for AI image multipart preprocessing
+	ContextKeyAIImageMemoryReservation ContextKey = "ai_image_memory_reservation"
 
 	// ContextKeyAdminRejectReason stores an admin-only reject/block reason extracted from upstream responses.
 	// It is not returned to end users, but can be persisted into consume/error logs for debugging.

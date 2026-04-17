@@ -10,6 +10,8 @@ var GetMediaToken bool
 var GetMediaTokenNotStream bool
 var UpdateTask bool
 var MaxRequestBodyMB int
+var AIImageMaxMemoryMB int
+var AIImageMaxConcurrency int
 var AzureDefaultAPIVersion string
 var NotifyLimitCount int
 var NotificationLimitDurationMinute int

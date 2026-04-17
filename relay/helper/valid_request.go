@@ -1,16 +1,20 @@
 package helper
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"mime/multipart"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/samber/lo"
 
@@ -249,7 +253,13 @@ func GetAndValidateClaudeRequest(c *gin.Context) (textRequest *dto.ClaudeRequest
 
 func GetAndValidateTextRequest(c *gin.Context, relayMode int) (*dto.GeneralOpenAIRequest, error) {
 	textRequest := &dto.GeneralOpenAIRequest{}
-	err := common.UnmarshalBodyReusable(c, textRequest)
+	contentType := c.Request.Header.Get("Content-Type")
+	var err error
+	if strings.Contains(contentType, gin.MIMEMultipartPOSTForm) {
+		err = populateTextRequestFromMultipart(c, textRequest)
+	} else {
+		err = common.UnmarshalBodyReusable(c, textRequest)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -303,6 +313,143 @@ func GetAndValidateTextRequest(c *gin.Context, relayMode int) (*dto.GeneralOpenA
 		}
 	}
 	return textRequest, nil
+}
+
+func populateTextRequestFromMultipart(c *gin.Context, textRequest *dto.GeneralOpenAIRequest) error {
+	form, err := common.ParseMultipartFormReusable(c)
+	if err != nil {
+		return err
+	}
+	bodyJSON := ""
+	if payloadValues := form.Value["payload"]; len(payloadValues) > 0 {
+		bodyJSON = strings.TrimSpace(payloadValues[0])
+	}
+	if bodyJSON == "" {
+		if payloadValues := form.Value["request_json"]; len(payloadValues) > 0 {
+			bodyJSON = strings.TrimSpace(payloadValues[0])
+		}
+	}
+	if bodyJSON == "" {
+		return errors.New("multipart request requires payload")
+	}
+	if err := common.Unmarshal([]byte(bodyJSON), textRequest); err != nil {
+		return err
+	}
+
+	fileHeaders := collectMultipartImageHeaders(form)
+	if len(fileHeaders) == 0 {
+		return nil
+	}
+	estimatedBytes := estimateMultipartHeadersSize(fileHeaders)
+	if estimatedBytes > 0 {
+		if _, err := service.TryReserveAIImageMemory(c, estimatedBytes); err != nil {
+			return err
+		}
+	}
+
+	_, encodedImages, err := encodeMultipartImages(fileHeaders)
+	if err != nil {
+		return err
+	}
+	injectMultipartImagesIntoMessages(textRequest, encodedImages)
+	return nil
+}
+
+func collectMultipartImageHeaders(form *multipart.Form) []*multipart.FileHeader {
+	orderedKeys := []string{"images", "image", "reference_images", "reference_image", "files"}
+	collected := make([]*multipart.FileHeader, 0)
+	seen := make(map[*multipart.FileHeader]struct{})
+	for _, key := range orderedKeys {
+		for _, header := range form.File[key] {
+			if header == nil {
+				continue
+			}
+			if !strings.HasPrefix(strings.ToLower(header.Header.Get("Content-Type")), "image/") {
+				continue
+			}
+			if _, exists := seen[header]; exists {
+				continue
+			}
+			collected = append(collected, header)
+			seen[header] = struct{}{}
+		}
+	}
+	return collected
+}
+
+func estimateMultipartHeadersSize(headers []*multipart.FileHeader) int64 {
+	var total int64
+	for _, header := range headers {
+		if header != nil && header.Size > 0 {
+			total += header.Size
+		}
+	}
+	return total
+}
+
+func encodeMultipartImages(headers []*multipart.FileHeader) (int64, []*dto.MessageImageUrl, error) {
+	images := make([]*dto.MessageImageUrl, 0, len(headers))
+	var totalBytes int64
+	for _, header := range headers {
+		file, err := header.Open()
+		if err != nil {
+			return 0, nil, err
+		}
+		fileBytes, readErr := io.ReadAll(file)
+		closeErr := file.Close()
+		if readErr != nil {
+			return 0, nil, readErr
+		}
+		if closeErr != nil {
+			return 0, nil, closeErr
+		}
+		totalBytes += int64(len(fileBytes))
+		mimeType := header.Header.Get("Content-Type")
+		images = append(images, &dto.MessageImageUrl{
+			Url:      base64.StdEncoding.EncodeToString(fileBytes),
+			Detail:   "high",
+			MimeType: mimeType,
+		})
+	}
+	return totalBytes, images, nil
+}
+
+func injectMultipartImagesIntoMessages(textRequest *dto.GeneralOpenAIRequest, images []*dto.MessageImageUrl) {
+	if len(images) == 0 {
+		return
+	}
+	if len(textRequest.Messages) == 0 {
+		textRequest.Messages = []dto.Message{{Role: "user"}}
+	}
+	userMessageIndex := len(textRequest.Messages) - 1
+	for index := len(textRequest.Messages) - 1; index >= 0; index-- {
+		if strings.EqualFold(textRequest.Messages[index].Role, "user") {
+			userMessageIndex = index
+			break
+		}
+	}
+	content := textRequest.Messages[userMessageIndex].ParseContent()
+	hasText := false
+	for _, part := range content {
+		if part.Type == dto.ContentTypeText {
+			hasText = true
+			break
+		}
+	}
+	if !hasText {
+		content = append([]dto.MediaContent{{Type: dto.ContentTypeText, Text: ""}}, content...)
+	}
+	for _, image := range images {
+		content = append(content, dto.MediaContent{
+			Type:     dto.ContentTypeImageURL,
+			ImageUrl: image,
+		})
+	}
+	contentItems := make([]any, 0, len(content))
+	for _, item := range content {
+		contentItems = append(contentItems, item)
+	}
+	textRequest.Messages[userMessageIndex].Content = contentItems
 }
 
 func GetAndValidateGeminiRequest(c *gin.Context) (*dto.GeminiChatRequest, error) {

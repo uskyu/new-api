@@ -394,7 +394,8 @@ func (m *MediaContent) GetVideoUrl() *MessageVideoUrl {
 type MessageImageUrl struct {
 	Url      string `json:"url"`
 	Detail   string `json:"detail,omitempty"`
-	MimeType string
+	FileID   string `json:"file_id,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
 }
 
 func (m *MessageImageUrl) IsRemoteImage() bool {
@@ -562,11 +563,15 @@ func (m *Message) ParseContent() []MediaContent {
 			case map[string]interface{}:
 				url, ok1 := v["url"].(string)
 				detail, ok2 := v["detail"].(string)
+				fileID, ok3 := v["file_id"].(string)
 				if ok2 {
 					temp.Detail = detail
 				}
 				if ok1 {
 					temp.Url = url
+				}
+				if ok3 {
+					temp.FileID = fileID
 				}
 			}
 			contentList = append(contentList, MediaContent{

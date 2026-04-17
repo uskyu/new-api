@@ -18,5 +18,6 @@ func BodyStorageCleanup() gin.HandlerFunc {
 
 		// 清理文件缓存（URL 下载的文件等）
 		service.CleanupFileSources(c)
+		service.ReleaseAIImageMemory(c)
 	}
 }

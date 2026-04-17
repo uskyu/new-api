@@ -586,11 +586,12 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 			} else if part.Type == dto.ContentTypeImageURL {
 				// 使用统一的文件服务获取图片数据
 				var source *types.FileSource
-				imageUrl := part.GetImageMedia().Url
+				imageMedia := part.GetImageMedia()
+				imageUrl := imageMedia.Url
 				if strings.HasPrefix(imageUrl, "http") {
 					source = types.NewURLFileSource(imageUrl)
 				} else {
-					source = types.NewBase64FileSource(imageUrl, "")
+					source = types.NewBase64FileSource(imageUrl, imageMedia.MimeType)
 				}
 				base64Data, mimeType, err := service.GetBase64Data(c, source, "formatting image for Gemini")
 				if err != nil {

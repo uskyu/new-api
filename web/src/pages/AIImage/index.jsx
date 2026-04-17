@@ -1,6 +1,6 @@
-﻿import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Button, Empty, Spin, TextArea, Typography } from '@douyinfe/semi-ui';
-import { ImagePlus, Loader2, Sparkles, Wand2, X } from 'lucide-react';
+import { Check, ImagePlus, Loader2, Sparkles, Wand2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import useAiImageState from '../../hooks/ai-image/useAiImageState';
 import { API_ENDPOINTS, MESSAGE_ROLES } from '../../constants/playground.constants';
@@ -16,6 +16,31 @@ import {
 const RESOLUTION_OPTIONS = ['1K', '2K', '4K'];
 const ASPECT_RATIO_OPTIONS = ['1:1', '3:2', '4:3', '16:9', '9:16'];
 const BATCH_COUNT_OPTIONS = [1, 2, 3, 4, 6, 8];
+const PROMPT_OPTIMIZER_SYSTEM_PROMPT = [
+  'You are an AI image prompt optimizer.',
+  'Rewrite the user prompt into one stronger image-generation prompt in Simplified Chinese.',
+  'Keep the meaning, add useful visual detail, and make it directly usable for image generation.',
+  'Return plain text only. Do not use markdown, JSON, lists, or explanations.',
+].join('\n');
+
+const createDraftImageEntry = (file) => ({
+  id: `draft-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  file,
+  previewUrl: URL.createObjectURL(file),
+  name: file.name,
+  type: file.type,
+  size: file.size,
+});
+
+const revokeDraftImage = (image) => {
+  if (image?.previewUrl?.startsWith('blob:')) {
+    URL.revokeObjectURL(image.previewUrl);
+  }
+};
+
+const revokeDraftImages = (images = []) => {
+  images.forEach(revokeDraftImage);
+};
 
 const normalizeImageSource = (value, mimeType = 'image/png') => {
   if (typeof value !== 'string' || value.trim() === '') return '';
@@ -34,10 +59,16 @@ const extractImageUrlsFromParts = (parts = []) =>
   parts
     .map((part) => {
       if (part?.inlineData?.data) {
-        return normalizeImageSource(part.inlineData.data, part.inlineData.mimeType || 'image/png');
+        return normalizeImageSource(
+          part.inlineData.data,
+          part.inlineData.mimeType || 'image/png',
+        );
       }
       if (part?.inline_data?.data) {
-        return normalizeImageSource(part.inline_data.data, part.inline_data.mime_type || 'image/png');
+        return normalizeImageSource(
+          part.inline_data.data,
+          part.inline_data.mime_type || 'image/png',
+        );
       }
       if (part?.image_url?.url) return normalizeImageSource(part.image_url.url);
       if (part?.imageUrl?.url) return normalizeImageSource(part.imageUrl.url);
@@ -89,43 +120,96 @@ const createImageAssistantMessage = (imageUrls, prompt) => ({
   status: 'complete',
 });
 
-const buildImagePayload = ({
-  prompt,
-  draftImages,
-  model,
-  group,
-  resolution,
-  aspectRatio,
-}) => {
-  const payload = buildApiPayload(
-    [
-      {
-        role: MESSAGE_ROLES.USER,
-        content: [
-          { type: 'text', text: prompt },
-          ...draftImages.map((url) => ({
-            type: 'image_url',
-            image_url: { url },
-          })),
-        ],
-      },
-    ],
-    null,
-    { model, group, stream: false },
-    {},
-  );
+const extractOptimizedPrompt = (rawContent) => {
+  if (typeof rawContent !== 'string') return '';
+  const normalized = rawContent.trim();
+  if (!normalized || normalized.includes('data:image/') || normalized.length > 5000) {
+    return '';
+  }
 
-  payload.extra_body = {
-    google: {
-      image_config: {
-        image_size: resolution,
-        aspect_ratio: aspectRatio,
-      },
+  try {
+    const parsed = JSON.parse(normalized);
+    if (typeof parsed?.prompt === 'string' && parsed.prompt.trim()) {
+      return parsed.prompt.trim();
+    }
+    if (
+      typeof parsed?.optimized_prompt === 'string' &&
+      parsed.optimized_prompt.trim()
+    ) {
+      return parsed.optimized_prompt.trim();
+    }
+    if (Array.isArray(parsed?.suggestions)) {
+      return (
+        parsed.suggestions.find(
+          (item) => typeof item === 'string' && item.trim(),
+        ) || ''
+      );
+    }
+  } catch {
+    // Fall through and treat it as plain text.
+  }
+
+  return normalized
+    .split('\n')
+    .map((item) => item.replace(/^\s*[-\d.)、]+\s*/, '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+};
+
+const readFileAsDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error || new Error('failed to read file'));
+    reader.readAsDataURL(file);
+  });
+
+const buildImageContent = (prompt, imageUrls = []) => [
+  { type: 'text', text: prompt },
+  ...imageUrls.filter(Boolean).map((url) => ({
+    type: 'image_url',
+    image_url: { url },
+  })),
+];
+
+const toGeminiInlinePart = (dataUrl) => {
+  if (typeof dataUrl !== 'string') return null;
+  const matched = dataUrl.match(/^data:(.+?);base64,(.+)$/);
+  if (!matched) return null;
+  return {
+    inlineData: {
+      mimeType: matched[1] || 'image/png',
+      data: matched[2] || '',
     },
   };
-
-  return payload;
 };
+
+const buildGeminiNativeImagePayload = ({
+  prompt,
+  imageUrls,
+  resolution,
+  aspectRatio,
+}) => ({
+  contents: [
+    {
+      role: 'user',
+      parts: [
+        { text: prompt },
+        ...imageUrls
+          .map((imageUrl) => toGeminiInlinePart(imageUrl))
+          .filter(Boolean),
+      ],
+    },
+  ],
+  generationConfig: {
+    responseModalities: ['TEXT', 'IMAGE'],
+    imageConfig: {
+      aspectRatio: aspectRatio,
+      imageSize: resolution,
+    },
+  },
+});
 
 const parseImageResponse = async (response) => {
   const data = await response.json();
@@ -151,6 +235,29 @@ const parseImageResponse = async (response) => {
   };
 };
 
+const postJsonPayload = async (payload) => {
+  const response = await fetch(API_ENDPOINTS.CHAT_COMPLETIONS, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'New-Api-User': getUserIdFromLocalStorage(),
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    let errorBody = '';
+    try {
+      errorBody = await response.text();
+    } catch {
+      errorBody = '';
+    }
+    throw new Error(`HTTP error! status: ${response.status}, body: ${errorBody}`);
+  }
+
+  return response;
+};
+
 const GalleryImage = ({ src, alt, active, onClick }) => (
   <button
     type='button'
@@ -174,10 +281,13 @@ const AIImage = () => {
     setMessages,
     groups,
     models,
+    textModels,
     selectedModel,
     selectedGroup,
     setSelectedModel,
     setSelectedGroup,
+    promptOptimizerModel,
+    setPromptOptimizerModel,
     draftImages,
     setDraftImages,
     clearCurrentSession,
@@ -190,6 +300,12 @@ const AIImage = () => {
   const [resolution, setResolution] = useState('1K');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [batchCount, setBatchCount] = useState(1);
+  const [isOptimizingPrompt, setIsOptimizingPrompt] = useState(false);
+  const [optimizedPromptDraft, setOptimizedPromptDraft] = useState('');
+  const [originalPrompt, setOriginalPrompt] = useState('');
+  const previousDraftImagesRef = useRef([]);
+  const selectedModelRef = useRef('');
+  const promptOptimizerModelRef = useRef('');
 
   const groupOptions = groups.map((group) => ({
     value: group.value,
@@ -201,60 +317,132 @@ const AIImage = () => {
     label: model.label,
   }));
 
+  const textModelOptions = textModels.map((model) => ({
+    value: model.value,
+    label: model.label,
+  }));
+  const fallbackImageModel = selectedModel || modelOptions[0]?.value || '';
+
+  React.useEffect(() => {
+    selectedModelRef.current = selectedModel || '';
+  }, [selectedModel]);
+
+  React.useEffect(() => {
+    promptOptimizerModelRef.current = promptOptimizerModel || '';
+  }, [promptOptimizerModel]);
+
   const records = useMemo(() => {
     const nextRecords = [];
     for (let index = 0; index < messages.length; index += 1) {
       const current = messages[index];
       const next = messages[index + 1];
-      if (current?.role !== MESSAGE_ROLES.USER || next?.role !== MESSAGE_ROLES.ASSISTANT) continue;
+      if (current?.role !== MESSAGE_ROLES.USER || next?.role !== MESSAGE_ROLES.ASSISTANT) {
+        continue;
+      }
       const record = extractGenerationRecord(current, next);
       if (record) nextRecords.push(record);
     }
     return nextRecords.reverse();
   }, [messages]);
 
-  const activeRecord = records.find((record) => record.id === activeRecordId) || records[0] || null;
+  const activeRecord =
+    records.find((record) => record.id === activeRecordId) || records[0] || null;
   const activeImage = activeRecord?.images?.[0] || '';
+
+  React.useEffect(() => {
+    const previousImages = previousDraftImagesRef.current;
+    const currentIds = new Set(draftImages.map((image) => image.id));
+    previousImages
+      .filter((image) => !currentIds.has(image.id))
+      .forEach(revokeDraftImage);
+    previousDraftImagesRef.current = draftImages;
+  }, [draftImages]);
+
+  React.useEffect(
+    () => () => {
+      revokeDraftImages(previousDraftImagesRef.current);
+    },
+    [],
+  );
 
   React.useEffect(() => {
     if (!activeRecordId && records.length > 0) {
       setActiveRecordId(records[0].id);
-    } else if (activeRecordId && !records.some((record) => record.id === activeRecordId)) {
+    } else if (
+      activeRecordId &&
+      !records.some((record) => record.id === activeRecordId)
+    ) {
       setActiveRecordId(records[0]?.id || null);
     }
   }, [activeRecordId, records]);
 
   const handleAddDraftImage = React.useCallback(
-    (imageDataUrl) => setDraftImages([imageDataUrl]),
+    (files) => {
+      const nextFiles = Array.from(files || []).filter(Boolean);
+      if (nextFiles.length === 0) return;
+      setDraftImages((previous) => [
+        ...previous,
+        ...nextFiles.map(createDraftImageEntry),
+      ]);
+    },
     [setDraftImages],
   );
 
   const handleRemoveDraftImage = React.useCallback(
     (index) => {
-      setDraftImages((previous) => previous.filter((_, itemIndex) => itemIndex !== index));
+      setDraftImages((previous) =>
+        previous.filter((_, itemIndex) => itemIndex !== index),
+      );
     },
     [setDraftImages],
   );
 
+  const clearDraftImages = React.useCallback(() => {
+    setDraftImages([]);
+  }, [setDraftImages]);
+
+  const serializeDraftImagesForRequest = React.useCallback(async () => {
+    const files = draftImages
+      .map((image) => image?.file)
+      .filter(Boolean);
+    if (files.length === 0) {
+      return [];
+    }
+    return Promise.all(files.map((file) => readFileAsDataUrl(file)));
+  }, [draftImages]);
+
   const requestOneImage = React.useCallback(
     async (itemPrompt) => {
-      const payload = buildImagePayload({
+      const effectiveModel = selectedModelRef.current || modelOptions[0]?.value || '';
+      if (!effectiveModel) {
+        throw new Error('image model is required');
+      }
+
+      const imageUrls = await serializeDraftImagesForRequest();
+      const payload = buildGeminiNativeImagePayload({
         prompt: itemPrompt,
-        draftImages,
-        model: selectedModel,
-        group: selectedGroup || '',
+        imageUrls,
         resolution,
         aspectRatio,
       });
 
-      const response = await fetch(API_ENDPOINTS.CHAT_COMPLETIONS, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'New-Api-User': getUserIdFromLocalStorage(),
+      const query = selectedGroup
+        ? `?group=${encodeURIComponent(selectedGroup)}`
+        : '';
+      const response = await fetch(
+        `${API_ENDPOINTS.GEMINI_NATIVE_MODELS}/${encodeURIComponent(
+          effectiveModel,
+        )}:generateContent${query}`,
+        {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'New-Api-User': getUserIdFromLocalStorage(),
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify(payload),
-      });
+      );
 
       if (!response.ok) {
         let errorBody = '';
@@ -268,7 +456,7 @@ const AIImage = () => {
 
       return parseImageResponse(response);
     },
-    [aspectRatio, draftImages, resolution, selectedGroup, selectedModel],
+    [aspectRatio, modelOptions, resolution, selectedGroup, serializeDraftImagesForRequest],
   );
 
   const appendGeneration = React.useCallback(
@@ -278,7 +466,10 @@ const AIImage = () => {
           role: MESSAGE_ROLES.USER,
           content: [
             { type: 'text', text: itemPrompt },
-            ...draftImages.map((url) => ({ type: 'image_url', image_url: { url } })),
+            ...draftImages.map((image) => ({
+              type: 'image_url',
+              image_url: { url: image.previewUrl },
+            })),
           ],
           createAt: Date.now(),
           id: `user-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -289,9 +480,9 @@ const AIImage = () => {
       if (createdMessages.length === 0) return;
       markSessionActivity();
       setMessages((previous) => [...previous, ...createdMessages]);
-      const lastAssistant = [...createdMessages].reverse().find(
-        (message) => message.role === MESSAGE_ROLES.ASSISTANT,
-      );
+      const lastAssistant = [...createdMessages]
+        .reverse()
+        .find((message) => message.role === MESSAGE_ROLES.ASSISTANT);
       setActiveRecordId(lastAssistant?.id || null);
     },
     [draftImages, markSessionActivity, setMessages],
@@ -303,9 +494,13 @@ const AIImage = () => {
       showError(t('请输入提示词'));
       return;
     }
-    if (!selectedModel) {
+    if (!fallbackImageModel) {
       showError(t('请选择模型'));
       return;
+    }
+    if (!selectedModelRef.current && fallbackImageModel) {
+      selectedModelRef.current = fallbackImageModel;
+      setSelectedModel(fallbackImageModel);
     }
 
     setIsGenerating(true);
@@ -317,7 +512,9 @@ const AIImage = () => {
       }
       appendGeneration([{ itemPrompt: trimmedPrompt, imageUrls: parsed.imageUrls }]);
       setPrompt('');
-      setDraftImages([]);
+      setOptimizedPromptDraft('');
+      setOriginalPrompt('');
+      clearDraftImages();
       showSuccess(t('图片生成成功'));
     } catch (error) {
       const errorInfo = handleApiError(error);
@@ -325,13 +522,29 @@ const AIImage = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [appendGeneration, prompt, requestOneImage, selectedModel, setDraftImages, t]);
+  }, [
+    appendGeneration,
+    clearDraftImages,
+    fallbackImageModel,
+    prompt,
+    requestOneImage,
+    setSelectedModel,
+    t,
+  ]);
 
   const handleBatchGenerate = React.useCallback(async () => {
-    const prompts = prompt.split('\n').map((item) => item.trim()).filter(Boolean);
-    if (!selectedModel) {
+    const prompts = prompt
+      .split('\n')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (!fallbackImageModel) {
       showError(t('请选择模型'));
       return;
+    }
+    if (!selectedModelRef.current && fallbackImageModel) {
+      selectedModelRef.current = fallbackImageModel;
+      setSelectedModel(fallbackImageModel);
     }
     if (prompts.length === 0) {
       showError(t('请输入提示词'));
@@ -357,7 +570,9 @@ const AIImage = () => {
       }
       appendGeneration(validResults);
       setPrompt('');
-      setDraftImages([]);
+      setOptimizedPromptDraft('');
+      setOriginalPrompt('');
+      clearDraftImages();
       showSuccess(t('批量生成完成'));
     } catch (error) {
       const errorInfo = handleApiError(error);
@@ -365,11 +580,23 @@ const AIImage = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [appendGeneration, batchCount, prompt, requestOneImage, selectedModel, setDraftImages, t]);
+  }, [
+    appendGeneration,
+    batchCount,
+    clearDraftImages,
+    fallbackImageModel,
+    prompt,
+    requestOneImage,
+    setSelectedModel,
+    t,
+  ]);
 
   const handleClearHistory = React.useCallback(() => {
     clearCurrentSession();
     setActiveRecordId(null);
+    setPrompt('');
+    setOptimizedPromptDraft('');
+    setOriginalPrompt('');
     showSuccess(t('已清空最近记录'));
   }, [clearCurrentSession, t]);
 
@@ -411,9 +638,7 @@ const AIImage = () => {
 
   const handleDeleteRecord = React.useCallback(
     (record) => {
-      if (!record) {
-        return;
-      }
+      if (!record) return;
 
       setMessages((previous) =>
         previous.filter(
@@ -431,6 +656,99 @@ const AIImage = () => {
     },
     [activeRecordId, setMessages, t],
   );
+
+  const handleReuseImage = React.useCallback(
+    async (imageUrl) => {
+      if (!imageUrl) {
+        showError(t('没有可引用的图片'));
+        return;
+      }
+
+      try {
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+        const extension = blob.type?.split('/')[1] || 'png';
+        const file = new File([blob], `referenced-${Date.now()}.${extension}`, {
+          type: blob.type || 'image/png',
+        });
+        setDraftImages((previous) => [...previous, createDraftImageEntry(file)]);
+        showSuccess(t('已引用到参考图'));
+      } catch (error) {
+        const errorInfo = handleApiError(error);
+        showError(errorInfo.error || t('引用图片失败'));
+      }
+    },
+    [setDraftImages, t],
+  );
+
+  const handleOptimizePrompt = React.useCallback(async () => {
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt) {
+      showError(t('请先输入提示词'));
+      return;
+    }
+    const effectivePromptOptimizerModel =
+      promptOptimizerModelRef.current || promptOptimizerModel;
+    if (!effectivePromptOptimizerModel) {
+      showError(t('当前没有可用于优化提示词的文本模型'));
+      return;
+    }
+
+    setIsOptimizingPrompt(true);
+    try {
+      const payload = buildApiPayload(
+        [
+          {
+            role: MESSAGE_ROLES.USER,
+            content: buildImageContent(
+              trimmedPrompt,
+              await serializeDraftImagesForRequest(),
+            ),
+          },
+        ],
+        PROMPT_OPTIMIZER_SYSTEM_PROMPT,
+        {
+          model: effectivePromptOptimizerModel,
+          group: selectedGroup || '',
+          stream: false,
+        },
+        {},
+      );
+      payload.model = effectivePromptOptimizerModel;
+      const response = await postJsonPayload(payload);
+      const data = await response.json();
+      const content = data?.choices?.[0]?.message?.content || '';
+      const nextPrompt = extractOptimizedPrompt(content);
+      if (!nextPrompt) {
+        showError(t('未获取到有效的优化结果，请切换文本模型后重试'));
+        return;
+      }
+
+      setOriginalPrompt(trimmedPrompt);
+      setOptimizedPromptDraft(nextPrompt);
+      setPrompt(nextPrompt);
+    } catch (error) {
+      const errorInfo = handleApiError(error);
+      showError(errorInfo.error || t('优化提示词失败'));
+    } finally {
+      setIsOptimizingPrompt(false);
+    }
+  }, [prompt, promptOptimizerModel, selectedGroup, serializeDraftImagesForRequest, t]);
+
+  const handleRevertOptimizedPrompt = React.useCallback(() => {
+    setPrompt(originalPrompt);
+    setOptimizedPromptDraft('');
+    setOriginalPrompt('');
+  }, [originalPrompt]);
+
+  const handleConfirmOptimizedPrompt = React.useCallback(() => {
+    if (optimizedPromptDraft) {
+      setPrompt(optimizedPromptDraft);
+    }
+    setOptimizedPromptDraft('');
+    setOriginalPrompt('');
+    showSuccess(t('已采用优化后的提示词'));
+  }, [optimizedPromptDraft, t]);
 
   if (!ready) {
     return (
@@ -496,7 +814,10 @@ const AIImage = () => {
                   </span>
                   <select
                     value={selectedModel}
-                    onChange={(event) => setSelectedModel(event.target.value)}
+                    onChange={(event) => {
+                      selectedModelRef.current = event.target.value;
+                      setSelectedModel(event.target.value);
+                    }}
                     className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
                   >
                     <option value=''>{t('选择模型')}</option>
@@ -521,7 +842,9 @@ const AIImage = () => {
                       className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
                     >
                       {RESOLUTION_OPTIONS.map((item) => (
-                        <option key={item} value={item}>{item}</option>
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
                       ))}
                     </select>
                   </label>
@@ -536,7 +859,9 @@ const AIImage = () => {
                       className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
                     >
                       {ASPECT_RATIO_OPTIONS.map((item) => (
-                        <option key={item} value={item}>{item}</option>
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
                       ))}
                     </select>
                   </label>
@@ -551,7 +876,9 @@ const AIImage = () => {
                       className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
                     >
                       {BATCH_COUNT_OPTIONS.map((item) => (
-                        <option key={item} value={item}>{item}</option>
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
                       ))}
                     </select>
                   </label>
@@ -559,17 +886,81 @@ const AIImage = () => {
 
                 <TextArea
                   value={prompt}
-                  onChange={setPrompt}
+                  onChange={(value) => {
+                    setPrompt(value);
+                    if (optimizedPromptDraft) {
+                      setOptimizedPromptDraft('');
+                      setOriginalPrompt('');
+                    }
+                  }}
                   autosize={{ minRows: 7, maxRows: 14 }}
                   placeholder={t('描述你想生成的图片；批量生成时可一行一个提示词')}
                   className='!bg-transparent'
                 />
 
+                <Typography.Text className='mt-2 block text-xs text-slate-500'>
+                  {promptOptimizerModel
+                    ? t('提示词优化当前使用模型：{{model}}', {
+                        model: promptOptimizerModel,
+                      })
+                    : t('提示词优化当前未找到可用文本模型')}
+                </Typography.Text>
+
+                <div className='mt-2 max-w-[360px]'>
+                  <select
+                    value={promptOptimizerModel}
+                    onChange={(event) => {
+                      promptOptimizerModelRef.current = event.target.value;
+                      setPromptOptimizerModel(event.target.value);
+                    }}
+                    className='h-10 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                  >
+                    <option value=''>{t('选择提示词优化模型')}</option>
+                    {textModelOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {optimizedPromptDraft && (
+                  <div className='mt-3 flex flex-wrap items-center gap-2 rounded-[18px] border border-emerald-100 bg-emerald-50/80 px-3 py-2'>
+                    <Typography.Text className='!text-sm !text-emerald-700'>
+                      {t('已生成优化后的提示词，可恢复原文或确认采用')}
+                    </Typography.Text>
+                    <Button
+                      theme='light'
+                      type='tertiary'
+                      className='!rounded-full'
+                      onClick={handleRevertOptimizedPrompt}
+                    >
+                      {t('恢复原提示词')}
+                    </Button>
+                    <Button
+                      theme='solid'
+                      type='primary'
+                      icon={<Check size={16} />}
+                      className='!rounded-full'
+                      onClick={handleConfirmOptimizedPrompt}
+                    >
+                      {t('采用优化结果')}
+                    </Button>
+                  </div>
+                )}
+
                 {draftImages.length > 0 && (
                   <div className='mt-3 flex flex-wrap gap-2'>
                     {draftImages.map((image, index) => (
-                      <div key={`${index}-${image.length}`} className='group relative overflow-hidden rounded-[18px] border border-white/70 bg-white'>
-                        <img src={image} alt={`${t('参考图')} ${index + 1}`} className='h-24 w-24 object-cover' />
+                      <div
+                        key={image.id || `${index}-${image.previewUrl}`}
+                        className='group relative overflow-hidden rounded-[18px] border border-white/70 bg-white'
+                      >
+                        <img
+                          src={image.previewUrl}
+                          alt={`${t('参考图')} ${index + 1}`}
+                          className='h-24 w-24 object-cover'
+                        />
                         <button
                           type='button'
                           onClick={() => handleRemoveDraftImage(index)}
@@ -589,14 +980,13 @@ const AIImage = () => {
                     <input
                       type='file'
                       accept='image/*'
+                      multiple
                       className='hidden'
                       onChange={(event) => {
-                        const file = event.target.files?.[0];
+                        const files = Array.from(event.target.files || []);
                         event.target.value = '';
-                        if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = () => handleAddDraftImage(reader.result);
-                        reader.readAsDataURL(file);
+                        if (!files.length) return;
+                        handleAddDraftImage(files);
                       }}
                     />
                   </label>
@@ -604,12 +994,36 @@ const AIImage = () => {
                   <Button
                     theme='solid'
                     type='primary'
-                    icon={isGenerating ? <Loader2 size={16} className='animate-spin' /> : <Wand2 size={16} />}
+                    icon={
+                      isGenerating ? (
+                        <Loader2 size={16} className='animate-spin' />
+                      ) : (
+                        <Wand2 size={16} />
+                      )
+                    }
                     loading={isGenerating}
                     onClick={handleGenerate}
                     className='!rounded-full'
                   >
                     {t('生成图片')}
+                  </Button>
+
+                  <Button
+                    theme='light'
+                    type='primary'
+                    icon={
+                      isOptimizingPrompt ? (
+                        <Loader2 size={16} className='animate-spin' />
+                      ) : (
+                        <Sparkles size={16} />
+                      )
+                    }
+                    loading={isOptimizingPrompt}
+                    disabled={isGenerating}
+                    onClick={handleOptimizePrompt}
+                    className='!rounded-full'
+                  >
+                    {t('优化提示词')}
                   </Button>
 
                   <Button
@@ -634,7 +1048,9 @@ const AIImage = () => {
                 </div>
 
                 <Typography.Text className='mt-3 block text-xs text-slate-500'>
-                  {t('图片仅保存在当前浏览器本地，删除浏览器缓存或记录后将会消失，请及时保存。')}
+                  {t(
+                    '图片仅保存在当前浏览器本地，删除浏览器缓存或记录后将会消失，请及时保存。',
+                  )}
                 </Typography.Text>
               </div>
             </div>
@@ -655,8 +1071,20 @@ const AIImage = () => {
                         className='max-h-[72vh] w-full flex-1 rounded-[24px] object-contain shadow-[0_20px_60px_rgba(15,23,42,0.12)]'
                       />
                       {activeRecord?.prompt ? (
-                        <p className='mt-3 text-sm text-slate-500'>{activeRecord.prompt}</p>
+                        <p className='mt-3 text-sm text-slate-500'>
+                          {activeRecord.prompt}
+                        </p>
                       ) : null}
+                      <div className='mt-3 flex flex-wrap gap-2'>
+                        <Button
+                          theme='light'
+                          type='primary'
+                          className='!rounded-full'
+                          onClick={() => handleReuseImage(activeImage)}
+                        >
+                          {t('引用为参考图')}
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <Empty
@@ -716,6 +1144,15 @@ const AIImage = () => {
                         onClick={() => handleDownloadImage(record)}
                       >
                         {t('下载')}
+                      </Button>
+                      <Button
+                        theme='light'
+                        type='primary'
+                        size='small'
+                        className='!rounded-full'
+                        onClick={() => handleReuseImage(record.images?.[0])}
+                      >
+                        {t('引用')}
                       </Button>
                       <Button
                         theme='light'
