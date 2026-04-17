@@ -23,13 +23,15 @@ const PROMPT_OPTIMIZER_SYSTEM_PROMPT = [
   'Return plain text only. Do not use markdown, JSON, lists, or explanations.',
 ].join('\n');
 
-const createDraftImageEntry = (file) => ({
+const createDraftImageEntry = (file, overrides = {}) => ({
   id: `draft-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   file,
   previewUrl: URL.createObjectURL(file),
   name: file.name,
   type: file.type,
   size: file.size,
+  sourceDataUrl: '',
+  ...overrides,
 });
 
 const revokeDraftImage = (image) => {
@@ -402,13 +404,24 @@ const AIImage = () => {
   }, [setDraftImages]);
 
   const serializeDraftImagesForRequest = React.useCallback(async () => {
-    const files = draftImages
-      .map((image) => image?.file)
-      .filter(Boolean);
-    if (files.length === 0) {
+    const images = draftImages.filter(Boolean);
+    if (images.length === 0) {
       return [];
     }
-    return Promise.all(files.map((file) => readFileAsDataUrl(file)));
+    return Promise.all(
+      images.map(async (image) => {
+        if (
+          typeof image?.sourceDataUrl === 'string' &&
+          image.sourceDataUrl.startsWith('data:image/')
+        ) {
+          return image.sourceDataUrl;
+        }
+        if (image?.file) {
+          return readFileAsDataUrl(image.file);
+        }
+        return '';
+      }),
+    );
   }, [draftImages]);
 
   const requestOneImage = React.useCallback(
@@ -665,6 +678,29 @@ const AIImage = () => {
       }
 
       try {
+        if (typeof imageUrl === 'string' && imageUrl.startsWith('data:image/')) {
+          const [meta, base64Data] = imageUrl.split(',', 2);
+          const mimeType =
+            meta.match(/^data:(.+?);base64$/)?.[1] || 'image/png';
+          const binary = atob(base64Data || '');
+          const bytes = new Uint8Array(binary.length);
+          for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+          }
+          const extension = mimeType.split('/')[1] || 'png';
+          const file = new File(
+            [bytes],
+            `referenced-${Date.now()}.${extension}`,
+            { type: mimeType },
+          );
+          setDraftImages((previous) => [
+            ...previous,
+            createDraftImageEntry(file, { sourceDataUrl: imageUrl }),
+          ]);
+          showSuccess(t('宸插紩鐢ㄥ埌鍙傝€冨浘'));
+          return;
+        }
+
         const response = await fetch(imageUrl);
         const blob = await response.blob();
         const extension = blob.type?.split('/')[1] || 'png';
@@ -1117,30 +1153,30 @@ const AIImage = () => {
           {records.length > 0 ? (
             <div className='flex gap-3 overflow-x-auto pb-1'>
               {records.map((record) => (
-                <div key={record.id} className='min-w-[168px] space-y-2'>
+                <div key={record.id} className='w-[168px] shrink-0 space-y-2'>
                   <GalleryImage
                     src={record.images[0]}
                     alt={record.prompt || 'generated image'}
                     active={record.id === activeRecord?.id}
                     onClick={() => setActiveRecordId(record.id)}
                   />
-                  <div className='px-1'>
+                  <div className='w-full px-1'>
                     <button
                       type='button'
-                      className='w-full rounded-xl px-1 py-1 text-left text-sm leading-5 text-slate-700 transition hover:bg-slate-100/80'
+                      className='w-full overflow-hidden rounded-xl px-1 py-1 text-left text-sm leading-5 text-slate-700 transition hover:bg-slate-100/80'
                       onClick={() => handleCopyPrompt(record)}
                       title={record.prompt || t('未命名提示词')}
                     >
-                      <span className='block line-clamp-2 break-words'>
+                      <span className='block max-w-full overflow-hidden text-ellipsis break-all line-clamp-2'>
                         {record.prompt || t('未命名提示词')}
                       </span>
                     </button>
-                    <div className='mt-2 flex flex-wrap gap-2'>
+                    <div className='mt-2 grid grid-cols-3 gap-1.5'>
                       <Button
                         theme='light'
                         type='tertiary'
                         size='small'
-                        className='!rounded-full'
+                        className='!h-7 !rounded-full !px-2 !text-xs'
                         onClick={() => handleDownloadImage(record)}
                       >
                         {t('下载')}
@@ -1149,7 +1185,7 @@ const AIImage = () => {
                         theme='light'
                         type='primary'
                         size='small'
-                        className='!rounded-full'
+                        className='!h-7 !rounded-full !px-2 !text-xs'
                         onClick={() => handleReuseImage(record.images?.[0])}
                       >
                         {t('引用')}
@@ -1158,10 +1194,10 @@ const AIImage = () => {
                         theme='light'
                         type='danger'
                         size='small'
-                        className='!rounded-full'
+                        className='!h-7 !rounded-full !px-2 !text-xs'
                         onClick={() => handleDeleteRecord(record)}
                       >
-                        {t('本地删除')}
+                        {t('删除')}
                       </Button>
                     </div>
                   </div>

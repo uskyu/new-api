@@ -9,18 +9,15 @@ const DEFAULT_MODEL = '';
 
 const sanitizeImageUrl = (value) => {
   if (typeof value !== 'string') return value;
-  if (value.startsWith('data:image/')) {
-    return '[local-image-preview]';
-  }
   if (value.startsWith('blob:')) {
     return '[local-image-preview]';
   }
   return value;
 };
 
-const sanitizeMessageContent = (content) => {
+const sanitizeMessageContent = (content, role) => {
   if (!Array.isArray(content)) {
-    if (typeof content === 'string' && content.includes('data:image/')) {
+    if (role === 'user' && typeof content === 'string' && content.includes('data:image/')) {
       return content.replace(/data:image\/[^)\s]+/g, '[local-image-preview]');
     }
     return content;
@@ -43,21 +40,27 @@ const sanitizeMessageContent = (content) => {
   });
 };
 
-const sanitizeMessageForStorage = (message) => ({
-  ...message,
-  content: sanitizeMessageContent(message?.content),
-  parts: Array.isArray(message?.parts)
-    ? message.parts.map((part) => ({
-        ...part,
-        image_url: part?.image_url
-          ? {
-              ...part.image_url,
-              url: sanitizeImageUrl(part.image_url.url),
-            }
-          : part?.image_url,
-      }))
-    : message?.parts,
-});
+const sanitizeMessageForStorage = (message) => {
+  const role = message?.role;
+  return {
+    ...message,
+    content: sanitizeMessageContent(message?.content, role),
+    parts: Array.isArray(message?.parts)
+      ? message.parts.map((part) => ({
+          ...part,
+          image_url: part?.image_url
+            ? {
+                ...part.image_url,
+                url:
+                  role === 'user'
+                    ? sanitizeImageUrl(part.image_url.url)
+                    : part.image_url.url,
+              }
+            : part?.image_url,
+        }))
+      : message?.parts,
+  };
+};
 
 const ensureRequestSuccess = (request) =>
   new Promise((resolve, reject) => {
