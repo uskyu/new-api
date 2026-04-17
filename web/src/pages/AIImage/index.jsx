@@ -15,7 +15,7 @@ import {
 
 const RESOLUTION_OPTIONS = ['1K', '2K', '4K'];
 const ASPECT_RATIO_OPTIONS = ['1:1', '3:2', '4:3', '16:9', '9:16'];
-const BATCH_COUNT_OPTIONS = [1, 2, 3, 4, 6, 8];
+const BATCH_COUNT_OPTIONS = [1, 2, 4];
 const PROMPT_OPTIMIZER_SYSTEM_PROMPT = [
   'You are an AI image prompt optimizer.',
   'Rewrite the user prompt into one stronger image-generation prompt in Simplified Chinese.',
@@ -274,6 +274,24 @@ const GalleryImage = ({ src, alt, active, onClick }) => (
   </button>
 );
 
+const openImageInNewTab = (imageUrl) => {
+  if (!imageUrl) return;
+  window.open(imageUrl, '_blank', 'noopener,noreferrer');
+};
+
+const createImageUserMessage = (prompt, draftImages = []) => ({
+  role: MESSAGE_ROLES.USER,
+  content: [
+    { type: 'text', text: prompt },
+    ...draftImages.map((image) => ({
+      type: 'image_url',
+      image_url: { url: image.previewUrl },
+    })),
+  ],
+  createAt: Date.now(),
+  id: `user-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+});
+
 const AIImage = () => {
   const { t } = useTranslation();
   const {
@@ -305,6 +323,7 @@ const AIImage = () => {
   const [isOptimizingPrompt, setIsOptimizingPrompt] = useState(false);
   const [optimizedPromptDraft, setOptimizedPromptDraft] = useState('');
   const [originalPrompt, setOriginalPrompt] = useState('');
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
   const previousDraftImagesRef = useRef([]);
   const selectedModelRef = useRef('');
   const promptOptimizerModelRef = useRef('');
@@ -349,7 +368,9 @@ const AIImage = () => {
 
   const activeRecord =
     records.find((record) => record.id === activeRecordId) || records[0] || null;
-  const activeImage = activeRecord?.images?.[0] || '';
+  const activeImages = activeRecord?.images || [];
+  const activeImage =
+    activeImages[activeImageIndex] || activeImages[0] || '';
 
   React.useEffect(() => {
     const previousImages = previousDraftImagesRef.current;
@@ -377,6 +398,16 @@ const AIImage = () => {
       setActiveRecordId(records[0]?.id || null);
     }
   }, [activeRecordId, records]);
+
+  React.useEffect(() => {
+    if (!activeRecord) {
+      setActiveImageIndex(0);
+      return;
+    }
+    if (activeImageIndex >= activeImages.length) {
+      setActiveImageIndex(0);
+    }
+  }, [activeImageIndex, activeImages.length, activeRecord]);
 
   const handleAddDraftImage = React.useCallback(
     (files) => {
@@ -475,18 +506,7 @@ const AIImage = () => {
   const appendGeneration = React.useCallback(
     (items) => {
       const createdMessages = items.flatMap(({ itemPrompt, imageUrls }) => [
-        {
-          role: MESSAGE_ROLES.USER,
-          content: [
-            { type: 'text', text: itemPrompt },
-            ...draftImages.map((image) => ({
-              type: 'image_url',
-              image_url: { url: image.previewUrl },
-            })),
-          ],
-          createAt: Date.now(),
-          id: `user-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        },
+        createImageUserMessage(itemPrompt, draftImages),
         createImageAssistantMessage(imageUrls, itemPrompt),
       ]);
 
@@ -497,6 +517,26 @@ const AIImage = () => {
         .reverse()
         .find((message) => message.role === MESSAGE_ROLES.ASSISTANT);
       setActiveRecordId(lastAssistant?.id || null);
+      setActiveImageIndex(0);
+    },
+    [draftImages, markSessionActivity, setMessages],
+  );
+
+  const appendBatchGeneration = React.useCallback(
+    (tasks, imageUrls) => {
+      if (!Array.isArray(imageUrls) || imageUrls.length === 0) return;
+
+      const combinedPrompt = tasks.join('\n').trim();
+      const userMessage = createImageUserMessage(combinedPrompt, draftImages);
+      const assistantMessage = createImageAssistantMessage(
+        imageUrls,
+        combinedPrompt,
+      );
+
+      markSessionActivity();
+      setMessages((previous) => [...previous, userMessage, assistantMessage]);
+      setActiveRecordId(assistantMessage.id);
+      setActiveImageIndex(0);
     },
     [draftImages, markSessionActivity, setMessages],
   );
@@ -581,7 +621,10 @@ const AIImage = () => {
         showError(t('未返回可展示的图片，请检查模型返回格式'));
         return;
       }
-      appendGeneration(validResults);
+      appendBatchGeneration(
+        tasks,
+        results.flatMap((item) => item.imageUrls || []),
+      );
       setPrompt('');
       setOptimizedPromptDraft('');
       setOriginalPrompt('');
@@ -594,7 +637,7 @@ const AIImage = () => {
       setIsGenerating(false);
     }
   }, [
-    appendGeneration,
+    appendBatchGeneration,
     batchCount,
     clearDraftImages,
     fallbackImageModel,
@@ -1038,7 +1081,7 @@ const AIImage = () => {
                       )
                     }
                     loading={isGenerating}
-                    onClick={handleGenerate}
+                    onClick={batchCount > 1 ? handleBatchGenerate : handleGenerate}
                     className='!rounded-full'
                   >
                     {t('生成图片')}
@@ -1101,15 +1144,44 @@ const AIImage = () => {
                 <div className='flex flex-1 items-center justify-center p-4'>
                   {activeImage ? (
                     <div className='flex h-full w-full flex-col'>
-                      <img
-                        src={activeImage}
-                        alt={activeRecord?.prompt || 'generated image'}
-                        className='max-h-[72vh] w-full flex-1 rounded-[24px] object-contain shadow-[0_20px_60px_rgba(15,23,42,0.12)]'
-                      />
+                      <button
+                        type='button'
+                        onClick={() => openImageInNewTab(activeImage)}
+                        className='mx-auto flex h-[420px] w-full max-w-[680px] items-center justify-center overflow-hidden rounded-[24px] bg-slate-50 shadow-[0_20px_60px_rgba(15,23,42,0.12)]'
+                        title={t('点击查看大图')}
+                      >
+                        <img
+                          src={activeImage}
+                          alt={activeRecord?.prompt || 'generated image'}
+                          className='h-full w-full object-contain'
+                        />
+                      </button>
                       {activeRecord?.prompt ? (
                         <p className='mt-3 text-sm text-slate-500'>
                           {activeRecord.prompt}
                         </p>
+                      ) : null}
+                      {activeImages.length > 1 ? (
+                        <div className='mt-3 flex flex-wrap gap-2'>
+                          {activeImages.map((imageUrl, index) => (
+                            <button
+                              key={`${activeRecord.id}-${index}`}
+                              type='button'
+                              onClick={() => setActiveImageIndex(index)}
+                              className={`overflow-hidden rounded-2xl border transition ${
+                                index === activeImageIndex
+                                  ? 'border-sky-400 shadow-[0_10px_24px_rgba(59,130,246,0.18)]'
+                                  : 'border-slate-200 hover:border-slate-300'
+                              }`}
+                            >
+                              <img
+                                src={imageUrl}
+                                alt={`${activeRecord.prompt || 'generated image'} ${index + 1}`}
+                                className='h-16 w-16 object-cover sm:h-20 sm:w-20'
+                              />
+                            </button>
+                          ))}
+                        </div>
                       ) : null}
                       <div className='mt-3 flex flex-wrap gap-2'>
                         <Button
@@ -1158,16 +1230,19 @@ const AIImage = () => {
                     src={record.images[0]}
                     alt={record.prompt || 'generated image'}
                     active={record.id === activeRecord?.id}
-                    onClick={() => setActiveRecordId(record.id)}
+                    onClick={() => {
+                      setActiveRecordId(record.id);
+                      setActiveImageIndex(0);
+                    }}
                   />
                   <div className='w-full px-1'>
                     <button
                       type='button'
-                      className='w-full overflow-hidden rounded-xl px-1 py-1 text-left text-sm leading-5 text-slate-700 transition hover:bg-slate-100/80'
+                      className='h-12 w-full overflow-hidden rounded-xl px-1 py-1 text-left text-sm leading-5 text-slate-700 transition hover:bg-slate-100/80'
                       onClick={() => handleCopyPrompt(record)}
                       title={record.prompt || t('未命名提示词')}
                     >
-                      <span className='block max-w-full overflow-hidden text-ellipsis break-all line-clamp-2'>
+                      <span className='block h-10 max-w-full overflow-hidden text-ellipsis break-all line-clamp-2'>
                         {record.prompt || t('未命名提示词')}
                       </span>
                     </button>
