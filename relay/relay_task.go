@@ -109,7 +109,8 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 	if info.Action == constant.TaskActionRemix {
 		if originTask.PrivateData.BillingContext != nil {
 			// 新的 remix 逻辑：直接从原始任务的 BillingContext 中提取 OtherRatios（如果存在）
-			for s, f := range originTask.PrivateData.BillingContext.OtherRatios {
+			ratios := taskcommon.SanitizeBillingRatiosForRequestPath(c.Request.URL.Path, originTask.PrivateData.BillingContext.OtherRatios)
+			for s, f := range ratios {
 				info.PriceData.AddOtherRatio(s, f)
 			}
 		} else {
@@ -130,6 +131,7 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 			if sizeStr == "1792x1024" || sizeStr == "1024x1792" {
 				info.PriceData.OtherRatios["size"] = 1.666667
 			}
+			info.PriceData.OtherRatios = taskcommon.SanitizeBillingRatiosForRequestPath(c.Request.URL.Path, info.PriceData.OtherRatios)
 		}
 	}
 
@@ -188,10 +190,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	//    必须在 ModelPriceHelperPerCall 之后调用（它会重建 PriceData）。
 	//    ResolveOriginTask 可能已在 remix 路径中预设了 OtherRatios，此处合并。
 	if estimatedRatios := adaptor.EstimateBilling(c, info); len(estimatedRatios) > 0 {
-		for k, v := range estimatedRatios {
+		for k, v := range taskcommon.SanitizeBillingRatiosForRequestPath(c.Request.URL.Path, estimatedRatios) {
 			info.PriceData.AddOtherRatio(k, v)
 		}
 	}
+	info.PriceData.OtherRatios = taskcommon.SanitizeBillingRatiosForRequestPath(c.Request.URL.Path, info.PriceData.OtherRatios)
 
 	// 6. 将 OtherRatios 应用到基础额度
 	if !common.StringsContains(constant.TaskPricePatches, modelName) {
@@ -243,6 +246,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// 11. 提交后计费调整：让适配器根据上游实际返回调整 OtherRatios
 	finalQuota := info.PriceData.Quota
 	if adjustedRatios := adaptor.AdjustBillingOnSubmit(info, taskData); len(adjustedRatios) > 0 {
+		adjustedRatios = taskcommon.SanitizeBillingRatiosForRequestPath(c.Request.URL.Path, adjustedRatios)
 		// 基于调整后的 ratios 重新计算 quota
 		finalQuota = recalcQuotaFromRatios(info, adjustedRatios)
 		info.PriceData.OtherRatios = adjustedRatios

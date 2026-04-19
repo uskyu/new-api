@@ -3,6 +3,7 @@ package taskcommon
 import (
 	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -64,6 +65,30 @@ func DecodeLocalTaskID(id string) (string, error) {
 // e.g., "https://your-server.com/v1/videos/task_xxxx/content"
 func BuildProxyURL(taskID string) string {
 	return fmt.Sprintf("%s/v1/videos/%s/content", system_setting.ServerAddress, taskID)
+}
+
+func IsOpenAIVideoAPIPath(path string) bool {
+	return path == "/v1/videos" || strings.HasPrefix(path, "/v1/videos/")
+}
+
+// SanitizeBillingRatiosForRequestPath strips multipliers that should not affect
+// billing for a given API surface.
+func SanitizeBillingRatiosForRequestPath(path string, ratios map[string]float64) map[string]float64 {
+	if len(ratios) == 0 || !IsOpenAIVideoAPIPath(path) {
+		return ratios
+	}
+
+	sanitized := make(map[string]float64, len(ratios))
+	for key, ratio := range ratios {
+		if key == "seconds" {
+			continue
+		}
+		sanitized[key] = ratio
+	}
+	if len(sanitized) == 0 {
+		return nil
+	}
+	return sanitized
 }
 
 // Status-to-progress mapping constants for polling updates.
