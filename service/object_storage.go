@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"path"
 	"strings"
@@ -46,6 +47,20 @@ func BuildAIImageObjectKey(userID int, ext string) string {
 	return path.Join(prefix, fmt.Sprintf("%d", userID), now.Format("2006"), now.Format("01"), fmt.Sprintf("%s.%s", strings.ReplaceAll(strings.ReplaceAll(now.Format(time.RFC3339Nano), ":", ""), ".", ""), ext))
 }
 
+func BuildAIImageRefObjectKey(userID int, ext string) string {
+	setting := operation_setting.GetAIImageAsyncSetting()
+	prefix := strings.Trim(setting.S3PathPrefix, "/")
+	if prefix == "" {
+		prefix = "ai-image"
+	}
+	refPrefix := prefix + "-ref"
+	if ext == "" {
+		ext = "png"
+	}
+	now := time.Now().UTC()
+	return path.Join(refPrefix, fmt.Sprintf("%d", userID), now.Format("2006"), now.Format("01"), fmt.Sprintf("%s.%s", strings.ReplaceAll(strings.ReplaceAll(now.Format(time.RFC3339Nano), ":", ""), ".", ""), ext))
+}
+
 func UploadBytesToObjectStorage(ctx context.Context, objectKey string, contentType string, data []byte) (string, string, error) {
 	client, err := NewObjectStorageClient()
 	if err != nil {
@@ -72,6 +87,29 @@ func DeleteObjectFromStorage(ctx context.Context, objectKey string) error {
 	}
 	setting := operation_setting.GetAIImageAsyncSetting()
 	return client.RemoveObject(ctx, setting.S3Bucket, objectKey, minio.RemoveObjectOptions{})
+}
+
+func DownloadObjectFromStorage(ctx context.Context, objectKey string) ([]byte, string, error) {
+	client, err := NewObjectStorageClient()
+	if err != nil {
+		return nil, "", err
+	}
+	setting := operation_setting.GetAIImageAsyncSetting()
+	obj, err := client.GetObject(ctx, setting.S3Bucket, objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, "", err
+	}
+	defer obj.Close()
+	data, err := io.ReadAll(obj)
+	if err != nil {
+		return nil, "", err
+	}
+	contentType := "image/png"
+	objInfo, err := client.StatObject(ctx, setting.S3Bucket, objectKey, minio.StatObjectOptions{})
+	if err == nil && objInfo.ContentType != "" {
+		contentType = objInfo.ContentType
+	}
+	return data, contentType, nil
 }
 
 func GenerateObjectStorageAccessURL(ctx context.Context, objectKey string) (string, error) {

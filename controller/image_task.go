@@ -6,8 +6,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -107,6 +110,14 @@ func CreateImageTask(c *gin.Context) {
 		Prompt:    req.Prompt,
 		Status:    model.ImageTaskStatusPending,
 		ChannelID: channel.Id,
+	}
+	if strings.TrimSpace(req.ReferenceImage) != "" {
+		refKey, err := uploadReferenceImage(context.Background(), userID, req.ReferenceImage)
+		if err != nil {
+			common.ApiError(c, fmt.Errorf("upload reference image failed: %w", err))
+			return
+		}
+		task.ReferenceImageKey = refKey
 	}
 	if err := model.CreateImageTask(task); err != nil {
 		common.ApiError(c, err)
@@ -238,6 +249,9 @@ func DeleteUserImageTask(c *gin.Context) {
 	if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") && service.IsObjectStorageEnabled() {
 		_ = service.DeleteObjectFromStorage(context.Background(), task.ResultKey)
 	}
+	if task.ReferenceImageKey != "" && !strings.Contains(task.ReferenceImageKey, "://") && service.IsObjectStorageEnabled() {
+		_ = service.DeleteObjectFromStorage(context.Background(), task.ReferenceImageKey)
+	}
 	common.ApiSuccess(c, nil)
 }
 
@@ -323,7 +337,13 @@ func processImageTaskBatch(concurrency int) {
 }
 
 func processOneImageTask(task *model.ImageTask) {
-	resultURL, resultKey, err := executeImageGenerationTask(task)
+	var resultURL, resultKey string
+	var err error
+	if task.ReferenceImageKey != "" {
+		resultURL, resultKey, err = executeImageEditTask(task)
+	} else {
+		resultURL, resultKey, err = executeImageGenerationTask(task)
+	}
 	finishedAt := time.Now().Unix()
 	if err != nil {
 		_ = model.UpdateImageTaskFields(task.TaskID, map[string]any{
@@ -331,15 +351,23 @@ func processOneImageTask(task *model.ImageTask) {
 			"error_message": err.Error(),
 			"finished_at":   finishedAt,
 		})
+		cleanupReferenceImage(task)
 		return
 	}
 	_ = model.UpdateImageTaskFields(task.TaskID, map[string]any{
-		"status":      model.ImageTaskStatusSucceeded,
-		"result_url":  resultURL,
-		"result_key":  resultKey,
+		"status":        model.ImageTaskStatusSucceeded,
+		"result_url":    resultURL,
+		"result_key":    resultKey,
 		"error_message": "",
-		"finished_at": finishedAt,
+		"finished_at":   finishedAt,
 	})
+	cleanupReferenceImage(task)
+}
+
+func cleanupReferenceImage(task *model.ImageTask) {
+	if task.ReferenceImageKey != "" && service.IsObjectStorageEnabled() {
+		_ = service.DeleteObjectFromStorage(context.Background(), task.ReferenceImageKey)
+	}
 }
 
 func executeImageGenerationTask(task *model.ImageTask) (string, string, error) {
@@ -474,6 +502,151 @@ func uploadImageResult(ctx context.Context, userID int, imageData dto.ImageData)
 	return "", objectKey, nil
 }
 
+func uploadReferenceImage(ctx context.Context, userID int, refImageBase64 string) (string, error) {
+	mimeType, base64Data, err := service.DecodeBase64FileData(refImageBase64)
+	if err != nil {
+		mimeType = "image/png"
+		base64Data = refImageBase64
+	}
+	decoded, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return "", fmt.Errorf("invalid base64 reference image: %w", err)
+	}
+	ext := strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(mimeType, "image/")), ".")
+	key := service.BuildAIImageRefObjectKey(userID, ext)
+	objectKey, _, err := service.UploadBytesToObjectStorage(ctx, key, mimeType, decoded)
+	if err != nil {
+		return "", err
+	}
+	return objectKey, nil
+}
+
+func executeImageEditTask(task *model.ImageTask) (string, string, error) {
+	channel, err := model.GetChannelById(task.ChannelID, true)
+	if err != nil {
+		return "", "", err
+	}
+	userCache, err := model.GetUserCache(task.UserID)
+	if err != nil {
+		return "", "", err
+	}
+
+	ctx := context.Background()
+	refData, _, err := service.DownloadObjectFromStorage(ctx, task.ReferenceImageKey)
+	if err != nil {
+		return "", "", fmt.Errorf("download reference image from S3 failed: %w", err)
+	}
+
+	var requestBody bytes.Buffer
+	writer := multipart.NewWriter(&requestBody)
+	writer.WriteField("model", task.Model)
+	writer.WriteField("prompt", task.Prompt)
+	writer.WriteField("n", "1")
+	if task.Size != "" {
+		writer.WriteField("size", task.Size)
+	}
+
+	ext := "png"
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image"; filename="image.%s"`, ext))
+	h.Set("Content-Type", "image/png")
+	part, err := writer.CreatePart(h)
+	if err != nil {
+		return "", "", fmt.Errorf("create multipart part failed: %w", err)
+	}
+	if _, err := part.Write(refData); err != nil {
+		return "", "", fmt.Errorf("write reference image to multipart failed: %w", err)
+	}
+	writer.Close()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	req := httptest.NewRequest("POST", "/v1/images/edits", &requestBody)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.Request = req
+
+	c.Set("id", task.UserID)
+	common.SetContextKey(c, constant.ContextKeyUserId, task.UserID)
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, task.Group)
+	userCache.WriteContext(c)
+	if err := setupImageTaskChannelContext(c, channel, task.Model); err != nil {
+		return "", "", err
+	}
+
+	reqSize := task.Size
+	if reqSize == "" {
+		reqSize = "1024x1024"
+	}
+	reqBody := dto.ImageRequest{Model: task.Model, Prompt: task.Prompt, N: lo.ToPtr(uint(1)), Size: reqSize}
+	info, err := relaycommon.GenRelayInfo(c, types.RelayFormatOpenAIImage, &reqBody, nil)
+	if err != nil {
+		return "", "", err
+	}
+	info.RelayMode = relayconstant.RelayModeImagesEdits
+	info.InitChannelMeta(c)
+	if err := helper.ModelMappedHelper(c, info, &reqBody); err != nil {
+		return "", "", err
+	}
+	reqBody.SetModelName(info.UpstreamModelName)
+	if _, err := helper.ModelPriceHelper(c, info, 0, reqBody.GetTokenCountMeta()); err != nil {
+		return "", "", err
+	}
+
+	apiType, _ := common.ChannelType2APIType(channel.Type)
+	adaptor := relay.GetAdaptor(apiType)
+	if adaptor == nil {
+		return "", "", fmt.Errorf("invalid api type: %d", apiType)
+	}
+	adaptor.Init(info)
+
+	convertedRequest, err := adaptor.ConvertImageRequest(c, info, reqBody)
+	if err != nil {
+		return "", "", err
+	}
+
+	var convertedBody io.Reader
+	switch v := convertedRequest.(type) {
+	case *bytes.Buffer:
+		convertedBody = v
+	default:
+		jsonData, err := common.Marshal(convertedRequest)
+		if err != nil {
+			return "", "", err
+		}
+		convertedBody = bytes.NewBuffer(jsonData)
+	}
+
+	respAny, err := adaptor.DoRequest(c, info, convertedBody)
+	if err != nil {
+		return "", "", err
+	}
+	resp := respAny.(*http.Response)
+	defer service.CloseResponseBodyGracefully(resp)
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", "", fmt.Errorf("upstream returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", err
+	}
+	var imageResp dto.ImageResponse
+	if err := common.Unmarshal(body, &imageResp); err != nil {
+		return "", "", err
+	}
+	if len(imageResp.Data) == 0 {
+		return "", "", fmt.Errorf("no image returned from upstream")
+	}
+	first := imageResp.Data[0]
+	if service.IsObjectStorageEnabled() {
+		return uploadImageResult(ctx, task.UserID, first)
+	}
+	if first.Url != "" {
+		return first.Url, "", nil
+	}
+	return uploadImageResult(ctx, task.UserID, first)
+}
+
 func buildImageTaskChannelContext(c *gin.Context, userCache *model.UserBase, usingGroup, modelName string) (*model.Channel, string, error) {
 	common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
 	service.EnsureRequestedGroup(c, usingGroup)
@@ -545,6 +718,9 @@ func cleanExpiredTasksAndS3Objects(cutoff int64) {
 	for _, task := range tasks {
 		if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") {
 			_ = service.DeleteObjectFromStorage(ctx, task.ResultKey)
+		}
+		if task.ReferenceImageKey != "" && !strings.Contains(task.ReferenceImageKey, "://") {
+			_ = service.DeleteObjectFromStorage(ctx, task.ReferenceImageKey)
 		}
 		ids = append(ids, task.ID)
 	}

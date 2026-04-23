@@ -17,23 +17,24 @@ const (
 )
 
 type ImageTask struct {
-	ID           int64           `json:"id" gorm:"primaryKey;autoIncrement"`
-	TaskID       string          `json:"task_id" gorm:"type:varchar(191);uniqueIndex"`
-	UserID       int             `json:"user_id" gorm:"index"`
-	Username     string          `json:"username,omitempty" gorm:"-"`
-	Group        string          `json:"group" gorm:"type:varchar(64);index"`
-	Model        string          `json:"model" gorm:"type:varchar(191);index"`
-	Size         string          `json:"size" gorm:"type:varchar(32)"`
-	Prompt       string          `json:"prompt" gorm:"type:text"`
-	Status       ImageTaskStatus `json:"status" gorm:"type:varchar(20);index"`
-	ChannelID    int             `json:"channel_id" gorm:"index"`
-	ResultURL    string          `json:"result_url" gorm:"type:text"`
-	ResultKey    string          `json:"result_key" gorm:"type:text"`
-	ErrorMessage string          `json:"error_message" gorm:"type:text"`
-	StartedAt    int64           `json:"started_at" gorm:"index"`
-	FinishedAt   int64           `json:"finished_at" gorm:"index"`
-	CreatedAt    int64           `json:"created_at" gorm:"index"`
-	UpdatedAt    int64           `json:"updated_at"`
+	ID                  int64           `json:"id" gorm:"primaryKey;autoIncrement"`
+	TaskID              string          `json:"task_id" gorm:"type:varchar(191);uniqueIndex"`
+	UserID              int             `json:"user_id" gorm:"index"`
+	Username            string          `json:"username,omitempty" gorm:"-"`
+	Group               string          `json:"group" gorm:"type:varchar(64);index"`
+	Model               string          `json:"model" gorm:"type:varchar(191);index"`
+	Size                string          `json:"size" gorm:"type:varchar(32)"`
+	Prompt              string          `json:"prompt" gorm:"type:text"`
+	Status              ImageTaskStatus `json:"status" gorm:"type:varchar(20);index"`
+	ChannelID           int             `json:"channel_id" gorm:"index"`
+	ResultURL           string          `json:"result_url" gorm:"type:text"`
+	ResultKey           string          `json:"result_key" gorm:"type:text"`
+	ReferenceImageKey   string          `json:"reference_image_key" gorm:"type:text"`
+	ErrorMessage        string          `json:"error_message" gorm:"type:text"`
+	StartedAt           int64           `json:"started_at" gorm:"index"`
+	FinishedAt          int64           `json:"finished_at" gorm:"index"`
+	CreatedAt           int64           `json:"created_at" gorm:"index"`
+	UpdatedAt           int64           `json:"updated_at"`
 }
 
 func (t *ImageTask) BeforeCreate(tx any) error {

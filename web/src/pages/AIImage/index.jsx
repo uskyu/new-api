@@ -642,6 +642,21 @@ const AIImage = () => {
       if (!effectiveModel) {
         throw new Error('image model is required');
       }
+      let referenceImage = '';
+      if (draftImages.length > 0) {
+        const dataUrls = await Promise.all(
+          draftImages.filter(Boolean).map(async (image) => {
+            if (typeof image?.sourceDataUrl === 'string' && image.sourceDataUrl.startsWith('data:image/')) {
+              return image.sourceDataUrl;
+            }
+            if (image?.file) {
+              return readFileAsDataUrl(image.file);
+            }
+            return '';
+          }),
+        );
+        referenceImage = dataUrls.filter(Boolean)[0] || '';
+      }
       const response = await fetch('/api/ai-image/tasks', {
         method: 'POST',
         headers: {
@@ -655,6 +670,7 @@ const AIImage = () => {
           group: selectedGroup,
           size: getOpenAIImageSize(aspectRatio),
           n: 1,
+          reference_image: referenceImage,
         }),
       });
       if (!response.ok) {
@@ -667,7 +683,7 @@ const AIImage = () => {
       }
       return result.data;
     },
-    [aspectRatio, modelOptions, selectedGroup],
+    [aspectRatio, draftImages, modelOptions, selectedGroup],
   );
 
   const requestOneImage = React.useCallback(
