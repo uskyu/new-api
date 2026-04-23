@@ -1347,12 +1347,16 @@ const AIImage = () => {
                 <TextArea
                   value={prompt}
                   onChange={(value) => {
-                    setPrompt(value);
+                    if (value.length <= 500) {
+                      setPrompt(value);
+                    }
                     if (optimizedPromptDraft) {
                       setOptimizedPromptDraft('');
                       setOriginalPrompt('');
                     }
                   }}
+                  maxLength={500}
+                  showClear
                   autosize={{ minRows: 7, maxRows: 14 }}
                   placeholder={t('描述你想生成的图片；批量生成时可一行一个提示词')}
                   className='!bg-transparent'
