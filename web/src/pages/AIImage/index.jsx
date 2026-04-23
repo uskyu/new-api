@@ -187,6 +187,25 @@ const toGeminiInlinePart = (dataUrl) => {
   };
 };
 
+const isOpenAIImageModel = (modelName) => {
+  const lower = String(modelName || '').toLowerCase();
+  return lower.includes('gpt-image') || lower.includes('dall-e');
+};
+
+const getOpenAIImageSize = (aspectRatio) => {
+  switch (aspectRatio) {
+    case '9:16':
+      return '1024x1536';
+    case '16:9':
+    case '3:2':
+    case '4:3':
+      return '1536x1024';
+    case '1:1':
+    default:
+      return '1024x1024';
+  }
+};
+
 const buildGeminiNativeImagePayload = ({
   prompt,
   imageUrls,
@@ -224,6 +243,17 @@ const parseImageResponse = async (response) => {
     : [];
 
   const imageUrls = [
+    ...((Array.isArray(data?.data)
+      ? data.data.flatMap((item) => {
+          if (item?.url) {
+            return [normalizeImageSource(item.url)];
+          }
+          if (typeof item?.b64_json === 'string' && item.b64_json.trim()) {
+            return [normalizeImageSource(item.b64_json, 'image/png')];
+          }
+          return [];
+        })
+      : [])),
     ...extractImageUrlsFromMarkdown(typeof content === 'string' ? content : ''),
     ...extractImageUrlsFromParts(contentParts),
     ...extractImageUrlsFromParts(messageParts),
@@ -245,6 +275,66 @@ const postJsonPayload = async (payload) => {
       'New-Api-User': getUserIdFromLocalStorage(),
     },
     body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    let errorBody = '';
+    try {
+      errorBody = await response.text();
+    } catch {
+      errorBody = '';
+    }
+    throw new Error(`HTTP error! status: ${response.status}, body: ${errorBody}`);
+  }
+
+  return response;
+};
+
+const postOpenAIImagePayload = async (payload, selectedGroup) => {
+  const query = selectedGroup
+    ? `?group=${encodeURIComponent(selectedGroup)}`
+    : '';
+  const response = await fetch(`${API_ENDPOINTS.IMAGE_GENERATIONS}${query}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'New-Api-User': getUserIdFromLocalStorage(),
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    let errorBody = '';
+    try {
+      errorBody = await response.text();
+    } catch {
+      errorBody = '';
+    }
+    throw new Error(`HTTP error! status: ${response.status}, body: ${errorBody}`);
+  }
+
+  return response;
+};
+
+const postOpenAIImageEditPayload = async ({ model, prompt, images, selectedGroup }) => {
+  const query = selectedGroup
+    ? `?group=${encodeURIComponent(selectedGroup)}`
+    : '';
+  const formData = new FormData();
+  formData.append('model', model);
+  formData.append('prompt', prompt);
+  formData.append('n', '1');
+
+  images.filter((image) => image?.file).forEach((image, index) => {
+    formData.append(index === 0 ? 'image' : 'image[]', image.file, image.name || image.file.name);
+  });
+
+  const response = await fetch(`${API_ENDPOINTS.IMAGE_EDITS}${query}`, {
+    method: 'POST',
+    headers: {
+      'New-Api-User': getUserIdFromLocalStorage(),
+    },
+    body: formData,
   });
 
   if (!response.ok) {
@@ -462,6 +552,26 @@ const AIImage = () => {
         throw new Error('image model is required');
       }
 
+      if (isOpenAIImageModel(effectiveModel)) {
+        const response = draftImages.length > 0
+          ? await postOpenAIImageEditPayload({
+              model: effectiveModel,
+              prompt: itemPrompt,
+              images: draftImages,
+              selectedGroup,
+            })
+          : await postOpenAIImagePayload(
+              {
+                model: effectiveModel,
+                prompt: itemPrompt,
+                size: getOpenAIImageSize(aspectRatio),
+                n: 1,
+              },
+              selectedGroup,
+            );
+        return parseImageResponse(response);
+      }
+
       const imageUrls = await serializeDraftImagesForRequest();
       const payload = buildGeminiNativeImagePayload({
         prompt: itemPrompt,
@@ -500,7 +610,7 @@ const AIImage = () => {
 
       return parseImageResponse(response);
     },
-    [aspectRatio, modelOptions, resolution, selectedGroup, serializeDraftImagesForRequest],
+    [aspectRatio, draftImages, modelOptions, resolution, selectedGroup, serializeDraftImagesForRequest],
   );
 
   const appendGeneration = React.useCallback(
@@ -889,7 +999,7 @@ const AIImage = () => {
 
                 <label className='flex flex-col gap-2'>
                   <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
-                    {t('Google 图片模型')}
+                      {t('绘图模型')}
                   </span>
                   <select
                     value={selectedModel}

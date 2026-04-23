@@ -5,7 +5,7 @@ const STORE_MESSAGES = 'messages';
 
 const LOCAL_STORAGE_SESSION_KEY = 'ai_image_current_session';
 const LOCAL_STORAGE_PREFS_KEY = 'ai_image_prefs';
-const DEFAULT_MODEL = '';
+const DEFAULT_MODEL = 'gpt-image-2';
 
 const sanitizeImageUrl = (value) => {
   if (typeof value !== 'string') return value;

@@ -24,16 +24,24 @@ const sortModelNames = (models) =>
   [...models].sort((left, right) => {
     const leftLower = left.toLowerCase();
     const rightLower = right.toLowerCase();
-    const leftScore = leftLower.includes('gemini')
-      ? 0
-      : leftLower.includes('imagen')
-        ? 1
-        : 2;
-    const rightScore = rightLower.includes('gemini')
-      ? 0
-      : rightLower.includes('imagen')
-        ? 1
-        : 2;
+    const leftScore = leftLower === 'gpt-image-2'
+      ? -1
+      : leftLower.includes('gpt-image') || leftLower.includes('dall-e')
+        ? 0
+        : leftLower.includes('gemini')
+          ? 1
+          : leftLower.includes('imagen')
+            ? 2
+            : 3;
+    const rightScore = rightLower === 'gpt-image-2'
+      ? -1
+      : rightLower.includes('gpt-image') || rightLower.includes('dall-e')
+        ? 0
+        : rightLower.includes('gemini')
+          ? 1
+          : rightLower.includes('imagen')
+            ? 2
+            : 3;
 
     if (leftScore !== rightScore) {
       return leftScore - rightScore;
@@ -41,12 +49,20 @@ const sortModelNames = (models) =>
     return left.localeCompare(right);
   });
 
-const isGoogleImageModel = (modelName, pricingMeta = {}) => {
+const isAiImageModel = (modelName, pricingMeta = {}) => {
   const lowerModel = modelName.toLowerCase();
   const vendorName = `${pricingMeta?.vendor_name || pricingMeta?.owner_by || ''}`.toLowerCase();
   const supportedEndpointTypes = Array.isArray(pricingMeta?.supported_endpoint_types)
     ? pricingMeta.supported_endpoint_types
     : [];
+
+  if (
+    lowerModel.includes('gpt-image') ||
+    lowerModel.includes('dall-e') ||
+    supportedEndpointTypes.includes('image-generation')
+  ) {
+    return true;
+  }
 
   const hasGoogleVendor =
     vendorName.includes('google') || vendorName.includes('gemini');
@@ -268,7 +284,7 @@ export default function useAiImageState() {
 
       const allModelOptions = buildModelOptions(userModels, pricingModels);
       const nextImageModels = allModelOptions.filter((model) =>
-        isGoogleImageModel(model.value, {
+        isAiImageModel(model.value, {
           vendor_name: model.vendorName,
           owner_by: model.ownerBy,
           supported_endpoint_types: model.supportedEndpointTypes,

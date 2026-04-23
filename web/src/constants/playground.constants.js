@@ -76,6 +76,8 @@ export const DEBUG_TABS = {
 // ========== API 相关常量 ==========
 export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
+  IMAGE_GENERATIONS: '/pg/v1/images/generations',
+  IMAGE_EDITS: '/pg/v1/images/edits',
   GEMINI_NATIVE_MODELS: '/pg/v1beta/models',
   USER_MODELS: '/api/user/models',
   USER_GROUPS: '/api/user/self/groups',
