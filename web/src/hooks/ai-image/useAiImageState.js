@@ -201,6 +201,11 @@ export default function useAiImageState() {
   const initializedRef = useRef(false);
   const suppressNextPersistRef = useRef(false);
   const activityRef = useRef(false);
+  const messagesRef = useRef(messages);
+  const currentSessionRef = useRef(null);
+  const currentSessionIdRef = useRef(currentSessionId);
+  const selectedModelRef = useRef(selectedModel);
+  const selectedGroupRef = useRef(selectedGroup);
 
   const currentSession = useMemo(
     () => sessions.find((session) => session.id === currentSessionId) || null,
@@ -230,6 +235,26 @@ export default function useAiImageState() {
       return model.enableGroups.includes(selectedGroup);
     });
   }, [selectedGroup, textModels]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    currentSessionRef.current = currentSession;
+  }, [currentSession]);
+
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
+
+  useEffect(() => {
+    selectedModelRef.current = selectedModel;
+  }, [selectedModel]);
+
+  useEffect(() => {
+    selectedGroupRef.current = selectedGroup;
+  }, [selectedGroup]);
 
   const refreshSessions = useCallback(async () => {
     const loaded = await loadAllSessions();
@@ -310,6 +335,45 @@ export default function useAiImageState() {
     const loadedMessages = await loadSessionMessages(sessionId);
     setMessages(loadedMessages);
     setDraftImages([]);
+  }, []);
+
+  const persistSnapshot = useCallback(async () => {
+    const sessionId = currentSessionIdRef.current;
+    if (!sessionId) {
+      return;
+    }
+
+    const session = currentSessionRef.current;
+    const nextMessages = messagesRef.current || [];
+    const nextSelectedModel = selectedModelRef.current || '';
+    const nextSelectedGroup = selectedGroupRef.current || '';
+
+    const derivedTitle =
+      session?.customTitle && session?.title
+        ? session.title
+        : getSessionTitle(nextMessages);
+
+    const nextSession = {
+      ...(session ||
+        createSessionRecord({
+          title: DEFAULT_SESSION_TITLE,
+          model: nextSelectedModel,
+          group: nextSelectedGroup,
+        })),
+      id: sessionId,
+      model: nextSelectedModel,
+      group: nextSelectedGroup,
+      title: derivedTitle,
+      updatedAt: activityRef.current
+        ? Date.now()
+        : session?.updatedAt || Date.now(),
+      lastMessagePreview: getPreviewText(nextMessages),
+    };
+
+    await putSession(nextSession);
+    await replaceSessionMessages(sessionId, nextMessages);
+    setSessions((previous) => upsertSession(previous, nextSession));
+    activityRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -396,48 +460,42 @@ export default function useAiImageState() {
       return;
     }
 
-    const persist = async () => {
-      const derivedTitle =
-        currentSession?.customTitle && currentSession?.title
-          ? currentSession.title
-          : getSessionTitle(messages);
-
-      const nextSession = {
-        ...(currentSession ||
-          createSessionRecord({
-            title: DEFAULT_SESSION_TITLE,
-            model: selectedModel,
-            group: selectedGroup,
-          })),
-        id: currentSessionId,
-        model: selectedModel,
-        group: selectedGroup,
-        title: derivedTitle,
-        updatedAt: activityRef.current
-          ? Date.now()
-          : currentSession?.updatedAt || Date.now(),
-        lastMessagePreview: getPreviewText(messages),
-      };
-
-      await putSession(nextSession);
-      await replaceSessionMessages(currentSessionId, messages);
-      setSessions((previous) => upsertSession(previous, nextSession));
-      activityRef.current = false;
-    };
-
     const timeoutId = setTimeout(() => {
-      persist().catch(() => {});
+      persistSnapshot().catch(() => {});
     }, 120);
 
     return () => clearTimeout(timeoutId);
   }, [
-    currentSession,
-    currentSessionId,
     messages,
+    persistSnapshot,
     ready,
-    selectedGroup,
-    selectedModel,
   ]);
+
+  useEffect(() => {
+    if (!ready) {
+      return undefined;
+    }
+
+    const flushPersist = () => {
+      persistSnapshot().catch(() => {});
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushPersist();
+      }
+    };
+
+    window.addEventListener('pagehide', flushPersist);
+    window.addEventListener('beforeunload', flushPersist);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('pagehide', flushPersist);
+      window.removeEventListener('beforeunload', flushPersist);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [persistSnapshot, ready]);
 
   const createSession = useCallback(async () => {
     const nextSession = createSessionRecord({

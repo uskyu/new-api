@@ -6,6 +6,8 @@ const STORE_MESSAGES = 'messages';
 const LOCAL_STORAGE_SESSION_KEY = 'ai_image_current_session';
 const LOCAL_STORAGE_PREFS_KEY = 'ai_image_prefs';
 const DEFAULT_MODEL = 'gpt-image-2';
+export const MAX_HISTORY_RECORDS = 30;
+const MAX_HISTORY_MESSAGES = MAX_HISTORY_RECORDS * 2;
 
 const sanitizeImageUrl = (value) => {
   if (typeof value !== 'string') return value;
@@ -163,7 +165,7 @@ export async function loadSessionMessages(sessionId) {
     return ensureRequestSuccess(request);
   });
 
-  return messages.sort((left, right) => {
+  const sortedMessages = messages.sort((left, right) => {
     const leftOrder = Number.isInteger(left.sortIndex) ? left.sortIndex : 0;
     const rightOrder = Number.isInteger(right.sortIndex) ? right.sortIndex : 0;
     if (leftOrder !== rightOrder) {
@@ -171,9 +173,13 @@ export async function loadSessionMessages(sessionId) {
     }
     return left.createAt - right.createAt;
   });
+
+  return sortedMessages.slice(-MAX_HISTORY_MESSAGES);
 }
 
 export async function replaceSessionMessages(sessionId, messages) {
+  const recentMessages = messages.slice(-MAX_HISTORY_MESSAGES);
+
   await withDatabase(async (db) => {
     const clearTx = db.transaction(STORE_MESSAGES, 'readwrite');
     const clearStore = clearTx.objectStore(STORE_MESSAGES);
@@ -195,7 +201,7 @@ export async function replaceSessionMessages(sessionId, messages) {
     const writeTx = db.transaction(STORE_MESSAGES, 'readwrite');
     const writeStore = writeTx.objectStore(STORE_MESSAGES);
 
-    messages.forEach((message, index) => {
+    recentMessages.forEach((message, index) => {
       writeStore.put({ ...sanitizeMessageForStorage(message), sessionId, sortIndex: index });
     });
 

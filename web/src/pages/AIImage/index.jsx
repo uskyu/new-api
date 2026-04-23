@@ -4,6 +4,7 @@ import { Check, ImagePlus, Loader2, Sparkles, Wand2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import useAiImageState from '../../hooks/ai-image/useAiImageState';
 import { API_ENDPOINTS, MESSAGE_ROLES } from '../../constants/playground.constants';
+import { MAX_HISTORY_RECORDS } from '../../utils/aiImageStorage';
 import {
   buildApiPayload,
   copy,
@@ -111,6 +112,8 @@ const extractGenerationRecord = (userMessage, assistantMessage) => {
     createdAt: assistantMessage?.createAt || Date.now(),
   };
 };
+
+const trimMessagesToHistoryLimit = (messages = []) => messages.slice(-(MAX_HISTORY_RECORDS * 2));
 
 const createImageAssistantMessage = (imageUrls, prompt) => ({
   role: MESSAGE_ROLES.ASSISTANT,
@@ -622,7 +625,7 @@ const AIImage = () => {
 
       if (createdMessages.length === 0) return;
       markSessionActivity();
-      setMessages((previous) => [...previous, ...createdMessages]);
+      setMessages((previous) => trimMessagesToHistoryLimit([...previous, ...createdMessages]));
       const lastAssistant = [...createdMessages]
         .reverse()
         .find((message) => message.role === MESSAGE_ROLES.ASSISTANT);
@@ -644,7 +647,9 @@ const AIImage = () => {
       );
 
       markSessionActivity();
-      setMessages((previous) => [...previous, userMessage, assistantMessage]);
+      setMessages((previous) =>
+        trimMessagesToHistoryLimit([...previous, userMessage, assistantMessage]),
+      );
       setActiveRecordId(assistantMessage.id);
       setActiveImageIndex(0);
     },
