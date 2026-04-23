@@ -167,7 +167,7 @@ func GetImageTaskStats(c *gin.Context) {
 func TestS3Connection(c *gin.Context) {
 	setting := operation_setting.GetAIImageAsyncSetting()
 	if !setting.S3Enabled || setting.S3Endpoint == "" || setting.S3Bucket == "" || setting.S3AccessKey == "" || setting.S3SecretKey == "" {
-		common.ApiErrorMsg(c, "S3 configuration is incomplete")
+		common.ApiErrorMsg(c, "S3 configuration is incomplete, please save config first")
 		return
 	}
 	client, err := service.NewObjectStorageClient()
@@ -175,17 +175,8 @@ func TestS3Connection(c *gin.Context) {
 		common.ApiError(c, fmt.Errorf("create S3 client failed: %w", err))
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	ok, err := client.BucketExists(ctx, setting.S3Bucket)
-	if err != nil {
-		common.ApiError(c, fmt.Errorf("connect to S3 failed: %w", err))
-		return
-	}
-	if !ok {
-		common.ApiErrorMsg(c, fmt.Sprintf("bucket %s does not exist", setting.S3Bucket))
-		return
-	}
 	testKey := "_healthcheck_" + time.Now().Format("20060102150405") + ".txt"
 	testData := []byte("new-api s3 connectivity test")
 	_, err = client.PutObject(ctx, setting.S3Bucket, testKey, bytes.NewReader(testData), int64(len(testData)), minio.PutObjectOptions{ContentType: "text/plain"})
@@ -351,7 +342,11 @@ func uploadImageResult(ctx context.Context, userID int, imageData dto.ImageData)
 		}
 		ext := strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(mimeType, "image/")), ".")
 		key := service.BuildAIImageObjectKey(userID, ext)
-		return service.UploadBytesToObjectStorage(ctx, key, mimeType, decoded)
+		objectKey, _, err := service.UploadBytesToObjectStorage(ctx, key, mimeType, decoded)
+		if err != nil {
+			return "", "", err
+		}
+		return "", objectKey, nil
 	}
 	if strings.TrimSpace(imageData.Url) == "" {
 		return "", "", fmt.Errorf("empty image url")
@@ -366,7 +361,11 @@ func uploadImageResult(ctx context.Context, userID int, imageData dto.ImageData)
 	}
 	ext := strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(mimeType, "image/")), ".")
 	key := service.BuildAIImageObjectKey(userID, ext)
-	return service.UploadBytesToObjectStorage(ctx, key, mimeType, decoded)
+	objectKey, _, err := service.UploadBytesToObjectStorage(ctx, key, mimeType, decoded)
+	if err != nil {
+		return "", "", err
+	}
+	return "", objectKey, nil
 }
 
 func buildImageTaskChannelContext(c *gin.Context, userCache *model.UserBase, usingGroup, modelName string) (*model.Channel, string, error) {
@@ -454,7 +453,7 @@ func toImageTaskDTO(task *model.ImageTask, fillUser bool) *dto.ImageTaskDTO {
 			result.Username = user.Username
 		}
 	}
-	if task.ResultKey != "" && service.IsObjectStorageEnabled() {
+	if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") && service.IsObjectStorageEnabled() {
 		if signedURL, err := service.GenerateObjectStorageAccessURL(context.Background(), task.ResultKey); err == nil {
 			result.ResultURL = signedURL
 		}
