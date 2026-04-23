@@ -244,7 +244,7 @@ const AIImageLogs = () => {
               <span>Worker 并发</span>
               <InputNumber
                 min={1}
-                max={10}
+                max={50}
                 value={config.workerConcurrency}
                 onChange={(value) =>
                   setConfig((previous) => ({
