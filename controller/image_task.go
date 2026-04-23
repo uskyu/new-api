@@ -25,6 +25,7 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
+	"github.com/minio/minio-go/v7"
 	"github.com/samber/lo"
 )
 
@@ -45,6 +46,16 @@ func StartImageTaskWorker() {
 				processImageTaskBatch(setting.WorkerConcurrency)
 			}
 			time.Sleep(time.Duration(interval) * time.Second)
+		}
+	})
+	gopool.Go(func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			cutoff := time.Now().Add(-7 * 24 * time.Hour).Unix()
+			cleaned, _ := model.CleanStaleFailedImageTasks(cutoff)
+			if cleaned > 0 {
+				common.SysLog(fmt.Sprintf("cleaned %d stale failed image tasks older than 7 days", cleaned))
+			}
 		}
 	})
 }
@@ -151,6 +162,39 @@ func GetImageTaskStats(c *gin.Context) {
 		WorkerConcurrency: setting.WorkerConcurrency,
 		QueueLimit:        setting.QueueLimit,
 	})
+}
+
+func TestS3Connection(c *gin.Context) {
+	setting := operation_setting.GetAIImageAsyncSetting()
+	if !setting.S3Enabled || setting.S3Endpoint == "" || setting.S3Bucket == "" || setting.S3AccessKey == "" || setting.S3SecretKey == "" {
+		common.ApiErrorMsg(c, "S3 configuration is incomplete")
+		return
+	}
+	client, err := service.NewObjectStorageClient()
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("create S3 client failed: %w", err))
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ok, err := client.BucketExists(ctx, setting.S3Bucket)
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("connect to S3 failed: %w", err))
+		return
+	}
+	if !ok {
+		common.ApiErrorMsg(c, fmt.Sprintf("bucket %s does not exist", setting.S3Bucket))
+		return
+	}
+	testKey := "_healthcheck_" + time.Now().Format("20060102150405") + ".txt"
+	testData := []byte("new-api s3 connectivity test")
+	_, err = client.PutObject(ctx, setting.S3Bucket, testKey, bytes.NewReader(testData), int64(len(testData)), minio.PutObjectOptions{ContentType: "text/plain"})
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("write test object failed: %w", err))
+		return
+	}
+	_ = client.RemoveObject(ctx, setting.S3Bucket, testKey, minio.RemoveObjectOptions{})
+	common.ApiSuccess(c, map[string]string{"status": "ok", "message": "S3 connection successful"})
 }
 
 func processImageTaskBatch(concurrency int) {

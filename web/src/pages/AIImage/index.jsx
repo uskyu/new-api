@@ -436,6 +436,11 @@ const AIImage = () => {
   const selectedModelRef = useRef('');
   const promptOptimizerModelRef = useRef('');
 
+  const pendingRemoteTasks = useMemo(
+    () => remoteTasks.filter((task) => task.status === 'PENDING' || task.status === 'PROCESSING'),
+    [remoteTasks],
+  );
+
   const groupOptions = groups.map((group) => ({
     value: group.value,
     label: group.fullLabel || group.label,
@@ -1464,6 +1469,34 @@ const AIImage = () => {
               {t('{{count}} 条记录', { count: records.length })}
             </Typography.Text>
           </div>
+
+          {pendingRemoteTasks.length > 0 && (
+            <div className='mb-3 rounded-2xl border border-blue-100 bg-blue-50/80 p-3'>
+              <div className='mb-2 text-xs font-medium uppercase tracking-wider text-blue-500'>
+                {t('排队 / 生成中')} ({pendingRemoteTasks.length})
+              </div>
+              <div className='flex flex-col gap-2'>
+                {pendingRemoteTasks.map((task) => (
+                  <div key={task.task_id} className='flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm'>
+                    <Loader2 size={14} className='animate-spin text-blue-500' />
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                      task.status === 'PROCESSING'
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {task.status === 'PROCESSING' ? t('生成中') : t('排队中')}
+                    </span>
+                    <span className='flex-1 truncate text-slate-600'>
+                      {task.prompt || t('未命名任务')}
+                    </span>
+                    <span className='shrink-0 text-xs text-slate-400'>
+                      {task.model}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {records.length > 0 ? (
             <div className='flex gap-3 overflow-x-auto pb-1'>

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -59,6 +60,35 @@ func (t *ImageTask) BeforeUpdate(tx any) error {
 }
 
 func CreateImageTask(task *ImageTask) error {
+	for retry := 0; retry < 3; retry++ {
+		if task.TaskID == "" {
+			key, _ := common.GenerateRandomCharsKey(32)
+			task.TaskID = "imgtask_" + key
+		}
+		err := DB.Create(task).Error
+		if err == nil {
+			return nil
+		}
+		if common.UsingSQLite {
+			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+				task.TaskID = ""
+				continue
+			}
+		} else if common.UsingMySQL {
+			if strings.Contains(err.Error(), "Duplicate entry") {
+				task.TaskID = ""
+				continue
+			}
+		} else if common.UsingPostgreSQL {
+			if strings.Contains(err.Error(), "duplicate key value violates unique constraint") {
+				task.TaskID = ""
+				continue
+			}
+		}
+		return err
+	}
+	key, _ := common.GenerateRandomCharsKey(32)
+	task.TaskID = "imgtask_" + key
 	return DB.Create(task).Error
 }
 
@@ -148,4 +178,9 @@ func UpdateImageTaskFields(taskID string, updates map[string]any) error {
 	}
 	updates["updated_at"] = time.Now().Unix()
 	return DB.Model(&ImageTask{}).Where("task_id = ?", taskID).Updates(updates).Error
+}
+
+func CleanStaleFailedImageTasks(beforeTimestamp int64) (int64, error) {
+	result := DB.Where("status = ? AND created_at < ?", ImageTaskStatusFailed, beforeTimestamp).Delete(&ImageTask{})
+	return result.RowsAffected, result.Error
 }

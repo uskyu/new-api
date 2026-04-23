@@ -364,6 +364,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			aiImageAdminRoute.GET("/tasks", controller.GetAllImageTasks)
 			aiImageAdminRoute.GET("/stats", controller.GetImageTaskStats)
+			aiImageAdminRoute.POST("/test-s3", controller.TestS3Connection)
 		}
 
 		taskRoute := apiRouter.Group("/task")

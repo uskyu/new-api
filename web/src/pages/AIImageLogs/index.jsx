@@ -17,6 +17,8 @@ const AIImageLogs = () => {
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState(null);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [testingS3, setTestingS3] = useState(false);
+  const [s3TestResult, setS3TestResult] = useState(null);
   const [config, setConfig] = useState({
     enabled: false,
     workerConcurrency: 1,
@@ -119,6 +121,7 @@ const AIImageLogs = () => {
         updates.map(([key, value]) => API.put('/api/option/', { key, value })),
       );
       showSuccess('AI 绘图异步配置已保存');
+      setS3TestResult(null);
       await loadData(1, pageSize);
     } catch (error) {
       showError(error?.message || '保存 AI 绘图异步配置失败');
@@ -126,6 +129,27 @@ const AIImageLogs = () => {
       setSavingConfig(false);
     }
   }, [config, loadData, page, pageSize]);
+
+  const testS3Connection = useCallback(async () => {
+    setTestingS3(true);
+    setS3TestResult(null);
+    try {
+      const res = await API.post('/api/admin/ai-image/test-s3');
+      if (res.data?.success) {
+        setS3TestResult({ ok: true, message: res.data.data?.message || 'S3 连通成功' });
+        showSuccess('S3 连通性检测通过');
+      } else {
+        setS3TestResult({ ok: false, message: res.data?.message || 'S3 连通失败' });
+        showError(res.data?.message || 'S3 连通失败');
+      }
+    } catch (error) {
+      const msg = error?.response?.data?.message || error?.message || 'S3 连通检测异常';
+      setS3TestResult({ ok: false, message: msg });
+      showError(msg);
+    } finally {
+      setTestingS3(false);
+    }
+  }, []);
 
   const columns = useMemo(
     () => [
@@ -350,7 +374,21 @@ const AIImageLogs = () => {
               </select>
             </label>
           </div>
-          <div className='mt-4 flex justify-end'>
+          <div className='mt-4 flex flex-wrap items-center justify-end gap-3'>
+            {s3TestResult && (
+              <span className={`text-sm ${s3TestResult.ok ? 'text-green-600' : 'text-red-500'}`}>
+                {s3TestResult.message}
+              </span>
+            )}
+            <Button
+              loading={testingS3}
+              onClick={testS3Connection}
+              theme='light'
+              type='primary'
+              disabled={!config.s3Enabled || !config.s3Endpoint}
+            >
+              检测 S3 连通性
+            </Button>
             <Button loading={savingConfig} onClick={saveConfig} type='primary'>
               保存 AI 绘图配置
             </Button>
