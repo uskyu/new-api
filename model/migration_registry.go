@@ -69,6 +69,7 @@ func CoreSchemaModels() []interface{} {
 		&TopUp{},
 		&QuotaData{},
 		&Task{},
+		&ImageTask{},
 		&Model{},
 		&Vendor{},
 		&PrefillGroup{},

@@ -53,6 +53,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     agent: true,
     models: true,
     deployment: true,
+    ai_image_logs: true,
     redemption: true,
     user: true,
     subscription: true,

@@ -132,6 +132,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         agent: true,
         models: true,
         deployment: true,
+        ai_image_logs: true,
         redemption: true,
         user: true,
         subscription: true,
@@ -207,6 +208,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             channel: true,
             models: true,
             deployment: true,
+            ai_image_logs: true,
             redemption: true,
             user: true,
             subscription: true,
@@ -289,6 +291,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           key: 'deployment',
           title: t('模型部署'),
           description: t('模型部署管理'),
+        },
+        {
+          key: 'ai_image_logs',
+          title: t('AI 绘图日志'),
+          description: t('异步 AI 绘图任务与对象存储配置'),
         },
         {
           key: 'subscription',

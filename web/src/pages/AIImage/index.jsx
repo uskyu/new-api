@@ -113,6 +113,20 @@ const extractGenerationRecord = (userMessage, assistantMessage) => {
   };
 };
 
+const taskToGenerationRecord = (task) => {
+  if (!task?.result_url) {
+    return null;
+  }
+  return {
+    id: task.task_id || `task-${task.id}`,
+    userMessageId: null,
+    assistantMessageId: null,
+    prompt: task.prompt || '',
+    images: [task.result_url],
+    createdAt: task.created_at || Date.now(),
+  };
+};
+
 const trimMessagesToHistoryLimit = (messages = []) => messages.slice(-(MAX_HISTORY_RECORDS * 2));
 
 const createImageAssistantMessage = (imageUrls, prompt) => ({
@@ -417,6 +431,7 @@ const AIImage = () => {
   const [optimizedPromptDraft, setOptimizedPromptDraft] = useState('');
   const [originalPrompt, setOriginalPrompt] = useState('');
   const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [remoteTasks, setRemoteTasks] = useState([]);
   const previousDraftImagesRef = useRef([]);
   const selectedModelRef = useRef('');
   const promptOptimizerModelRef = useRef('');
@@ -445,7 +460,7 @@ const AIImage = () => {
     promptOptimizerModelRef.current = promptOptimizerModel || '';
   }, [promptOptimizerModel]);
 
-  const records = useMemo(() => {
+  const localRecords = useMemo(() => {
     const nextRecords = [];
     for (let index = 0; index < messages.length; index += 1) {
       const current = messages[index];
@@ -458,6 +473,15 @@ const AIImage = () => {
     }
     return nextRecords.reverse();
   }, [messages]);
+
+  const records = useMemo(() => {
+    const remoteRecords = remoteTasks
+      .map((task) => taskToGenerationRecord(task))
+      .filter(Boolean);
+    return [...remoteRecords, ...localRecords]
+      .sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0))
+      .slice(0, MAX_HISTORY_RECORDS);
+  }, [localRecords, remoteTasks]);
 
   const activeRecord =
     records.find((record) => record.id === activeRecordId) || records[0] || null;
@@ -547,6 +571,83 @@ const AIImage = () => {
       }),
     );
   }, [draftImages]);
+
+  const loadRemoteTasks = React.useCallback(async () => {
+    const response = await fetch('/api/ai-image/tasks?p=1&page_size=30', {
+      headers: {
+        Accept: 'application/json',
+        'New-Api-User': getUserIdFromLocalStorage(),
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const result = await response.json();
+    if (!result?.success) {
+      throw new Error(result?.message || 'failed to load image tasks');
+    }
+    setRemoteTasks(Array.isArray(result?.data?.items) ? result.data.items : []);
+  }, []);
+
+  React.useEffect(() => {
+    if (!ready) {
+      return undefined;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        if (!cancelled) {
+          await loadRemoteTasks();
+        }
+      } catch {
+        // Ignore background polling failures.
+      }
+    };
+    refresh();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        refresh();
+      }
+    }, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [loadRemoteTasks, ready]);
+
+  const submitImageTask = React.useCallback(
+    async (itemPrompt) => {
+      const effectiveModel = selectedModelRef.current || modelOptions[0]?.value || '';
+      if (!effectiveModel) {
+        throw new Error('image model is required');
+      }
+      const response = await fetch('/api/ai-image/tasks', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'New-Api-User': getUserIdFromLocalStorage(),
+        },
+        body: JSON.stringify({
+          model: effectiveModel,
+          prompt: itemPrompt,
+          group: selectedGroup,
+          size: getOpenAIImageSize(aspectRatio),
+          n: 1,
+        }),
+      });
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, body: ${errorBody}`);
+      }
+      const result = await response.json();
+      if (!result?.success) {
+        throw new Error(result?.message || 'submit image task failed');
+      }
+      return result.data;
+    },
+    [aspectRatio, modelOptions, selectedGroup],
+  );
 
   const requestOneImage = React.useCallback(
     async (itemPrompt) => {
@@ -673,6 +774,16 @@ const AIImage = () => {
 
     setIsGenerating(true);
     try {
+      if (isOpenAIImageModel(fallbackImageModel)) {
+        await submitImageTask(trimmedPrompt);
+        await loadRemoteTasks();
+        setPrompt('');
+        setOptimizedPromptDraft('');
+        setOriginalPrompt('');
+        clearDraftImages();
+        showSuccess(t('已加入生成队列'));
+        return;
+      }
       const parsed = await requestOneImage(trimmedPrompt);
       if (parsed.imageUrls.length === 0) {
         showError(t('未返回可展示的图片，请检查模型返回格式'));
@@ -694,9 +805,11 @@ const AIImage = () => {
     appendGeneration,
     clearDraftImages,
     fallbackImageModel,
+    loadRemoteTasks,
     prompt,
     requestOneImage,
     setSelectedModel,
+    submitImageTask,
     t,
   ]);
 
@@ -725,6 +838,16 @@ const AIImage = () => {
 
     setIsGenerating(true);
     try {
+      if (isOpenAIImageModel(fallbackImageModel)) {
+        await Promise.all(tasks.map((itemPrompt) => submitImageTask(itemPrompt)));
+        await loadRemoteTasks();
+        setPrompt('');
+        setOptimizedPromptDraft('');
+        setOriginalPrompt('');
+        clearDraftImages();
+        showSuccess(t('批量任务已提交'));
+        return;
+      }
       const results = await Promise.all(
         tasks.map(async (itemPrompt) => {
           const parsed = await requestOneImage(itemPrompt);
@@ -756,9 +879,11 @@ const AIImage = () => {
     batchCount,
     clearDraftImages,
     fallbackImageModel,
+    loadRemoteTasks,
     prompt,
     requestOneImage,
     setSelectedModel,
+    submitImageTask,
     t,
   ]);
 

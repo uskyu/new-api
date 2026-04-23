@@ -50,6 +50,7 @@ const routerMap = {
   deployment: '/console/deployment',
   ai_console: '/console/ai',
   ai_image: '/console/ai-image',
+  ai_image_logs: '/console/ai-image-logs',
   playground: '/console/playground',
   personal: '/console/personal',
 };
@@ -146,6 +147,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('渠道管理'),
         itemKey: 'channel',
         to: '/channel',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('AI 绘图日志'),
+        itemKey: 'ai_image_logs',
+        to: '/console/ai-image-logs',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

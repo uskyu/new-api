@@ -352,6 +352,20 @@ func SetApiRouter(router *gin.Engine) {
 		mjRoute.GET("/self", middleware.UserAuth(), controller.GetUserMidjourney)
 		mjRoute.GET("/", middleware.AdminAuth(), controller.GetAllMidjourney)
 
+		aiImageTaskRoute := apiRouter.Group("/ai-image/tasks")
+		aiImageTaskRoute.Use(middleware.UserAuth())
+		{
+			aiImageTaskRoute.POST("", controller.CreateImageTask)
+			aiImageTaskRoute.GET("", controller.GetUserImageTasks)
+			aiImageTaskRoute.GET(":task_id", controller.GetUserImageTask)
+		}
+		aiImageAdminRoute := apiRouter.Group("/admin/ai-image")
+		aiImageAdminRoute.Use(middleware.AdminAuth())
+		{
+			aiImageAdminRoute.GET("/tasks", controller.GetAllImageTasks)
+			aiImageAdminRoute.GET("/stats", controller.GetImageTaskStats)
+		}
+
 		taskRoute := apiRouter.Group("/task")
 		{
 			taskRoute.GET("/self", middleware.UserAuth(), controller.GetUserTask)
