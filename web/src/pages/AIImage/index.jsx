@@ -16,6 +16,15 @@ import {
 
 const RESOLUTION_OPTIONS = ['1K', '2K', '4K'];
 const ASPECT_RATIO_OPTIONS = ['1:1', '3:2', '4:3', '16:9', '9:16'];
+const OPENAI_IMAGE_SIZE_OPTIONS = [
+  { value: '1024x1024', label: '1024×1024 (1:1)' },
+  { value: '1536x1024', label: '1536×1024 (3:2)' },
+  { value: '1024x1536', label: '1024×1536 (2:3)' },
+  { value: '2048x2048', label: '2048×2048 (1:1 2K)' },
+  { value: '2048x1152', label: '2048×1152 (16:9)' },
+  { value: '3840x2160', label: '3840×2160 (16:9 4K)' },
+  { value: '2160x3840', label: '2160×3840 (9:16 4K)' },
+];
 const BATCH_COUNT_OPTIONS = [1, 2, 4];
 const PROMPT_OPTIMIZER_SYSTEM_PROMPT = [
   'You are an AI image prompt optimizer.',
@@ -225,20 +234,6 @@ const isOpenAIImageModel = (modelName) => {
   return lower.includes('gpt-image') || lower.includes('dall-e');
 };
 
-const getOpenAIImageSize = (aspectRatio) => {
-  switch (aspectRatio) {
-    case '9:16':
-      return '1024x1536';
-    case '16:9':
-    case '3:2':
-    case '4:3':
-      return '1536x1024';
-    case '1:1':
-    default:
-      return '1024x1024';
-  }
-};
-
 const buildGeminiNativeImagePayload = ({
   prompt,
   imageUrls,
@@ -442,6 +437,7 @@ const AIImage = () => {
   const [activeRecordId, setActiveRecordId] = useState(null);
   const [resolution, setResolution] = useState('1K');
   const [aspectRatio, setAspectRatio] = useState('1:1');
+  const [openaiImageSize, setOpenaiImageSize] = useState('1024x1024');
   const [batchCount, setBatchCount] = useState(1);
   const [isOptimizingPrompt, setIsOptimizingPrompt] = useState(false);
   const [optimizedPromptDraft, setOptimizedPromptDraft] = useState('');
@@ -695,7 +691,7 @@ const AIImage = () => {
           model: effectiveModel,
           prompt: itemPrompt,
           group: selectedGroup,
-          size: getOpenAIImageSize(aspectRatio),
+          size: openaiImageSize,
           n: 1,
           reference_image: referenceImage,
         }),
@@ -710,7 +706,7 @@ const AIImage = () => {
       }
       return result.data;
     },
-    [aspectRatio, draftImages, modelOptions, selectedGroup],
+    [draftImages, modelOptions, openaiImageSize, selectedGroup],
   );
 
   const requestOneImage = React.useCallback(
@@ -732,7 +728,7 @@ const AIImage = () => {
               {
                 model: effectiveModel,
                 prompt: itemPrompt,
-                size: getOpenAIImageSize(aspectRatio),
+                size: openaiImageSize,
                 n: 1,
               },
               selectedGroup,
@@ -778,7 +774,7 @@ const AIImage = () => {
 
       return parseImageResponse(response);
     },
-    [aspectRatio, draftImages, modelOptions, resolution, selectedGroup, serializeDraftImagesForRequest],
+    [aspectRatio, draftImages, modelOptions, openaiImageSize, resolution, selectedGroup, serializeDraftImagesForRequest],
   );
 
   const appendGeneration = React.useCallback(
@@ -1275,39 +1271,60 @@ const AIImage = () => {
 
               <div className='rounded-[28px] border border-slate-200 bg-slate-50/70 p-4'>
                 <div className='mb-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
-                  <label className='flex flex-col gap-2'>
-                    <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
-                      {t('分辨率')}
-                    </span>
-                    <select
-                      value={resolution}
-                      onChange={(event) => setResolution(event.target.value)}
-                      className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
-                    >
-                      {RESOLUTION_OPTIONS.map((item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  {isOpenAIImageModel(fallbackImageModel) ? (
+                    <label className='flex flex-col gap-2 md:col-span-2'>
+                      <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
+                        {t('图片尺寸')}
+                      </span>
+                      <select
+                        value={openaiImageSize}
+                        onChange={(event) => setOpenaiImageSize(event.target.value)}
+                        className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                      >
+                        {OPENAI_IMAGE_SIZE_OPTIONS.map((item) => (
+                          <option key={item.value} value={item.value}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <>
+                      <label className='flex flex-col gap-2'>
+                        <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
+                          {t('分辨率')}
+                        </span>
+                        <select
+                          value={resolution}
+                          onChange={(event) => setResolution(event.target.value)}
+                          className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                        >
+                          {RESOLUTION_OPTIONS.map((item) => (
+                            <option key={item} value={item}>
+                              {item}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                  <label className='flex flex-col gap-2'>
-                    <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
-                      {t('图像比例')}
-                    </span>
-                    <select
-                      value={aspectRatio}
-                      onChange={(event) => setAspectRatio(event.target.value)}
-                      className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
-                    >
-                      {ASPECT_RATIO_OPTIONS.map((item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      <label className='flex flex-col gap-2'>
+                        <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
+                          {t('图像比例')}
+                        </span>
+                        <select
+                          value={aspectRatio}
+                          onChange={(event) => setAspectRatio(event.target.value)}
+                          className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                        >
+                          {ASPECT_RATIO_OPTIONS.map((item) => (
+                            <option key={item} value={item}>
+                              {item}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
+                  )}
 
                   <label className='flex flex-col gap-2'>
                     <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
