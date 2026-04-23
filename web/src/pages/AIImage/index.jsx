@@ -1328,6 +1328,9 @@ const AIImage = () => {
               <Typography.Title heading={6} className='!mb-0 !text-slate-900'>
                 {t('最近生成')}
               </Typography.Title>
+              <Typography.Text className='!ml-2 !text-sm !font-medium !text-red-600'>
+                {t('（当前部分模型的引用功能和下载功能正在开发中，建议使用鼠标右键保存或长按保存）')}
+              </Typography.Text>
               <Typography.Text className='!text-sm !text-slate-500'>
                 {t('点击下方缩略图即可切换查看历史结果')}
               </Typography.Text>
