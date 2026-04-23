@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -137,7 +138,11 @@ func GetUserImageTask(c *gin.Context) {
 
 func GetUserImageTasks(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	items, total, err := model.ListUserImageTasks(c.GetInt("id"), pageInfo.GetStartIdx(), pageInfo.GetPageSize(), c.Query("status"))
+	var sinceID int64
+	if v := c.Query("since_id"); v != "" {
+		sinceID, _ = strconv.ParseInt(v, 10, 64)
+	}
+	items, total, err := model.ListUserImageTasks(c.GetInt("id"), pageInfo.GetStartIdx(), pageInfo.GetPageSize(), c.Query("status"), sinceID)
 	if err != nil {
 		common.ApiError(c, err)
 		return

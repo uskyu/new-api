@@ -111,10 +111,13 @@ func GetImageTaskByTaskIDAndUserID(taskID string, userID int) (*ImageTask, error
 	return &task, nil
 }
 
-func ListUserImageTasks(userID, startIdx, limit int, status string) ([]*ImageTask, int64, error) {
+func ListUserImageTasks(userID, startIdx, limit int, status string, sinceID int64) ([]*ImageTask, int64, error) {
 	query := DB.Model(&ImageTask{}).Where("user_id = ?", userID)
 	if status != "" {
 		query = query.Where("status = ?", status)
+	}
+	if sinceID > 0 {
+		query = query.Where("id > ?", sinceID)
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
