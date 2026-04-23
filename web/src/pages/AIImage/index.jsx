@@ -114,15 +114,31 @@ const extractGenerationRecord = (userMessage, assistantMessage) => {
 };
 
 const taskToGenerationRecord = (task) => {
-  if (!task?.result_url) {
-    return null;
+  if (!task) return null;
+  if (task.status === 'FAILED') {
+    return {
+      id: task.task_id || `task-${task.id}`,
+      userMessageId: null,
+      assistantMessageId: null,
+      prompt: task.prompt || '',
+      images: [],
+      status: 'FAILED',
+      errorMessage: task.error_message || '',
+      isRemote: true,
+      taskId: task.task_id,
+      createdAt: task.created_at || Date.now(),
+    };
   }
+  if (!task?.result_url) return null;
   return {
     id: task.task_id || `task-${task.id}`,
     userMessageId: null,
     assistantMessageId: null,
     prompt: task.prompt || '',
     images: [task.result_url],
+    status: task.status,
+    isRemote: true,
+    taskId: task.task_id,
     createdAt: task.created_at || Date.now(),
   };
 };
@@ -919,87 +935,147 @@ const AIImage = () => {
   );
 
   const handleDownloadImage = React.useCallback(
-    (record) => {
+    async (record) => {
+      if (record?.status === 'FAILED') {
+        showError(t('该任务生成失败，无法下载'));
+        return;
+      }
       const imageUrl = record?.images?.[0];
-      if (!imageUrl) {
+      if (!imageUrl && !record?.taskId) {
         showError(t('没有可下载的图片'));
         return;
       }
 
-      const anchor = document.createElement('a');
-      anchor.href = imageUrl;
-      anchor.download = `ai-image-${record.id || Date.now()}.png`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      showSuccess(t('开始下载图片'));
+      if (record.isRemote && record.taskId) {
+        try {
+          const response = await fetch(`/api/ai-image/download/${record.taskId}`, {
+            headers: { 'New-Api-User': getUserIdFromLocalStorage() },
+          });
+          if (!response.ok) throw new Error(`download failed: ${response.status}`);
+          const blob = await response.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = blobUrl;
+          anchor.download = `ai-image-${record.taskId}.png`;
+          document.body.appendChild(anchor);
+          anchor.click();
+          document.body.removeChild(anchor);
+          URL.revokeObjectURL(blobUrl);
+          showSuccess(t('开始下载图片'));
+          return;
+        } catch {
+          // fallback
+        }
+      }
+
+      if (imageUrl) {
+        try {
+          const response = await fetch(imageUrl);
+          const blob = await response.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = blobUrl;
+          anchor.download = `ai-image-${record.id || Date.now()}.png`;
+          document.body.appendChild(anchor);
+          anchor.click();
+          document.body.removeChild(anchor);
+          URL.revokeObjectURL(blobUrl);
+          showSuccess(t('开始下载图片'));
+        } catch {
+          window.open(imageUrl, '_blank', 'noopener,noreferrer');
+        }
+      }
     },
     [t],
   );
 
   const handleDeleteRecord = React.useCallback(
-    (record) => {
+    async (record) => {
       if (!record) return;
 
-      setMessages((previous) =>
-        previous.filter(
-          (message) =>
-            message.id !== record.userMessageId &&
-            message.id !== record.assistantMessageId,
-        ),
-      );
+      if (record.isRemote && record.taskId) {
+        try {
+          const response = await fetch(`/api/ai-image/tasks/${record.taskId}`, {
+            method: 'DELETE',
+            headers: { 'New-Api-User': getUserIdFromLocalStorage() },
+          });
+          const result = await response.json();
+          if (!result?.success) {
+            showError(result?.message || t('删除失败'));
+            return;
+          }
+          setRemoteTasks((previous) => previous.filter((task) => task.task_id !== record.taskId));
+        } catch (error) {
+          showError(t('删除失败'));
+          return;
+        }
+      } else {
+        setMessages((previous) =>
+          previous.filter(
+            (message) =>
+              message.id !== record.userMessageId &&
+              message.id !== record.assistantMessageId,
+          ),
+        );
+      }
 
       if (activeRecordId === record.id) {
         setActiveRecordId(null);
       }
-
-      showSuccess(t('已从本地删除该记录'));
+      showSuccess(t('已删除该记录'));
     },
     [activeRecordId, setMessages, t],
   );
 
   const handleReuseImage = React.useCallback(
-    async (imageUrl) => {
-      if (!imageUrl) {
+    async (record) => {
+      const imageUrl = record?.images?.[0];
+      if (!imageUrl && !record?.taskId) {
         showError(t('没有可引用的图片'));
+        return;
+      }
+      if (record?.status === 'FAILED') {
+        showError(t('该任务生成失败，无法引用'));
         return;
       }
 
       try {
-        if (typeof imageUrl === 'string' && imageUrl.startsWith('data:image/')) {
+        if (imageUrl && imageUrl.startsWith('data:image/')) {
           const [meta, base64Data] = imageUrl.split(',', 2);
-          const mimeType =
-            meta.match(/^data:(.+?);base64$/)?.[1] || 'image/png';
+          const mimeType = meta.match(/^data:(.+?);base64$/)?.[1] || 'image/png';
           const binary = atob(base64Data || '');
           const bytes = new Uint8Array(binary.length);
           for (let index = 0; index < binary.length; index += 1) {
             bytes[index] = binary.charCodeAt(index);
           }
           const extension = mimeType.split('/')[1] || 'png';
-          const file = new File(
-            [bytes],
-            `referenced-${Date.now()}.${extension}`,
-            { type: mimeType },
-          );
-          setDraftImages((previous) => [
-            ...previous,
-            createDraftImageEntry(file, { sourceDataUrl: imageUrl }),
-          ]);
-          showSuccess(t('宸插紩鐢ㄥ埌鍙傝€冨浘'));
+          const file = new File([bytes], `referenced-${Date.now()}.${extension}`, { type: mimeType });
+          setDraftImages((previous) => [...previous, createDraftImageEntry(file, { sourceDataUrl: imageUrl })]);
+          showSuccess(t('已引用到参考图'));
           return;
         }
 
-        const response = await fetch(imageUrl);
-        const blob = await response.blob();
+        let blob;
+        if (record.isRemote && record.taskId) {
+          const response = await fetch(`/api/ai-image/proxy/${record.taskId}`, {
+            headers: { 'New-Api-User': getUserIdFromLocalStorage() },
+          });
+          if (!response.ok) throw new Error(`proxy fetch failed: ${response.status}`);
+          blob = await response.blob();
+        } else if (imageUrl) {
+          const response = await fetch(imageUrl);
+          if (!response.ok) throw new Error(`fetch failed: ${response.status}`);
+          blob = await response.blob();
+        } else {
+          showError(t('没有可引用的图片'));
+          return;
+        }
         const extension = blob.type?.split('/')[1] || 'png';
-        const file = new File([blob], `referenced-${Date.now()}.${extension}`, {
-          type: blob.type || 'image/png',
-        });
+        const file = new File([blob], `referenced-${Date.now()}.${extension}`, { type: blob.type || 'image/png' });
         setDraftImages((previous) => [...previous, createDraftImageEntry(file)]);
         showSuccess(t('已引用到参考图'));
-      } catch (error) {
-        const errorInfo = handleApiError(error);
-        showError(errorInfo.error || t('引用图片失败'));
+      } catch {
+        showError(t('引用图片失败，请右键保存后手动上传'));
       }
     },
     [setDraftImages, t],
@@ -1373,7 +1449,7 @@ const AIImage = () => {
 
                 <Typography.Text className='mt-3 block text-xs text-slate-500'>
                   {t(
-                    '图片仅保存在当前浏览器本地，删除浏览器缓存或记录后将会消失，请及时保存。',
+                    '异步生成的图片保留 7 天后自动清理（含对象存储），本地同步图片仅保存在浏览器中。',
                   )}
                 </Typography.Text>
               </div>
@@ -1429,12 +1505,12 @@ const AIImage = () => {
                         </div>
                       ) : null}
                       <div className='mt-3 flex flex-wrap gap-2'>
-                        <Button
-                          theme='light'
-                          type='primary'
-                          className='!rounded-full'
-                          onClick={() => handleReuseImage(activeImage)}
-                        >
+                      <Button
+                        theme='light'
+                        type='primary'
+                        className='!rounded-full'
+                        onClick={() => handleReuseImage(activeRecord)}
+                      >
                           {t('引用为参考图')}
                         </Button>
                       </div>
@@ -1458,8 +1534,8 @@ const AIImage = () => {
               <Typography.Title heading={6} className='!mb-0 !text-slate-900'>
                 {t('最近生成')}
               </Typography.Title>
-              <Typography.Text className='!ml-2 !text-sm !font-medium !text-red-600'>
-                {t('（当前部分模型的引用功能和下载功能正在开发中，建议使用鼠标右键保存或长按保存）')}
+              <Typography.Text className='!ml-2 !text-sm !font-medium !text-slate-500'>
+                {t('点击下方缩略图即可切换查看历史结果，图片保留 7 天后自动清理')}
               </Typography.Text>
               <Typography.Text className='!text-sm !text-slate-500'>
                 {t('点击下方缩略图即可切换查看历史结果')}
@@ -1502,15 +1578,29 @@ const AIImage = () => {
             <div className='flex gap-3 overflow-x-auto pb-1'>
               {records.map((record) => (
                 <div key={record.id} className='w-[168px] shrink-0 space-y-2'>
-                  <GalleryImage
-                    src={record.images[0]}
-                    alt={record.prompt || 'generated image'}
-                    active={record.id === activeRecord?.id}
-                    onClick={() => {
-                      setActiveRecordId(record.id);
-                      setActiveImageIndex(0);
-                    }}
-                  />
+                  {record.status === 'FAILED' ? (
+                    <div
+                      className='flex h-24 w-24 items-center justify-center rounded-[22px] border border-red-200 bg-red-50 sm:h-28 sm:w-28'
+                      title={record.errorMessage || t('生成失败')}
+                    >
+                      <div className='px-2 text-center'>
+                        <X size={20} className='mx-auto mb-1 text-red-400' />
+                        <p className='text-xs leading-tight text-red-500 line-clamp-3'>
+                          {record.errorMessage || t('生成失败')}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <GalleryImage
+                      src={record.images[0]}
+                      alt={record.prompt || 'generated image'}
+                      active={record.id === activeRecord?.id}
+                      onClick={() => {
+                        setActiveRecordId(record.id);
+                        setActiveImageIndex(0);
+                      }}
+                    />
+                  )}
                   <div className='w-full px-1'>
                     <button
                       type='button'
@@ -1529,6 +1619,7 @@ const AIImage = () => {
                         size='small'
                         className='!h-7 !rounded-full !px-2 !text-xs'
                         onClick={() => handleDownloadImage(record)}
+                        disabled={record.status === 'FAILED'}
                       >
                         {t('下载')}
                       </Button>
@@ -1537,7 +1628,8 @@ const AIImage = () => {
                         type='primary'
                         size='small'
                         className='!h-7 !rounded-full !px-2 !text-xs'
-                        onClick={() => handleReuseImage(record.images?.[0])}
+                        onClick={() => handleReuseImage(record)}
+                        disabled={record.status === 'FAILED'}
                       >
                         {t('引用')}
                       </Button>

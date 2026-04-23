@@ -358,6 +358,14 @@ func SetApiRouter(router *gin.Engine) {
 			aiImageTaskRoute.POST("", controller.CreateImageTask)
 			aiImageTaskRoute.GET("", controller.GetUserImageTasks)
 			aiImageTaskRoute.GET(":task_id", controller.GetUserImageTask)
+			aiImageTaskRoute.DELETE(":task_id", controller.DeleteUserImageTask)
+		}
+
+		aiImageProxyRoute := apiRouter.Group("/ai-image")
+		aiImageProxyRoute.Use(middleware.UserAuth())
+		{
+			aiImageProxyRoute.GET("download/:task_id", controller.ProxyImageDownload)
+			aiImageProxyRoute.GET("proxy/:task_id", controller.ProxyImageData)
 		}
 		aiImageAdminRoute := apiRouter.Group("/admin/ai-image")
 		aiImageAdminRoute.Use(middleware.AdminAuth())

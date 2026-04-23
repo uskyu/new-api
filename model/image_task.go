@@ -184,3 +184,28 @@ func CleanStaleFailedImageTasks(beforeTimestamp int64) (int64, error) {
 	result := DB.Where("status = ? AND created_at < ?", ImageTaskStatusFailed, beforeTimestamp).Delete(&ImageTask{})
 	return result.RowsAffected, result.Error
 }
+
+func DeleteImageTaskByTaskIDAndUserID(taskID string, userID int) (*ImageTask, error) {
+	var task ImageTask
+	if err := DB.Where("task_id = ? AND user_id = ?", taskID, userID).First(&task).Error; err != nil {
+		return nil, err
+	}
+	if err := DB.Delete(&task).Error; err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+func GetStaleImageTasks(beforeTimestamp int64, limit int) ([]*ImageTask, error) {
+	var tasks []*ImageTask
+	err := DB.Where("status IN ? AND created_at < ?", []ImageTaskStatus{ImageTaskStatusSucceeded, ImageTaskStatusFailed}, beforeTimestamp).
+		Order("id asc").Limit(limit).Find(&tasks).Error
+	return tasks, err
+}
+
+func BatchDeleteImageTasksByIDs(ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return DB.Where("id IN ?", ids).Delete(&ImageTask{}).Error
+}

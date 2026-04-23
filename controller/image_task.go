@@ -56,6 +56,7 @@ func StartImageTaskWorker() {
 			if cleaned > 0 {
 				common.SysLog(fmt.Sprintf("cleaned %d stale failed image tasks older than 7 days", cleaned))
 			}
+			cleanExpiredTasksAndS3Objects(cutoff)
 		}
 	})
 }
@@ -133,6 +134,111 @@ func GetUserImageTasks(c *gin.Context) {
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(toImageTaskDTOs(items, false))
 	common.ApiSuccess(c, pageInfo)
+}
+
+func ProxyImageDownload(c *gin.Context) {
+	taskID := c.Param("task_id")
+	userID := c.GetInt("id")
+	task, err := model.GetImageTaskByTaskIDAndUserID(taskID, userID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if task.Status != model.ImageTaskStatusSucceeded {
+		common.ApiErrorMsg(c, "task not succeeded")
+		return
+	}
+	imageURL := task.ResultURL
+	if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") && service.IsObjectStorageEnabled() {
+		signedURL, err := service.GenerateObjectStorageAccessURL(context.Background(), task.ResultKey)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		imageURL = signedURL
+	}
+	if imageURL == "" {
+		common.ApiErrorMsg(c, "no image url available")
+		return
+	}
+	req, err := http.NewRequestWithContext(c.Request.Context(), "GET", imageURL, nil)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	defer resp.Body.Close()
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "image/png"
+	}
+	c.Header("Content-Type", contentType)
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="ai-image-%s.png"`, taskID))
+	c.Header("Cache-Control", "no-store")
+	c.DataFromReader(resp.StatusCode, resp.ContentLength, contentType, resp.Body, nil)
+}
+
+func ProxyImageData(c *gin.Context) {
+	taskID := c.Param("task_id")
+	userID := c.GetInt("id")
+	task, err := model.GetImageTaskByTaskIDAndUserID(taskID, userID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if task.Status != model.ImageTaskStatusSucceeded {
+		common.ApiErrorMsg(c, "task not succeeded")
+		return
+	}
+	imageURL := task.ResultURL
+	if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") && service.IsObjectStorageEnabled() {
+		signedURL, err := service.GenerateObjectStorageAccessURL(context.Background(), task.ResultKey)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		imageURL = signedURL
+	}
+	if imageURL == "" {
+		common.ApiErrorMsg(c, "no image url available")
+		return
+	}
+	req, err := http.NewRequestWithContext(c.Request.Context(), "GET", imageURL, nil)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	defer resp.Body.Close()
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "image/png"
+	}
+	c.Header("Content-Type", contentType)
+	c.Header("Cache-Control", "private, max-age=3600")
+	c.DataFromReader(resp.StatusCode, resp.ContentLength, contentType, resp.Body, nil)
+}
+
+func DeleteUserImageTask(c *gin.Context) {
+	taskID := c.Param("task_id")
+	userID := c.GetInt("id")
+	task, err := model.DeleteImageTaskByTaskIDAndUserID(taskID, userID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") && service.IsObjectStorageEnabled() {
+		_ = service.DeleteObjectFromStorage(context.Background(), task.ResultKey)
+	}
+	common.ApiSuccess(c, nil)
 }
 
 func GetAllImageTasks(c *gin.Context) {
@@ -424,6 +530,28 @@ func setupImageTaskChannelContext(c *gin.Context, channel *model.Channel, modelN
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ApiType: apiType}}
 	_ = info
 	return nil
+}
+
+func cleanExpiredTasksAndS3Objects(cutoff int64) {
+	if !service.IsObjectStorageEnabled() {
+		return
+	}
+	tasks, err := model.GetStaleImageTasks(cutoff, 200)
+	if err != nil || len(tasks) == 0 {
+		return
+	}
+	ctx := context.Background()
+	var ids []int64
+	for _, task := range tasks {
+		if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") {
+			_ = service.DeleteObjectFromStorage(ctx, task.ResultKey)
+		}
+		ids = append(ids, task.ID)
+	}
+	if len(ids) > 0 {
+		_ = model.BatchDeleteImageTasksByIDs(ids)
+		common.SysLog(fmt.Sprintf("cleaned %d expired image tasks (succeeded/failed) and their S3 objects older than 7 days", len(ids)))
+	}
 }
 
 func toImageTaskDTO(task *model.ImageTask, fillUser bool) *dto.ImageTaskDTO {

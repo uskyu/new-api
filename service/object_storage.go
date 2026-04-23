@@ -65,6 +65,15 @@ func UploadBytesToObjectStorage(ctx context.Context, objectKey string, contentTy
 	return objectKey, accessURL, nil
 }
 
+func DeleteObjectFromStorage(ctx context.Context, objectKey string) error {
+	client, err := NewObjectStorageClient()
+	if err != nil {
+		return err
+	}
+	setting := operation_setting.GetAIImageAsyncSetting()
+	return client.RemoveObject(ctx, setting.S3Bucket, objectKey, minio.RemoveObjectOptions{})
+}
+
 func GenerateObjectStorageAccessURL(ctx context.Context, objectKey string) (string, error) {
 	client, err := NewObjectStorageClient()
 	if err != nil {
