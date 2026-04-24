@@ -20,8 +20,8 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
-	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -342,12 +342,29 @@ func processImageTaskBatch(concurrency int) {
 }
 
 func processOneImageTask(task *model.ImageTask) {
+	setting := operation_setting.GetAIImageAsyncSetting()
+	retryCount := setting.RetryCount
+	if retryCount < 0 {
+		retryCount = 0
+	}
+
 	var resultURL, resultKey string
 	var err error
-	if task.ReferenceImageKey != "" {
-		resultURL, resultKey, err = executeImageEditTask(task)
-	} else {
-		resultURL, resultKey, err = executeImageGenerationTask(task)
+	for attempt := 0; attempt <= retryCount; attempt++ {
+		if task.ReferenceImageKey != "" {
+			resultURL, resultKey, err = executeImageEditTask(task)
+		} else {
+			resultURL, resultKey, err = executeImageGenerationTask(task)
+		}
+		if err == nil {
+			break
+		}
+		if attempt >= retryCount {
+			break
+		}
+		delay := imageTaskRetryDelay(attempt)
+		common.SysLog(fmt.Sprintf("image task %s failed on attempt %d/%d, retrying in %s: %s", task.TaskID, attempt+1, retryCount+1, delay.String(), err.Error()))
+		time.Sleep(delay)
 	}
 	finishedAt := time.Now().Unix()
 	if err != nil {
@@ -367,6 +384,17 @@ func processOneImageTask(task *model.ImageTask) {
 		"finished_at":   finishedAt,
 	})
 	cleanupReferenceImage(task)
+}
+
+func imageTaskRetryDelay(attempt int) time.Duration {
+	switch attempt {
+	case 0:
+		return 2 * time.Second
+	case 1:
+		return 5 * time.Second
+	default:
+		return 10 * time.Second
+	}
 }
 
 func cleanupReferenceImage(task *model.ImageTask) {

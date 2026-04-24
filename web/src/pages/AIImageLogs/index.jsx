@@ -23,6 +23,7 @@ const AIImageLogs = () => {
   const [config, setConfig] = useState({
     enabled: false,
     workerConcurrency: 1,
+    retryCount: 1,
     pollIntervalSec: 3,
     queueLimit: 50,
     s3Enabled: false,
@@ -82,6 +83,7 @@ const AIImageLogs = () => {
       setConfig({
         enabled: toBoolean(optionMap['ai_image_async_setting.enabled']),
         workerConcurrency: parseInt(optionMap['ai_image_async_setting.worker_concurrency'] || '1', 10),
+        retryCount: parseInt(optionMap['ai_image_async_setting.retry_count'] || '1', 10),
         pollIntervalSec: parseInt(optionMap['ai_image_async_setting.poll_interval_sec'] || '3', 10),
         queueLimit: parseInt(optionMap['ai_image_async_setting.queue_limit'] || '50', 10),
         s3Enabled: toBoolean(optionMap['ai_image_async_setting.s3_enabled']),
@@ -109,6 +111,7 @@ const AIImageLogs = () => {
       const updates = [
         ['ai_image_async_setting.enabled', String(config.enabled)],
         ['ai_image_async_setting.worker_concurrency', String(config.workerConcurrency || 1)],
+        ['ai_image_async_setting.retry_count', String(Math.max(0, Number(config.retryCount || 0)))],
         ['ai_image_async_setting.poll_interval_sec', String(config.pollIntervalSec || 3)],
         ['ai_image_async_setting.queue_limit', String(config.queueLimit || 50)],
         ['ai_image_async_setting.s3_enabled', String(config.s3Enabled)],
@@ -282,6 +285,20 @@ const AIImageLogs = () => {
                   setConfig((previous) => ({
                     ...previous,
                     workerConcurrency: Number(value || 1),
+                  }))
+                }
+              />
+            </label>
+            <label className='flex flex-col gap-1 text-sm'>
+              <span>失败重试次数</span>
+              <InputNumber
+                min={0}
+                max={10}
+                value={config.retryCount}
+                onChange={(value) =>
+                  setConfig((previous) => ({
+                    ...previous,
+                    retryCount: Number(value || 0),
                   }))
                 }
               />

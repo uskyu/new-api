@@ -5,6 +5,7 @@ import "github.com/QuantumNous/new-api/setting/config"
 type AIImageAsyncSetting struct {
 	Enabled           bool   `json:"enabled"`
 	WorkerConcurrency int    `json:"worker_concurrency"`
+	RetryCount        int    `json:"retry_count"`
 	PollIntervalSec   int    `json:"poll_interval_sec"`
 	QueueLimit        int    `json:"queue_limit"`
 	S3Enabled         bool   `json:"s3_enabled"`
@@ -21,6 +22,7 @@ type AIImageAsyncSetting struct {
 var aiImageAsyncSetting = AIImageAsyncSetting{
 	Enabled:           false,
 	WorkerConcurrency: 1,
+	RetryCount:        1,
 	PollIntervalSec:   3,
 	QueueLimit:        50,
 	S3Enabled:         false,
