@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -18,10 +17,10 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -403,17 +402,20 @@ func cleanupReferenceImage(task *model.ImageTask) {
 	}
 }
 
-func executeImageGenerationTask(task *model.ImageTask) (string, string, error) {
+func executeImageGenerationTask(task *model.ImageTask) (resultURL, resultKey string, execErr error) {
 	channel, err := model.GetChannelById(task.ChannelID, true)
 	if err != nil {
 		return "", "", err
+	}
+	// Check if channel has base URL configured
+	if channel.GetBaseURL() == "" {
+		return "", "", fmt.Errorf("channel %d (type %d) has no base URL configured, please check channel settings",
+			channel.Id, channel.Type)
 	}
 	userCache, err := model.GetUserCache(task.UserID)
 	if err != nil {
 		return "", "", err
 	}
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
 	reqSize := task.Size
 	if reqSize == "" {
 		reqSize = "1024x1024"
@@ -423,65 +425,43 @@ func executeImageGenerationTask(task *model.ImageTask) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	req := httptest.NewRequest("POST", "/v1/images/generations", bytes.NewReader(requestJSON))
+	req := httptest.NewRequest("POST", "/pg/v1/images/generations", bytes.NewReader(requestJSON))
 	req.Header.Set("Content-Type", "application/json")
-	c.Request = req
-	c.Set("id", task.UserID)
-	common.SetContextKey(c, constant.ContextKeyUserId, task.UserID)
-	common.SetContextKey(c, constant.ContextKeyUsingGroup, task.Group)
-	userCache.WriteContext(c)
-	if err := setupImageTaskChannelContext(c, channel, task.Model); err != nil {
+	c, recorder, err := newImageTaskRelayContext(task, userCache, channel, req)
+	if err != nil {
 		return "", "", err
 	}
 	info, err := relaycommon.GenRelayInfo(c, types.RelayFormatOpenAIImage, &reqBody, nil)
 	if err != nil {
 		return "", "", err
 	}
-	info.InitChannelMeta(c)
-	if err := helper.ModelMappedHelper(c, info, &reqBody); err != nil {
-		return "", "", err
-	}
-	reqBody.SetModelName(info.UpstreamModelName)
-	if _, err := helper.ModelPriceHelper(c, info, 0, reqBody.GetTokenCountMeta()); err != nil {
-		return "", "", err
-	}
-	apiType, _ := common.ChannelType2APIType(channel.Type)
-	adaptor := relay.GetAdaptor(apiType)
-	if adaptor == nil {
-		return "", "", fmt.Errorf("invalid api type: %d", apiType)
-	}
-	adaptor.Init(info)
-	convertedRequest, err := adaptor.ConvertImageRequest(c, info, reqBody)
+	meta := reqBody.GetTokenCountMeta()
+	tokens, err := service.EstimateRequestToken(c, meta, info)
 	if err != nil {
 		return "", "", err
 	}
-	var requestBody io.Reader
-	switch v := convertedRequest.(type) {
-	case *bytes.Buffer:
-		requestBody = v
-	default:
-		jsonData, err := common.Marshal(convertedRequest)
-		if err != nil {
-			return "", "", err
+	info.SetEstimatePromptTokens(tokens)
+	priceData, err := helper.ModelPriceHelper(c, info, tokens, meta)
+	if err != nil {
+		return "", "", err
+	}
+	if !priceData.FreeModel {
+		info.ForcePreConsume = true
+		if apiErr := service.PreConsumeBilling(c, priceData.QuotaToPreConsume, info); apiErr != nil {
+			return "", "", apiErr
 		}
-		requestBody = bytes.NewBuffer(jsonData)
 	}
-	respAny, err := adaptor.DoRequest(c, info, requestBody)
-	if err != nil {
-		return "", "", err
-	}
-	resp := respAny.(*http.Response)
-	defer service.CloseResponseBodyGracefully(resp)
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", "", fmt.Errorf("upstream returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", "", err
+	defer func() {
+		if execErr != nil && info.Billing != nil {
+			info.Billing.Refund(c)
+		}
+	}()
+	if apiErr := relay.ImageHelper(c, info); apiErr != nil {
+		execErr = apiErr
+		return "", "", execErr
 	}
 	var imageResp dto.ImageResponse
-	if err := common.Unmarshal(body, &imageResp); err != nil {
+	if err := common.Unmarshal(recorder.Body.Bytes(), &imageResp); err != nil {
 		return "", "", err
 	}
 	if len(imageResp.Data) == 0 {
@@ -554,10 +534,15 @@ func uploadReferenceImage(ctx context.Context, userID int, refImageBase64 string
 	return objectKey, nil
 }
 
-func executeImageEditTask(task *model.ImageTask) (string, string, error) {
+func executeImageEditTask(task *model.ImageTask) (resultURL, resultKey string, execErr error) {
 	channel, err := model.GetChannelById(task.ChannelID, true)
 	if err != nil {
 		return "", "", err
+	}
+	// Check if channel has base URL configured
+	if channel.GetBaseURL() == "" {
+		return "", "", fmt.Errorf("channel %d (type %d) has no base URL configured, please check channel settings",
+			channel.Id, channel.Type)
 	}
 	userCache, err := model.GetUserCache(task.UserID)
 	if err != nil {
@@ -592,17 +577,10 @@ func executeImageEditTask(task *model.ImageTask) (string, string, error) {
 	}
 	writer.Close()
 
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest("POST", "/v1/images/edits", &requestBody)
+	req := httptest.NewRequest("POST", "/pg/v1/images/edits", &requestBody)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	c.Request = req
-
-	c.Set("id", task.UserID)
-	common.SetContextKey(c, constant.ContextKeyUserId, task.UserID)
-	common.SetContextKey(c, constant.ContextKeyUsingGroup, task.Group)
-	userCache.WriteContext(c)
-	if err := setupImageTaskChannelContext(c, channel, task.Model); err != nil {
+	c, recorder, err := newImageTaskRelayContext(task, userCache, channel, req)
+	if err != nil {
 		return "", "", err
 	}
 
@@ -615,56 +593,33 @@ func executeImageEditTask(task *model.ImageTask) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	info.RelayMode = relayconstant.RelayModeImagesEdits
-	info.InitChannelMeta(c)
-	if err := helper.ModelMappedHelper(c, info, &reqBody); err != nil {
-		return "", "", err
-	}
-	reqBody.SetModelName(info.UpstreamModelName)
-	if _, err := helper.ModelPriceHelper(c, info, 0, reqBody.GetTokenCountMeta()); err != nil {
-		return "", "", err
-	}
-
-	apiType, _ := common.ChannelType2APIType(channel.Type)
-	adaptor := relay.GetAdaptor(apiType)
-	if adaptor == nil {
-		return "", "", fmt.Errorf("invalid api type: %d", apiType)
-	}
-	adaptor.Init(info)
-
-	convertedRequest, err := adaptor.ConvertImageRequest(c, info, reqBody)
+	meta := reqBody.GetTokenCountMeta()
+	tokens, err := service.EstimateRequestToken(c, meta, info)
 	if err != nil {
 		return "", "", err
 	}
-
-	var convertedBody io.Reader
-	switch v := convertedRequest.(type) {
-	case *bytes.Buffer:
-		convertedBody = v
-	default:
-		jsonData, err := common.Marshal(convertedRequest)
-		if err != nil {
-			return "", "", err
+	info.SetEstimatePromptTokens(tokens)
+	priceData, err := helper.ModelPriceHelper(c, info, tokens, meta)
+	if err != nil {
+		return "", "", err
+	}
+	if !priceData.FreeModel {
+		info.ForcePreConsume = true
+		if apiErr := service.PreConsumeBilling(c, priceData.QuotaToPreConsume, info); apiErr != nil {
+			return "", "", apiErr
 		}
-		convertedBody = bytes.NewBuffer(jsonData)
 	}
-
-	respAny, err := adaptor.DoRequest(c, info, convertedBody)
-	if err != nil {
-		return "", "", err
-	}
-	resp := respAny.(*http.Response)
-	defer service.CloseResponseBodyGracefully(resp)
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", "", fmt.Errorf("upstream returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", "", err
+	defer func() {
+		if execErr != nil && info.Billing != nil {
+			info.Billing.Refund(c)
+		}
+	}()
+	if apiErr := relay.ImageHelper(c, info); apiErr != nil {
+		execErr = apiErr
+		return "", "", execErr
 	}
 	var imageResp dto.ImageResponse
-	if err := common.Unmarshal(body, &imageResp); err != nil {
+	if err := common.Unmarshal(recorder.Body.Bytes(), &imageResp); err != nil {
 		return "", "", err
 	}
 	if len(imageResp.Data) == 0 {
@@ -678,6 +633,32 @@ func executeImageEditTask(task *model.ImageTask) (string, string, error) {
 		return first.Url, "", nil
 	}
 	return uploadImageResult(ctx, task.UserID, first)
+}
+
+func newImageTaskRelayContext(task *model.ImageTask, userCache *model.UserBase, channel *model.Channel, req *http.Request) (*gin.Context, *httptest.ResponseRecorder, error) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	if req != nil {
+		req = req.WithContext(context.WithValue(req.Context(), common.RequestIdKey, task.TaskID))
+	}
+	c.Request = req
+	c.Set(common.RequestIdKey, task.TaskID)
+	c.Set("id", task.UserID)
+	common.SetContextKey(c, constant.ContextKeyUserId, task.UserID)
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, task.Group)
+	userCache.WriteContext(c)
+	tempToken := &model.Token{
+		UserId: task.UserID,
+		Name:   fmt.Sprintf("playground-image-%s", task.Group),
+		Group:  task.Group,
+	}
+	if err := middleware.SetupContextForToken(c, tempToken); err != nil {
+		return nil, nil, err
+	}
+	if err := setupImageTaskChannelContext(c, channel, task.Model); err != nil {
+		return nil, nil, err
+	}
+	return c, recorder, nil
 }
 
 func buildImageTaskChannelContext(c *gin.Context, userCache *model.UserBase, usingGroup, modelName string) (*model.Channel, string, error) {

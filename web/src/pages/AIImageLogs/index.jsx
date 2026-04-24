@@ -61,11 +61,11 @@ const AIImageLogs = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize]);
+  }, [pageSize]);
 
   useEffect(() => {
     loadData(1, pageSize);
-  }, [loadData, pageSize]);
+  }, []);
 
   const loadConfig = useCallback(async () => {
     if (!isRoot()) {
