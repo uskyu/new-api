@@ -591,46 +591,18 @@ const AIImage = () => {
 
   const loadRemoteTasks = React.useCallback(async (forceFull = false) => {
     const CACHE_KEY = 'ai_image_tasks_cache';
-    let cached = null;
-    if (!forceFull) {
-      try {
-        const raw = localStorage.getItem(CACHE_KEY);
-        if (raw) cached = JSON.parse(raw);
-      } catch { /* ignore */ }
-    }
-
-    const maxCachedId = !forceFull && Array.isArray(cached) && cached.length > 0
-      ? Math.max(...cached.map((t) => t.id || 0))
-      : 0;
-
     const headers = {
       Accept: 'application/json',
       'New-Api-User': getUserIdFromLocalStorage(),
     };
 
-    if (maxCachedId > 0 && !forceFull) {
-      const response = await fetch(`/api/ai-image/tasks?p=1&page_size=100&since_id=${maxCachedId}`, { headers });
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const result = await response.json();
-      if (!result?.success) throw new Error(result?.message || 'failed to load image tasks');
-      const newItems = Array.isArray(result?.data?.items) ? result.data.items : [];
-      if (newItems.length === 0) {
-        setRemoteTasks(cached);
-        return;
-      }
-      const merged = [...newItems, ...cached.filter((old) => !newItems.some((n) => n.id === old.id))];
-      const trimmed = merged.slice(0, 100);
-      setRemoteTasks(trimmed);
-      try { localStorage.setItem(CACHE_KEY, JSON.stringify(trimmed)); } catch { /* ignore */ }
-    } else {
-      const response = await fetch('/api/ai-image/tasks?p=1&page_size=100', { headers });
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const result = await response.json();
-      if (!result?.success) throw new Error(result?.message || 'failed to load image tasks');
-      const items = Array.isArray(result?.data?.items) ? result.data.items : [];
-      setRemoteTasks(items);
-      try { localStorage.setItem(CACHE_KEY, JSON.stringify(items)); } catch { /* ignore */ }
-    }
+    const response = await fetch('/api/ai-image/tasks?p=1&page_size=100', { headers });
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    const result = await response.json();
+    if (!result?.success) throw new Error(result?.message || 'failed to load image tasks');
+    const items = Array.isArray(result?.data?.items) ? result.data.items : [];
+    setRemoteTasks(items);
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(items)); } catch { /* ignore */ }
   }, []);
 
   React.useEffect(() => {
