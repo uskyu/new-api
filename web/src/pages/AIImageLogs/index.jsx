@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Input, InputNumber, Table, Tag, Typography } from '@douyinfe/semi-ui';
+import { Button, Input, InputNumber, Modal, Table, Tag, Typography } from '@douyinfe/semi-ui';
 import { API, isRoot, showError, showSuccess, timestamp2string, toBoolean } from '../../helpers';
 
 const statusColorMap = {
@@ -19,6 +19,7 @@ const AIImageLogs = () => {
   const [savingConfig, setSavingConfig] = useState(false);
   const [testingS3, setTestingS3] = useState(false);
   const [s3TestResult, setS3TestResult] = useState(null);
+  const [promptPreview, setPromptPreview] = useState(null);
   const [config, setConfig] = useState({
     enabled: false,
     workerConcurrency: 1,
@@ -30,6 +31,7 @@ const AIImageLogs = () => {
     s3Bucket: '',
     s3AccessKey: '',
     s3SecretKey: '',
+    s3PublicBaseURL: '',
     s3PathPrefix: 'ai-image',
     s3UseSSL: true,
   });
@@ -88,6 +90,7 @@ const AIImageLogs = () => {
         s3Bucket: optionMap['ai_image_async_setting.s3_bucket'] || '',
         s3AccessKey: optionMap['ai_image_async_setting.s3_access_key'] || '',
         s3SecretKey: optionMap['ai_image_async_setting.s3_secret_key'] || '',
+        s3PublicBaseURL: optionMap['ai_image_async_setting.s3_public_base_url'] || '',
         s3PathPrefix: optionMap['ai_image_async_setting.s3_path_prefix'] || 'ai-image',
         s3UseSSL: optionMap['ai_image_async_setting.s3_use_ssl'] === '' ? true : toBoolean(optionMap['ai_image_async_setting.s3_use_ssl']),
       });
@@ -114,6 +117,7 @@ const AIImageLogs = () => {
         ['ai_image_async_setting.s3_bucket', config.s3Bucket || ''],
         ['ai_image_async_setting.s3_access_key', config.s3AccessKey || ''],
         ['ai_image_async_setting.s3_secret_key', config.s3SecretKey || ''],
+        ['ai_image_async_setting.s3_public_base_url', config.s3PublicBaseURL || ''],
         ['ai_image_async_setting.s3_path_prefix', config.s3PathPrefix || 'ai-image'],
         ['ai_image_async_setting.s3_use_ssl', String(config.s3UseSSL)],
       ];
@@ -172,15 +176,43 @@ const AIImageLogs = () => {
         dataIndex: 'status',
         render: (value) => <Tag color={statusColorMap[value] || 'grey'}>{value}</Tag>,
       },
-      {
-        title: '提示词',
-        dataIndex: 'prompt',
-        render: (value) => (
-          <span className='line-clamp-2 block max-w-[320px] break-all'>
-            {value || '-'}
-          </span>
-        ),
-      },
+        {
+          title: '提示词',
+          dataIndex: 'prompt',
+          render: (value) => {
+            if (!value) {
+              return '-';
+            }
+            return (
+              <div className='max-w-[320px]'>
+                <div
+                  style={{
+                    display: '-webkit-box',
+                    WebkitBoxOrient: 'vertical',
+                    WebkitLineClamp: 4,
+                    overflow: 'hidden',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {value}
+                </div>
+                {value.length > 80 ? (
+                  <Button
+                    theme='borderless'
+                    type='primary'
+                    size='small'
+                    className='!px-0'
+                    onClick={() => setPromptPreview(value)}
+                  >
+                    查看全文
+                  </Button>
+                ) : null}
+              </div>
+            );
+          },
+          width: 360,
+        },
       {
         title: '结果',
         dataIndex: 'result_url',
@@ -347,6 +379,16 @@ const AIImageLogs = () => {
                 }
               />
             </label>
+            <label className='flex flex-col gap-1 text-sm md:col-span-2'>
+              <span>Public Base URL</span>
+              <Input
+                value={config.s3PublicBaseURL}
+                onChange={(value) =>
+                  setConfig((previous) => ({ ...previous, s3PublicBaseURL: value }))
+                }
+                placeholder='https://cdn.example.com/ai-image'
+              />
+            </label>
             <label className='flex flex-col gap-1 text-sm'>
               <span>Path Prefix</span>
               <Input
@@ -426,6 +468,21 @@ const AIImageLogs = () => {
           onPageSizeChange: (nextPageSize) => loadData(1, nextPageSize),
         }}
       />
+
+      <Modal
+        title='提示词全文'
+        visible={Boolean(promptPreview)}
+        onCancel={() => setPromptPreview(null)}
+        footer={
+          <Button type='primary' onClick={() => setPromptPreview(null)}>
+            关闭
+          </Button>
+        }
+      >
+        <div className='max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-6'>
+          {promptPreview}
+        </div>
+      </Modal>
     </div>
   );
 };
