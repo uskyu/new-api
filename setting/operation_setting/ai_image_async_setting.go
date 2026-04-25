@@ -6,6 +6,7 @@ type AIImageAsyncSetting struct {
 	Enabled           bool   `json:"enabled"`
 	WorkerConcurrency int    `json:"worker_concurrency"`
 	RetryCount        int    `json:"retry_count"`
+	MaxTimeoutMin     int    `json:"max_timeout_min"`
 	PollIntervalSec   int    `json:"poll_interval_sec"`
 	QueueLimit        int    `json:"queue_limit"`
 	S3Enabled         bool   `json:"s3_enabled"`
@@ -23,6 +24,7 @@ var aiImageAsyncSetting = AIImageAsyncSetting{
 	Enabled:           false,
 	WorkerConcurrency: 1,
 	RetryCount:        1,
+	MaxTimeoutMin:     10,
 	PollIntervalSec:   3,
 	QueueLimit:        50,
 	S3Enabled:         false,

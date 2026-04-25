@@ -357,6 +357,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			aiImageTaskRoute.POST("", controller.CreateImageTask)
 			aiImageTaskRoute.GET("", controller.GetUserImageTasks)
+			aiImageTaskRoute.DELETE("/history", controller.DeleteUserCompletedImageTasks)
 			aiImageTaskRoute.GET(":task_id", controller.GetUserImageTask)
 			aiImageTaskRoute.DELETE(":task_id", controller.DeleteUserImageTask)
 		}

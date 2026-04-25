@@ -34,6 +34,20 @@ import (
 
 var imageTaskProcessingCount int64
 
+func normalizeImageTaskTimeoutMin(timeoutMin int) int {
+	if timeoutMin <= 0 {
+		return 10
+	}
+	if timeoutMin > 120 {
+		return 120
+	}
+	return timeoutMin
+}
+
+func imageTaskTimeoutError(timeoutMin int) error {
+	return fmt.Errorf("image task exceeded max timeout of %d minute(s)", timeoutMin)
+}
+
 func StartImageTaskWorker() {
 	if !common.IsMasterNode {
 		return
@@ -259,6 +273,24 @@ func DeleteUserImageTask(c *gin.Context) {
 	common.ApiSuccess(c, nil)
 }
 
+func DeleteUserCompletedImageTasks(c *gin.Context) {
+	userID := c.GetInt("id")
+	tasks, err := model.DeleteCompletedImageTasksByUserID(userID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	for _, task := range tasks {
+		if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") && service.IsObjectStorageEnabled() {
+			_ = service.DeleteObjectFromStorage(context.Background(), task.ResultKey)
+		}
+		if task.ReferenceImageKey != "" && !strings.Contains(task.ReferenceImageKey, "://") && service.IsObjectStorageEnabled() {
+			_ = service.DeleteObjectFromStorage(context.Background(), task.ReferenceImageKey)
+		}
+	}
+	common.ApiSuccess(c, map[string]int{"deleted": len(tasks)})
+}
+
 func GetAllImageTasks(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	userID := common.String2Int(c.Query("user_id"))
@@ -346,16 +378,27 @@ func processOneImageTask(task *model.ImageTask) {
 	if retryCount < 0 {
 		retryCount = 0
 	}
+	timeoutMin := normalizeImageTaskTimeoutMin(setting.MaxTimeoutMin)
+	taskCtx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMin)*time.Minute)
+	defer cancel()
 
 	var resultURL, resultKey string
 	var err error
 	for attempt := 0; attempt <= retryCount; attempt++ {
+		if taskCtx.Err() != nil {
+			err = imageTaskTimeoutError(timeoutMin)
+			break
+		}
 		if task.ReferenceImageKey != "" {
-			resultURL, resultKey, err = executeImageEditTask(task)
+			resultURL, resultKey, err = executeImageEditTask(taskCtx, task)
 		} else {
-			resultURL, resultKey, err = executeImageGenerationTask(task)
+			resultURL, resultKey, err = executeImageGenerationTask(taskCtx, task)
 		}
 		if err == nil {
+			break
+		}
+		if taskCtx.Err() != nil {
+			err = imageTaskTimeoutError(timeoutMin)
 			break
 		}
 		if attempt >= retryCount {
@@ -363,7 +406,16 @@ func processOneImageTask(task *model.ImageTask) {
 		}
 		delay := imageTaskRetryDelay(attempt)
 		common.SysLog(fmt.Sprintf("image task %s failed on attempt %d/%d, retrying in %s: %s", task.TaskID, attempt+1, retryCount+1, delay.String(), err.Error()))
-		time.Sleep(delay)
+		waitTimedOut := false
+		select {
+		case <-taskCtx.Done():
+			err = imageTaskTimeoutError(timeoutMin)
+			waitTimedOut = true
+		case <-time.After(delay):
+		}
+		if waitTimedOut {
+			break
+		}
 	}
 	finishedAt := time.Now().Unix()
 	if err != nil {
@@ -398,11 +450,13 @@ func imageTaskRetryDelay(attempt int) time.Duration {
 
 func cleanupReferenceImage(task *model.ImageTask) {
 	if task.ReferenceImageKey != "" && service.IsObjectStorageEnabled() {
-		_ = service.DeleteObjectFromStorage(context.Background(), task.ReferenceImageKey)
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = service.DeleteObjectFromStorage(cleanupCtx, task.ReferenceImageKey)
 	}
 }
 
-func executeImageGenerationTask(task *model.ImageTask) (resultURL, resultKey string, execErr error) {
+func executeImageGenerationTask(ctx context.Context, task *model.ImageTask) (resultURL, resultKey string, execErr error) {
 	channel, err := model.GetChannelById(task.ChannelID, true)
 	if err != nil {
 		return "", "", err
@@ -427,7 +481,7 @@ func executeImageGenerationTask(task *model.ImageTask) (resultURL, resultKey str
 	}
 	req := httptest.NewRequest("POST", "/pg/v1/images/generations", bytes.NewReader(requestJSON))
 	req.Header.Set("Content-Type", "application/json")
-	c, recorder, err := newImageTaskRelayContext(task, userCache, channel, req)
+	c, recorder, err := newImageTaskRelayContext(ctx, task, userCache, channel, req)
 	if err != nil {
 		return "", "", err
 	}
@@ -469,12 +523,12 @@ func executeImageGenerationTask(task *model.ImageTask) (resultURL, resultKey str
 	}
 	first := imageResp.Data[0]
 	if service.IsObjectStorageEnabled() {
-		return uploadImageResult(context.Background(), task.UserID, first)
+		return uploadImageResult(ctx, task.UserID, first)
 	}
 	if first.Url != "" {
 		return first.Url, "", nil
 	}
-	return uploadImageResult(context.Background(), task.UserID, first)
+	return uploadImageResult(ctx, task.UserID, first)
 }
 
 func uploadImageResult(ctx context.Context, userID int, imageData dto.ImageData) (string, string, error) {
@@ -498,7 +552,7 @@ func uploadImageResult(ctx context.Context, userID int, imageData dto.ImageData)
 	if strings.TrimSpace(imageData.Url) == "" {
 		return "", "", fmt.Errorf("empty image url")
 	}
-	mimeType, base64Data, err := service.GetImageFromUrl(imageData.Url)
+	mimeType, base64Data, err := service.GetImageFromUrlWithContext(ctx, imageData.Url)
 	if err != nil {
 		return "", "", err
 	}
@@ -534,7 +588,7 @@ func uploadReferenceImage(ctx context.Context, userID int, refImageBase64 string
 	return objectKey, nil
 }
 
-func executeImageEditTask(task *model.ImageTask) (resultURL, resultKey string, execErr error) {
+func executeImageEditTask(ctx context.Context, task *model.ImageTask) (resultURL, resultKey string, execErr error) {
 	channel, err := model.GetChannelById(task.ChannelID, true)
 	if err != nil {
 		return "", "", err
@@ -549,7 +603,6 @@ func executeImageEditTask(task *model.ImageTask) (resultURL, resultKey string, e
 		return "", "", err
 	}
 
-	ctx := context.Background()
 	refData, _, err := service.DownloadObjectFromStorage(ctx, task.ReferenceImageKey)
 	if err != nil {
 		return "", "", fmt.Errorf("download reference image from S3 failed: %w", err)
@@ -579,7 +632,7 @@ func executeImageEditTask(task *model.ImageTask) (resultURL, resultKey string, e
 
 	req := httptest.NewRequest("POST", "/pg/v1/images/edits", &requestBody)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	c, recorder, err := newImageTaskRelayContext(task, userCache, channel, req)
+	c, recorder, err := newImageTaskRelayContext(ctx, task, userCache, channel, req)
 	if err != nil {
 		return "", "", err
 	}
@@ -635,11 +688,11 @@ func executeImageEditTask(task *model.ImageTask) (resultURL, resultKey string, e
 	return uploadImageResult(ctx, task.UserID, first)
 }
 
-func newImageTaskRelayContext(task *model.ImageTask, userCache *model.UserBase, channel *model.Channel, req *http.Request) (*gin.Context, *httptest.ResponseRecorder, error) {
+func newImageTaskRelayContext(ctx context.Context, task *model.ImageTask, userCache *model.UserBase, channel *model.Channel, req *http.Request) (*gin.Context, *httptest.ResponseRecorder, error) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	if req != nil {
-		req = req.WithContext(context.WithValue(req.Context(), common.RequestIdKey, task.TaskID))
+		req = req.WithContext(context.WithValue(ctx, common.RequestIdKey, task.TaskID))
 	}
 	c.Request = req
 	c.Set(common.RequestIdKey, task.TaskID)

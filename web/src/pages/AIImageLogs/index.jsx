@@ -24,6 +24,7 @@ const AIImageLogs = () => {
     enabled: false,
     workerConcurrency: 1,
     retryCount: 1,
+    maxTimeoutMin: 10,
     pollIntervalSec: 3,
     queueLimit: 50,
     s3Enabled: false,
@@ -84,6 +85,7 @@ const AIImageLogs = () => {
         enabled: toBoolean(optionMap['ai_image_async_setting.enabled']),
         workerConcurrency: parseInt(optionMap['ai_image_async_setting.worker_concurrency'] || '1', 10),
         retryCount: parseInt(optionMap['ai_image_async_setting.retry_count'] || '1', 10),
+        maxTimeoutMin: parseInt(optionMap['ai_image_async_setting.max_timeout_min'] || '10', 10),
         pollIntervalSec: parseInt(optionMap['ai_image_async_setting.poll_interval_sec'] || '3', 10),
         queueLimit: parseInt(optionMap['ai_image_async_setting.queue_limit'] || '50', 10),
         s3Enabled: toBoolean(optionMap['ai_image_async_setting.s3_enabled']),
@@ -112,6 +114,7 @@ const AIImageLogs = () => {
         ['ai_image_async_setting.enabled', String(config.enabled)],
         ['ai_image_async_setting.worker_concurrency', String(config.workerConcurrency || 1)],
         ['ai_image_async_setting.retry_count', String(Math.max(0, Number(config.retryCount || 0)))],
+        ['ai_image_async_setting.max_timeout_min', String(Math.min(120, Math.max(1, Number(config.maxTimeoutMin || 10))))],
         ['ai_image_async_setting.poll_interval_sec', String(config.pollIntervalSec || 3)],
         ['ai_image_async_setting.queue_limit', String(config.queueLimit || 50)],
         ['ai_image_async_setting.s3_enabled', String(config.s3Enabled)],
@@ -299,6 +302,20 @@ const AIImageLogs = () => {
                   setConfig((previous) => ({
                     ...previous,
                     retryCount: Number(value || 0),
+                  }))
+                }
+              />
+            </label>
+            <label className='flex flex-col gap-1 text-sm'>
+              <span>最大超时分钟</span>
+              <InputNumber
+                min={1}
+                max={120}
+                value={config.maxTimeoutMin}
+                onChange={(value) =>
+                  setConfig((previous) => ({
+                    ...previous,
+                    maxTimeoutMin: Math.min(120, Math.max(1, Number(value || 10))),
                   }))
                 }
               />

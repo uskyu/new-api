@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Button, Empty, Spin, TextArea, Typography } from '@douyinfe/semi-ui';
+import { Button, Empty, InputNumber, Modal, Spin, TextArea, Typography } from '@douyinfe/semi-ui';
 import { Check, ImagePlus, Loader2, Sparkles, Wand2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import useAiImageState from '../../hooks/ai-image/useAiImageState';
@@ -22,10 +22,13 @@ const OPENAI_IMAGE_SIZE_OPTIONS = [
   { value: '1024x1536', label: '1024×1536 (2:3)' },
   { value: '2048x2048', label: '2048×2048 (1:1 2K)' },
   { value: '2048x1152', label: '2048×1152 (16:9)' },
-  { value: '3840x2160', label: '3840×2160 (16:9 4K)' },
-  { value: '2160x3840', label: '2160×3840 (9:16 4K)' },
+  { value: '3840x2160', label: '3840×2160 (16:9)' },
+  { value: '2160x3840', label: '2160×3840 (9:16)' },
 ];
-const BATCH_COUNT_OPTIONS = [1, 2, 4];
+const QUICK_BATCH_COUNT_OPTIONS = [1, 2, 4];
+const MAX_BATCH_COUNT = 10;
+const MAX_PROMPT_LENGTH = 4000;
+const TASKS_CACHE_KEY = 'ai_image_tasks_cache';
 const PROMPT_OPTIMIZER_SYSTEM_PROMPT = [
   'You are an AI image prompt optimizer.',
   'Rewrite the user prompt into one stronger image-generation prompt in Simplified Chinese.',
@@ -52,6 +55,12 @@ const revokeDraftImage = (image) => {
 
 const revokeDraftImages = (images = []) => {
   images.forEach(revokeDraftImage);
+};
+
+const normalizeBatchCount = (value) => {
+  const nextValue = Number(value || 1);
+  if (!Number.isFinite(nextValue)) return 1;
+  return Math.min(MAX_BATCH_COUNT, Math.max(1, Math.trunc(nextValue)));
 };
 
 const normalizeImageSource = (value, mimeType = 'image/png') => {
@@ -453,6 +462,11 @@ const AIImage = () => {
     [remoteTasks],
   );
 
+  const completedRemoteTasks = useMemo(
+    () => remoteTasks.filter((task) => task.status === 'SUCCEEDED' || task.status === 'FAILED'),
+    [remoteTasks],
+  );
+
   const groupOptions = groups.map((group) => ({
     value: group.value,
     label: group.fullLabel || group.label,
@@ -590,7 +604,6 @@ const AIImage = () => {
   }, [draftImages]);
 
   const loadRemoteTasks = React.useCallback(async (forceFull = false) => {
-    const CACHE_KEY = 'ai_image_tasks_cache';
     const headers = {
       Accept: 'application/json',
       'New-Api-User': getUserIdFromLocalStorage(),
@@ -602,7 +615,7 @@ const AIImage = () => {
     if (!result?.success) throw new Error(result?.message || 'failed to load image tasks');
     const items = Array.isArray(result?.data?.items) ? result.data.items : [];
     setRemoteTasks(items);
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify(items)); } catch { /* ignore */ }
+    try { localStorage.setItem(TASKS_CACHE_KEY, JSON.stringify(items)); } catch { /* ignore */ }
   }, []);
 
   React.useEffect(() => {
@@ -864,7 +877,8 @@ const AIImage = () => {
       return;
     }
 
-    const tasks = Array.from({ length: batchCount }, (_, index) =>
+    const effectiveBatchCount = normalizeBatchCount(batchCount);
+    const tasks = Array.from({ length: effectiveBatchCount }, (_, index) =>
       prompts.length > 1 ? prompts[index % prompts.length] : prompts[0],
     );
 
@@ -919,14 +933,55 @@ const AIImage = () => {
     t,
   ]);
 
-  const handleClearHistory = React.useCallback(() => {
-    clearCurrentSession();
-    setActiveRecordId(null);
-    setPrompt('');
-    setOptimizedPromptDraft('');
-    setOriginalPrompt('');
-    showSuccess(t('已清空最近记录'));
-  }, [clearCurrentSession, t]);
+  const handleDeleteHistory = React.useCallback(() => {
+    const localCount = localRecords.length;
+    const remoteCount = completedRemoteTasks.length;
+    if (localCount === 0 && remoteCount === 0) {
+      showError(t('暂无可删除历史'));
+      return;
+    }
+
+    Modal.confirm({
+      title: t('确认一键删除历史记录'),
+      content: t('将删除所有已完成的历史记录，排队中和生成中的任务不会删除。此操作不可恢复。'),
+      okText: t('确认删除'),
+      cancelText: t('取消'),
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          if (remoteCount > 0) {
+            const response = await fetch('/api/ai-image/tasks/history', {
+              method: 'DELETE',
+              headers: { 'New-Api-User': getUserIdFromLocalStorage() },
+            });
+            const result = await response.json();
+            if (!result?.success) {
+              showError(result?.message || t('删除失败'));
+              return;
+            }
+          }
+
+          if (localCount > 0) {
+            clearCurrentSession();
+          }
+          const nextRemoteTasks = remoteTasks.filter(
+            (task) => task.status === 'PENDING' || task.status === 'PROCESSING',
+          );
+
+          setRemoteTasks(nextRemoteTasks);
+          try {
+            localStorage.setItem(TASKS_CACHE_KEY, JSON.stringify(nextRemoteTasks));
+          } catch {
+            // Ignore storage sync errors.
+          }
+          setActiveRecordId(null);
+          showSuccess(t('已删除历史记录'));
+        } catch {
+          showError(t('删除失败'));
+        }
+      },
+    });
+  }, [clearCurrentSession, completedRemoteTasks.length, localRecords.length, remoteTasks, t]);
 
   const handleCopyPrompt = React.useCallback(
     async (record) => {
@@ -1196,7 +1251,7 @@ const AIImage = () => {
                     {t('AI 绘图')}
                   </Typography.Title>
                   <Typography.Text className='!text-sm !text-slate-500'>
-                    {t('选择 Google 图片模型，输入提示词后直接查看生成结果')}
+                    {t('选择 gpt-image-2 图片模型，输入提示词后直接查看生成结果')}
                   </Typography.Text>
                 </div>
               </div>
@@ -1302,24 +1357,39 @@ const AIImage = () => {
                     <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
                       {t('批量张数')}
                     </span>
-                    <select
-                      value={batchCount}
-                      onChange={(event) => setBatchCount(Number(event.target.value))}
-                      className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
-                    >
-                      {BATCH_COUNT_OPTIONS.map((item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ))}
-                    </select>
+                    <div className='flex items-center gap-3'>
+                      <div className='flex items-center gap-2'>
+                        {QUICK_BATCH_COUNT_OPTIONS.map((item) => (
+                          <Button
+                            key={item}
+                            theme={batchCount === item ? 'solid' : 'light'}
+                            type='primary'
+                            className='!rounded-full'
+                            onClick={() => setBatchCount(item)}
+                          >
+                            {item}
+                          </Button>
+                        ))}
+                      </div>
+                      <InputNumber
+                        min={1}
+                        max={MAX_BATCH_COUNT}
+                        value={batchCount}
+                        onChange={(value) => setBatchCount(normalizeBatchCount(value))}
+                        className='!w-[112px] shrink-0'
+                        placeholder='1-10'
+                      />
+                    </div>
+                    <Typography.Text className='!text-xs !text-slate-500'>
+                      {t('快捷选择 1 / 2 / 4，也可自定义输入，最高 10 张')}
+                    </Typography.Text>
                   </label>
                 </div>
 
                 <TextArea
                   value={prompt}
                   onChange={(value) => {
-                    if (value.length <= 500) {
+                    if (value.length <= MAX_PROMPT_LENGTH) {
                       setPrompt(value);
                     }
                     if (optimizedPromptDraft) {
@@ -1327,7 +1397,7 @@ const AIImage = () => {
                       setOriginalPrompt('');
                     }
                   }}
-                  maxLength={500}
+                  maxLength={MAX_PROMPT_LENGTH}
                   showClear
                   autosize={{ minRows: 7, maxRows: 14 }}
                   placeholder={t('描述你想生成的图片；批量生成时可一行一个提示词')}
@@ -1438,7 +1508,7 @@ const AIImage = () => {
                       )
                     }
                     loading={isGenerating}
-                    onClick={batchCount > 1 ? handleBatchGenerate : handleGenerate}
+                    onClick={normalizeBatchCount(batchCount) > 1 ? handleBatchGenerate : handleGenerate}
                     className='!rounded-full'
                   >
                     {t('生成图片')}
@@ -1462,25 +1532,6 @@ const AIImage = () => {
                     {t('优化提示词')}
                   </Button>
 
-                  <Button
-                    theme='light'
-                    type='tertiary'
-                    disabled={isGenerating}
-                    onClick={handleBatchGenerate}
-                    className='!rounded-full'
-                  >
-                    {t('批量生成')}
-                  </Button>
-
-                  <Button
-                    theme='borderless'
-                    type='tertiary'
-                    disabled={isGenerating || records.length === 0}
-                    onClick={handleClearHistory}
-                    className='!rounded-full'
-                  >
-                    {t('清空记录')}
-                  </Button>
                 </div>
 
                 <Typography.Text className='mt-3 block text-xs text-slate-500'>
@@ -1577,9 +1628,20 @@ const AIImage = () => {
                 {t('点击下方缩略图即可切换查看历史结果')}
               </Typography.Text>
             </div>
-            <Typography.Text className='!text-sm !text-slate-400'>
-              {t('{{count}} 条记录', { count: records.length })}
-            </Typography.Text>
+            <div className='flex items-center gap-3'>
+              <Typography.Text className='!text-sm !text-slate-400'>
+                {t('{{count}} 条记录', { count: records.length })}
+              </Typography.Text>
+              <Button
+                theme='light'
+                type='danger'
+                className='!rounded-full'
+                disabled={localRecords.length === 0 && completedRemoteTasks.length === 0}
+                onClick={handleDeleteHistory}
+              >
+                {t('一键删除历史')}
+              </Button>
+            </div>
           </div>
 
           {pendingRemoteTasks.length > 0 && (
