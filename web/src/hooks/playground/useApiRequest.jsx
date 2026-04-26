@@ -331,6 +331,11 @@ export const useApiRequest = (
           return;
         }
 
+        // Ignore heartbeat/comment frames emitted by the SSE client as empty messages.
+        if (!e.data || !e.data.trim()) {
+          return;
+        }
+
         try {
           const payload = JSON.parse(e.data);
           responseData += e.data + '\n';
