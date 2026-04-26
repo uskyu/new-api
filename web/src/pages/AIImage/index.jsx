@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Button, Empty, InputNumber, Modal, Spin, TextArea, Typography } from '@douyinfe/semi-ui';
+import { Button, Empty, InputNumber, Modal, Pagination, Spin, TextArea, Typography } from '@douyinfe/semi-ui';
 import { Check, ImagePlus, Loader2, Sparkles, Wand2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import useAiImageState from '../../hooks/ai-image/useAiImageState';
@@ -28,6 +28,7 @@ const OPENAI_IMAGE_SIZE_OPTIONS = [
 const QUICK_BATCH_COUNT_OPTIONS = [1, 2, 4];
 const MAX_BATCH_COUNT = 10;
 const MAX_PROMPT_LENGTH = 4000;
+const REMOTE_TASK_PAGE_SIZE = 10;
 const TASKS_CACHE_KEY = 'ai_image_tasks_cache';
 const PROMPT_OPTIMIZER_SYSTEM_PROMPT = [
   'You are an AI image prompt optimizer.',
@@ -397,7 +398,7 @@ const GalleryImage = ({ src, alt, active, onClick }) => (
         : 'border-white/70 hover:border-slate-300'
     }`}
   >
-    <img src={src} alt={alt} className='h-24 w-24 object-cover sm:h-28 sm:w-28' />
+    <img src={src} alt={alt} loading='lazy' decoding='async' className='h-24 w-24 object-cover sm:h-28 sm:w-28' />
   </button>
 );
 
@@ -453,9 +454,12 @@ const AIImage = () => {
   const [originalPrompt, setOriginalPrompt] = useState('');
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [remoteTasks, setRemoteTasks] = useState([]);
+  const [remotePage, setRemotePage] = useState(1);
+  const [remoteTotal, setRemoteTotal] = useState(0);
   const previousDraftImagesRef = useRef([]);
   const selectedModelRef = useRef('');
   const promptOptimizerModelRef = useRef('');
+  const stableTaskUrlRef = useRef(new Map());
 
   const pendingRemoteTasks = useMemo(
     () => remoteTasks.filter((task) => task.status === 'PENDING' || task.status === 'PROCESSING'),
@@ -603,46 +607,66 @@ const AIImage = () => {
     );
   }, [draftImages]);
 
-  const loadRemoteTasks = React.useCallback(async (forceFull = false) => {
+  const mergeStableTaskUrls = React.useCallback((items) => {
+    const urlCache = stableTaskUrlRef.current;
+    return items.map((task) => {
+      if (task?.status !== 'SUCCEEDED') {
+        return task;
+      }
+      const cacheKey = task.task_id || task.id;
+      if (!cacheKey) {
+        return task;
+      }
+      const cachedURL = urlCache.get(cacheKey);
+      const resultURL = cachedURL || task.result_url || '';
+      if (resultURL) {
+        urlCache.set(cacheKey, resultURL);
+      }
+      return resultURL === task.result_url ? task : { ...task, result_url: resultURL };
+    });
+  }, []);
+
+  const loadRemoteTasks = React.useCallback(async (nextPage = remotePage) => {
     const headers = {
       Accept: 'application/json',
       'New-Api-User': getUserIdFromLocalStorage(),
     };
 
-    const response = await fetch('/api/ai-image/tasks?p=1&page_size=100', { headers });
+    const page = Math.max(1, Number(nextPage) || 1);
+    const response = await fetch(`/api/ai-image/tasks?p=${page}&page_size=${REMOTE_TASK_PAGE_SIZE}`, { headers });
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const result = await response.json();
     if (!result?.success) throw new Error(result?.message || 'failed to load image tasks');
-    const items = Array.isArray(result?.data?.items) ? result.data.items : [];
+    const data = result?.data || {};
+    const items = Array.isArray(data.items) ? mergeStableTaskUrls(data.items) : [];
+    setRemotePage(Number(data.page) || page);
+    setRemoteTotal(Number(data.total) || 0);
     setRemoteTasks(items);
     try { localStorage.setItem(TASKS_CACHE_KEY, JSON.stringify(items)); } catch { /* ignore */ }
-  }, []);
+  }, [mergeStableTaskUrls, remotePage]);
 
   React.useEffect(() => {
     if (!ready) {
+      return;
+    }
+    loadRemoteTasks(remotePage).catch(() => {
+      // Ignore background load failures.
+    });
+  }, [loadRemoteTasks, ready, remotePage]);
+
+  React.useEffect(() => {
+    if (!ready || pendingRemoteTasks.length === 0) {
       return undefined;
     }
-    let cancelled = false;
-    const refresh = async (forceFull = false) => {
-      try {
-        if (!cancelled) {
-          await loadRemoteTasks(forceFull);
-        }
-      } catch {
-        // Ignore background polling failures.
-      }
-    };
-    refresh(true);
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') {
-        refresh(false);
+        loadRemoteTasks(remotePage).catch(() => {
+          // Ignore background polling failures.
+        });
       }
     }, 3000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [loadRemoteTasks, ready]);
+    return () => window.clearInterval(timer);
+  }, [loadRemoteTasks, pendingRemoteTasks.length, ready, remotePage]);
 
   const submitImageTask = React.useCallback(
     async (itemPrompt) => {
@@ -821,7 +845,8 @@ const AIImage = () => {
     try {
       if (isOpenAIImageModel(fallbackImageModel)) {
         await submitImageTask(trimmedPrompt);
-        await loadRemoteTasks(true);
+        setRemotePage(1);
+        await loadRemoteTasks(1);
         setPrompt('');
         setOptimizedPromptDraft('');
         setOriginalPrompt('');
@@ -886,7 +911,8 @@ const AIImage = () => {
     try {
       if (isOpenAIImageModel(fallbackImageModel)) {
         await Promise.all(tasks.map((itemPrompt) => submitImageTask(itemPrompt)));
-        await loadRemoteTasks(true);
+        setRemotePage(1);
+        await loadRemoteTasks(1);
         setPrompt('');
         setOptimizedPromptDraft('');
         setOriginalPrompt('');
@@ -932,6 +958,13 @@ const AIImage = () => {
     submitImageTask,
     t,
   ]);
+
+  const handleRemotePageChange = React.useCallback((page) => {
+    const nextPage = Math.max(1, Number(page) || 1);
+    setRemotePage(nextPage);
+    setActiveRecordId(null);
+    setActiveImageIndex(0);
+  }, []);
 
   const handleDeleteHistory = React.useCallback(() => {
     const localCount = localRecords.length;
@@ -1071,6 +1104,7 @@ const AIImage = () => {
             return;
           }
           setRemoteTasks((previous) => previous.filter((task) => task.task_id !== record.taskId));
+          setRemoteTotal((previous) => Math.max(0, previous - 1));
         } catch (error) {
           showError(t('删除失败'));
           return;
@@ -1585,6 +1619,8 @@ const AIImage = () => {
                               <img
                                 src={imageUrl}
                                 alt={`${activeRecord.prompt || 'generated image'} ${index + 1}`}
+                                loading='lazy'
+                                decoding='async'
                                 className='h-16 w-16 object-cover sm:h-20 sm:w-20'
                               />
                             </button>
@@ -1673,78 +1709,91 @@ const AIImage = () => {
           )}
 
           {records.length > 0 ? (
-            <div className='flex gap-3 overflow-x-auto pb-1'>
-              {records.map((record) => (
-                <div key={record.id} className='w-[168px] shrink-0 space-y-2'>
-                  {record.status === 'FAILED' ? (
-                    <div
-                      className='flex h-24 w-24 items-center justify-center rounded-[22px] border border-red-200 bg-red-50 sm:h-28 sm:w-28'
-                      title={record.errorMessage || t('生成失败')}
-                    >
-                      <div className='px-2 text-center'>
-                        <X size={20} className='mx-auto mb-1 text-red-400' />
-                        <p className='text-xs leading-tight text-red-500 line-clamp-3'>
-                          {record.errorMessage || t('生成失败')}
-                        </p>
+            <>
+              <div className='flex gap-3 overflow-x-auto pb-1'>
+                {records.map((record) => (
+                  <div key={record.id} className='w-[168px] shrink-0 space-y-2'>
+                    {record.status === 'FAILED' ? (
+                      <div
+                        className='flex h-24 w-24 items-center justify-center rounded-[22px] border border-red-200 bg-red-50 sm:h-28 sm:w-28'
+                        title={record.errorMessage || t('生成失败')}
+                      >
+                        <div className='px-2 text-center'>
+                          <X size={20} className='mx-auto mb-1 text-red-400' />
+                          <p className='text-xs leading-tight text-red-500 line-clamp-3'>
+                            {record.errorMessage || t('生成失败')}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <GalleryImage
+                        src={record.images[0]}
+                        alt={record.prompt || 'generated image'}
+                        active={record.id === activeRecord?.id}
+                        onClick={() => {
+                          setActiveRecordId(record.id);
+                          setActiveImageIndex(0);
+                        }}
+                      />
+                    )}
+                    <div className='w-full px-1'>
+                      <button
+                        type='button'
+                        className='h-12 w-full overflow-hidden rounded-xl px-1 py-1 text-left text-sm leading-5 text-slate-700 transition hover:bg-slate-100/80'
+                        onClick={() => handleCopyPrompt(record)}
+                        title={record.prompt || t('未命名提示词')}
+                      >
+                        <span className='block h-10 max-w-full overflow-hidden text-ellipsis break-all line-clamp-2'>
+                          {record.prompt || t('未命名提示词')}
+                        </span>
+                      </button>
+                      <div className='mt-2 grid grid-cols-3 gap-1.5'>
+                        <Button
+                          theme='light'
+                          type='tertiary'
+                          size='small'
+                          className='!h-7 !rounded-full !px-2 !text-xs'
+                          onClick={() => handleDownloadImage(record)}
+                          disabled={record.status === 'FAILED'}
+                        >
+                          {t('下载')}
+                        </Button>
+                        <Button
+                          theme='light'
+                          type='primary'
+                          size='small'
+                          className='!h-7 !rounded-full !px-2 !text-xs'
+                          onClick={() => handleReuseImage(record)}
+                          disabled={record.status === 'FAILED'}
+                        >
+                          {t('引用')}
+                        </Button>
+                        <Button
+                          theme='light'
+                          type='danger'
+                          size='small'
+                          className='!h-7 !rounded-full !px-2 !text-xs'
+                          onClick={() => handleDeleteRecord(record)}
+                        >
+                          {t('删除')}
+                        </Button>
                       </div>
                     </div>
-                  ) : (
-                    <GalleryImage
-                      src={record.images[0]}
-                      alt={record.prompt || 'generated image'}
-                      active={record.id === activeRecord?.id}
-                      onClick={() => {
-                        setActiveRecordId(record.id);
-                        setActiveImageIndex(0);
-                      }}
-                    />
-                  )}
-                  <div className='w-full px-1'>
-                    <button
-                      type='button'
-                      className='h-12 w-full overflow-hidden rounded-xl px-1 py-1 text-left text-sm leading-5 text-slate-700 transition hover:bg-slate-100/80'
-                      onClick={() => handleCopyPrompt(record)}
-                      title={record.prompt || t('未命名提示词')}
-                    >
-                      <span className='block h-10 max-w-full overflow-hidden text-ellipsis break-all line-clamp-2'>
-                        {record.prompt || t('未命名提示词')}
-                      </span>
-                    </button>
-                    <div className='mt-2 grid grid-cols-3 gap-1.5'>
-                      <Button
-                        theme='light'
-                        type='tertiary'
-                        size='small'
-                        className='!h-7 !rounded-full !px-2 !text-xs'
-                        onClick={() => handleDownloadImage(record)}
-                        disabled={record.status === 'FAILED'}
-                      >
-                        {t('下载')}
-                      </Button>
-                      <Button
-                        theme='light'
-                        type='primary'
-                        size='small'
-                        className='!h-7 !rounded-full !px-2 !text-xs'
-                        onClick={() => handleReuseImage(record)}
-                        disabled={record.status === 'FAILED'}
-                      >
-                        {t('引用')}
-                      </Button>
-                      <Button
-                        theme='light'
-                        type='danger'
-                        size='small'
-                        className='!h-7 !rounded-full !px-2 !text-xs'
-                        onClick={() => handleDeleteRecord(record)}
-                      >
-                        {t('删除')}
-                      </Button>
-                    </div>
                   </div>
+                ))}
+              </div>
+              {remoteTotal > REMOTE_TASK_PAGE_SIZE ? (
+                <div className='mt-4 flex justify-end'>
+                  <Pagination
+                    currentPage={remotePage}
+                    pageSize={REMOTE_TASK_PAGE_SIZE}
+                    total={remoteTotal}
+                    onPageChange={handleRemotePageChange}
+                    showTotal
+                  />
                 </div>
-              ))}
-            </div>
+              ) : null}
+            </>
           ) : (
             <Empty
               image={<Sparkles size={36} className='text-slate-400' />}
