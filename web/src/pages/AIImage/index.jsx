@@ -670,7 +670,7 @@ const AIImage = () => {
     try { localStorage.setItem(TASKS_CACHE_KEY, JSON.stringify(items)); } catch { /* ignore */ }
   }, [mergeStableTaskUrls, remotePage]);
 
-  const loadPromptFavorites = React.useCallback(async (keyword = favoriteSearch) => {
+  const loadPromptFavorites = React.useCallback(async (keyword = favoriteSearch, options = {}) => {
     setFavoritesLoading(true);
     try {
       const params = new URLSearchParams({
@@ -686,7 +686,9 @@ const AIImage = () => {
       if (!result?.success) throw new Error(result?.message || 'failed to load favorites');
       setPromptFavorites(Array.isArray(result?.data?.items) ? result.data.items : []);
     } catch (error) {
-      showError(error.message || t('加载收藏夹失败'));
+      if (!options.silent) {
+        showError(error.message || t('加载收藏夹失败'));
+      }
     } finally {
       setFavoritesLoading(false);
     }
@@ -701,8 +703,8 @@ const AIImage = () => {
   const openPromptFavorites = React.useCallback(() => {
     setFavoritesVisible(true);
     resetFavoriteDraft(prompt.trim());
-    loadPromptFavorites();
-  }, [loadPromptFavorites, prompt, resetFavoriteDraft]);
+    loadPromptFavorites(favoriteSearch, { silent: true });
+  }, [favoriteSearch, loadPromptFavorites, prompt, resetFavoriteDraft]);
 
   const buildFavoritePayload = React.useCallback((sourcePrompt, sourceTitle = '') => ({
     title: sourceTitle || createPromptFavoriteTitle(sourcePrompt),
@@ -1452,24 +1454,9 @@ const AIImage = () => {
   }
 
   return (
-    <div
-      className='relative mt-[64px] min-h-[calc(100vh-64px)] overflow-hidden px-2 py-3 sm:px-3 lg:px-4'
-      style={{
-        backgroundColor: '#eef4fb',
-        backgroundImage: [
-          'radial-gradient(circle at 9% 2%, rgba(125, 211, 252, 0.34), transparent 24rem)',
-          'radial-gradient(circle at 63% 24%, rgba(186, 230, 253, 0.32), transparent 22rem)',
-          'radial-gradient(circle at 37% 92%, rgba(216, 180, 254, 0.26), transparent 25rem)',
-          'linear-gradient(rgba(148, 163, 184, 0.13) 1px, transparent 1px)',
-          'linear-gradient(90deg, rgba(148, 163, 184, 0.13) 1px, transparent 1px)',
-        ].join(','),
-        backgroundSize: 'auto, auto, auto, 64px 64px, 64px 64px',
-      }}
-    >
-      <div className='pointer-events-none absolute -left-24 top-10 h-80 w-80 rounded-full bg-cyan-200/30 blur-3xl' />
-      <div className='pointer-events-none absolute -right-16 bottom-32 h-96 w-96 rounded-full bg-violet-200/35 blur-3xl' />
-      <div className='relative mx-auto flex min-h-[calc(100vh-88px)] w-full max-w-none flex-col gap-4'>
-        <section className='rounded-[34px] border border-white/60 bg-white/45 p-4 shadow-[0_24px_90px_rgba(15,23,42,0.10)] backdrop-blur-2xl sm:p-5'>
+    <div className='mt-[64px] min-h-[calc(100vh-64px)] bg-[#eef2f7] px-2 py-3 sm:px-3 lg:px-4'>
+      <div className='mx-auto flex min-h-[calc(100vh-88px)] w-full max-w-none flex-col gap-4'>
+        <section className='rounded-[32px] border border-white/70 bg-white/75 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-5'>
           <div className='flex min-h-[60vh] flex-col gap-4 xl:flex-row'>
             <div className='flex min-w-0 flex-1 flex-col gap-4'>
               <div className='flex items-center gap-3'>
@@ -1486,7 +1473,7 @@ const AIImage = () => {
                 </div>
               </div>
 
-              <div className='rounded-[28px] border border-white/60 bg-white/45 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] backdrop-blur-xl'>
+              <div className='rounded-[28px] border border-slate-200 bg-slate-50/70 p-4'>
                 <div className='mb-3 flex items-center justify-between gap-3'>
                   <div>
                     <Typography.Text className='!text-xs !font-semibold !uppercase !tracking-[0.2em] !text-slate-400'>
@@ -1503,7 +1490,7 @@ const AIImage = () => {
                   <select
                     value={selectedGroup}
                     onChange={(event) => setSelectedGroup(event.target.value)}
-                    className='h-11 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
+                    className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
                   >
                     {groupOptions.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -1523,7 +1510,7 @@ const AIImage = () => {
                       selectedModelRef.current = event.target.value;
                       setSelectedModel(event.target.value);
                     }}
-                    className='h-11 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
+                    className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
                   >
                     <option value=''>{t('选择模型')}</option>
                     {modelOptions.map((option) => (
@@ -1536,7 +1523,7 @@ const AIImage = () => {
                 </div>
               </div>
 
-              <div className='rounded-[28px] border border-white/60 bg-white/45 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] backdrop-blur-xl'>
+              <div className='rounded-[28px] border border-slate-200 bg-slate-50/70 p-4'>
                 <div className='mb-3 flex flex-wrap items-center justify-between gap-3'>
                   <div>
                     <Typography.Text className='!text-xs !font-semibold !uppercase !tracking-[0.2em] !text-slate-400'>
@@ -1554,15 +1541,6 @@ const AIImage = () => {
                     >
                       {t('收藏当前')}
                     </Button>
-                    <Button
-                      theme='solid'
-                      type='tertiary'
-                      icon={<Search size={15} />}
-                      className='!rounded-full !bg-slate-900 !text-white'
-                      onClick={openPromptFavorites}
-                    >
-                      {t('收藏夹')}
-                    </Button>
                   </div>
                 </div>
                 <div className='mb-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
@@ -1574,7 +1552,7 @@ const AIImage = () => {
                       <select
                         value={openaiImageSize}
                         onChange={(event) => setOpenaiImageSize(event.target.value)}
-                        className='h-11 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
+                        className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
                       >
                         {OPENAI_IMAGE_SIZE_OPTIONS.map((item) => (
                           <option key={item.value} value={item.value}>
@@ -1592,7 +1570,7 @@ const AIImage = () => {
                         <select
                           value={resolution}
                           onChange={(event) => setResolution(event.target.value)}
-                            className='h-11 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
+                            className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
                         >
                           {RESOLUTION_OPTIONS.map((item) => (
                             <option key={item} value={item}>
@@ -1609,7 +1587,7 @@ const AIImage = () => {
                         <select
                           value={aspectRatio}
                           onChange={(event) => setAspectRatio(event.target.value)}
-                            className='h-11 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
+                            className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
                         >
                           {ASPECT_RATIO_OPTIONS.map((item) => (
                             <option key={item} value={item}>
@@ -1687,7 +1665,7 @@ const AIImage = () => {
                       promptOptimizerModelRef.current = event.target.value;
                       setPromptOptimizerModel(event.target.value);
                     }}
-                    className='h-10 w-full rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
+                    className='h-10 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
                   >
                     <option value=''>{t('选择提示词优化模型')}</option>
                     {textModelOptions.map((option) => (
@@ -1748,7 +1726,7 @@ const AIImage = () => {
                 )}
 
                 <div className='mt-3 flex flex-wrap items-center gap-3'>
-                  <label className='inline-flex cursor-pointer items-center gap-2 rounded-full border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-700 shadow-sm backdrop-blur'>
+                  <label className='inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm'>
                     <ImagePlus size={16} />
                     <span>{t('上传参考图')}</span>
                     <input
@@ -1804,6 +1782,16 @@ const AIImage = () => {
                     {t('优化提示词')}
                   </Button>
 
+                  <Button
+                    theme='solid'
+                    type='tertiary'
+                    icon={<Search size={15} />}
+                    className='!rounded-full !bg-slate-900 !text-white'
+                    onClick={openPromptFavorites}
+                  >
+                    {t('收藏夹')}
+                  </Button>
+
                 </div>
 
                 <Typography.Text className='mt-3 block text-xs text-slate-500'>
@@ -1815,7 +1803,7 @@ const AIImage = () => {
             </div>
 
             <div className='w-full xl:w-[52%]'>
-              <div className='flex h-full min-h-[70vh] flex-col rounded-[30px] border border-white/65 bg-white/55 shadow-[0_18px_60px_rgba(15,23,42,0.10)] backdrop-blur-2xl'>
+              <div className='flex h-full min-h-[70vh] flex-col rounded-[28px] border border-white/70 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)]'>
                 <div className='border-b border-slate-100 px-4 py-3'>
                   <Typography.Text className='!text-xs !font-medium !uppercase !tracking-[0.2em] !text-slate-400'>
                     {t('当前结果')}
@@ -1827,7 +1815,7 @@ const AIImage = () => {
                       <button
                         type='button'
                         onClick={() => openImageInNewTab(activeImage)}
-                        className='mx-auto flex h-[420px] w-full max-w-[680px] items-center justify-center overflow-hidden rounded-[26px] border border-white/70 bg-white/40 shadow-[0_20px_70px_rgba(15,23,42,0.14)] backdrop-blur-xl'
+                        className='mx-auto flex h-[420px] w-full max-w-[680px] items-center justify-center overflow-hidden rounded-[24px] bg-slate-50 shadow-[0_20px_60px_rgba(15,23,42,0.12)]'
                         title={t('点击查看大图')}
                       >
                         <img
@@ -1867,15 +1855,6 @@ const AIImage = () => {
                       ) : null}
                       <div className='mt-3 flex flex-wrap gap-2'>
                         <Button
-                          theme='solid'
-                          type='primary'
-                          className='!rounded-full'
-                          onClick={() => setPrompt(activeRecord?.prompt || '')}
-                          disabled={!activeRecord?.prompt}
-                        >
-                          {t('使用该提示词')}
-                        </Button>
-                        <Button
                           theme='light'
                           type='primary'
                           icon={<Bookmark size={15} />}
@@ -1908,7 +1887,7 @@ const AIImage = () => {
           </div>
         </section>
 
-        <section className='rounded-[34px] border border-white/60 bg-white/45 p-4 shadow-[0_24px_90px_rgba(15,23,42,0.10)] backdrop-blur-2xl sm:p-5'>
+        <section className='rounded-[32px] border border-white/70 bg-white/75 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-5'>
           <div className='mb-4 flex items-center justify-between gap-3'>
             <div>
               <Typography.Title heading={6} className='!mb-0 !text-slate-900'>
@@ -2003,16 +1982,6 @@ const AIImage = () => {
                       </button>
                       <div className='mt-2 grid grid-cols-2 gap-1.5'>
                         <Button
-                          theme='solid'
-                          type='primary'
-                          size='small'
-                          className='!h-7 !rounded-full !px-2 !text-xs'
-                          onClick={() => setPrompt(record.prompt || '')}
-                          disabled={!record.prompt}
-                        >
-                          {t('使用')}
-                        </Button>
-                        <Button
                           theme='light'
                           type='primary'
                           size='small'
@@ -2020,7 +1989,7 @@ const AIImage = () => {
                           onClick={() => createPromptFavorite(record.prompt || '')}
                           disabled={!record.prompt}
                         >
-                          {t('收藏')}
+                          {t('收藏提示词')}
                         </Button>
                         <Button
                           theme='light'
