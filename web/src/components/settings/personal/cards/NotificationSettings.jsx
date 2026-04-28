@@ -68,6 +68,7 @@ const NotificationSettings = ({
       enabled: true,
       ai_console: true,
       ai_image: true,
+      ai_ecommerce_template: true,
       playground: true,
       chat: true,
     },
@@ -163,6 +164,7 @@ const NotificationSettings = ({
         enabled: true,
         ai_console: true,
         ai_image: true,
+        ai_ecommerce_template: true,
         playground: true,
         chat: true,
       },
@@ -267,6 +269,11 @@ const NotificationSettings = ({
           key: 'ai_image',
           title: t('AI 绘图'),
           description: t('Google 图片生成页面'),
+        },
+        {
+          key: 'ai_ecommerce_template',
+          title: t('AI 电商绘图模板'),
+          description: t('电商详情页母版与分段生成工作流'),
         },
         {
           key: 'playground',

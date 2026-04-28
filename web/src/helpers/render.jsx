@@ -124,6 +124,8 @@ export function getLucideIcon(key, selected = false) {
       return <Sparkles {...commonProps} color={iconColor} />;
     case 'ai_image':
       return <ImagePlus {...commonProps} color={iconColor} />;
+    case 'ai_ecommerce_template':
+      return <Package {...commonProps} color={iconColor} />;
     case 'playground':
       return <TerminalSquare {...commonProps} color={iconColor} />;
     case 'chat':

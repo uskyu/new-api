@@ -30,6 +30,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     enabled: true,
     ai_console: true,
     ai_image: true,
+    ai_ecommerce_template: true,
     playground: true,
     chat: true,
   },

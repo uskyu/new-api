@@ -52,6 +52,7 @@ const PageLayout = () => {
   const cardProPages = [
     '/console/ai',
     '/console/ai-image',
+    '/console/ai-ecommerce-template',
     '/console/channel',
     '/console/log',
     '/console/redemption',
@@ -69,6 +70,7 @@ const PageLayout = () => {
     location.pathname.includes('/console') &&
     location.pathname !== '/console/ai' &&
     location.pathname !== '/console/ai-image' &&
+    location.pathname !== '/console/ai-ecommerce-template' &&
     !location.pathname.startsWith('/console/chat') &&
     location.pathname !== '/console/playground';
 

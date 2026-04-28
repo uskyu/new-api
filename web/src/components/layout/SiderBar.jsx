@@ -50,6 +50,7 @@ const routerMap = {
   deployment: '/console/deployment',
   ai_console: '/console/ai',
   ai_image: '/console/ai-image',
+  ai_ecommerce_template: '/console/ai-ecommerce-template',
   ai_image_logs: '/console/ai-image-logs',
   playground: '/console/playground',
   personal: '/console/personal',
@@ -227,6 +228,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       to: '/console/ai-image',
     });
 
+    items.splice(2, 0, {
+      text: t('AI 电商绘图模板'),
+      itemKey: 'ai_ecommerce_template',
+      to: '/console/ai-ecommerce-template',
+    });
+
     return items
       .map((item) =>
         item.itemKey === 'ai_console'
@@ -332,7 +339,9 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text={
           <span
             className={`truncate font-medium text-sm ${
-              item.itemKey === 'ai_console' || item.itemKey === 'ai_image'
+              item.itemKey === 'ai_console' ||
+              item.itemKey === 'ai_image' ||
+              item.itemKey === 'ai_ecommerce_template'
                 ? 'sidebar-ai-nav-text'
                 : ''
             }`}
