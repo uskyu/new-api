@@ -362,6 +362,16 @@ func SetApiRouter(router *gin.Engine) {
 			aiImageTaskRoute.DELETE(":task_id", controller.DeleteUserImageTask)
 		}
 
+		aiImagePromptFavoriteRoute := apiRouter.Group("/ai-image/prompt-favorites")
+		aiImagePromptFavoriteRoute.Use(middleware.UserAuth())
+		{
+			aiImagePromptFavoriteRoute.GET("", controller.ListImagePromptFavorites)
+			aiImagePromptFavoriteRoute.POST("", controller.CreateImagePromptFavorite)
+			aiImagePromptFavoriteRoute.PUT("/:id", controller.UpdateImagePromptFavorite)
+			aiImagePromptFavoriteRoute.POST("/:id/use", controller.UseImagePromptFavorite)
+			aiImagePromptFavoriteRoute.DELETE("/:id", controller.DeleteImagePromptFavorite)
+		}
+
 		aiImageProxyRoute := apiRouter.Group("/ai-image")
 		aiImageProxyRoute.Use(middleware.UserAuth())
 		{

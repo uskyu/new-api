@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Button, Empty, InputNumber, Modal, Pagination, Spin, TextArea, Typography } from '@douyinfe/semi-ui';
-import { Check, ImagePlus, Loader2, Sparkles, Wand2, X } from 'lucide-react';
+import { Bookmark, Check, Edit3, ImagePlus, Loader2, Search, Sparkles, Trash2, Wand2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import useAiImageState from '../../hooks/ai-image/useAiImageState';
 import { API_ENDPOINTS, MESSAGE_ROLES } from '../../constants/playground.constants';
@@ -31,6 +31,8 @@ const MAX_PROMPT_LENGTH = 4000;
 const MAX_REFERENCE_IMAGES = 5;
 const REMOTE_TASK_PAGE_SIZE = 10;
 const TASKS_CACHE_KEY = 'ai_image_tasks_cache';
+const PROMPT_FAVORITES_PAGE_SIZE = 80;
+const PROMPT_FAVORITES_ENDPOINT = '/api/ai-image/prompt-favorites';
 const PROMPT_OPTIMIZER_SYSTEM_PROMPT = [
   'You are an AI image prompt optimizer.',
   'Rewrite the user prompt into one stronger image-generation prompt in Simplified Chinese.',
@@ -408,6 +410,12 @@ const openImageInNewTab = (imageUrl) => {
   window.open(imageUrl, '_blank', 'noopener,noreferrer');
 };
 
+const createPromptFavoriteTitle = (value) => {
+  const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return normalized.length > 36 ? `${normalized.slice(0, 36)}...` : normalized;
+};
+
 const createImageUserMessage = (prompt, draftImages = []) => ({
   role: MESSAGE_ROLES.USER,
   content: [
@@ -457,6 +465,13 @@ const AIImage = () => {
   const [remoteTasks, setRemoteTasks] = useState([]);
   const [remotePage, setRemotePage] = useState(1);
   const [remoteTotal, setRemoteTotal] = useState(0);
+  const [favoritesVisible, setFavoritesVisible] = useState(false);
+  const [promptFavorites, setPromptFavorites] = useState([]);
+  const [favoritesLoading, setFavoritesLoading] = useState(false);
+  const [favoriteSearch, setFavoriteSearch] = useState('');
+  const [favoriteDraftTitle, setFavoriteDraftTitle] = useState('');
+  const [favoriteDraftPrompt, setFavoriteDraftPrompt] = useState('');
+  const [editingFavoriteId, setEditingFavoriteId] = useState(null);
   const previousDraftImagesRef = useRef([]);
   const selectedModelRef = useRef('');
   const promptOptimizerModelRef = useRef('');
@@ -654,6 +669,156 @@ const AIImage = () => {
     setRemoteTasks(items);
     try { localStorage.setItem(TASKS_CACHE_KEY, JSON.stringify(items)); } catch { /* ignore */ }
   }, [mergeStableTaskUrls, remotePage]);
+
+  const loadPromptFavorites = React.useCallback(async (keyword = favoriteSearch) => {
+    setFavoritesLoading(true);
+    try {
+      const params = new URLSearchParams({
+        p: '1',
+        page_size: String(PROMPT_FAVORITES_PAGE_SIZE),
+      });
+      const trimmedKeyword = keyword.trim();
+      if (trimmedKeyword) params.set('q', trimmedKeyword);
+      const response = await fetch(`${PROMPT_FAVORITES_ENDPOINT}?${params.toString()}`, {
+        headers: { 'New-Api-User': getUserIdFromLocalStorage() },
+      });
+      const result = await response.json();
+      if (!result?.success) throw new Error(result?.message || 'failed to load favorites');
+      setPromptFavorites(Array.isArray(result?.data?.items) ? result.data.items : []);
+    } catch (error) {
+      showError(error.message || t('加载收藏夹失败'));
+    } finally {
+      setFavoritesLoading(false);
+    }
+  }, [favoriteSearch, t]);
+
+  const resetFavoriteDraft = React.useCallback((nextPrompt = '') => {
+    setEditingFavoriteId(null);
+    setFavoriteDraftPrompt(nextPrompt);
+    setFavoriteDraftTitle(createPromptFavoriteTitle(nextPrompt));
+  }, []);
+
+  const openPromptFavorites = React.useCallback(() => {
+    setFavoritesVisible(true);
+    resetFavoriteDraft(prompt.trim());
+    loadPromptFavorites();
+  }, [loadPromptFavorites, prompt, resetFavoriteDraft]);
+
+  const buildFavoritePayload = React.useCallback((sourcePrompt, sourceTitle = '') => ({
+    title: sourceTitle || createPromptFavoriteTitle(sourcePrompt),
+    prompt: sourcePrompt,
+    model: selectedModelRef.current || selectedModel || '',
+    group: selectedGroup || '',
+    size: openaiImageSize || '',
+    resolution: resolution || '',
+    aspect_ratio: aspectRatio || '',
+  }), [aspectRatio, openaiImageSize, resolution, selectedGroup, selectedModel]);
+
+  const createPromptFavorite = React.useCallback(async (sourcePrompt, sourceTitle = '') => {
+    const trimmedPrompt = String(sourcePrompt || '').trim();
+    if (!trimmedPrompt) {
+      showError(t('请先输入提示词'));
+      return false;
+    }
+    try {
+      const response = await fetch(PROMPT_FAVORITES_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'New-Api-User': getUserIdFromLocalStorage(),
+        },
+        body: JSON.stringify(buildFavoritePayload(trimmedPrompt, sourceTitle)),
+      });
+      const result = await response.json();
+      if (!result?.success) throw new Error(result?.message || 'failed to save favorite');
+      setPromptFavorites((previous) => [result.data, ...previous.filter((item) => item.id !== result.data?.id)]);
+      showSuccess(t('已收藏提示词'));
+      return true;
+    } catch (error) {
+      showError(error.message || t('收藏失败'));
+      return false;
+    }
+  }, [buildFavoritePayload, t]);
+
+  const saveFavoriteDraft = React.useCallback(async () => {
+    const trimmedPrompt = favoriteDraftPrompt.trim();
+    if (!trimmedPrompt) {
+      showError(t('请先输入提示词'));
+      return;
+    }
+    const payload = buildFavoritePayload(trimmedPrompt, favoriteDraftTitle.trim());
+    try {
+      const response = await fetch(
+        editingFavoriteId ? `${PROMPT_FAVORITES_ENDPOINT}/${editingFavoriteId}` : PROMPT_FAVORITES_ENDPOINT,
+        {
+          method: editingFavoriteId ? 'PUT' : 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'New-Api-User': getUserIdFromLocalStorage(),
+          },
+          body: JSON.stringify(payload),
+        },
+      );
+      const result = await response.json();
+      if (!result?.success) throw new Error(result?.message || 'failed to save favorite');
+      setPromptFavorites((previous) => [
+        result.data,
+        ...previous.filter((item) => item.id !== result.data?.id),
+      ]);
+      resetFavoriteDraft('');
+      showSuccess(editingFavoriteId ? t('已更新收藏') : t('已创建收藏'));
+    } catch (error) {
+      showError(error.message || t('保存失败'));
+    }
+  }, [buildFavoritePayload, editingFavoriteId, favoriteDraftPrompt, favoriteDraftTitle, resetFavoriteDraft, t]);
+
+  const usePromptFavorite = React.useCallback(async (favorite) => {
+    if (!favorite?.prompt) return;
+    setPrompt(favorite.prompt);
+    if (favorite.model) {
+      selectedModelRef.current = favorite.model;
+      setSelectedModel(favorite.model);
+    }
+    if (favorite.group) setSelectedGroup(favorite.group);
+    if (favorite.size) setOpenaiImageSize(favorite.size);
+    if (favorite.resolution) setResolution(favorite.resolution);
+    if (favorite.aspect_ratio) setAspectRatio(favorite.aspect_ratio);
+    setOptimizedPromptDraft('');
+    setOriginalPrompt('');
+    setFavoritesVisible(false);
+    showSuccess(t('已填入收藏提示词'));
+    try {
+      await fetch(`${PROMPT_FAVORITES_ENDPOINT}/${favorite.id}/use`, {
+        method: 'POST',
+        headers: { 'New-Api-User': getUserIdFromLocalStorage() },
+      });
+    } catch {
+      // Last-used time is best-effort only.
+    }
+  }, [setSelectedGroup, setSelectedModel, t]);
+
+  const editPromptFavorite = React.useCallback((favorite) => {
+    setEditingFavoriteId(favorite.id);
+    setFavoriteDraftTitle(favorite.title || createPromptFavoriteTitle(favorite.prompt));
+    setFavoriteDraftPrompt(favorite.prompt || '');
+  }, []);
+
+  const deletePromptFavorite = React.useCallback(async (favorite) => {
+    if (!favorite?.id) return;
+    try {
+      const response = await fetch(`${PROMPT_FAVORITES_ENDPOINT}/${favorite.id}`, {
+        method: 'DELETE',
+        headers: { 'New-Api-User': getUserIdFromLocalStorage() },
+      });
+      const result = await response.json();
+      if (!result?.success) throw new Error(result?.message || 'failed to delete favorite');
+      setPromptFavorites((previous) => previous.filter((item) => item.id !== favorite.id));
+      if (editingFavoriteId === favorite.id) resetFavoriteDraft('');
+      showSuccess(t('已删除收藏'));
+    } catch (error) {
+      showError(error.message || t('删除失败'));
+    }
+  }, [editingFavoriteId, resetFavoriteDraft, t]);
 
   React.useEffect(() => {
     if (!ready) {
@@ -1287,9 +1452,24 @@ const AIImage = () => {
   }
 
   return (
-    <div className='mt-[64px] min-h-[calc(100vh-64px)] bg-[#eef2f7] px-2 py-3 sm:px-3 lg:px-4'>
-      <div className='mx-auto flex min-h-[calc(100vh-88px)] w-full max-w-none flex-col gap-4'>
-        <section className='rounded-[32px] border border-white/70 bg-white/75 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-5'>
+    <div
+      className='relative mt-[64px] min-h-[calc(100vh-64px)] overflow-hidden px-2 py-3 sm:px-3 lg:px-4'
+      style={{
+        backgroundColor: '#eef4fb',
+        backgroundImage: [
+          'radial-gradient(circle at 9% 2%, rgba(125, 211, 252, 0.34), transparent 24rem)',
+          'radial-gradient(circle at 63% 24%, rgba(186, 230, 253, 0.32), transparent 22rem)',
+          'radial-gradient(circle at 37% 92%, rgba(216, 180, 254, 0.26), transparent 25rem)',
+          'linear-gradient(rgba(148, 163, 184, 0.13) 1px, transparent 1px)',
+          'linear-gradient(90deg, rgba(148, 163, 184, 0.13) 1px, transparent 1px)',
+        ].join(','),
+        backgroundSize: 'auto, auto, auto, 64px 64px, 64px 64px',
+      }}
+    >
+      <div className='pointer-events-none absolute -left-24 top-10 h-80 w-80 rounded-full bg-cyan-200/30 blur-3xl' />
+      <div className='pointer-events-none absolute -right-16 bottom-32 h-96 w-96 rounded-full bg-violet-200/35 blur-3xl' />
+      <div className='relative mx-auto flex min-h-[calc(100vh-88px)] w-full max-w-none flex-col gap-4'>
+        <section className='rounded-[34px] border border-white/60 bg-white/45 p-4 shadow-[0_24px_90px_rgba(15,23,42,0.10)] backdrop-blur-2xl sm:p-5'>
           <div className='flex min-h-[60vh] flex-col gap-4 xl:flex-row'>
             <div className='flex min-w-0 flex-1 flex-col gap-4'>
               <div className='flex items-center gap-3'>
@@ -1306,7 +1486,16 @@ const AIImage = () => {
                 </div>
               </div>
 
-              <div className='grid gap-3 md:grid-cols-2'>
+              <div className='rounded-[28px] border border-white/60 bg-white/45 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] backdrop-blur-xl'>
+                <div className='mb-3 flex items-center justify-between gap-3'>
+                  <div>
+                    <Typography.Text className='!text-xs !font-semibold !uppercase !tracking-[0.2em] !text-slate-400'>
+                      {t('基础设置')}
+                    </Typography.Text>
+                    <p className='mt-1 text-sm text-slate-500'>{t('选择模型、分组和生成规格')}</p>
+                  </div>
+                </div>
+                <div className='grid gap-3 md:grid-cols-2'>
                 <label className='flex flex-col gap-2'>
                   <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
                     {t('分组')}
@@ -1314,7 +1503,7 @@ const AIImage = () => {
                   <select
                     value={selectedGroup}
                     onChange={(event) => setSelectedGroup(event.target.value)}
-                    className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                    className='h-11 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
                   >
                     {groupOptions.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -1334,7 +1523,7 @@ const AIImage = () => {
                       selectedModelRef.current = event.target.value;
                       setSelectedModel(event.target.value);
                     }}
-                    className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                    className='h-11 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
                   >
                     <option value=''>{t('选择模型')}</option>
                     {modelOptions.map((option) => (
@@ -1344,9 +1533,38 @@ const AIImage = () => {
                     ))}
                   </select>
                 </label>
+                </div>
               </div>
 
-              <div className='rounded-[28px] border border-slate-200 bg-slate-50/70 p-4'>
+              <div className='rounded-[28px] border border-white/60 bg-white/45 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] backdrop-blur-xl'>
+                <div className='mb-3 flex flex-wrap items-center justify-between gap-3'>
+                  <div>
+                    <Typography.Text className='!text-xs !font-semibold !uppercase !tracking-[0.2em] !text-slate-400'>
+                      {t('提示词与参考')}
+                    </Typography.Text>
+                    <p className='mt-1 text-sm text-slate-500'>{t('编辑提示词、收藏常用灵感，并上传参考图')}</p>
+                  </div>
+                  <div className='flex flex-wrap gap-2'>
+                    <Button
+                      theme='light'
+                      type='primary'
+                      icon={<Bookmark size={15} />}
+                      className='!rounded-full'
+                      onClick={() => createPromptFavorite(prompt)}
+                    >
+                      {t('收藏当前')}
+                    </Button>
+                    <Button
+                      theme='solid'
+                      type='tertiary'
+                      icon={<Search size={15} />}
+                      className='!rounded-full !bg-slate-900 !text-white'
+                      onClick={openPromptFavorites}
+                    >
+                      {t('收藏夹')}
+                    </Button>
+                  </div>
+                </div>
                 <div className='mb-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
                   {isOpenAIImageModel(fallbackImageModel) ? (
                     <label className='flex flex-col gap-2 md:col-span-2'>
@@ -1356,7 +1574,7 @@ const AIImage = () => {
                       <select
                         value={openaiImageSize}
                         onChange={(event) => setOpenaiImageSize(event.target.value)}
-                        className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                        className='h-11 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
                       >
                         {OPENAI_IMAGE_SIZE_OPTIONS.map((item) => (
                           <option key={item.value} value={item.value}>
@@ -1374,7 +1592,7 @@ const AIImage = () => {
                         <select
                           value={resolution}
                           onChange={(event) => setResolution(event.target.value)}
-                          className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                            className='h-11 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
                         >
                           {RESOLUTION_OPTIONS.map((item) => (
                             <option key={item} value={item}>
@@ -1391,7 +1609,7 @@ const AIImage = () => {
                         <select
                           value={aspectRatio}
                           onChange={(event) => setAspectRatio(event.target.value)}
-                          className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                            className='h-11 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
                         >
                           {ASPECT_RATIO_OPTIONS.map((item) => (
                             <option key={item} value={item}>
@@ -1469,7 +1687,7 @@ const AIImage = () => {
                       promptOptimizerModelRef.current = event.target.value;
                       setPromptOptimizerModel(event.target.value);
                     }}
-                    className='h-10 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                    className='h-10 w-full rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
                   >
                     <option value=''>{t('选择提示词优化模型')}</option>
                     {textModelOptions.map((option) => (
@@ -1530,7 +1748,7 @@ const AIImage = () => {
                 )}
 
                 <div className='mt-3 flex flex-wrap items-center gap-3'>
-                  <label className='inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm'>
+                  <label className='inline-flex cursor-pointer items-center gap-2 rounded-full border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-700 shadow-sm backdrop-blur'>
                     <ImagePlus size={16} />
                     <span>{t('上传参考图')}</span>
                     <input
@@ -1597,7 +1815,7 @@ const AIImage = () => {
             </div>
 
             <div className='w-full xl:w-[52%]'>
-              <div className='flex h-full min-h-[70vh] flex-col rounded-[28px] border border-white/70 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)]'>
+              <div className='flex h-full min-h-[70vh] flex-col rounded-[30px] border border-white/65 bg-white/55 shadow-[0_18px_60px_rgba(15,23,42,0.10)] backdrop-blur-2xl'>
                 <div className='border-b border-slate-100 px-4 py-3'>
                   <Typography.Text className='!text-xs !font-medium !uppercase !tracking-[0.2em] !text-slate-400'>
                     {t('当前结果')}
@@ -1609,7 +1827,7 @@ const AIImage = () => {
                       <button
                         type='button'
                         onClick={() => openImageInNewTab(activeImage)}
-                        className='mx-auto flex h-[420px] w-full max-w-[680px] items-center justify-center overflow-hidden rounded-[24px] bg-slate-50 shadow-[0_20px_60px_rgba(15,23,42,0.12)]'
+                        className='mx-auto flex h-[420px] w-full max-w-[680px] items-center justify-center overflow-hidden rounded-[26px] border border-white/70 bg-white/40 shadow-[0_20px_70px_rgba(15,23,42,0.14)] backdrop-blur-xl'
                         title={t('点击查看大图')}
                       >
                         <img
@@ -1648,12 +1866,31 @@ const AIImage = () => {
                         </div>
                       ) : null}
                       <div className='mt-3 flex flex-wrap gap-2'>
-                      <Button
-                        theme='light'
-                        type='primary'
-                        className='!rounded-full'
-                        onClick={() => handleReuseImage(activeRecord)}
-                      >
+                        <Button
+                          theme='solid'
+                          type='primary'
+                          className='!rounded-full'
+                          onClick={() => setPrompt(activeRecord?.prompt || '')}
+                          disabled={!activeRecord?.prompt}
+                        >
+                          {t('使用该提示词')}
+                        </Button>
+                        <Button
+                          theme='light'
+                          type='primary'
+                          icon={<Bookmark size={15} />}
+                          className='!rounded-full'
+                          onClick={() => createPromptFavorite(activeRecord?.prompt || '')}
+                          disabled={!activeRecord?.prompt}
+                        >
+                          {t('收藏提示词')}
+                        </Button>
+                        <Button
+                          theme='light'
+                          type='primary'
+                          className='!rounded-full'
+                          onClick={() => handleReuseImage(activeRecord)}
+                        >
                           {t('引用为参考图')}
                         </Button>
                       </div>
@@ -1671,7 +1908,7 @@ const AIImage = () => {
           </div>
         </section>
 
-        <section className='rounded-[32px] border border-white/70 bg-white/75 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-5'>
+        <section className='rounded-[34px] border border-white/60 bg-white/45 p-4 shadow-[0_24px_90px_rgba(15,23,42,0.10)] backdrop-blur-2xl sm:p-5'>
           <div className='mb-4 flex items-center justify-between gap-3'>
             <div>
               <Typography.Title heading={6} className='!mb-0 !text-slate-900'>
@@ -1679,9 +1916,6 @@ const AIImage = () => {
               </Typography.Title>
               <Typography.Text className='!ml-2 !text-sm !font-medium !text-slate-500'>
                 {t('点击下方缩略图即可切换查看历史结果，图片保留 7 天后自动清理')}
-              </Typography.Text>
-              <Typography.Text className='!text-sm !text-slate-500'>
-                {t('点击下方缩略图即可切换查看历史结果')}
               </Typography.Text>
             </div>
             <div className='flex items-center gap-3'>
@@ -1767,7 +2001,27 @@ const AIImage = () => {
                           {record.prompt || t('未命名提示词')}
                         </span>
                       </button>
-                      <div className='mt-2 grid grid-cols-3 gap-1.5'>
+                      <div className='mt-2 grid grid-cols-2 gap-1.5'>
+                        <Button
+                          theme='solid'
+                          type='primary'
+                          size='small'
+                          className='!h-7 !rounded-full !px-2 !text-xs'
+                          onClick={() => setPrompt(record.prompt || '')}
+                          disabled={!record.prompt}
+                        >
+                          {t('使用')}
+                        </Button>
+                        <Button
+                          theme='light'
+                          type='primary'
+                          size='small'
+                          className='!h-7 !rounded-full !px-2 !text-xs'
+                          onClick={() => createPromptFavorite(record.prompt || '')}
+                          disabled={!record.prompt}
+                        >
+                          {t('收藏')}
+                        </Button>
                         <Button
                           theme='light'
                           type='tertiary'
@@ -1823,6 +2077,154 @@ const AIImage = () => {
           )}
         </section>
       </div>
+      <Modal
+        visible={favoritesVisible}
+        title={null}
+        footer={null}
+        width={980}
+        onCancel={() => setFavoritesVisible(false)}
+        className='!rounded-[28px]'
+        bodyStyle={{ padding: 0, background: 'transparent' }}
+      >
+        <div className='overflow-hidden rounded-[28px] border border-white/70 bg-white/70 shadow-[0_24px_80px_rgba(15,23,42,0.16)] backdrop-blur-2xl'>
+          <div className='border-b border-white/70 bg-white/45 px-5 py-4'>
+            <div className='flex flex-wrap items-center justify-between gap-3'>
+              <div>
+                <Typography.Title heading={5} className='!mb-1 !text-slate-900'>
+                  {t('提示词收藏夹')}
+                </Typography.Title>
+                <Typography.Text className='!text-sm !text-slate-500'>
+                  {t('保存常用提示词，之后可一键填入并继续创作')}
+                </Typography.Text>
+              </div>
+            </div>
+          </div>
+
+          <div className='grid max-h-[72vh] gap-4 overflow-y-auto p-4 lg:grid-cols-[minmax(0,1fr)_340px]'>
+            <div className='min-w-0 overflow-hidden rounded-[24px] border border-white/70 bg-white/45 p-3 backdrop-blur-xl'>
+              <div className='mb-3 flex gap-2'>
+                <input
+                  value={favoriteSearch}
+                  onChange={(event) => setFavoriteSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') loadPromptFavorites(event.currentTarget.value);
+                  }}
+                  placeholder={t('搜索标题或提示词')}
+                  className='h-10 min-w-0 flex-1 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
+                />
+                <Button
+                  theme='solid'
+                  type='primary'
+                  icon={<Search size={15} />}
+                  className='!rounded-full'
+                  onClick={() => loadPromptFavorites(favoriteSearch)}
+                >
+                  {t('搜索')}
+                </Button>
+              </div>
+
+              <Spin spinning={favoritesLoading}>
+                {promptFavorites.length > 0 ? (
+                  <div className='grid gap-2'>
+                    {promptFavorites.map((favorite) => (
+                      <div key={favorite.id} className='min-w-0 overflow-hidden rounded-[20px] border border-white/70 bg-white/60 p-3 shadow-sm backdrop-blur'>
+                        <div className='mb-2 flex items-start justify-between gap-3'>
+                          <div className='min-w-0'>
+                            <div className='truncate text-sm font-semibold text-slate-900' title={favorite.title || favorite.prompt}>
+                              {favorite.title || createPromptFavoriteTitle(favorite.prompt) || t('未命名收藏')}
+                            </div>
+                            <div className='mt-1 flex min-w-0 flex-wrap gap-2 text-xs text-slate-400'>
+                              {favorite.model ? <span>{favorite.model}</span> : null}
+                              {favorite.size ? <span>{favorite.size}</span> : null}
+                              {favorite.aspect_ratio ? <span>{favorite.aspect_ratio}</span> : null}
+                            </div>
+                          </div>
+                          <div className='flex shrink-0 gap-1'>
+                            <Button
+                              theme='borderless'
+                              type='tertiary'
+                              size='small'
+                              icon={<Edit3 size={14} />}
+                              onClick={() => editPromptFavorite(favorite)}
+                            />
+                            <Button
+                              theme='borderless'
+                              type='danger'
+                              size='small'
+                              icon={<Trash2 size={14} />}
+                              onClick={() => deletePromptFavorite(favorite)}
+                            />
+                          </div>
+                        </div>
+                        <p className='mb-3 max-w-full break-all text-sm leading-6 text-slate-600 line-clamp-3'>
+                          {favorite.prompt}
+                        </p>
+                        <Button
+                          theme='solid'
+                          type='primary'
+                          className='!rounded-full'
+                          onClick={() => usePromptFavorite(favorite)}
+                        >
+                          {t('使用这个提示词')}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <Empty
+                    image={<Bookmark size={34} className='text-slate-400' />}
+                    title={t('暂无收藏')}
+                    description={t('可以从当前提示词或历史记录中收藏常用提示词')}
+                  />
+                )}
+              </Spin>
+            </div>
+
+            <div className='min-w-0 rounded-[24px] border border-white/70 bg-white/55 p-4 backdrop-blur-xl'>
+              <Typography.Text className='!text-xs !font-semibold !uppercase !tracking-[0.2em] !text-slate-400'>
+                {editingFavoriteId ? t('编辑收藏') : t('保存当前提示词')}
+              </Typography.Text>
+              <label className='mt-3 flex flex-col gap-2'>
+                <span className='text-xs font-medium text-slate-500'>{t('标题')}</span>
+                <input
+                  value={favoriteDraftTitle}
+                  onChange={(event) => setFavoriteDraftTitle(event.target.value)}
+                  placeholder={t('给这个提示词起个名字')}
+                  className='h-10 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
+                />
+              </label>
+              <label className='mt-3 flex flex-col gap-2'>
+                <span className='text-xs font-medium text-slate-500'>{t('提示词')}</span>
+                <TextArea
+                  value={favoriteDraftPrompt}
+                  onChange={setFavoriteDraftPrompt}
+                  autosize={{ minRows: 9, maxRows: 14 }}
+                  placeholder={t('输入要收藏的提示词')}
+                />
+              </label>
+              <div className='mt-4 flex flex-wrap gap-2'>
+                <Button
+                  theme='solid'
+                  type='primary'
+                  icon={<Bookmark size={15} />}
+                  className='!rounded-full'
+                  onClick={saveFavoriteDraft}
+                >
+                  {editingFavoriteId ? t('保存修改') : t('保存到收藏夹')}
+                </Button>
+                <Button
+                  theme='light'
+                  type='tertiary'
+                  className='!rounded-full'
+                  onClick={() => resetFavoriteDraft('')}
+                >
+                  {t('清空')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

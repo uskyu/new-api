@@ -70,6 +70,7 @@ func CoreSchemaModels() []interface{} {
 		&QuotaData{},
 		&Task{},
 		&ImageTask{},
+		&ImagePromptFavorite{},
 		&Model{},
 		&Vendor{},
 		&PrefillGroup{},
