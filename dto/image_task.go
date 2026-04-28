@@ -1,12 +1,13 @@
 package dto
 
 type CreateImageTaskRequest struct {
-	Model          string `json:"model" binding:"required"`
-	Prompt         string `json:"prompt" binding:"required"`
-	Group          string `json:"group,omitempty"`
-	Size           string `json:"size,omitempty"`
-	N              *uint  `json:"n,omitempty"`
-	ReferenceImage string `json:"reference_image,omitempty"`
+	Model           string   `json:"model" binding:"required"`
+	Prompt          string   `json:"prompt" binding:"required"`
+	Group           string   `json:"group,omitempty"`
+	Size            string   `json:"size,omitempty"`
+	N               *uint    `json:"n,omitempty"`
+	ReferenceImage  string   `json:"reference_image,omitempty"`
+	ReferenceImages []string `json:"reference_images,omitempty"`
 }
 
 type ImageTaskDTO struct {

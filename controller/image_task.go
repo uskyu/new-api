@@ -34,6 +34,14 @@ import (
 
 var imageTaskProcessingCount int64
 
+const (
+	maxReferenceImagesPerTask    = 5
+	staleImageTaskRecoveryBuffer = 5 * time.Minute
+	staleImageTaskRecoveryTick   = 5 * time.Minute
+	staleImageTaskFailureMessage = "image task worker stalled and task was marked failed during recovery"
+	staleImageTaskRecoveryBatch  = 100
+)
+
 func normalizeImageTaskTimeoutMin(timeoutMin int) int {
 	if timeoutMin <= 0 {
 		return 10
@@ -46,6 +54,72 @@ func normalizeImageTaskTimeoutMin(timeoutMin int) int {
 
 func imageTaskTimeoutError(timeoutMin int) error {
 	return fmt.Errorf("image task exceeded max timeout of %d minute(s)", timeoutMin)
+}
+
+func normalizeCreateTaskReferenceImages(req *dto.CreateImageTaskRequest) []string {
+	if req == nil {
+		return nil
+	}
+	result := make([]string, 0, len(req.ReferenceImages)+1)
+	for _, image := range req.ReferenceImages {
+		if trimmed := strings.TrimSpace(image); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	if len(result) == 0 {
+		if trimmed := strings.TrimSpace(req.ReferenceImage); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func cleanupReferenceImages(referenceKeys []string) {
+	if !service.IsObjectStorageEnabled() || len(referenceKeys) == 0 {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, referenceKey := range referenceKeys {
+		if referenceKey == "" || strings.Contains(referenceKey, "://") {
+			continue
+		}
+		_ = service.DeleteObjectFromStorage(cleanupCtx, referenceKey)
+	}
+}
+
+func failStaleProcessingTasks() {
+	timeoutMin := normalizeImageTaskTimeoutMin(operation_setting.GetAIImageAsyncSetting().MaxTimeoutMin)
+	cutoff := time.Now().Add(-(time.Duration(timeoutMin) * time.Minute) - staleImageTaskRecoveryBuffer).Unix()
+	for {
+		tasks, err := model.GetStaleProcessingTasks(cutoff, staleImageTaskRecoveryBatch)
+		if err != nil {
+			common.SysLog("load stale processing image tasks failed: " + err.Error())
+			return
+		}
+		if len(tasks) == 0 {
+			return
+		}
+		recovered := 0
+		finishedAt := time.Now().Unix()
+		for _, task := range tasks {
+			ok, err := model.UpdateImageTaskStatus(task.TaskID, model.ImageTaskStatusProcessing, model.ImageTaskStatusFailed, map[string]any{
+				"error_message": staleImageTaskFailureMessage,
+				"finished_at":   finishedAt,
+			})
+			if err != nil || !ok {
+				continue
+			}
+			cleanupReferenceImages(task.GetReferenceImageKeys())
+			recovered++
+		}
+		if recovered > 0 {
+			common.SysLog(fmt.Sprintf("recovered %d stale processing image tasks", recovered))
+		}
+		if len(tasks) < staleImageTaskRecoveryBatch {
+			return
+		}
+	}
 }
 
 func StartImageTaskWorker() {
@@ -63,6 +137,12 @@ func StartImageTaskWorker() {
 				processImageTaskBatch(setting.WorkerConcurrency)
 			}
 			time.Sleep(time.Duration(interval) * time.Second)
+		}
+	})
+	gopool.Go(func() {
+		for {
+			failStaleProcessingTasks()
+			time.Sleep(staleImageTaskRecoveryTick)
 		}
 	})
 	gopool.Go(func() {
@@ -116,6 +196,11 @@ func CreateImageTask(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	referenceImages := normalizeCreateTaskReferenceImages(req)
+	if len(referenceImages) > maxReferenceImagesPerTask {
+		common.ApiErrorMsg(c, fmt.Sprintf("at most %d reference images are supported", maxReferenceImagesPerTask))
+		return
+	}
 	task := &model.ImageTask{
 		UserID:    userID,
 		Group:     usingGroup,
@@ -125,13 +210,17 @@ func CreateImageTask(c *gin.Context) {
 		Status:    model.ImageTaskStatusPending,
 		ChannelID: channel.Id,
 	}
-	if strings.TrimSpace(req.ReferenceImage) != "" {
-		refKey, err := uploadReferenceImage(context.Background(), userID, req.ReferenceImage)
+	if len(referenceImages) > 0 {
+		refKeys, err := uploadReferenceImages(context.Background(), userID, referenceImages)
 		if err != nil {
 			common.ApiError(c, fmt.Errorf("upload reference image failed: %w", err))
 			return
 		}
-		task.ReferenceImageKey = refKey
+		if err := task.SetReferenceImageKeys(refKeys); err != nil {
+			cleanupReferenceImages(refKeys)
+			common.ApiError(c, err)
+			return
+		}
 	}
 	if err := model.CreateImageTask(task); err != nil {
 		common.ApiError(c, err)
@@ -267,9 +356,7 @@ func DeleteUserImageTask(c *gin.Context) {
 	if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") && service.IsObjectStorageEnabled() {
 		_ = service.DeleteObjectFromStorage(context.Background(), task.ResultKey)
 	}
-	if task.ReferenceImageKey != "" && !strings.Contains(task.ReferenceImageKey, "://") && service.IsObjectStorageEnabled() {
-		_ = service.DeleteObjectFromStorage(context.Background(), task.ReferenceImageKey)
-	}
+	cleanupReferenceImages(task.GetReferenceImageKeys())
 	common.ApiSuccess(c, nil)
 }
 
@@ -284,9 +371,7 @@ func DeleteUserCompletedImageTasks(c *gin.Context) {
 		if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") && service.IsObjectStorageEnabled() {
 			_ = service.DeleteObjectFromStorage(context.Background(), task.ResultKey)
 		}
-		if task.ReferenceImageKey != "" && !strings.Contains(task.ReferenceImageKey, "://") && service.IsObjectStorageEnabled() {
-			_ = service.DeleteObjectFromStorage(context.Background(), task.ReferenceImageKey)
-		}
+		cleanupReferenceImages(task.GetReferenceImageKeys())
 	}
 	common.ApiSuccess(c, map[string]int{"deleted": len(tasks)})
 }
@@ -389,7 +474,7 @@ func processOneImageTask(task *model.ImageTask) {
 			err = imageTaskTimeoutError(timeoutMin)
 			break
 		}
-		if task.ReferenceImageKey != "" {
+		if len(task.GetReferenceImageKeys()) > 0 {
 			resultURL, resultKey, err = executeImageEditTask(taskCtx, task)
 		} else {
 			resultURL, resultKey, err = executeImageGenerationTask(taskCtx, task)
@@ -424,7 +509,7 @@ func processOneImageTask(task *model.ImageTask) {
 			"error_message": err.Error(),
 			"finished_at":   finishedAt,
 		})
-		cleanupReferenceImage(task)
+		cleanupReferenceImages(task.GetReferenceImageKeys())
 		return
 	}
 	_ = model.UpdateImageTaskFields(task.TaskID, map[string]any{
@@ -434,7 +519,7 @@ func processOneImageTask(task *model.ImageTask) {
 		"error_message": "",
 		"finished_at":   finishedAt,
 	})
-	cleanupReferenceImage(task)
+	cleanupReferenceImages(task.GetReferenceImageKeys())
 }
 
 func imageTaskRetryDelay(attempt int) time.Duration {
@@ -445,14 +530,6 @@ func imageTaskRetryDelay(attempt int) time.Duration {
 		return 5 * time.Second
 	default:
 		return 10 * time.Second
-	}
-}
-
-func cleanupReferenceImage(task *model.ImageTask) {
-	if task.ReferenceImageKey != "" && service.IsObjectStorageEnabled() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_ = service.DeleteObjectFromStorage(cleanupCtx, task.ReferenceImageKey)
 	}
 }
 
@@ -588,6 +665,22 @@ func uploadReferenceImage(ctx context.Context, userID int, refImageBase64 string
 	return objectKey, nil
 }
 
+func uploadReferenceImages(ctx context.Context, userID int, referenceImages []string) ([]string, error) {
+	keys := make([]string, 0, len(referenceImages))
+	for _, referenceImage := range referenceImages {
+		if strings.TrimSpace(referenceImage) == "" {
+			continue
+		}
+		key, err := uploadReferenceImage(ctx, userID, referenceImage)
+		if err != nil {
+			cleanupReferenceImages(keys)
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
 func executeImageEditTask(ctx context.Context, task *model.ImageTask) (resultURL, resultKey string, execErr error) {
 	channel, err := model.GetChannelById(task.ChannelID, true)
 	if err != nil {
@@ -602,10 +695,9 @@ func executeImageEditTask(ctx context.Context, task *model.ImageTask) (resultURL
 	if err != nil {
 		return "", "", err
 	}
-
-	refData, _, err := service.DownloadObjectFromStorage(ctx, task.ReferenceImageKey)
-	if err != nil {
-		return "", "", fmt.Errorf("download reference image from S3 failed: %w", err)
+	referenceKeys := task.GetReferenceImageKeys()
+	if len(referenceKeys) == 0 {
+		return "", "", fmt.Errorf("reference image is required for edit task")
 	}
 
 	var requestBody bytes.Buffer
@@ -616,17 +708,25 @@ func executeImageEditTask(ctx context.Context, task *model.ImageTask) (resultURL
 	if task.Size != "" {
 		writer.WriteField("size", task.Size)
 	}
-
-	ext := "png"
-	h := make(textproto.MIMEHeader)
-	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image"; filename="image.%s"`, ext))
-	h.Set("Content-Type", "image/png")
-	part, err := writer.CreatePart(h)
-	if err != nil {
-		return "", "", fmt.Errorf("create multipart part failed: %w", err)
-	}
-	if _, err := part.Write(refData); err != nil {
-		return "", "", fmt.Errorf("write reference image to multipart failed: %w", err)
+	for index, referenceKey := range referenceKeys {
+		refData, contentType, err := service.DownloadObjectFromStorage(ctx, referenceKey)
+		if err != nil {
+			return "", "", fmt.Errorf("download reference image from S3 failed: %w", err)
+		}
+		ext := "png"
+		if imageType := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(contentType), "image/")); imageType != "" {
+			ext = strings.Split(imageType, ";")[0]
+		}
+		h := make(textproto.MIMEHeader)
+		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image"; filename="image-%d.%s"`, index+1, ext))
+		h.Set("Content-Type", contentType)
+		part, err := writer.CreatePart(h)
+		if err != nil {
+			return "", "", fmt.Errorf("create multipart part failed: %w", err)
+		}
+		if _, err := part.Write(refData); err != nil {
+			return "", "", fmt.Errorf("write reference image to multipart failed: %w", err)
+		}
 	}
 	writer.Close()
 
@@ -786,9 +886,7 @@ func cleanExpiredTasksAndS3Objects(cutoff int64) {
 		if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") {
 			_ = service.DeleteObjectFromStorage(ctx, task.ResultKey)
 		}
-		if task.ReferenceImageKey != "" && !strings.Contains(task.ReferenceImageKey, "://") {
-			_ = service.DeleteObjectFromStorage(ctx, task.ReferenceImageKey)
-		}
+		cleanupReferenceImages(task.GetReferenceImageKeys())
 		ids = append(ids, task.ID)
 	}
 	if len(ids) > 0 {

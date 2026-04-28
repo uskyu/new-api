@@ -37,6 +37,52 @@ type ImageTask struct {
 	UpdatedAt         int64           `json:"updated_at"`
 }
 
+func (t *ImageTask) GetReferenceImageKeys() []string {
+	stored := strings.TrimSpace(t.ReferenceImageKey)
+	if stored == "" {
+		return nil
+	}
+	if strings.HasPrefix(stored, "[") {
+		var keys []string
+		if err := common.Unmarshal([]byte(stored), &keys); err == nil {
+			result := make([]string, 0, len(keys))
+			for _, key := range keys {
+				if trimmed := strings.TrimSpace(key); trimmed != "" {
+					result = append(result, trimmed)
+				}
+			}
+			if len(result) > 0 {
+				return result
+			}
+		}
+	}
+	return []string{stored}
+}
+
+func (t *ImageTask) SetReferenceImageKeys(keys []string) error {
+	result := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if trimmed := strings.TrimSpace(key); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	if len(result) == 0 {
+		t.ReferenceImageKey = ""
+		return nil
+	}
+	if len(result) == 1 {
+		t.ReferenceImageKey = result[0]
+		return nil
+	}
+	data, err := common.Marshal(result)
+	if err != nil {
+		return err
+	}
+
+	t.ReferenceImageKey = string(data)
+	return nil
+}
+
 func (t *ImageTask) BeforeCreate(tx any) error {
 	now := time.Now().Unix()
 	if t.CreatedAt == 0 {
@@ -187,6 +233,15 @@ func UpdateImageTaskFields(taskID string, updates map[string]any) error {
 func CleanStaleFailedImageTasks(beforeTimestamp int64) (int64, error) {
 	result := DB.Where("status = ? AND created_at < ?", ImageTaskStatusFailed, beforeTimestamp).Delete(&ImageTask{})
 	return result.RowsAffected, result.Error
+}
+
+func GetStaleProcessingTasks(cutoffTimestamp int64, limit int) ([]*ImageTask, error) {
+	var tasks []*ImageTask
+	err := DB.Where("status = ? AND (started_at = 0 OR started_at < ?)", ImageTaskStatusProcessing, cutoffTimestamp).
+		Order("id asc").
+		Limit(limit).
+		Find(&tasks).Error
+	return tasks, err
 }
 
 func DeleteImageTaskByTaskIDAndUserID(taskID string, userID int) (*ImageTask, error) {

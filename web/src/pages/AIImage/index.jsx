@@ -28,6 +28,7 @@ const OPENAI_IMAGE_SIZE_OPTIONS = [
 const QUICK_BATCH_COUNT_OPTIONS = [1, 2, 4];
 const MAX_BATCH_COUNT = 10;
 const MAX_PROMPT_LENGTH = 4000;
+const MAX_REFERENCE_IMAGES = 5;
 const REMOTE_TASK_PAGE_SIZE = 10;
 const TASKS_CACHE_KEY = 'ai_image_tasks_cache';
 const PROMPT_OPTIMIZER_SYSTEM_PROMPT = [
@@ -363,8 +364,8 @@ const postOpenAIImageEditPayload = async ({ model, prompt, images, selectedGroup
   formData.append('prompt', prompt);
   formData.append('n', '1');
 
-  images.filter((image) => image?.file).forEach((image, index) => {
-    formData.append(index === 0 ? 'image' : 'image[]', image.file, image.name || image.file.name);
+  images.filter((image) => image?.file).slice(0, MAX_REFERENCE_IMAGES).forEach((image, index) => {
+    formData.append('image', image.file, image.name || image.file.name);
   });
 
   const response = await fetch(`${API_ENDPOINTS.IMAGE_EDITS}${query}`, {
@@ -565,12 +566,21 @@ const AIImage = () => {
     (files) => {
       const nextFiles = Array.from(files || []).filter(Boolean);
       if (nextFiles.length === 0) return;
+      const remaining = MAX_REFERENCE_IMAGES - draftImages.length;
+      if (remaining <= 0) {
+        showError(t('最多支持 {{count}} 张参考图', { count: MAX_REFERENCE_IMAGES }));
+        return;
+      }
+      const acceptedFiles = nextFiles.slice(0, remaining);
       setDraftImages((previous) => [
         ...previous,
-        ...nextFiles.map(createDraftImageEntry),
+        ...acceptedFiles.map(createDraftImageEntry),
       ]);
+      if (acceptedFiles.length < nextFiles.length) {
+        showError(t('最多支持 {{count}} 张参考图', { count: MAX_REFERENCE_IMAGES }));
+      }
     },
-    [setDraftImages],
+    [draftImages.length, setDraftImages, t],
   );
 
   const handleRemoveDraftImage = React.useCallback(
@@ -587,7 +597,7 @@ const AIImage = () => {
   }, [setDraftImages]);
 
   const serializeDraftImagesForRequest = React.useCallback(async () => {
-    const images = draftImages.filter(Boolean);
+    const images = draftImages.filter(Boolean).slice(0, MAX_REFERENCE_IMAGES);
     if (images.length === 0) {
       return [];
     }
@@ -674,10 +684,10 @@ const AIImage = () => {
       if (!effectiveModel) {
         throw new Error('image model is required');
       }
-      let referenceImage = '';
+      let referenceImages = [];
       if (draftImages.length > 0) {
         const dataUrls = await Promise.all(
-          draftImages.filter(Boolean).map(async (image) => {
+          draftImages.filter(Boolean).slice(0, MAX_REFERENCE_IMAGES).map(async (image) => {
             if (typeof image?.sourceDataUrl === 'string' && image.sourceDataUrl.startsWith('data:image/')) {
               return image.sourceDataUrl;
             }
@@ -687,7 +697,7 @@ const AIImage = () => {
             return '';
           }),
         );
-        referenceImage = dataUrls.filter(Boolean)[0] || '';
+        referenceImages = dataUrls.filter(Boolean);
       }
       const response = await fetch('/api/ai-image/tasks', {
         method: 'POST',
@@ -702,7 +712,7 @@ const AIImage = () => {
           group: selectedGroup,
           size: openaiImageSize,
           n: 1,
-          reference_image: referenceImage,
+          reference_images: referenceImages,
         }),
       });
       if (!response.ok) {
@@ -725,12 +735,14 @@ const AIImage = () => {
         throw new Error('image model is required');
       }
 
+      const activeDraftImages = draftImages.slice(0, MAX_REFERENCE_IMAGES);
+
       if (isOpenAIImageModel(effectiveModel)) {
-        const response = draftImages.length > 0
+        const response = activeDraftImages.length > 0
           ? await postOpenAIImageEditPayload({
               model: effectiveModel,
               prompt: itemPrompt,
-              images: draftImages,
+              images: activeDraftImages,
               selectedGroup,
             })
           : await postOpenAIImagePayload(
@@ -1138,6 +1150,10 @@ const AIImage = () => {
         showError(t('该任务生成失败，无法引用'));
         return;
       }
+      if (draftImages.length >= MAX_REFERENCE_IMAGES) {
+        showError(t('最多支持 {{count}} 张参考图', { count: MAX_REFERENCE_IMAGES }));
+        return;
+      }
 
       try {
         if (imageUrl && imageUrl.startsWith('data:image/')) {
@@ -1530,6 +1546,10 @@ const AIImage = () => {
                       }}
                     />
                   </label>
+
+                  <Typography.Text className='!text-xs !text-slate-500'>
+                    {t('最多 {{count}} 张参考图', { count: MAX_REFERENCE_IMAGES })}
+                  </Typography.Text>
 
                   <Button
                     theme='solid'
