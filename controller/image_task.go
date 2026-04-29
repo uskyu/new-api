@@ -88,6 +88,13 @@ func cleanupReferenceImages(referenceKeys []string) {
 	}
 }
 
+func shouldCleanupImageTaskReferences(task *model.ImageTask) bool {
+	if task == nil {
+		return false
+	}
+	return task.Source != ecommerceImageSource
+}
+
 func failStaleProcessingTasks() {
 	timeoutMin := normalizeImageTaskTimeoutMin(operation_setting.GetAIImageAsyncSetting().MaxTimeoutMin)
 	cutoff := time.Now().Add(-(time.Duration(timeoutMin) * time.Minute) - staleImageTaskRecoveryBuffer).Unix()
@@ -110,7 +117,9 @@ func failStaleProcessingTasks() {
 			if err != nil || !ok {
 				continue
 			}
-			cleanupReferenceImages(task.GetReferenceImageKeys())
+			if shouldCleanupImageTaskReferences(task) {
+				cleanupReferenceImages(task.GetReferenceImageKeys())
+			}
 			recovered++
 		}
 		if recovered > 0 {
@@ -135,6 +144,19 @@ func StartImageTaskWorker() {
 			}
 			if setting.Enabled {
 				processImageTaskBatch(setting.WorkerConcurrency)
+			}
+			time.Sleep(time.Duration(interval) * time.Second)
+		}
+	})
+	gopool.Go(func() {
+		for {
+			setting := operation_setting.GetAIImageAsyncSetting()
+			interval := setting.PollIntervalSec
+			if interval <= 0 {
+				interval = 3
+			}
+			if setting.Enabled {
+				processEcommerceWorkflowBatch()
 			}
 			time.Sleep(time.Duration(interval) * time.Second)
 		}
@@ -208,6 +230,7 @@ func CreateImageTask(c *gin.Context) {
 		Size:      req.Size,
 		Prompt:    req.Prompt,
 		Status:    model.ImageTaskStatusPending,
+		Source:    "ai_image",
 		ChannelID: channel.Id,
 	}
 	if len(referenceImages) > 0 {
@@ -356,7 +379,9 @@ func DeleteUserImageTask(c *gin.Context) {
 	if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") && service.IsObjectStorageEnabled() {
 		_ = service.DeleteObjectFromStorage(context.Background(), task.ResultKey)
 	}
-	cleanupReferenceImages(task.GetReferenceImageKeys())
+	if shouldCleanupImageTaskReferences(task) {
+		cleanupReferenceImages(task.GetReferenceImageKeys())
+	}
 	common.ApiSuccess(c, nil)
 }
 
@@ -371,7 +396,9 @@ func DeleteUserCompletedImageTasks(c *gin.Context) {
 		if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") && service.IsObjectStorageEnabled() {
 			_ = service.DeleteObjectFromStorage(context.Background(), task.ResultKey)
 		}
-		cleanupReferenceImages(task.GetReferenceImageKeys())
+		if shouldCleanupImageTaskReferences(task) {
+			cleanupReferenceImages(task.GetReferenceImageKeys())
+		}
 	}
 	common.ApiSuccess(c, map[string]int{"deleted": len(tasks)})
 }
@@ -379,7 +406,9 @@ func DeleteUserCompletedImageTasks(c *gin.Context) {
 func GetAllImageTasks(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	userID := common.String2Int(c.Query("user_id"))
-	items, total, err := model.ListAllImageTasks(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), userID, c.Query("model"), c.Query("status"))
+	startTime, _ := strconv.ParseInt(c.Query("start_time"), 10, 64)
+	endTime, _ := strconv.ParseInt(c.Query("end_time"), 10, 64)
+	items, total, err := model.ListAllImageTasks(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), userID, c.Query("model"), c.Query("status"), c.Query("source"), startTime, endTime)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -509,7 +538,9 @@ func processOneImageTask(task *model.ImageTask) {
 			"error_message": err.Error(),
 			"finished_at":   finishedAt,
 		})
-		cleanupReferenceImages(task.GetReferenceImageKeys())
+		if shouldCleanupImageTaskReferences(task) {
+			cleanupReferenceImages(task.GetReferenceImageKeys())
+		}
 		return
 	}
 	_ = model.UpdateImageTaskFields(task.TaskID, map[string]any{
@@ -519,7 +550,9 @@ func processOneImageTask(task *model.ImageTask) {
 		"error_message": "",
 		"finished_at":   finishedAt,
 	})
-	cleanupReferenceImages(task.GetReferenceImageKeys())
+	if shouldCleanupImageTaskReferences(task) {
+		cleanupReferenceImages(task.GetReferenceImageKeys())
+	}
 }
 
 func imageTaskRetryDelay(attempt int) time.Duration {
@@ -883,10 +916,15 @@ func cleanExpiredTasksAndS3Objects(cutoff int64) {
 	ctx := context.Background()
 	var ids []int64
 	for _, task := range tasks {
+		if task.Source == ecommerceImageSource {
+			continue
+		}
 		if task.ResultKey != "" && !strings.Contains(task.ResultKey, "://") {
 			_ = service.DeleteObjectFromStorage(ctx, task.ResultKey)
 		}
-		cleanupReferenceImages(task.GetReferenceImageKeys())
+		if shouldCleanupImageTaskReferences(task) {
+			cleanupReferenceImages(task.GetReferenceImageKeys())
+		}
 		ids = append(ids, task.ID)
 	}
 	if len(ids) > 0 {
@@ -900,22 +938,25 @@ func toImageTaskDTO(task *model.ImageTask, fillUser bool) *dto.ImageTaskDTO {
 		return nil
 	}
 	result := &dto.ImageTaskDTO{
-		ID:           task.ID,
-		TaskID:       task.TaskID,
-		UserID:       task.UserID,
-		Group:        task.Group,
-		Model:        task.Model,
-		Size:         task.Size,
-		Prompt:       task.Prompt,
-		Status:       string(task.Status),
-		ChannelID:    task.ChannelID,
-		ResultURL:    task.ResultURL,
-		ResultKey:    task.ResultKey,
-		ErrorMessage: task.ErrorMessage,
-		StartedAt:    task.StartedAt,
-		FinishedAt:   task.FinishedAt,
-		CreatedAt:    task.CreatedAt,
-		UpdatedAt:    task.UpdatedAt,
+		ID:            task.ID,
+		TaskID:        task.TaskID,
+		UserID:        task.UserID,
+		Group:         task.Group,
+		Model:         task.Model,
+		Size:          task.Size,
+		Prompt:        task.Prompt,
+		Status:        string(task.Status),
+		Source:        task.Source,
+		WorkflowID:    task.WorkflowID,
+		WorkflowStage: task.WorkflowStage,
+		ChannelID:     task.ChannelID,
+		ResultURL:     task.ResultURL,
+		ResultKey:     task.ResultKey,
+		ErrorMessage:  task.ErrorMessage,
+		StartedAt:     task.StartedAt,
+		FinishedAt:    task.FinishedAt,
+		CreatedAt:     task.CreatedAt,
+		UpdatedAt:     task.UpdatedAt,
 	}
 	if fillUser {
 		if user, err := model.GetUserCache(task.UserID); err == nil {

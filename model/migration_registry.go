@@ -71,6 +71,8 @@ func CoreSchemaModels() []interface{} {
 		&Task{},
 		&ImageTask{},
 		&ImagePromptFavorite{},
+		&EcommerceWorkflow{},
+		&EcommerceWorkflowSegment{},
 		&Model{},
 		&Vendor{},
 		&PrefillGroup{},

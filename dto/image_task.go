@@ -11,23 +11,26 @@ type CreateImageTaskRequest struct {
 }
 
 type ImageTaskDTO struct {
-	ID           int64  `json:"id"`
-	TaskID       string `json:"task_id"`
-	UserID       int    `json:"user_id"`
-	Username     string `json:"username,omitempty"`
-	Group        string `json:"group"`
-	Model        string `json:"model"`
-	Size         string `json:"size,omitempty"`
-	Prompt       string `json:"prompt"`
-	Status       string `json:"status"`
-	ChannelID    int    `json:"channel_id"`
-	ResultURL    string `json:"result_url,omitempty"`
-	ResultKey    string `json:"result_key,omitempty"`
-	ErrorMessage string `json:"error_message,omitempty"`
-	StartedAt    int64  `json:"started_at"`
-	FinishedAt   int64  `json:"finished_at"`
-	CreatedAt    int64  `json:"created_at"`
-	UpdatedAt    int64  `json:"updated_at"`
+	ID            int64  `json:"id"`
+	TaskID        string `json:"task_id"`
+	UserID        int    `json:"user_id"`
+	Username      string `json:"username,omitempty"`
+	Group         string `json:"group"`
+	Model         string `json:"model"`
+	Size          string `json:"size,omitempty"`
+	Prompt        string `json:"prompt"`
+	Status        string `json:"status"`
+	Source        string `json:"source,omitempty"`
+	WorkflowID    string `json:"workflow_id,omitempty"`
+	WorkflowStage string `json:"workflow_stage,omitempty"`
+	ChannelID     int    `json:"channel_id"`
+	ResultURL     string `json:"result_url,omitempty"`
+	ResultKey     string `json:"result_key,omitempty"`
+	ErrorMessage  string `json:"error_message,omitempty"`
+	StartedAt     int64  `json:"started_at"`
+	FinishedAt    int64  `json:"finished_at"`
+	CreatedAt     int64  `json:"created_at"`
+	UpdatedAt     int64  `json:"updated_at"`
 }
 
 type ImageTaskStatsResponse struct {

@@ -372,6 +372,16 @@ func SetApiRouter(router *gin.Engine) {
 			aiImagePromptFavoriteRoute.DELETE("/:id", controller.DeleteImagePromptFavorite)
 		}
 
+		aiEcommerceWorkflowRoute := apiRouter.Group("/ai-ecommerce/workflows")
+		aiEcommerceWorkflowRoute.Use(middleware.UserAuth())
+		{
+			aiEcommerceWorkflowRoute.POST("", controller.CreateEcommerceWorkflow)
+			aiEcommerceWorkflowRoute.GET("", controller.ListUserEcommerceWorkflows)
+			aiEcommerceWorkflowRoute.GET("/:workflow_id", controller.GetUserEcommerceWorkflow)
+			aiEcommerceWorkflowRoute.POST("/:workflow_id/confirm", controller.ConfirmEcommerceWorkflow)
+			aiEcommerceWorkflowRoute.POST("/:workflow_id/segments/:segment_key/redraw", controller.RedrawEcommerceWorkflowSegment)
+		}
+
 		aiImageProxyRoute := apiRouter.Group("/ai-image")
 		aiImageProxyRoute.Use(middleware.UserAuth())
 		{
@@ -383,7 +393,13 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			aiImageAdminRoute.GET("/tasks", controller.GetAllImageTasks)
 			aiImageAdminRoute.GET("/stats", controller.GetImageTaskStats)
+			aiImageAdminRoute.GET("/daily-stats", controller.GetAIImageDailyStats)
 			aiImageAdminRoute.POST("/test-s3", controller.TestS3Connection)
+		}
+		aiEcommerceAdminRoute := apiRouter.Group("/admin/ai-ecommerce")
+		aiEcommerceAdminRoute.Use(middleware.AdminAuth())
+		{
+			aiEcommerceAdminRoute.GET("/workflows", controller.GetAllEcommerceWorkflows)
 		}
 
 		taskRoute := apiRouter.Group("/task")

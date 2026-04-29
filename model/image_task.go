@@ -26,6 +26,10 @@ type ImageTask struct {
 	Size              string          `json:"size" gorm:"type:varchar(32)"`
 	Prompt            string          `json:"prompt" gorm:"type:text"`
 	Status            ImageTaskStatus `json:"status" gorm:"type:varchar(20);index"`
+	Source            string          `json:"source" gorm:"type:varchar(64);index"`
+	WorkflowID        string          `json:"workflow_id" gorm:"type:varchar(191);index"`
+	WorkflowStage     string          `json:"workflow_stage" gorm:"type:varchar(64);index"`
+	Metadata          string          `json:"metadata" gorm:"type:text"`
 	ChannelID         int             `json:"channel_id" gorm:"index"`
 	ResultURL         string          `json:"result_url" gorm:"type:text"`
 	ResultKey         string          `json:"result_key" gorm:"type:text"`
@@ -97,6 +101,9 @@ func (t *ImageTask) BeforeCreate(tx any) error {
 	}
 	if t.Status == "" {
 		t.Status = ImageTaskStatusPending
+	}
+	if strings.TrimSpace(t.Source) == "" {
+		t.Source = "ai_image"
 	}
 	return nil
 }
@@ -174,7 +181,7 @@ func ListUserImageTasks(userID, startIdx, limit int, status string, sinceID int6
 	return tasks, total, err
 }
 
-func ListAllImageTasks(startIdx, limit int, userID int, modelName, status string) ([]*ImageTask, int64, error) {
+func ListAllImageTasks(startIdx, limit int, userID int, modelName, status, source string, startTime, endTime int64) ([]*ImageTask, int64, error) {
 	query := DB.Model(&ImageTask{})
 	if userID > 0 {
 		query = query.Where("user_id = ?", userID)
@@ -184,6 +191,19 @@ func ListAllImageTasks(startIdx, limit int, userID int, modelName, status string
 	}
 	if status != "" {
 		query = query.Where("status = ?", status)
+	}
+	if source != "" {
+		if source == "ai_image" {
+			query = query.Where("source = ? OR source = '' OR source IS NULL", source)
+		} else {
+			query = query.Where("source = ?", source)
+		}
+	}
+	if startTime > 0 {
+		query = query.Where("created_at >= ?", startTime)
+	}
+	if endTime > 0 {
+		query = query.Where("created_at <= ?", endTime)
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -197,6 +217,26 @@ func ListAllImageTasks(startIdx, limit int, userID int, modelName, status string
 func CountImageTasksByStatus(status ImageTaskStatus) (int64, error) {
 	var total int64
 	err := DB.Model(&ImageTask{}).Where("status = ?", status).Count(&total).Error
+	return total, err
+}
+
+func CountImageTasksBySourceAndTime(source string, startTime, endTime int64) (int64, error) {
+	query := DB.Model(&ImageTask{})
+	if source != "" {
+		if source == "ai_image" {
+			query = query.Where("source = ? OR source = '' OR source IS NULL", source)
+		} else {
+			query = query.Where("source = ?", source)
+		}
+	}
+	if startTime > 0 {
+		query = query.Where("created_at >= ?", startTime)
+	}
+	if endTime > 0 {
+		query = query.Where("created_at <= ?", endTime)
+	}
+	var total int64
+	err := query.Count(&total).Error
 	return total, err
 }
 

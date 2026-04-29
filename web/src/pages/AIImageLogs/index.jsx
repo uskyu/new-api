@@ -16,6 +16,12 @@ const AIImageLogs = () => {
   const [pageSize, setPageSize] = useState(10);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState(null);
+  const [dailyStats, setDailyStats] = useState(null);
+  const [activeLogType, setActiveLogType] = useState('ai_image');
+  const [filterUserId, setFilterUserId] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterStartTime, setFilterStartTime] = useState('');
+  const [filterEndTime, setFilterEndTime] = useState('');
   const [savingConfig, setSavingConfig] = useState(false);
   const [testingS3, setTestingS3] = useState(false);
   const [s3TestResult, setS3TestResult] = useState(null);
@@ -38,12 +44,35 @@ const AIImageLogs = () => {
     s3UseSSL: true,
   });
 
+  const toTimestamp = (value) => {
+    if (!value) return '';
+    const time = new Date(value).getTime();
+    return Number.isFinite(time) ? String(Math.floor(time / 1000)) : '';
+  };
+
+  const buildQuery = useCallback((nextPage, nextPageSize) => {
+    const params = new URLSearchParams({
+      p: String(nextPage),
+      page_size: String(nextPageSize),
+    });
+    if (filterUserId.trim()) params.set('user_id', filterUserId.trim());
+    if (filterStatus) params.set('status', filterStatus);
+    if (filterStartTime) params.set('start_time', toTimestamp(filterStartTime));
+    if (filterEndTime) params.set('end_time', toTimestamp(filterEndTime));
+    return params.toString();
+  }, [filterEndTime, filterStartTime, filterStatus, filterUserId]);
+
   const loadData = useCallback(async (nextPage = page, nextPageSize = pageSize) => {
     setLoading(true);
     try {
-      const [taskRes, statsRes] = await Promise.all([
-        API.get(`/api/admin/ai-image/tasks?p=${nextPage}&page_size=${nextPageSize}`),
+      const query = buildQuery(nextPage, nextPageSize);
+      const listURL = activeLogType === 'ecommerce'
+        ? `/api/admin/ai-ecommerce/workflows?${query}`
+        : `/api/admin/ai-image/tasks?source=ai_image&${query}`;
+      const [taskRes, statsRes, dailyStatsRes] = await Promise.all([
+        API.get(listURL),
         API.get('/api/admin/ai-image/stats'),
+        API.get('/api/admin/ai-image/daily-stats'),
       ]);
       if (taskRes.data?.success) {
         const data = taskRes.data.data || {};
@@ -57,16 +86,19 @@ const AIImageLogs = () => {
       if (statsRes.data?.success) {
         setStats(statsRes.data.data || null);
       }
+      if (dailyStatsRes.data?.success) {
+        setDailyStats(dailyStatsRes.data.data || null);
+      }
     } catch (error) {
       showError(error?.message || '加载 AI 绘图日志失败');
     } finally {
       setLoading(false);
     }
-  }, [pageSize]);
+  }, [activeLogType, buildQuery, page, pageSize]);
 
   useEffect(() => {
     loadData(1, pageSize);
-  }, []);
+  }, [activeLogType]);
 
   const loadConfig = useCallback(async () => {
     if (!isRoot()) {
@@ -161,7 +193,7 @@ const AIImageLogs = () => {
     }
   }, []);
 
-  const columns = useMemo(
+  const imageTaskColumns = useMemo(
     () => [
       {
         title: '提交时间',
@@ -237,6 +269,16 @@ const AIImageLogs = () => {
           ),
       },
       {
+        title: '来源',
+        dataIndex: 'source',
+        render: (value) => value || 'ai_image',
+      },
+      {
+        title: '阶段',
+        dataIndex: 'workflow_stage',
+        render: (value) => value || '-',
+      },
+      {
         title: '错误',
         dataIndex: 'error_message',
         render: (value) => (
@@ -248,6 +290,88 @@ const AIImageLogs = () => {
     ],
     [],
   );
+
+  const ecommerceColumns = useMemo(
+    () => [
+      {
+        title: '提交时间',
+        dataIndex: 'created_at',
+        render: (value) => timestamp2string(value),
+      },
+      {
+        title: '用户',
+        dataIndex: 'username',
+        render: (_, record) => record.username || `#${record.user_id}`,
+      },
+      {
+        title: '模板',
+        dataIndex: 'template_name',
+        render: (value, record) => value || record.template_key || '-',
+      },
+      {
+        title: '商品',
+        dataIndex: 'product_name',
+        render: (value) => value || '-',
+      },
+      {
+        title: '模型',
+        dataIndex: 'model',
+      },
+      {
+        title: '状态',
+        dataIndex: 'status',
+        render: (value) => <Tag color={statusColorMap[value] || 'grey'}>{value}</Tag>,
+      },
+      {
+        title: '进度',
+        dataIndex: 'segments',
+        render: (segments = []) => {
+          if (!Array.isArray(segments) || segments.length === 0) return '-';
+          return (
+            <div className='flex flex-wrap gap-1'>
+              {segments.map((segment) => (
+                <Tag key={segment.segment_key} color={statusColorMap[segment.status] || 'grey'}>
+                  {segment.label}: {segment.status}
+                </Tag>
+              ))}
+            </div>
+          );
+        },
+        width: 320,
+      },
+      {
+        title: '结果',
+        dataIndex: 'assembled_url',
+        render: (value, record) => (
+          <div className='flex flex-wrap gap-2'>
+            {record.mother_result_url ? (
+              <Button theme='light' type='tertiary' size='small' onClick={() => window.open(record.mother_result_url, '_blank', 'noopener,noreferrer')}>
+                母版
+              </Button>
+            ) : null}
+            {value ? (
+              <Button theme='light' type='primary' size='small' onClick={() => window.open(value, '_blank', 'noopener,noreferrer')}>
+                长图
+              </Button>
+            ) : null}
+            {!record.mother_result_url && !value ? '-' : null}
+          </div>
+        ),
+      },
+      {
+        title: '错误',
+        dataIndex: 'error_message',
+        render: (value) => (
+          <span className='line-clamp-2 block max-w-[280px] break-all text-red-500'>
+            {value || '-'}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
+
+  const columns = activeLogType === 'ecommerce' ? ecommerceColumns : imageTaskColumns;
 
   return (
     <div className='mt-[60px] space-y-4 px-2'>
@@ -478,7 +602,7 @@ const AIImageLogs = () => {
             AI 绘图日志
           </Typography.Title>
           <Typography.Text type='tertiary'>
-            查看异步 AI 绘图任务状态、结果与失败信息。
+            查看异步 AI 绘图任务、电商模板工作流、结果与失败信息。
           </Typography.Text>
         </div>
         <div className='flex flex-wrap gap-2 text-sm text-slate-500'>
@@ -486,6 +610,91 @@ const AIImageLogs = () => {
           <span>Processing: {stats?.processing ?? '-'}</span>
           <span>Succeeded: {stats?.succeeded ?? '-'}</span>
           <span>Failed: {stats?.failed ?? '-'}</span>
+        </div>
+      </div>
+
+      <div className='grid gap-3 md:grid-cols-3'>
+        <div className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'>
+          <div className='text-sm text-slate-500'>今日 AI 绘画请求</div>
+          <div className='mt-2 text-2xl font-semibold text-slate-900'>{dailyStats?.ai_image_tasks ?? '-'}</div>
+        </div>
+        <div className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'>
+          <div className='text-sm text-slate-500'>今日电商模板子任务</div>
+          <div className='mt-2 text-2xl font-semibold text-slate-900'>{dailyStats?.ai_ecommerce_tasks ?? '-'}</div>
+        </div>
+        <div className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'>
+          <div className='text-sm text-slate-500'>今日电商模板工作流</div>
+          <div className='mt-2 text-2xl font-semibold text-slate-900'>{dailyStats?.ai_ecommerce_workflows ?? '-'}</div>
+        </div>
+      </div>
+
+      <div className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'>
+        <div className='mb-3 flex flex-wrap gap-2'>
+          <Button
+            type='primary'
+            theme={activeLogType === 'ai_image' ? 'solid' : 'light'}
+            className='!rounded-full'
+            onClick={() => {
+              setActiveLogType('ai_image');
+              setFilterStatus('');
+              setPage(1);
+            }}
+          >
+            AI 绘画日志
+          </Button>
+          <Button
+            type='primary'
+            theme={activeLogType === 'ecommerce' ? 'solid' : 'light'}
+            className='!rounded-full'
+            onClick={() => {
+              setActiveLogType('ecommerce');
+              setFilterStatus('');
+              setPage(1);
+            }}
+          >
+            AI 电商绘图模板日志
+          </Button>
+        </div>
+        <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-5'>
+          <label className='flex flex-col gap-1 text-sm'>
+            <span>用户 ID</span>
+            <Input value={filterUserId} onChange={setFilterUserId} placeholder='例如 1' />
+          </label>
+          <label className='flex flex-col gap-1 text-sm'>
+            <span>状态</span>
+            <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value)} className='h-9 rounded-lg border border-slate-200 px-3'>
+              <option value=''>全部</option>
+              {activeLogType === 'ecommerce' ? (
+                <>
+                  <option value='MOTHER_PROCESSING'>MOTHER_PROCESSING</option>
+                  <option value='WAITING_CONFIRM'>WAITING_CONFIRM</option>
+                  <option value='SEGMENTS_PROCESSING'>SEGMENTS_PROCESSING</option>
+                  <option value='SUCCEEDED'>SUCCEEDED</option>
+                  <option value='FAILED'>FAILED</option>
+                  <option value='MOTHER_FAILED'>MOTHER_FAILED</option>
+                </>
+              ) : (
+                <>
+                  <option value='PENDING'>PENDING</option>
+                  <option value='PROCESSING'>PROCESSING</option>
+                  <option value='SUCCEEDED'>SUCCEEDED</option>
+                  <option value='FAILED'>FAILED</option>
+                </>
+              )}
+            </select>
+          </label>
+          <label className='flex flex-col gap-1 text-sm'>
+            <span>开始时间</span>
+            <input type='datetime-local' value={filterStartTime} onChange={(event) => setFilterStartTime(event.target.value)} className='h-9 rounded-lg border border-slate-200 px-3' />
+          </label>
+          <label className='flex flex-col gap-1 text-sm'>
+            <span>结束时间</span>
+            <input type='datetime-local' value={filterEndTime} onChange={(event) => setFilterEndTime(event.target.value)} className='h-9 rounded-lg border border-slate-200 px-3' />
+          </label>
+          <div className='flex items-end gap-2'>
+            <Button type='primary' className='!rounded-full' onClick={() => loadData(1, pageSize)}>搜索</Button>
+            <Button className='!rounded-full' onClick={() => { setFilterUserId(''); setFilterStatus(''); setFilterStartTime(''); setFilterEndTime(''); setTimeout(() => loadData(1, pageSize), 0); }}>重置</Button>
+          </div>
         </div>
       </div>
 
