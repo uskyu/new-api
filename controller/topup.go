@@ -20,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 )
 
 func GetTopUpInfo(c *gin.Context) {
@@ -374,28 +375,49 @@ func EpayNotify(c *gin.Context) {
 			return
 		}
 		if topUp.Status == common.TopUpStatusPending {
-			if topUp.PaymentMethod != verifyInfo.Type {
-				logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 实际支付方式与订单不同 trade_no=%s order_payment_method=%s actual_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, topUp.PaymentMethod, verifyInfo.Type, c.ClientIP()))
-				topUp.PaymentMethod = verifyInfo.Type
-			}
-			topUp.Status = common.TopUpStatusSuccess
-			err := topUp.Update()
+			quotaToAdd := 0
+			err := model.DB.Transaction(func(tx *gorm.DB) error {
+				refCol := "`trade_no`"
+				if common.UsingPostgreSQL {
+					refCol = `"trade_no"`
+				}
+				lockedTopUp := &model.TopUp{}
+				if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", verifyInfo.ServiceTradeNo).First(lockedTopUp).Error; err != nil {
+					return err
+				}
+				if lockedTopUp.PaymentProvider != model.PaymentProviderEpay {
+					return model.ErrPaymentMethodMismatch
+				}
+				if lockedTopUp.Status == common.TopUpStatusSuccess {
+					topUp = lockedTopUp
+					return nil
+				}
+				if lockedTopUp.Status != common.TopUpStatusPending {
+					return nil
+				}
+				if lockedTopUp.PaymentMethod != verifyInfo.Type {
+					logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 实际支付方式与订单不同 trade_no=%s order_payment_method=%s actual_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, lockedTopUp.PaymentMethod, verifyInfo.Type, c.ClientIP()))
+					lockedTopUp.PaymentMethod = verifyInfo.Type
+				}
+				lockedTopUp.Status = common.TopUpStatusSuccess
+				lockedTopUp.CompleteTime = common.GetTimestamp()
+				if err := tx.Save(lockedTopUp).Error; err != nil {
+					return err
+				}
+				dAmount := decimal.NewFromInt(int64(lockedTopUp.Amount))
+				dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+				quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
+				if err := tx.Model(&model.User{}).Where("id = ?", lockedTopUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+					return err
+				}
+				if err := model.SettleAgentRebateTx(tx, lockedTopUp, model.AgentRebateSourceEPay); err != nil {
+					return err
+				}
+				topUp = lockedTopUp
+				return nil
+			})
 			if err != nil {
-				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 更新充值订单失败 trade_no=%s user_id=%d client_ip=%s error=%q topup=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), err.Error(), common.GetJsonString(topUp)))
-				return
-			}
-			//user, _ := model.GetUserById(topUp.UserId, false)
-			//user.Quota += topUp.Amount * 500000
-			dAmount := decimal.NewFromInt(int64(topUp.Amount))
-			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
-			err = model.IncreaseUserQuota(topUp.UserId, quotaToAdd, true)
-			if err != nil {
-				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 更新用户额度失败 trade_no=%s user_id=%d client_ip=%s quota_to_add=%d error=%q topup=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), quotaToAdd, err.Error(), common.GetJsonString(topUp)))
-				return
-			}
-			if err := model.SettleAgentRebateTx(model.DB, topUp, model.AgentRebateSourceEPay); err != nil {
-				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 代理返利结算失败 trade_no=%s user_id=%d client_ip=%s error=%q topup=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), err.Error(), common.GetJsonString(topUp)))
+				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 充值订单处理失败 trade_no=%s user_id=%d client_ip=%s quota_to_add=%d error=%q topup=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), quotaToAdd, err.Error(), common.GetJsonString(topUp)))
 				return
 			}
 			logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值成功 trade_no=%s user_id=%d client_ip=%s quota_to_add=%d money=%.2f topup=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), quotaToAdd, topUp.Money, common.GetJsonString(topUp)))
