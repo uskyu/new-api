@@ -240,9 +240,36 @@ export const processGroupsData = (data, userGroup) => {
 
 // 原来components中的utils.js
 
+const AFF_STORAGE_KEY = 'aff';
+
+export function storeAffiliateCode(code) {
+  const affCode = String(code || '').trim();
+  if (!affCode) {
+    return '';
+  }
+  localStorage.setItem(AFF_STORAGE_KEY, affCode);
+  return affCode;
+}
+
+export function captureAffiliateCodeFromSearch(search = window.location.search) {
+  const affCode = new URLSearchParams(search).get('aff');
+  if (!affCode) {
+    return '';
+  }
+  return storeAffiliateCode(affCode);
+}
+
+export function getStoredAffiliateCode() {
+  return String(localStorage.getItem(AFF_STORAGE_KEY) || '').trim();
+}
+
+export function clearStoredAffiliateCode() {
+  localStorage.removeItem(AFF_STORAGE_KEY);
+}
+
 export async function getOAuthState() {
   let path = '/api/oauth/state';
-  let affCode = localStorage.getItem('aff');
+  let affCode = getStoredAffiliateCode();
   if (affCode && affCode.length > 0) {
     path += `?aff=${affCode}`;
   }

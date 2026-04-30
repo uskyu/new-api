@@ -28,6 +28,8 @@ import {
   updateAPI,
   getSystemName,
   getOAuthProviderIcon,
+  getStoredAffiliateCode,
+  clearStoredAffiliateCode,
   setUserData,
   onDiscordOAuthClicked,
   onCustomOAuthClicked,
@@ -114,11 +116,6 @@ const RegisterForm = () => {
   const logo = getLogo();
   const systemName = getSystemName();
 
-  let affCode = new URLSearchParams(window.location.search).get('aff');
-  if (affCode) {
-    localStorage.setItem('aff', affCode);
-  }
-
   const status = useMemo(() => {
     if (statusState?.status) return statusState.status;
     const savedStatus = localStorage.getItem('status');
@@ -194,6 +191,7 @@ const RegisterForm = () => {
       );
       const { success, message, data } = res.data;
       if (success) {
+        clearStoredAffiliateCode();
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
         setUserData(data);
@@ -231,16 +229,14 @@ const RegisterForm = () => {
       }
       setRegisterLoading(true);
       try {
-        if (!affCode) {
-          affCode = localStorage.getItem('aff');
-        }
-        inputs.aff_code = affCode;
+        inputs.aff_code = getStoredAffiliateCode();
         const res = await API.post(
           `/api/user/register?turnstile=${turnstileToken}`,
           inputs,
         );
         const { success, message } = res.data;
         if (success) {
+          clearStoredAffiliateCode();
           navigate('/login');
           showSuccess('注册成功！');
         } else {
@@ -377,6 +373,7 @@ const RegisterForm = () => {
       const res = await API.get(`/api/oauth/telegram/login`, { params });
       const { success, message, data } = res.data;
       if (success) {
+        clearStoredAffiliateCode();
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
         showSuccess('登录成功！');

@@ -30,6 +30,7 @@ import {
   updateAPI,
   getSystemName,
   getOAuthProviderIcon,
+  clearStoredAffiliateCode,
   setUserData,
   onGitHubOAuthClicked,
   onDiscordOAuthClicked,
@@ -116,11 +117,6 @@ const LoginForm = () => {
   const logo = getLogo();
   const systemName = getSystemName();
 
-  let affCode = new URLSearchParams(window.location.search).get('aff');
-  if (affCode) {
-    localStorage.setItem('aff', affCode);
-  }
-
   const status = useMemo(() => {
     if (statusState?.status) return statusState.status;
     const savedStatus = localStorage.getItem('status');
@@ -194,6 +190,7 @@ const LoginForm = () => {
       );
       const { success, message, data } = res.data;
       if (success) {
+        clearStoredAffiliateCode();
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
         setUserData(data);
@@ -247,6 +244,7 @@ const LoginForm = () => {
           userDispatch({ type: 'login', payload: data });
           setUserData(data);
           updateAPI();
+          clearStoredAffiliateCode();
           showSuccess('登录成功！');
           if (username === 'root' && password === '123456') {
             Modal.error({
@@ -295,6 +293,7 @@ const LoginForm = () => {
       const res = await API.get(`/api/oauth/telegram/login`, { params });
       const { success, message, data } = res.data;
       if (success) {
+        clearStoredAffiliateCode();
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
         showSuccess('登录成功！');
@@ -455,6 +454,7 @@ const LoginForm = () => {
         userDispatch({ type: 'login', payload: finish.data });
         setUserData(finish.data);
         updateAPI();
+        clearStoredAffiliateCode();
         showSuccess('登录成功！');
         navigate('/console');
       } else {
@@ -490,6 +490,7 @@ const LoginForm = () => {
     userDispatch({ type: 'login', payload: data });
     setUserData(data);
     updateAPI();
+    clearStoredAffiliateCode();
     showSuccess('登录成功！');
     navigate('/console');
   };
