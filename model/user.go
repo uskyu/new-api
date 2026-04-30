@@ -45,6 +45,7 @@ type User struct {
 	AffQuota         int            `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
 	AffHistoryQuota  int            `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
 	InviterId        int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
+	PromoLinkId      int            `json:"promo_link_id" gorm:"type:int;column:promo_link_id;index"`
 	DeletedAt        gorm.DeletedAt `gorm:"index"`
 	LinuxDOId        string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
 	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
@@ -121,9 +122,10 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 
 	// 个人中心区域 - 所有用户都可以访问
 	defaultConfig["personal"] = map[string]interface{}{
-		"enabled":  true,
-		"topup":    true,
-		"personal": true,
+		"enabled":      true,
+		"topup":        true,
+		"agent_center": true,
+		"personal":     true,
 	}
 
 	// 管理员区域 - 根据角色决定
@@ -132,6 +134,7 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 		defaultConfig["admin"] = map[string]interface{}{
 			"enabled":    true,
 			"channel":    true,
+			"agent":      true,
 			"models":     true,
 			"redemption": true,
 			"user":       true,
@@ -142,6 +145,7 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 		defaultConfig["admin"] = map[string]interface{}{
 			"enabled":    true,
 			"channel":    true,
+			"agent":      true,
 			"models":     true,
 			"redemption": true,
 			"user":       true,

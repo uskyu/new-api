@@ -36,7 +36,9 @@ const routerMap = {
   token: '/console/token',
   redemption: '/console/redemption',
   topup: '/console/topup',
+  agent_center: '/console/agent-center',
   user: '/console/user',
+  agent: '/console/agent',
   subscription: '/console/subscription',
   log: '/console/log',
   midjourney: '/console/midjourney',
@@ -130,6 +132,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/topup',
       },
       {
+        text: t('合作代理'),
+        itemKey: 'agent_center',
+        to: '/agent-center',
+      },
+      {
         text: t('个人设置'),
         itemKey: 'personal',
         to: '/personal',
@@ -157,6 +164,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('订阅管理'),
         itemKey: 'subscription',
         to: '/subscription',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('代理管理'),
+        itemKey: 'agent',
+        to: '/agent',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

@@ -143,6 +143,8 @@ export function getLucideIcon(key, selected = false) {
       return <Gift {...commonProps} color={iconColor} />;
     case 'user':
     case 'personal':
+    case 'agent':
+    case 'agent_center':
       return <User {...commonProps} color={iconColor} />;
     case 'models':
       return <Package {...commonProps} color={iconColor} />;

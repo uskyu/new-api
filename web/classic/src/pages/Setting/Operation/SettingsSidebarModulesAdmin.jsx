@@ -56,11 +56,13 @@ export default function SettingsSidebarModulesAdmin(props) {
     personal: {
       enabled: true,
       topup: true,
+      agent_center: true,
       personal: true,
     },
     admin: {
       enabled: true,
       channel: true,
+      agent: true,
       models: true,
       deployment: true,
       redemption: true,
@@ -117,11 +119,13 @@ export default function SettingsSidebarModulesAdmin(props) {
       personal: {
         enabled: true,
         topup: true,
+        agent_center: true,
         personal: true,
       },
       admin: {
         enabled: true,
         channel: true,
+        agent: true,
         models: true,
         deployment: true,
         redemption: true,
@@ -187,10 +191,11 @@ export default function SettingsSidebarModulesAdmin(props) {
             midjourney: true,
             task: true,
           },
-          personal: { enabled: true, topup: true, personal: true },
+          personal: { enabled: true, topup: true, agent_center: true, personal: true },
           admin: {
             enabled: true,
             channel: true,
+            agent: true,
             models: true,
             deployment: true,
             redemption: true,
@@ -242,6 +247,11 @@ export default function SettingsSidebarModulesAdmin(props) {
       modules: [
         { key: 'topup', title: t('钱包管理'), description: t('余额充值管理') },
         {
+          key: 'agent_center',
+          title: t('合作代理'),
+          description: t('代理返利中心'),
+        },
+        {
           key: 'personal',
           title: t('个人设置'),
           description: t('个人信息设置'),
@@ -254,6 +264,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       description: t('系统管理功能'),
       modules: [
         { key: 'channel', title: t('渠道管理'), description: t('API渠道配置') },
+        { key: 'agent', title: t('代理管理'), description: t('代理返利与调账') },
         { key: 'models', title: t('模型管理'), description: t('AI模型配置') },
         {
           key: 'deployment',

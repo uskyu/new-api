@@ -35,6 +35,7 @@ import Channel from './pages/Channel';
 import Token from './pages/Token';
 import Redemption from './pages/Redemption';
 import TopUp from './pages/TopUp';
+import AgentCenter from './pages/AgentCenter';
 import Log from './pages/Log';
 import Chat from './pages/Chat';
 import Chat2Link from './pages/Chat2Link';
@@ -45,6 +46,7 @@ import ModelPage from './pages/Model';
 import ModelDeploymentPage from './pages/ModelDeployment';
 import Playground from './pages/Playground';
 import Subscription from './pages/Subscription';
+import Agent from './pages/Agent';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
@@ -136,6 +138,14 @@ function App() {
           element={
             <AdminRoute>
               <Channel />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/agent'
+          element={
+            <AdminRoute>
+              <Agent />
             </AdminRoute>
           }
         />
@@ -263,6 +273,16 @@ function App() {
             <PrivateRoute>
               <Suspense fallback={<Loading></Loading>} key={location.pathname}>
                 <PersonalSetting />
+              </Suspense>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/agent-center'
+          element={
+            <PrivateRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <AgentCenter />
               </Suspense>
             </PrivateRoute>
           }

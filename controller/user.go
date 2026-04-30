@@ -174,12 +174,17 @@ func Register(c *gin.Context) {
 		return
 	}
 	affCode := user.AffCode // this code is the inviter's code, not the user's own code
-	inviterId, _ := model.GetUserIdByAffCode(affCode)
+	inviterId, promoLinkId, err := model.ResolveRegistrationAttribution(affCode)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	cleanUser := model.User{
 		Username:    user.Username,
 		Password:    user.Password,
 		DisplayName: user.Username,
 		InviterId:   inviterId,
+		PromoLinkId: promoLinkId,
 		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
 	}
 	if common.EmailVerificationEnabled {
