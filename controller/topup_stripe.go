@@ -238,6 +238,7 @@ func sessionAsyncPaymentFailed(ctx context.Context, event stripe.Event, callerIp
 		return
 	}
 
+	topUp.PaymentProvider = model.ResolvePaymentProvider(topUp.PaymentMethod, topUp.PaymentProvider)
 	if topUp.PaymentProvider != model.PaymentProviderStripe {
 		logger.LogWarn(ctx, fmt.Sprintf("Stripe 异步支付失败但订单支付网关不匹配 trade_no=%s payment_provider=%s client_ip=%s", referenceId, topUp.PaymentProvider, callerIp))
 		return

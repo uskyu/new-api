@@ -51,6 +51,21 @@ func insertSubscriptionOrderForPaymentGuardTest(t *testing.T, tradeNo string, us
 	require.NoError(t, order.Insert())
 }
 
+func insertSubscriptionOrderForPaymentGuardTestWithMethod(t *testing.T, tradeNo string, userID int, planID int, paymentMethod string, paymentProvider string) {
+	t.Helper()
+	order := &SubscriptionOrder{
+		UserId:          userID,
+		PlanId:          planID,
+		Money:           9.99,
+		TradeNo:         tradeNo,
+		PaymentMethod:   paymentMethod,
+		PaymentProvider: paymentProvider,
+		Status:          common.TopUpStatusPending,
+		CreateTime:      time.Now().Unix(),
+	}
+	require.NoError(t, order.Insert())
+}
+
 func insertTopUpForPaymentGuardTest(t *testing.T, tradeNo string, userID int, paymentProvider string) {
 	t.Helper()
 	topUp := &TopUp{
@@ -59,6 +74,21 @@ func insertTopUpForPaymentGuardTest(t *testing.T, tradeNo string, userID int, pa
 		Money:           9.99,
 		TradeNo:         tradeNo,
 		PaymentMethod:   paymentProvider,
+		PaymentProvider: paymentProvider,
+		Status:          common.TopUpStatusPending,
+		CreateTime:      time.Now().Unix(),
+	}
+	require.NoError(t, topUp.Insert())
+}
+
+func insertTopUpForPaymentGuardTestWithMethod(t *testing.T, tradeNo string, userID int, paymentMethod string, paymentProvider string) {
+	t.Helper()
+	topUp := &TopUp{
+		UserId:          userID,
+		Amount:          2,
+		Money:           9.99,
+		TradeNo:         tradeNo,
+		PaymentMethod:   paymentMethod,
 		PaymentProvider: paymentProvider,
 		Status:          common.TopUpStatusPending,
 		CreateTime:      time.Now().Unix(),
@@ -171,4 +201,58 @@ func TestExpireSubscriptionOrder_RejectsMismatchedPaymentProvider(t *testing.T) 
 	order := GetSubscriptionOrderByTradeNo("sub-expire-guard")
 	require.NotNil(t, order)
 	assert.Equal(t, common.TopUpStatusPending, order.Status)
+}
+
+func TestResolvePaymentProvider_LegacyFallback(t *testing.T) {
+	testCases := []struct {
+		name            string
+		paymentMethod   string
+		paymentProvider string
+		expected        string
+	}{
+		{name: "keeps explicit provider", paymentMethod: "alipay", paymentProvider: PaymentProviderEpay, expected: PaymentProviderEpay},
+		{name: "legacy epay alipay", paymentMethod: "alipay", paymentProvider: "", expected: PaymentProviderEpay},
+		{name: "legacy epay wxpay", paymentMethod: "wxpay", paymentProvider: "", expected: PaymentProviderEpay},
+		{name: "legacy stripe", paymentMethod: PaymentMethodStripe, paymentProvider: "", expected: PaymentProviderStripe},
+		{name: "legacy creem", paymentMethod: PaymentMethodCreem, paymentProvider: "", expected: PaymentProviderCreem},
+		{name: "empty method", paymentMethod: "", paymentProvider: "", expected: ""},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, ResolvePaymentProvider(tc.paymentMethod, tc.paymentProvider))
+		})
+	}
+}
+
+func TestUpdatePendingTopUpStatus_AllowsLegacyProviderFallback(t *testing.T) {
+	truncateTables(t)
+
+	insertUserForPaymentGuardTest(t, 404, 0)
+	insertTopUpForPaymentGuardTestWithMethod(t, "legacy-stripe-expire", 404, PaymentMethodStripe, "")
+
+	err := UpdatePendingTopUpStatus("legacy-stripe-expire", PaymentProviderStripe, common.TopUpStatusExpired)
+	require.NoError(t, err)
+
+	topUp := GetTopUpByTradeNo("legacy-stripe-expire")
+	require.NotNil(t, topUp)
+	assert.Equal(t, common.TopUpStatusExpired, topUp.Status)
+	assert.Equal(t, PaymentProviderStripe, topUp.PaymentProvider)
+}
+
+func TestCompleteSubscriptionOrder_AllowsLegacyEpayProviderFallback(t *testing.T) {
+	truncateTables(t)
+
+	insertUserForPaymentGuardTest(t, 505, 0)
+	plan := insertSubscriptionPlanForPaymentGuardTest(t, 501)
+	insertSubscriptionOrderForPaymentGuardTestWithMethod(t, "legacy-epay-sub", 505, plan.Id, "alipay", "")
+
+	err := CompleteSubscriptionOrder("legacy-epay-sub", `{"provider":"epay"}`, PaymentProviderEpay, "alipay")
+	require.NoError(t, err)
+
+	order := GetSubscriptionOrderByTradeNo("legacy-epay-sub")
+	require.NotNil(t, order)
+	assert.Equal(t, common.TopUpStatusSuccess, order.Status)
+	assert.Equal(t, PaymentProviderEpay, order.PaymentProvider)
+	assert.Equal(t, int64(1), countUserSubscriptionsForPaymentGuardTest(t, 505))
 }

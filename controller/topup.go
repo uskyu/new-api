@@ -370,6 +370,7 @@ func EpayNotify(c *gin.Context) {
 			logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 回调订单不存在 trade_no=%s callback_type=%s client_ip=%s verify_info=%q", verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP(), common.GetJsonString(verifyInfo)))
 			return
 		}
+		topUp.PaymentProvider = model.ResolvePaymentProvider(topUp.PaymentMethod, topUp.PaymentProvider)
 		if topUp.PaymentProvider != model.PaymentProviderEpay {
 			logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 订单支付网关不匹配 trade_no=%s order_provider=%s callback_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, topUp.PaymentProvider, verifyInfo.Type, c.ClientIP()))
 			return
@@ -385,6 +386,7 @@ func EpayNotify(c *gin.Context) {
 				if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", verifyInfo.ServiceTradeNo).First(lockedTopUp).Error; err != nil {
 					return err
 				}
+				lockedTopUp.PaymentProvider = model.ResolvePaymentProvider(lockedTopUp.PaymentMethod, lockedTopUp.PaymentProvider)
 				if lockedTopUp.PaymentProvider != model.PaymentProviderEpay {
 					return model.ErrPaymentMethodMismatch
 				}

@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -44,6 +45,29 @@ var (
 	ErrTopUpNotFound         = errors.New("topup not found")
 	ErrTopUpStatusInvalid    = errors.New("topup status invalid")
 )
+
+// ResolvePaymentProvider infers the gateway for legacy rows created before
+// payment_provider was stored explicitly.
+func ResolvePaymentProvider(paymentMethod string, paymentProvider string) string {
+	if provider := strings.TrimSpace(paymentProvider); provider != "" {
+		return provider
+	}
+
+	switch strings.TrimSpace(paymentMethod) {
+	case "":
+		return ""
+	case PaymentMethodStripe:
+		return PaymentProviderStripe
+	case PaymentMethodCreem:
+		return PaymentProviderCreem
+	case PaymentMethodWaffo:
+		return PaymentProviderWaffo
+	case PaymentMethodWaffoPancake:
+		return PaymentProviderWaffoPancake
+	default:
+		return PaymentProviderEpay
+	}
+}
 
 func (topUp *TopUp) Insert() error {
 	var err error
@@ -92,6 +116,7 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
 			return ErrTopUpNotFound
 		}
+		topUp.PaymentProvider = ResolvePaymentProvider(topUp.PaymentMethod, topUp.PaymentProvider)
 		if expectedPaymentProvider != "" && topUp.PaymentProvider != expectedPaymentProvider {
 			return ErrPaymentMethodMismatch
 		}
@@ -123,6 +148,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 			return errors.New("充值订单不存在")
 		}
 
+		topUp.PaymentProvider = ResolvePaymentProvider(topUp.PaymentMethod, topUp.PaymentProvider)
 		if topUp.PaymentProvider != PaymentProviderStripe {
 			return ErrPaymentMethodMismatch
 		}
@@ -352,6 +378,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		// 计算应充值额度：
 		// - Stripe 订单：Money 代表经分组倍率换算后的美元数量，直接 * QuotaPerUnit
 		// - 其他订单（如易支付）：Amount 为美元数量，* QuotaPerUnit
+		topUp.PaymentProvider = ResolvePaymentProvider(topUp.PaymentMethod, topUp.PaymentProvider)
 		if topUp.PaymentProvider == PaymentProviderStripe {
 			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 			quotaToAdd = int(decimal.NewFromFloat(topUp.Money).Mul(dQuotaPerUnit).IntPart())
@@ -412,6 +439,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 			return errors.New("充值订单不存在")
 		}
 
+		topUp.PaymentProvider = ResolvePaymentProvider(topUp.PaymentMethod, topUp.PaymentProvider)
 		if topUp.PaymentProvider != PaymentProviderCreem {
 			return ErrPaymentMethodMismatch
 		}
@@ -490,6 +518,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 			return errors.New("充值订单不存在")
 		}
 
+		topUp.PaymentProvider = ResolvePaymentProvider(topUp.PaymentMethod, topUp.PaymentProvider)
 		if topUp.PaymentProvider != PaymentProviderWaffo {
 			return ErrPaymentMethodMismatch
 		}
@@ -553,6 +582,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 			return errors.New("充值订单不存在")
 		}
 
+		topUp.PaymentProvider = ResolvePaymentProvider(topUp.PaymentMethod, topUp.PaymentProvider)
 		if topUp.PaymentProvider != PaymentProviderWaffoPancake {
 			return ErrPaymentMethodMismatch
 		}
