@@ -373,6 +373,133 @@ func TestAgentUpgradeRequestAndRateConflict(t *testing.T) {
 	require.NotEmpty(t, conflictErr.Conflicts)
 }
 
+func TestTransferAgentDownlineUserSyncsAttributionAndFutureRebate(t *testing.T) {
+	setupAgentTestDB(t, TestDBDialectSQLite)
+	common.AgentEnabled = true
+	common.AgentInitialized = true
+	t.Cleanup(func() {
+		common.AgentEnabled = false
+		common.AgentInitialized = false
+	})
+
+	operator := createAgentTestUser(t, "admin_transfer", "AFF_TRANSFER_ADMIN")
+	sourceAgent := createAgentTestUser(t, "source_agent", "AFF_TRANSFER_SOURCE")
+	targetAgent := createAgentTestUser(t, "target_agent", "AFF_TRANSFER_TARGET")
+	downline := createAgentTestUser(t, "downline_transfer_user", "AFF_TRANSFER_DOWNLINE")
+	group := &AgentRebateGroup{Name: "transfer-group", RebateRate: 3000, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: sourceAgent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: targetAgent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	oldPromo := &AgentPromoLink{AgentUserId: sourceAgent.Id, Name: "old", Code: "TRANSFEROLD", Status: AgentPromoLinkEnabled}
+	newPromo := &AgentPromoLink{AgentUserId: targetAgent.Id, Name: "new", Code: "TRANSFERNEW", Status: AgentPromoLinkEnabled}
+	require.NoError(t, DB.Create(oldPromo).Error)
+	require.NoError(t, DB.Create(newPromo).Error)
+	require.NoError(t, DB.Model(downline).Updates(map[string]interface{}{"inviter_id": sourceAgent.Id, "promo_link_id": oldPromo.Id}).Error)
+
+	oldTopup := &TopUp{
+		UserId:        downline.Id,
+		Amount:        100,
+		Money:         100,
+		TradeNo:       "trade_transfer_old_agent",
+		PaymentMethod: "epay",
+		CreateTime:    common.GetTimestamp(),
+		Status:        common.TopUpStatusSuccess,
+	}
+	require.NoError(t, DB.Create(oldTopup).Error)
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		return SettleAgentRebateTx(tx, oldTopup, AgentRebateSourceEPay)
+	}))
+
+	err := TransferAgentDownlineUser(operator.Id, sourceAgent.Id, targetAgent.Id, downline.Id, newPromo.Id, "move to better service")
+	require.NoError(t, err)
+
+	var updatedDownline User
+	require.NoError(t, DB.Select("id", "inviter_id", "promo_link_id").First(&updatedDownline, downline.Id).Error)
+	require.Equal(t, targetAgent.Id, updatedDownline.InviterId)
+	require.Equal(t, newPromo.Id, updatedDownline.PromoLinkId)
+
+	newTopup := &TopUp{
+		UserId:        downline.Id,
+		Amount:        100,
+		Money:         100,
+		TradeNo:       "trade_transfer_new_agent",
+		PaymentMethod: "epay",
+		CreateTime:    common.GetTimestamp(),
+		Status:        common.TopUpStatusSuccess,
+	}
+	require.NoError(t, DB.Create(newTopup).Error)
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		return SettleAgentRebateTx(tx, newTopup, AgentRebateSourceEPay)
+	}))
+	targetProfile, err := GetAgentProfileByUserId(targetAgent.Id)
+	require.NoError(t, err)
+	require.Equal(t, int64(3000), targetProfile.RebateBalanceAmount)
+	sourceProfile, err := GetAgentProfileByUserId(sourceAgent.Id)
+	require.NoError(t, err)
+	require.Equal(t, int64(3000), sourceProfile.RebateBalanceAmount)
+	var records []AgentRebateRecord
+	require.NoError(t, DB.Order("id asc").Find(&records).Error)
+	require.Len(t, records, 2)
+	require.Equal(t, sourceAgent.Id, records[0].AgentUserId)
+	require.Equal(t, oldPromo.Id, records[0].PromoLinkId)
+	require.Equal(t, targetAgent.Id, records[1].AgentUserId)
+	require.Equal(t, newPromo.Id, records[1].PromoLinkId)
+}
+
+func TestTransferAgentDownlineUserValidatesOwnershipAndTargetLink(t *testing.T) {
+	setupAgentTestDB(t, TestDBDialectSQLite)
+	common.AgentEnabled = true
+	common.AgentInitialized = true
+	t.Cleanup(func() {
+		common.AgentEnabled = false
+		common.AgentInitialized = false
+	})
+
+	operator := createAgentTestUser(t, "admin_transfer_guard", "AFF_TRANSFER_GUARD_ADMIN")
+	sourceAgent := createAgentTestUser(t, "guard_source_agent", "AFF_TRANSFER_GUARD_SOURCE")
+	otherAgent := createAgentTestUser(t, "guard_other_agent", "AFF_TRANSFER_GUARD_OTHER")
+	targetAgent := createAgentTestUser(t, "guard_target_agent", "AFF_TRANSFER_GUARD_TARGET")
+	targetNoLinkAgent := createAgentTestUser(t, "guard_target_no_link_agent", "AFF_TRANSFER_GUARD_TARGET_NO_LINK")
+	downline := createAgentTestUser(t, "guard_downline_user", "AFF_TRANSFER_GUARD_DOWNLINE")
+	childAgent := createAgentTestUser(t, "guard_child_agent", "AFF_TRANSFER_GUARD_CHILD")
+	group := &AgentRebateGroup{Name: "guard-group", RebateRate: 3000, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: sourceAgent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: otherAgent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: targetAgent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: targetNoLinkAgent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: childAgent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	wrongPromo := &AgentPromoLink{AgentUserId: otherAgent.Id, Name: "wrong", Code: "TRANSFERWRONG", Status: AgentPromoLinkEnabled}
+	targetPromo := &AgentPromoLink{AgentUserId: targetAgent.Id, Name: "target", Code: "TRANSFERTARGET", Status: AgentPromoLinkEnabled}
+	require.NoError(t, DB.Create(wrongPromo).Error)
+	require.NoError(t, DB.Create(targetPromo).Error)
+	require.NoError(t, DB.Model(downline).Update("inviter_id", otherAgent.Id).Error)
+	require.NoError(t, DB.Model(childAgent).Update("inviter_id", sourceAgent.Id).Error)
+
+	err := TransferAgentDownlineUser(operator.Id, sourceAgent.Id, targetAgent.Id, downline.Id, targetPromo.Id, "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "source agent")
+
+	err = TransferAgentDownlineUser(operator.Id, sourceAgent.Id, targetAgent.Id, childAgent.Id, targetPromo.Id, "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "is an agent")
+
+	require.NoError(t, DB.Model(downline).Update("inviter_id", sourceAgent.Id).Error)
+	err = TransferAgentDownlineUser(operator.Id, sourceAgent.Id, targetAgent.Id, downline.Id, wrongPromo.Id, "")
+	require.Error(t, err)
+
+	err = TransferAgentDownlineUser(operator.Id, sourceAgent.Id, targetNoLinkAgent.Id, downline.Id, 0, "")
+	require.NoError(t, err)
+	var updated User
+	require.NoError(t, DB.Select("id", "inviter_id", "promo_link_id").First(&updated, downline.Id).Error)
+	require.Equal(t, targetNoLinkAgent.Id, updated.InviterId)
+	require.NotZero(t, updated.PromoLinkId)
+	var autoPromo AgentPromoLink
+	require.NoError(t, DB.First(&autoPromo, updated.PromoLinkId).Error)
+	require.Equal(t, targetNoLinkAgent.Id, autoPromo.AgentUserId)
+	require.Equal(t, AgentPromoLinkEnabled, autoPromo.Status)
+}
+
 func TestAgentWithdrawWorkflow(t *testing.T) {
 	setupAgentTestDB(t, TestDBDialectSQLite)
 	agent := createAgentTestUser(t, "agent_withdraw", "AFF16")

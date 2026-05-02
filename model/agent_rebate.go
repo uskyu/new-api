@@ -1689,6 +1689,102 @@ func ReviewAgentUpgradeRequest(requestId int, reviewerUserId int, approve bool, 
 	return request, nil
 }
 
+func TransferAgentDownlineUser(operatorUserId int, sourceAgentUserId int, targetAgentUserId int, downlineUserId int, promoLinkId int, remark string) error {
+	if operatorUserId <= 0 || sourceAgentUserId <= 0 || targetAgentUserId <= 0 || downlineUserId <= 0 {
+		return errors.New("invalid user id")
+	}
+	if !common.AgentEnabled || !common.AgentInitialized {
+		return errors.New("agent module is not initialized")
+	}
+	if sourceAgentUserId == targetAgentUserId {
+		return errors.New("target agent cannot equal source agent")
+	}
+	if downlineUserId == sourceAgentUserId || downlineUserId == targetAgentUserId {
+		return errors.New("downline user cannot equal agent user")
+	}
+	remark = strings.TrimSpace(remark)
+	targetPromoLinkId := promoLinkId
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		sourceProfile, err := getAgentProfileByUserIdTx(tx, sourceAgentUserId)
+		if err != nil {
+			return err
+		}
+		if sourceProfile.Status != AgentStatusEnabled {
+			return errors.New("source agent is disabled")
+		}
+		targetProfile, err := getAgentProfileByUserIdTx(tx, targetAgentUserId)
+		if err != nil {
+			return err
+		}
+		if targetProfile.Status != AgentStatusEnabled {
+			return errors.New("target agent is disabled")
+		}
+		var downline User
+		if err := tx.Select("id", "inviter_id", "promo_link_id").First(&downline, downlineUserId).Error; err != nil {
+			return err
+		}
+		if downline.InviterId != sourceAgentUserId {
+			return errors.New("downline user does not belong to source agent")
+		}
+		if _, err := getAgentProfileByUserIdTx(tx, downlineUserId); err == nil {
+			return errors.New("downline user is an agent")
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		linkId, err := resolveTransferPromoLinkIdTx(tx, targetAgentUserId, promoLinkId)
+		if err != nil {
+			return err
+		}
+		targetPromoLinkId = linkId
+		if err := tx.Model(&User{}).Where("id = ?", downlineUserId).Updates(map[string]interface{}{
+			"inviter_id":    targetAgentUserId,
+			"promo_link_id": targetPromoLinkId,
+		}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	RecordLog(operatorUserId, LogTypeManage, fmt.Sprintf("transfer agent downline user, source agent user ID: %d, target agent user ID: %d, downline user ID: %d, promo link ID: %d, remark: %s", sourceAgentUserId, targetAgentUserId, downlineUserId, targetPromoLinkId, remark))
+	return nil
+}
+
+func resolveTransferPromoLinkIdTx(tx *gorm.DB, targetAgentUserId int, promoLinkId int) (int, error) {
+	if promoLinkId > 0 {
+		var promoLink AgentPromoLink
+		if err := tx.Where("id = ? AND agent_user_id = ? AND status = ?", promoLinkId, targetAgentUserId, AgentPromoLinkEnabled).First(&promoLink).Error; err != nil {
+			return 0, err
+		}
+		return promoLink.Id, nil
+	}
+	var promoLink AgentPromoLink
+	err := tx.Where("agent_user_id = ? AND status = ?", targetAgentUserId, AgentPromoLinkEnabled).Order("id asc").First(&promoLink).Error
+	if err == nil {
+		return promoLink.Id, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+	code, err := GenerateUniqueAgentPromoCodeTx(tx)
+	if err != nil {
+		return 0, err
+	}
+	promoLink = AgentPromoLink{
+		AgentUserId: targetAgentUserId,
+		Name:        "default",
+		Code:        code,
+		Status:      AgentPromoLinkEnabled,
+		LandingPage: "/",
+		Remark:      "auto-created for transfer",
+	}
+	if err := tx.Create(&promoLink).Error; err != nil {
+		return 0, err
+	}
+	return promoLink.Id, nil
+}
+
 func ensureAgentRelationshipTx(tx *gorm.DB, parentAgentUserId int, childAgentUserId int) error {
 	if parentAgentUserId <= 0 || childAgentUserId <= 0 {
 		return errors.New("invalid relationship users")

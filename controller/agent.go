@@ -69,6 +69,14 @@ type AgentWithdrawRequestPayload struct {
 	Remark      string `json:"remark"`
 }
 
+type TransferAgentDownlineUserRequest struct {
+	SourceAgentUserId int    `json:"source_agent_user_id"`
+	TargetAgentUserId int    `json:"target_agent_user_id"`
+	DownlineUserId    int    `json:"downline_user_id"`
+	PromoLinkId       int    `json:"promo_link_id"`
+	Remark            string `json:"remark"`
+}
+
 func writeAgentConflict(c *gin.Context, err error) bool {
 	var conflictErr *model.AgentRateConflictError
 	if !errors.As(err, &conflictErr) {
@@ -557,4 +565,17 @@ func GetAgentDownlineUsers(c *gin.Context) {
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(users)
 	common.ApiSuccess(c, pageInfo)
+}
+
+func TransferAgentDownlineUser(c *gin.Context) {
+	var req TransferAgentDownlineUserRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiErrorMsg(c, "invalid request body")
+		return
+	}
+	if err := model.TransferAgentDownlineUser(c.GetInt("id"), req.SourceAgentUserId, req.TargetAgentUserId, req.DownlineUserId, req.PromoLinkId, req.Remark); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, true)
 }

@@ -127,6 +127,21 @@ export default function Agent() {
     landingPage: '',
     remark: '',
   });
+  const [transferModalVisible, setTransferModalVisible] = useState(false);
+  const [transferSubmitting, setTransferSubmitting] = useState(false);
+  const [transferAgents, setTransferAgents] = useState([]);
+  const [transferAgentsLoading, setTransferAgentsLoading] = useState(false);
+  const [transferPromoLinks, setTransferPromoLinks] = useState([]);
+  const [transferPromoLinksLoading, setTransferPromoLinksLoading] = useState(false);
+  const [transferForm, setTransferForm] = useState({
+    sourceAgentUserId: 0,
+    sourceAgentUsername: '',
+    downlineUserId: 0,
+    downlineUsername: '',
+    targetAgentUserId: 0,
+    promoLinkId: 0,
+    remark: '',
+  });
   const [withdrawRequests, setWithdrawRequests] = useState([]);
   const [withdrawRequestsTotal, setWithdrawRequestsTotal] = useState(0);
   const [withdrawRequestsPage, setWithdrawRequestsPage] = useState(1);
@@ -503,6 +518,86 @@ export default function Agent() {
     [groups],
   );
 
+  const transferAgentOptions = useMemo(
+    () =>
+      transferAgents.map((agent) => ({
+        label: `${agent.username || agent.user_id} (${formatRate(agent.effective_rate)})`,
+        value: agent.user_id,
+      })),
+    [transferAgents],
+  );
+
+  const transferPromoLinkOptions = useMemo(
+    () => [
+      { label: t('自动使用目标代理默认推广链接'), value: 0 },
+      ...transferPromoLinks.map((link) => ({
+        label: `${link.name || link.code} (${link.code})`,
+        value: link.id,
+      })),
+    ],
+    [t, transferPromoLinks],
+  );
+
+  const loadTransferAgents = useCallback(
+    async (excludedUserIds = []) => {
+      setTransferAgentsLoading(true);
+      try {
+        const res = await API.get('/api/agent/profiles', {
+          params: {
+            p: 1,
+            page_size: 1000,
+          },
+        });
+        if (!res.data.success) {
+          showError(res.data.message);
+          return;
+        }
+        const excluded = new Set(excludedUserIds);
+        const agents = (res.data.data?.items || []).filter(
+          (agent) => agent.status === 1 && !excluded.has(agent.user_id),
+        );
+        setTransferAgents(agents);
+      } catch (error) {
+        showError(error.message || t('加载目标代理失败'));
+      } finally {
+        setTransferAgentsLoading(false);
+      }
+    },
+    [t],
+  );
+
+  const loadTransferPromoLinks = useCallback(
+    async (agentUserId = 0) => {
+      if (!agentUserId) {
+        setTransferPromoLinks([]);
+        return [];
+      }
+      setTransferPromoLinksLoading(true);
+      try {
+        const res = await API.get('/api/agent/promo-links', {
+          params: {
+            agent_user_id: agentUserId,
+            p: 1,
+            page_size: 1000,
+          },
+        });
+        if (!res.data.success) {
+          showError(res.data.message);
+          return [];
+        }
+        const links = (res.data.data?.items || []).filter((link) => link.status === 1);
+        setTransferPromoLinks(links);
+        return links;
+      } catch (error) {
+        showError(error.message || t('加载推广链接失败'));
+        return [];
+      } finally {
+        setTransferPromoLinksLoading(false);
+      }
+    },
+    [t],
+  );
+
   const handleOpenCreateProfile = () => {
     setProfileForm({
       userId: '',
@@ -534,6 +629,72 @@ export default function Agent() {
     setDownlinesPage(1);
     await loadPromoLinkStats(scope.userId);
     await loadDownlines(scope.userId, 1);
+  };
+
+  const handleOpenTransferDownline = async (record) => {
+    if (!activeAgentScope?.userId) {
+      showError(t('请选择当前代理'));
+      return;
+    }
+    setTransferForm({
+      sourceAgentUserId: activeAgentScope.userId,
+      sourceAgentUsername: activeAgentScope.username,
+      downlineUserId: record.user_id,
+      downlineUsername: record.username,
+      targetAgentUserId: 0,
+      promoLinkId: 0,
+      remark: '',
+    });
+    setTransferPromoLinks([]);
+    setTransferModalVisible(true);
+    await loadTransferAgents([activeAgentScope.userId, record.user_id]);
+  };
+
+  const handleChangeTransferTarget = async (targetAgentUserId) => {
+    setTransferForm((prev) => ({
+      ...prev,
+      targetAgentUserId,
+      promoLinkId: 0,
+    }));
+    const links = await loadTransferPromoLinks(targetAgentUserId);
+    if (links.length > 0) {
+      setTransferForm((prev) => ({
+        ...prev,
+        promoLinkId: links[0].id,
+      }));
+    }
+  };
+
+  const handleSubmitTransfer = async () => {
+    if (!transferForm.targetAgentUserId) {
+      showError(t('请选择目标代理'));
+      return;
+    }
+    setTransferSubmitting(true);
+    try {
+      const res = await API.post('/api/agent/downline/transfer', {
+        source_agent_user_id: transferForm.sourceAgentUserId,
+        target_agent_user_id: transferForm.targetAgentUserId,
+        downline_user_id: transferForm.downlineUserId,
+        promo_link_id: transferForm.promoLinkId,
+        remark: transferForm.remark,
+      });
+      if (!res.data.success) {
+        showError(res.data.message);
+        return;
+      }
+      showSuccess(t('用户已转移'));
+      setTransferModalVisible(false);
+      if (activeAgentScope?.userId) {
+        await loadDownlines(activeAgentScope.userId, downlinesPage);
+        await loadPromoLinkStats(activeAgentScope.userId);
+      }
+      await loadOverview();
+    } catch (error) {
+      showError(error.message || t('转移用户失败'));
+    } finally {
+      setTransferSubmitting(false);
+    }
   };
 
   const handleSubmitProfile = async () => {
@@ -944,6 +1105,20 @@ export default function Agent() {
       render: (_, record) =>
         record.latest_topup_time ? timestamp2string(record.latest_topup_time) : '-',
     },
+    {
+      title: t('操作'),
+      dataIndex: 'operate',
+      render: (_, record) => (
+        <Space>
+          {isRoot() && !record.is_agent && (
+            <Button size='small' type='warning' onClick={() => handleOpenTransferDownline(record)}>
+              {t('转移')}
+            </Button>
+          )}
+          {record.is_agent && <Tag color='blue'>{t('代理')}</Tag>}
+        </Space>
+      ),
+    },
   ];
 
   const withdrawColumns = [
@@ -1253,6 +1428,56 @@ export default function Agent() {
             onChange={setInitRatePercent}
             suffix='%'
             style={{ width: '100%' }}
+          />
+        </Space>
+      </Modal>
+
+      <Modal
+        title={t('转移用户')}
+        visible={transferModalVisible}
+        onCancel={() => setTransferModalVisible(false)}
+        onOk={handleSubmitTransfer}
+        confirmLoading={transferSubmitting}
+      >
+        <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
+          <Descriptions
+            data={[
+              {
+                key: t('源代理'),
+                value: transferForm.sourceAgentUsername || transferForm.sourceAgentUserId,
+              },
+              {
+                key: t('下线用户'),
+                value: transferForm.downlineUsername || transferForm.downlineUserId,
+              },
+            ]}
+            row
+          />
+          <Select
+            placeholder={t('目标代理')}
+            value={transferForm.targetAgentUserId || undefined}
+            onChange={handleChangeTransferTarget}
+            optionList={transferAgentOptions}
+            loading={transferAgentsLoading}
+            filter
+            style={{ width: '100%' }}
+          />
+          <Select
+            placeholder={t('转移后的推广链接')}
+            value={transferForm.promoLinkId}
+            onChange={(value) => setTransferForm((prev) => ({ ...prev, promoLinkId: value }))}
+            optionList={transferPromoLinkOptions}
+            loading={transferPromoLinksLoading}
+            style={{ width: '100%' }}
+          />
+          <Text type='secondary'>
+            {t('转移会更新该用户的邀请归属和推广链接归属，历史返佣记录保持不变。')}
+          </Text>
+          <TextArea
+            placeholder={t('Remark')}
+            value={transferForm.remark}
+            onChange={(value) => setTransferForm((prev) => ({ ...prev, remark: value }))}
+            rows={3}
           />
         </Space>
       </Modal>
