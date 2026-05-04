@@ -545,6 +545,23 @@ code {
   min-height: 24px;
 }
 
+.ai-console-page .ai-console-input-node .semi-chat-inputBox,
+.ai-console-page .ai-console-input-node .semi-chat-inputBox-inner,
+.ai-console-page .ai-console-input-node .semi-chat-inputBox-container,
+.ai-console-page .ai-console-input-node .semi-chat-inputBox-inputArea,
+.ai-console-page .ai-console-input-node .semi-chat-inputBox-textarea,
+.ai-console-page .ai-console-input-node .semi-input-textarea-wrapper {
+  min-height: 40px !important;
+}
+
+.ai-console-page .ai-console-input-node .semi-chat-inputBox-textarea textarea,
+.ai-console-page .ai-console-input-node textarea {
+  min-height: 24px !important;
+  max-height: 160px;
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+}
+
 .semi-chat-chatBox-action {
   column-gap: 0 !important;
 }

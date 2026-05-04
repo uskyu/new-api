@@ -160,9 +160,9 @@ function App() {
         <Route
           path='/console/agent'
           element={
-            <AdminRoute>
+            <PermissionRoute permission={PERMISSIONS.AGENT_DOWNLINE_ASSIGN}>
               <Agent />
-            </AdminRoute>
+            </PermissionRoute>
           }
         />
         <Route

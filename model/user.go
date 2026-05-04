@@ -138,6 +138,7 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 			"models":     false,
 			"redemption": true,
 			"user":       true,
+			"agent":      true,
 			"setting":    false,
 		}
 	} else if userRole == common.RoleAdminUser {

@@ -166,7 +166,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('代理管理'),
         itemKey: 'agent',
         to: '/agent',
-        className: isAdmin() ? '' : 'tableHiddle',
+        className: can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN) ? '' : 'tableHiddle',
       },
       {
         text: t('模型管理'),
@@ -200,7 +200,15 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       },
     ];
 
-    return items.filter((item) => isModuleVisible('admin', item.itemKey));
+    return items.filter((item) => {
+      if (
+        item.itemKey === 'agent' &&
+        can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN)
+      ) {
+        return true;
+      }
+      return isModuleVisible('admin', item.itemKey);
+    });
   }, [isModuleVisible, t]);
 
   const chatMenuItems = useMemo(() => {
@@ -419,7 +427,8 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         showAdmin={
           isAdmin() ||
           can(PERMISSIONS.REDEMPTION_MANAGE) ||
-          can(PERMISSIONS.USER_QUOTA_DECREASE)
+          can(PERMISSIONS.USER_QUOTA_DECREASE) ||
+          can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN)
         }
       >
         <Nav
@@ -494,7 +503,8 @@ const SiderBar = ({ onNavigate = () => {} }) => {
 
           {(isAdmin() ||
             can(PERMISSIONS.REDEMPTION_MANAGE) ||
-            can(PERMISSIONS.USER_QUOTA_DECREASE)) &&
+            can(PERMISSIONS.USER_QUOTA_DECREASE) ||
+            can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN)) &&
             hasSectionVisibleModules('admin') && (
             <>
               <Divider className='sidebar-divider' />

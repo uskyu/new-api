@@ -99,6 +99,9 @@ export default function useAiConsoleState() {
   const [selectedGroup, setSelectedGroup] = useState(
     storedPrefs.selectedGroup || '',
   );
+  const [reasoningEffort, setReasoningEffort] = useState(
+    storedPrefs.reasoningEffort || '',
+  );
   const [draftImages, setDraftImages] = useState([]);
   const [draftFiles, setDraftFiles] = useState([]);
 
@@ -249,8 +252,16 @@ export default function useAiConsoleState() {
   }, [filteredModels, selectedModel]);
 
   useEffect(() => {
-    writeStoredPrefs({ selectedModel, selectedGroup });
-  }, [selectedGroup, selectedModel]);
+    writeStoredPrefs({
+      selectedModel,
+      selectedGroup,
+      reasoningEffort,
+    });
+  }, [
+    reasoningEffort,
+    selectedGroup,
+    selectedModel,
+  ]);
 
   useEffect(() => {
     if (suppressNextPersistRef.current) {
@@ -438,6 +449,8 @@ export default function useAiConsoleState() {
     selectedGroup,
     setSelectedModel,
     setSelectedGroup,
+    reasoningEffort,
+    setReasoningEffort,
     draftImages,
     setDraftImages,
     draftFiles,

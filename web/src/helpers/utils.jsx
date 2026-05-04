@@ -39,20 +39,24 @@ export const USER_ROLES = {
 export const PERMISSIONS = {
   REDEMPTION_MANAGE: 'redemption.manage',
   USER_QUOTA_DECREASE: 'user.quota.decrease',
+  AGENT_DOWNLINE_ASSIGN: 'agent.downline.assign',
 };
 
 const rolePermissions = {
   [USER_ROLES.SUPPORT]: {
     [PERMISSIONS.REDEMPTION_MANAGE]: true,
     [PERMISSIONS.USER_QUOTA_DECREASE]: true,
+    [PERMISSIONS.AGENT_DOWNLINE_ASSIGN]: true,
   },
   [USER_ROLES.ADMIN]: {
     [PERMISSIONS.REDEMPTION_MANAGE]: true,
     [PERMISSIONS.USER_QUOTA_DECREASE]: true,
+    [PERMISSIONS.AGENT_DOWNLINE_ASSIGN]: true,
   },
   [USER_ROLES.ROOT]: {
     [PERMISSIONS.REDEMPTION_MANAGE]: true,
     [PERMISSIONS.USER_QUOTA_DECREASE]: true,
+    [PERMISSIONS.AGENT_DOWNLINE_ASSIGN]: true,
   },
 };
 

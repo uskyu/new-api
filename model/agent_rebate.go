@@ -1948,6 +1948,65 @@ func TransferAgentDownlineUser(operatorUserId int, sourceAgentUserId int, target
 	return nil
 }
 
+func AssignAgentDownlineUser(operatorUserId int, targetAgentUserId int, downlineUserId int, promoLinkId int, remark string) error {
+	if operatorUserId <= 0 || targetAgentUserId <= 0 || downlineUserId <= 0 {
+		return errors.New("invalid user id")
+	}
+	if !common.AgentEnabled || !common.AgentInitialized {
+		return errors.New("agent module is not initialized")
+	}
+	if downlineUserId == targetAgentUserId {
+		return errors.New("downline user cannot equal agent user")
+	}
+	remark = strings.TrimSpace(remark)
+	targetPromoLinkId := promoLinkId
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		targetProfile, err := getAgentProfileByUserIdTx(tx, targetAgentUserId)
+		if err != nil {
+			return err
+		}
+		if targetProfile.Status != AgentStatusEnabled {
+			return errors.New("target agent is disabled")
+		}
+		var downline User
+		if err := tx.Select("id", "role", "inviter_id", "promo_link_id").First(&downline, downlineUserId).Error; err != nil {
+			return err
+		}
+		if downline.Role != common.RoleCommonUser {
+			return errors.New("only common users can be assigned as agent downlines")
+		}
+		if downline.InviterId > 0 {
+			return errors.New("user already belongs to an inviter")
+		}
+		if _, err := getAgentProfileByUserIdTx(tx, downlineUserId); err == nil {
+			return errors.New("downline user is an agent")
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		linkId, err := resolveTransferPromoLinkIdTx(tx, targetAgentUserId, promoLinkId)
+		if err != nil {
+			return err
+		}
+		targetPromoLinkId = linkId
+		result := tx.Model(&User{}).Where("id = ? AND inviter_id = ?", downlineUserId, 0).Updates(map[string]interface{}{
+			"inviter_id":    targetAgentUserId,
+			"promo_link_id": targetPromoLinkId,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("downline user ownership changed, please refresh and retry")
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	RecordLog(operatorUserId, LogTypeManage, fmt.Sprintf("assign agent downline user, target agent user ID: %d, downline user ID: %d, promo link ID: %d, remark: %s", targetAgentUserId, downlineUserId, targetPromoLinkId, remark))
+	return nil
+}
+
 func resolveTransferPromoLinkIdTx(tx *gorm.DB, targetAgentUserId int, promoLinkId int) (int, error) {
 	if promoLinkId > 0 {
 		var promoLink AgentPromoLink

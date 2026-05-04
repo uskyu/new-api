@@ -153,22 +153,26 @@ func IsValidateRole(role int) bool {
 }
 
 const (
-	PermissionRedemptionManage  = "redemption.manage"
-	PermissionUserQuotaDecrease = "user.quota.decrease"
+	PermissionRedemptionManage    = "redemption.manage"
+	PermissionUserQuotaDecrease   = "user.quota.decrease"
+	PermissionAgentDownlineAssign = "agent.downline.assign"
 )
 
 var RolePermissions = map[int]map[string]bool{
 	RoleSupportUser: {
-		PermissionRedemptionManage:  true,
-		PermissionUserQuotaDecrease: true,
+		PermissionRedemptionManage:    true,
+		PermissionUserQuotaDecrease:   true,
+		PermissionAgentDownlineAssign: true,
 	},
 	RoleAdminUser: {
-		PermissionRedemptionManage:  true,
-		PermissionUserQuotaDecrease: true,
+		PermissionRedemptionManage:    true,
+		PermissionUserQuotaDecrease:   true,
+		PermissionAgentDownlineAssign: true,
 	},
 	RoleRootUser: {
-		PermissionRedemptionManage:  true,
-		PermissionUserQuotaDecrease: true,
+		PermissionRedemptionManage:    true,
+		PermissionUserQuotaDecrease:   true,
+		PermissionAgentDownlineAssign: true,
 	},
 }
 

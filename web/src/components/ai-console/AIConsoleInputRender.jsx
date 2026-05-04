@@ -19,8 +19,10 @@ const AIConsoleInputRender = ({
   onRemoveImage,
   onAddFile,
   onRemoveFile,
+  inputControlsNode,
 }) => {
   const { t } = useTranslation();
+  const containerRef = useRef(null);
   const fileInputRef = useRef(null);
   const documentInputRef = useRef(null);
   const [isParsingFile, setIsParsingFile] = useState(false);
@@ -92,42 +94,77 @@ const AIConsoleInputRender = ({
     onAddImage?.(dataUrl);
   };
 
-  const handlePickDocument = async (event) => {
-    const files = Array.from(event.target.files || []);
-    event.target.value = '';
-    if (files.length === 0) {
+  const handleAddFiles = React.useCallback(async (files) => {
+    const nextFiles = Array.from(files || []).filter(Boolean);
+    if (nextFiles.length === 0) {
       return;
     }
     setIsParsingFile(true);
     try {
-      for (const file of files) {
+      for (const file of nextFiles) {
         await onAddFile?.(file);
       }
     } finally {
       setIsParsingFile(false);
     }
+  }, [onAddFile]);
+
+  const handlePickDocument = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    await handleAddFiles(files);
   };
 
   const handlePaste = React.useCallback(
     async (event) => {
-      const items = Array.from(event.clipboardData?.items || []);
-      const imageItem = items.find((item) => item.type?.startsWith('image/'));
-      if (!imageItem) {
+      const clipboardData = event.clipboardData;
+      if (!clipboardData) {
         return;
       }
-      const file = imageItem.getAsFile();
-      if (!file) {
+
+      const filesFromItems = Array.from(clipboardData.items || [])
+        .filter((item) => item.kind === 'file')
+        .map((item) => item.getAsFile())
+        .filter(Boolean);
+      const filesFromList = Array.from(clipboardData.files || []).filter(Boolean);
+      const files = [...filesFromItems, ...filesFromList].filter(
+        (file, index, list) =>
+          list.findIndex(
+            (item) =>
+              item.name === file.name &&
+              item.size === file.size &&
+              item.type === file.type,
+          ) === index,
+      );
+
+      if (files.length === 0) {
         return;
       }
+
       event.preventDefault();
-      const dataUrl = await readFileAsDataUrl(file);
-      onAddImage?.(dataUrl);
+
+      const imageFiles = files.filter((file) => file.type?.startsWith('image/'));
+      const documentFiles = files.filter((file) => !file.type?.startsWith('image/'));
+      for (const imageFile of imageFiles) {
+        const dataUrl = await readFileAsDataUrl(imageFile);
+        onAddImage?.(dataUrl);
+      }
+      await handleAddFiles(documentFiles);
     },
-    [onAddImage],
+    [handleAddFiles, onAddImage],
   );
 
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+    container.addEventListener('paste', handlePaste, true);
+    return () => {
+      container.removeEventListener('paste', handlePaste, true);
+    };
+  }, [handlePaste]);
+
   return (
-    <div className='px-3 pb-3 pt-2 sm:px-5 sm:pb-5' onClick={onClick} onPaste={handlePaste}>
+    <div ref={containerRef} className='px-3 pb-3 pt-2 sm:px-5 sm:pb-5' onClick={onClick}>
       {draftImages.length > 0 && (
         <div className='mb-3 flex flex-wrap gap-2'>
           {draftImages.map((image, index) => (
@@ -196,7 +233,12 @@ const AIConsoleInputRender = ({
         className='rounded-[28px] border border-white/70 bg-white/75 p-2 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-shadow hover:shadow-[0_28px_90px_rgba(15,23,42,0.12)]'
         title={t('支持图片上传与粘贴')}
       >
-        <div className='flex items-center gap-2'>
+        {inputControlsNode ? (
+          <div className='mb-1 border-b border-slate-200/60 px-1 pb-2'>
+            {inputControlsNode}
+          </div>
+        ) : null}
+        <div className='flex min-h-[46px] items-center gap-2'>
           {styledClearNode}
           <input
             ref={fileInputRef}
@@ -258,7 +300,7 @@ const AIConsoleInputRender = ({
             }}
             aria-label={t('上传文件')}
           />
-          <div className='min-w-0 flex-1 overflow-hidden rounded-[22px] bg-transparent px-1'>
+          <div className='ai-console-input-node min-w-0 flex-1 overflow-hidden rounded-[22px] bg-transparent px-1'>
             {inputNode}
           </div>
           {styledSendNode}

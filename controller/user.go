@@ -527,7 +527,7 @@ func calculateUserPermissions(userRole int) map[string]interface{} {
 				"channel":       false,
 				"models":        false,
 				"deployment":    false,
-				"agent":         false,
+				"agent":         true,
 				"subscription":  false,
 				"ai_image_logs": false,
 				"setting":       false,
@@ -597,7 +597,7 @@ func generateDefaultSidebarConfig(userRole int) string {
 			"redemption":   true,
 			"user":         true,
 			"setting":      false,
-			"agent":        false,
+			"agent":        true,
 			"subscription": false,
 		}
 	} else if userRole == common.RoleAdminUser {

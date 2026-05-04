@@ -19,8 +19,11 @@ import {
 } from '@douyinfe/semi-ui';
 import {
   API,
+  can,
   copy,
+  isAdmin,
   isRoot,
+  PERMISSIONS,
   renderQuotaWithAmount,
   showError,
   showSuccess,
@@ -63,6 +66,8 @@ function getWithdrawStatusTag(status, t) {
 
 export default function Agent() {
   const { t } = useTranslation();
+  const canManageAgentAdmin = isAdmin();
+  const canAssignDownlines = can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN);
   const [status, setStatus] = useState(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const [overview, setOverview] = useState(null);
@@ -144,6 +149,15 @@ export default function Agent() {
     downlineUsername: '',
     targetAgentUserId: 0,
     promoLinkId: 0,
+    remark: '',
+  });
+  const [assignModalVisible, setAssignModalVisible] = useState(false);
+  const [assignSubmitting, setAssignSubmitting] = useState(false);
+  const [assignAgentKeyword, setAssignAgentKeyword] = useState('');
+  const [assignForm, setAssignForm] = useState({
+    downlineUserId: '',
+    targetAgentUserId: 0,
+    targetAgentUsername: '',
     remark: '',
   });
   const [withdrawRequests, setWithdrawRequests] = useState([]);
@@ -405,27 +419,33 @@ export default function Agent() {
 
   useEffect(() => {
     if (status?.migration_ready) {
-      loadGroups();
+      if (canManageAgentAdmin) {
+        loadGroups();
+      }
     }
     if (status?.initialized) {
-      loadOverview();
+      if (canManageAgentAdmin) {
+        loadOverview();
+        loadAdjustments();
+        loadPromoLinks(1);
+        loadWithdrawRequests();
+      }
       loadProfiles(1, keyword);
-      loadAdjustments();
-      loadPromoLinks(1);
-      loadWithdrawRequests();
     }
-  }, [status?.migration_ready, status?.initialized]);
+  }, [canManageAgentAdmin, status?.migration_ready, status?.initialized]);
 
   const refreshAll = async () => {
     await loadStatus();
-    await loadOverview();
-    await loadGroups();
+    if (canManageAgentAdmin) {
+      await loadOverview();
+      await loadGroups();
+      await loadAdjustments();
+      await loadPromoLinks(promoLinksPage);
+      await loadWithdrawRequests();
+      await loadPromoLinkStats(activeAgentScope?.userId || 0);
+      await loadDownlines(activeAgentScope?.userId || 0, downlinesPage, downlineKeyword);
+    }
     await loadProfiles(profilesPage, keyword);
-    await loadAdjustments();
-    await loadPromoLinks(promoLinksPage);
-    await loadWithdrawRequests();
-    await loadPromoLinkStats(activeAgentScope?.userId || 0);
-    await loadDownlines(activeAgentScope?.userId || 0, downlinesPage, downlineKeyword);
   };
 
   const handleOpenCreateGroup = () => {
@@ -544,6 +564,29 @@ export default function Agent() {
       }));
     },
     [transferAgentKeyword, transferAgents],
+  );
+
+  const assignAgentOptions = useMemo(
+    () => {
+      const normalizedKeyword = assignAgentKeyword.trim().toLowerCase();
+      return transferAgents
+        .filter((agent) => {
+          if (!normalizedKeyword) return true;
+          return [
+            agent.user_id,
+            agent.username,
+            agent.display_name,
+            agent.rebate_group_name,
+          ]
+            .filter((value) => value !== undefined && value !== null)
+            .some((value) => String(value).toLowerCase().includes(normalizedKeyword));
+        })
+        .map((agent) => ({
+          label: `${agent.username || agent.user_id} (${formatRate(agent.effective_rate)})`,
+          value: agent.user_id,
+        }));
+    },
+    [assignAgentKeyword, transferAgents],
   );
 
   const transferPromoLinkOptions = useMemo(
@@ -716,6 +759,49 @@ export default function Agent() {
       showError(error.message || t('转移用户失败'));
     } finally {
       setTransferSubmitting(false);
+    }
+  };
+
+  const handleOpenAssignDownline = async (record = null) => {
+    setAssignForm({
+      downlineUserId: '',
+      targetAgentUserId: record?.user_id || 0,
+      targetAgentUsername: record?.username || '',
+      remark: '',
+    });
+    setAssignAgentKeyword('');
+    setAssignModalVisible(true);
+    await loadTransferAgents([]);
+  };
+
+  const handleSubmitAssign = async () => {
+    if (!assignForm.downlineUserId) {
+      showError(t('请输入用户ID'));
+      return;
+    }
+    if (!assignForm.targetAgentUserId) {
+      showError(t('请选择目标代理'));
+      return;
+    }
+    setAssignSubmitting(true);
+    try {
+      const res = await API.post('/api/agent/downline/assign', {
+        target_agent_user_id: Number(assignForm.targetAgentUserId),
+        downline_user_id: Number(assignForm.downlineUserId),
+        promo_link_id: 0,
+        remark: assignForm.remark,
+      });
+      if (!res.data.success) {
+        showError(res.data.message);
+        return;
+      }
+      showSuccess(t('用户已分配给目标代理'));
+      setAssignModalVisible(false);
+      await loadProfiles(profilesPage, keyword);
+    } catch (error) {
+      showError(error.message || t('分配用户失败'));
+    } finally {
+      setAssignSubmitting(false);
     }
   };
 
@@ -970,15 +1056,20 @@ export default function Agent() {
       dataIndex: 'operate',
       render: (_, record) => (
         <Space>
-          <Button size='small' type='tertiary' onClick={() => handleOpenEditProfile(record)}>
+          {canManageAgentAdmin && <Button size='small' type='tertiary' onClick={() => handleOpenEditProfile(record)}>
             {t('编辑')}
-          </Button>
-          <Button size='small' type='secondary' onClick={() => handleOpenAdjust(record)}>
+          </Button>}
+          {canManageAgentAdmin && <Button size='small' type='secondary' onClick={() => handleOpenAdjust(record)}>
             {t('调账')}
-          </Button>
-          <Button size='small' type='primary' onClick={() => handleInspectAgent(record)}>
+          </Button>}
+          {canManageAgentAdmin && <Button size='small' type='primary' onClick={() => handleInspectAgent(record)}>
             {t('查看下级')}
-          </Button>
+          </Button>}
+          {canAssignDownlines && (
+            <Button size='small' type='warning' onClick={() => handleOpenAssignDownline(record)}>
+              {t('分配用户')}
+            </Button>
+          )}
         </Space>
       ),
     },
@@ -1223,6 +1314,8 @@ export default function Agent() {
 
         {status?.initialized ? (
           <>
+            {canManageAgentAdmin && (
+            <>
             <Card style={{ width: '100%' }} loading={overviewLoading}>
               <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
                 <Title heading={5} style={{ margin: 0 }}>
@@ -1258,6 +1351,8 @@ export default function Agent() {
                 />
               </Space>
             </Card>
+            </>
+            )}
 
             <Card style={{ width: '100%' }}>
               <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
@@ -1281,9 +1376,14 @@ export default function Agent() {
                     >
                       {t('搜索')}
                     </Button>
-                    <Button type='primary' onClick={handleOpenCreateProfile}>
+                    {canAssignDownlines && (
+                      <Button type='warning' onClick={() => handleOpenAssignDownline()}>
+                        {t('分配用户')}
+                      </Button>
+                    )}
+                    {canManageAgentAdmin && <Button type='primary' onClick={handleOpenCreateProfile}>
                       {t('新增代理')}
-                    </Button>
+                    </Button>}
                   </Space>
                 </div>
                 <Table
@@ -1306,6 +1406,8 @@ export default function Agent() {
               </Space>
             </Card>
 
+            {canManageAgentAdmin && (
+            <>
             <Card style={{ width: '100%' }}>
               <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
                 <Title heading={5} style={{ margin: 0 }}>
@@ -1351,7 +1453,10 @@ export default function Agent() {
                 />
               </Space>
             </Card>
+            </>
+            )}
 
+            {canManageAgentAdmin && (
             <Card style={{ width: '100%' }}>
               <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
                 <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
@@ -1422,6 +1527,7 @@ export default function Agent() {
                 />
               </Space>
             </Card>
+            )}
 
           </>
         ) : (
@@ -1771,6 +1877,46 @@ export default function Agent() {
             placeholder={t('备注')}
             value={promoLinkForm.remark}
             onChange={(value) => setPromoLinkForm((prev) => ({ ...prev, remark: value }))}
+          />
+        </Space>
+      </Modal>
+
+      <Modal
+        title={t('分配代理下级用户')}
+        visible={assignModalVisible}
+        onCancel={() => setAssignModalVisible(false)}
+        onOk={handleSubmitAssign}
+        confirmLoading={assignSubmitting}
+      >
+        <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
+          <Input
+            placeholder={t('普通用户ID')}
+            value={String(assignForm.downlineUserId)}
+            onChange={(value) => setAssignForm((prev) => ({ ...prev, downlineUserId: value }))}
+          />
+          <Input
+            prefix={<IconSearch size={14} />}
+            placeholder={t('搜索目标代理ID、用户名或分组')}
+            value={assignAgentKeyword}
+            onChange={setAssignAgentKeyword}
+          />
+          <Select
+            placeholder={t('目标代理')}
+            value={assignForm.targetAgentUserId || undefined}
+            onChange={(value) => setAssignForm((prev) => ({ ...prev, targetAgentUserId: value }))}
+            optionList={assignAgentOptions}
+            loading={transferAgentsLoading}
+            filter
+            style={{ width: '100%' }}
+          />
+          <Text type='secondary'>
+            {t('分配后会更新该用户的邀请归属，后续充值和兑换码返利将归到目标代理；历史返佣记录保持不变。')}
+          </Text>
+          <TextArea
+            placeholder={t('备注')}
+            value={assignForm.remark}
+            onChange={(value) => setAssignForm((prev) => ({ ...prev, remark: value }))}
+            rows={3}
           />
         </Space>
       </Modal>

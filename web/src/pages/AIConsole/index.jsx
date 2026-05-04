@@ -140,6 +140,14 @@ const NativeSelect = ({ value, options, onChange, placeholder }) => (
   </select>
 );
 
+const MAX_DRAFT_IMAGES = 5;
+const REASONING_EFFORT_OPTIONS = [
+  { value: '', label: '自动' },
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+];
+
 const AIConsole = () => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -170,6 +178,8 @@ const AIConsole = () => {
     selectedGroup,
     setSelectedModel,
     setSelectedGroup,
+    reasoningEffort,
+    setReasoningEffort,
     draftImages,
     setDraftImages,
     draftFiles,
@@ -272,6 +282,9 @@ const AIConsole = () => {
           },
           {},
         );
+        if (reasoningEffort) {
+          payload.reasoning_effort = reasoningEffort;
+        }
 
         sendRequest(payload, true);
         return nextMessages;
@@ -285,6 +298,7 @@ const AIConsole = () => {
       draftFiles,
       selectedGroup,
       selectedModel,
+      reasoningEffort,
       markSessionActivity,
       sendRequest,
       setDraftImages,
@@ -328,9 +342,16 @@ const AIConsole = () => {
 
   const handleAddDraftImage = React.useCallback(
     (imageDataUrl) => {
-      setDraftImages([imageDataUrl]);
+      if (!imageDataUrl) return;
+      setDraftImages((previous) => {
+        if (previous.length >= MAX_DRAFT_IMAGES) {
+          showError(t('最多支持 {{count}} 张图片', { count: MAX_DRAFT_IMAGES }));
+          return previous;
+        }
+        return [...previous, imageDataUrl];
+      });
     },
-    [setDraftImages],
+    [setDraftImages, t],
   );
 
   const handleAddDraftFile = React.useCallback(
@@ -411,6 +432,25 @@ const AIConsole = () => {
     value: model.value,
     label: model.label,
   }));
+
+  const inputControlsNode = (
+    <div
+      className='flex flex-wrap items-center gap-2'
+      onClick={(event) => event.stopPropagation()}
+    >
+      <select
+        value={reasoningEffort}
+        onChange={(event) => setReasoningEffort(event.target.value)}
+        className='h-8 rounded-full border-0 bg-slate-100/80 px-3 text-xs text-slate-700 outline-none transition hover:bg-slate-100 focus:bg-white'
+      >
+        {REASONING_EFFORT_OPTIONS.map((option) => (
+          <option key={option.value || 'auto'} value={option.value}>
+            {t('思考')}: {t(option.label)}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 
   if (!ready) {
     return (
@@ -497,6 +537,7 @@ const AIConsole = () => {
             placeholder={t('选择模型')}
           />
         </div>
+
       </div>
     </div>
   );
@@ -564,6 +605,7 @@ const AIConsole = () => {
               onToggleReasoningExpansion={onToggleReasoningExpansion}
               onStopGenerator={onStopGenerator}
               onClearMessages={handleClearMessages}
+              inputControlsNode={inputControlsNode}
             />
           </div>
         </main>
