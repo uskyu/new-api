@@ -1,6 +1,6 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { Button, Modal, Typography } from '@douyinfe/semi-ui';
-import { ImagePlus, X } from 'lucide-react';
+import { FileText, ImagePlus, Loader2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 const readFileAsDataUrl = (file) =>
@@ -14,11 +14,16 @@ const readFileAsDataUrl = (file) =>
 const AIConsoleInputRender = ({
   detailProps,
   draftImages,
+  draftFiles = [],
   onAddImage,
   onRemoveImage,
+  onAddFile,
+  onRemoveFile,
 }) => {
   const { t } = useTranslation();
   const fileInputRef = useRef(null);
+  const documentInputRef = useRef(null);
+  const [isParsingFile, setIsParsingFile] = useState(false);
   const { clearContextNode, inputNode, sendNode, onClick } = detailProps;
 
   const handleRequestClear = React.useCallback(
@@ -87,8 +92,42 @@ const AIConsoleInputRender = ({
     onAddImage?.(dataUrl);
   };
 
+  const handlePickDocument = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (files.length === 0) {
+      return;
+    }
+    setIsParsingFile(true);
+    try {
+      for (const file of files) {
+        await onAddFile?.(file);
+      }
+    } finally {
+      setIsParsingFile(false);
+    }
+  };
+
+  const handlePaste = React.useCallback(
+    async (event) => {
+      const items = Array.from(event.clipboardData?.items || []);
+      const imageItem = items.find((item) => item.type?.startsWith('image/'));
+      if (!imageItem) {
+        return;
+      }
+      const file = imageItem.getAsFile();
+      if (!file) {
+        return;
+      }
+      event.preventDefault();
+      const dataUrl = await readFileAsDataUrl(file);
+      onAddImage?.(dataUrl);
+    },
+    [onAddImage],
+  );
+
   return (
-    <div className='px-3 pb-3 pt-2 sm:px-5 sm:pb-5' onClick={onClick}>
+    <div className='px-3 pb-3 pt-2 sm:px-5 sm:pb-5' onClick={onClick} onPaste={handlePaste}>
       {draftImages.length > 0 && (
         <div className='mb-3 flex flex-wrap gap-2'>
           {draftImages.map((image, index) => (
@@ -117,6 +156,42 @@ const AIConsoleInputRender = ({
         </div>
       )}
 
+      {draftFiles.length > 0 && (
+        <div className='mb-3 flex flex-wrap gap-2'>
+          {draftFiles.map((file, index) => (
+            <div
+              key={file.id || `${index}-${file.filename}`}
+              className='group flex max-w-full items-center gap-2 rounded-2xl border border-white/70 bg-white/80 px-3 py-2 shadow-[0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-md'
+            >
+              <div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600'>
+                <FileText size={16} />
+              </div>
+              <div className='min-w-0'>
+                <div className='max-w-[220px] truncate text-sm font-medium text-slate-800'>
+                  {file.filename || t('未命名文件')}
+                </div>
+                <div className='text-xs text-slate-400'>
+                  {file.warnings?.length > 0
+                    ? file.warnings.join('；')
+                    : t('已解析为 Markdown')}
+                </div>
+              </div>
+              <button
+                type='button'
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRemoveFile?.(index);
+                }}
+                className='flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black/5 text-slate-500 transition hover:bg-rose-500 hover:text-white'
+                aria-label={t('删除文件')}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div
         className='rounded-[28px] border border-white/70 bg-white/75 p-2 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-shadow hover:shadow-[0_28px_90px_rgba(15,23,42,0.12)]'
         title={t('支持图片上传与粘贴')}
@@ -129,6 +204,14 @@ const AIConsoleInputRender = ({
             accept='image/*'
             className='hidden'
             onChange={handlePickImage}
+          />
+          <input
+            ref={documentInputRef}
+            type='file'
+            accept='.txt,.md,.csv,.json,.log,.pdf,.docx,.xlsx,.pptx'
+            multiple
+            className='hidden'
+            onChange={handlePickDocument}
           />
           <Button
             theme='borderless'
@@ -149,6 +232,32 @@ const AIConsoleInputRender = ({
             }}
             aria-label={t('上传图片')}
           />
+          <Button
+            theme='borderless'
+            type='tertiary'
+            icon={
+              isParsingFile ? (
+                <Loader2 size={16} className='animate-spin' />
+              ) : (
+                <FileText size={16} />
+              )
+            }
+            loading={isParsingFile}
+            className='!rounded-full !bg-white/75 hover:!bg-emerald-50 hover:!text-emerald-600'
+            style={{
+              width: 38,
+              height: 38,
+              minWidth: 38,
+              padding: 0,
+              border: '1px solid rgba(255,255,255,0.6)',
+              boxShadow: '0 12px 32px rgba(15, 23, 42, 0.08)',
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              documentInputRef.current?.click();
+            }}
+            aria-label={t('上传文件')}
+          />
           <div className='min-w-0 flex-1 overflow-hidden rounded-[22px] bg-transparent px-1'>
             {inputNode}
           </div>
@@ -157,7 +266,7 @@ const AIConsoleInputRender = ({
       </div>
 
       <Typography.Text className='mt-2 block pl-2 text-xs text-slate-500'>
-        {t('历史记录仅保存在当前浏览器')}
+        {t('支持 Ctrl+V 粘贴图片，办公文件会解析为文本后发送')}
       </Typography.Text>
     </div>
   );

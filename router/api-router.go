@@ -362,6 +362,12 @@ func SetApiRouter(router *gin.Engine) {
 		mjRoute.GET("/self", middleware.UserAuth(), controller.GetUserMidjourney)
 		mjRoute.GET("/", middleware.AdminAuth(), controller.GetAllMidjourney)
 
+		aiConsoleFileRoute := apiRouter.Group("/ai-console/files")
+		aiConsoleFileRoute.Use(middleware.UserAuth())
+		{
+			aiConsoleFileRoute.POST("/parse", controller.ParseAIConsoleFile)
+		}
+
 		aiImageTaskRoute := apiRouter.Group("/ai-image/tasks")
 		aiImageTaskRoute.Use(middleware.UserAuth())
 		{

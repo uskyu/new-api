@@ -31,8 +31,11 @@ const AIConsoleChatPanel = ({
   styleState,
   hideHeader = false,
   draftImages,
+  draftFiles,
   onAddImage,
   onRemoveImage,
+  onAddFile,
+  onRemoveFile,
   onMessageSend,
   onMessageCopy,
   onMessageReset,
@@ -62,11 +65,14 @@ const AIConsoleChatPanel = ({
       <AIConsoleInputRender
         {...props}
         draftImages={draftImages}
+        draftFiles={draftFiles}
         onAddImage={onAddImage}
         onRemoveImage={onRemoveImage}
+        onAddFile={onAddFile}
+        onRemoveFile={onRemoveFile}
       />
     ),
-    [draftImages, onAddImage, onRemoveImage],
+    [draftFiles, draftImages, onAddFile, onAddImage, onRemoveFile, onRemoveImage],
   );
 
   const renderCustomChatContent = React.useCallback(

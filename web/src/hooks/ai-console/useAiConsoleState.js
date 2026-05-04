@@ -100,6 +100,7 @@ export default function useAiConsoleState() {
     storedPrefs.selectedGroup || '',
   );
   const [draftImages, setDraftImages] = useState([]);
+  const [draftFiles, setDraftFiles] = useState([]);
 
   const initializedRef = useRef(false);
   const suppressNextPersistRef = useRef(false);
@@ -190,6 +191,7 @@ export default function useAiConsoleState() {
     const loadedMessages = await loadSessionMessages(sessionId);
     setMessages(loadedMessages);
     setDraftImages([]);
+    setDraftFiles([]);
   }, []);
 
   useEffect(() => {
@@ -315,6 +317,7 @@ export default function useAiConsoleState() {
     persistCurrentSessionId(nextSession.id);
     setMessages([]);
     setDraftImages([]);
+    setDraftFiles([]);
     return nextSession;
   }, [selectedGroup, selectedModel]);
 
@@ -366,6 +369,7 @@ export default function useAiConsoleState() {
 
     setMessages([]);
     setDraftImages([]);
+    setDraftFiles([]);
     await clearMessagesForSession(currentSessionId);
 
     if (currentSession) {
@@ -436,6 +440,8 @@ export default function useAiConsoleState() {
     setSelectedGroup,
     draftImages,
     setDraftImages,
+    draftFiles,
+    setDraftFiles,
     createSession,
     switchSession,
     renameSession,

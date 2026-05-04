@@ -25,7 +25,10 @@ import {
   createLoadingAssistantMessage,
   createMessage,
   encodeToBase64,
+  getUserIdFromLocalStorage,
   getLogo,
+  showError,
+  showSuccess,
   stringToColor,
 } from '../../helpers';
 import AIConsoleChatPanel from '../../components/ai-console/AIConsoleChatPanel';
@@ -169,6 +172,8 @@ const AIConsole = () => {
     setSelectedGroup,
     draftImages,
     setDraftImages,
+    draftFiles,
+    setDraftFiles,
     createSession,
     switchSession,
     renameSession,
@@ -213,14 +218,44 @@ const AIConsole = () => {
   const onMessageSend = React.useCallback(
     (content) => {
       const trimmed = typeof content === 'string' ? content.trim() : '';
-      if (!trimmed && draftImages.length === 0) {
+      const fileContext = draftFiles
+        .map((file, index) => {
+          const markdown = String(file?.markdown || '').trim();
+          if (!markdown) return '';
+          return [
+            `文件 ${index + 1}：《${file.filename || '未命名文件'}》`,
+            '```markdown',
+            markdown,
+            '```',
+          ].join('\n');
+        })
+        .filter(Boolean)
+        .join('\n\n');
+      if (!trimmed && draftImages.length === 0 && !fileContext) {
         return;
       }
+      const textContent = fileContext
+        ? [
+            trimmed,
+            '',
+            '以下是用户上传文件的解析内容，请作为本轮对话上下文：',
+            fileContext,
+          ].filter((item) => item !== '').join('\n')
+        : trimmed;
 
       const loadingMessage = createLoadingAssistantMessage();
       const userMessage = createMessage(
         MESSAGE_ROLES.USER,
-        buildMessageContent(trimmed, draftImages, draftImages.length > 0),
+        buildMessageContent(textContent, draftImages, draftImages.length > 0),
+        draftFiles.length > 0
+          ? {
+              attachments: draftFiles.map((file) => ({
+                filename: file.filename,
+                size: file.size,
+                warnings: file.warnings || [],
+              })),
+            }
+          : {},
       );
 
       markSessionActivity();
@@ -243,14 +278,17 @@ const AIConsole = () => {
       });
 
       setDraftImages([]);
+      setDraftFiles([]);
     },
     [
       draftImages,
+      draftFiles,
       selectedGroup,
       selectedModel,
       markSessionActivity,
       sendRequest,
       setDraftImages,
+      setDraftFiles,
       setMessages,
     ],
   );
@@ -293,6 +331,52 @@ const AIConsole = () => {
       setDraftImages([imageDataUrl]);
     },
     [setDraftImages],
+  );
+
+  const handleAddDraftFile = React.useCallback(
+    async (file) => {
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const response = await fetch('/api/ai-console/files/parse', {
+          method: 'POST',
+          headers: {
+            'New-Api-User': getUserIdFromLocalStorage(),
+          },
+          body: formData,
+        });
+        const result = await response.json();
+        if (!result?.success) {
+          throw new Error(result?.message || 'failed to parse file');
+        }
+        const data = result.data || {};
+        setDraftFiles((previous) => [
+          ...previous,
+          {
+            id: `file-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            filename: data.filename || file.name,
+            markdown: data.markdown || '',
+            warnings: Array.isArray(data.warnings) ? data.warnings : [],
+            size: file.size,
+            type: file.type,
+          },
+        ]);
+        showSuccess(t('文件已解析'));
+      } catch (error) {
+        showError(error.message || t('文件解析失败'));
+      }
+    },
+    [setDraftFiles, t],
+  );
+
+  const handleRemoveDraftFile = React.useCallback(
+    (index) => {
+      setDraftFiles((previous) =>
+        previous.filter((_, itemIndex) => itemIndex !== index),
+      );
+    },
+    [setDraftFiles],
   );
 
   const handleClearMessages = React.useCallback(() => {
@@ -468,8 +552,11 @@ const AIConsole = () => {
               styleState={styleState}
               hideHeader={isMobile}
               draftImages={draftImages}
+              draftFiles={draftFiles}
               onAddImage={handleAddDraftImage}
               onRemoveImage={handleRemoveDraftImage}
+              onAddFile={handleAddDraftFile}
+              onRemoveFile={handleRemoveDraftFile}
               onMessageSend={onMessageSend}
               onMessageCopy={messageActions.handleMessageCopy}
               onMessageReset={messageActions.handleMessageReset}
