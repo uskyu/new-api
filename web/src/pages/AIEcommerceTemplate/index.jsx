@@ -51,21 +51,22 @@ const statusColorMap = {
 };
 
 const statusLabelMap = {
-  MOTHER_PENDING: '母版排队中',
-  MOTHER_PROCESSING: '母版生成中',
-  WAITING_CONFIRM: '等待确认',
-  MOTHER_FAILED: '母版生成失败',
-  SEGMENTS_PENDING: '详情段排队中',
-  SEGMENTS_PROCESSING: '详情段生成中',
-  SUCCEEDED: '生成成功',
-  FAILED: '生成失败',
-  PENDING: '排队中',
-  PROCESSING: '处理中',
+  MOTHER_PENDING: '\u6bcd\u7248\u6392\u961f\u4e2d',
+  MOTHER_PROCESSING: '\u6bcd\u7248\u751f\u6210\u4e2d',
+  WAITING_CONFIRM: '\u7b49\u5f85\u786e\u8ba4',
+  MOTHER_FAILED: '\u6bcd\u7248\u751f\u6210\u5931\u8d25',
+  SEGMENTS_PENDING: '\u8be6\u60c5\u6bb5\u6392\u961f\u4e2d',
+  SEGMENTS_PROCESSING: '\u8be6\u60c5\u6bb5\u751f\u6210\u4e2d',
+  SUCCEEDED: '\u751f\u6210\u6210\u529f',
+  FAILED: '\u751f\u6210\u5931\u8d25',
+  PENDING: '\u6392\u961f\u4e2d',
+  PROCESSING: '\u5904\u7406\u4e2d',
 };
 
 const getStatusLabel = (status, t) => {
   if (!status) return '-';
-  return t(statusLabelMap[status] || status);
+  const normalizedStatus = String(status).trim().toUpperCase();
+  return t(statusLabelMap[normalizedStatus] || normalizedStatus);
 };
 
 const readFileAsDataUrl = (file) =>
