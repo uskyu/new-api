@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Input, Modal, Spin, Tag, TextArea, Typography } from '@douyinfe/semi-ui';
 import {
+  Brush,
   Check,
   Download,
   ExternalLink,
@@ -18,9 +19,10 @@ import {
   DEFAULT_ECOMMERCE_TEMPLATE_KEY,
   ECOMMERCE_IMAGE_TEMPLATES,
 } from '../../constants/ai-ecommerce-template.constants';
-import { API, showError, showSuccess, timestamp2string } from '../../helpers';
+import { API, getUserIdFromLocalStorage, showError, showSuccess, timestamp2string } from '../../helpers';
 
 const MAX_REFERENCE_IMAGES = 5;
+const ANNOTATION_CANVAS_MAX_SIDE = 1400;
 const DEFAULT_OPENAI_SIZE = '1024x1024';
 const OPENAI_SIZE_OPTIONS = [
   { value: '1024x1024', label: '1024x1024 母版' },
@@ -63,6 +65,15 @@ const statusLabelMap = {
   PROCESSING: '\u5904\u7406\u4e2d',
 };
 
+const ANNOTATION_COLORS = [
+  { value: '#ef4444', label: '\u7ea2\u8272' },
+  { value: '#2563eb', label: '\u84dd\u8272' },
+  { value: '#16a34a', label: '\u7eff\u8272' },
+  { value: '#f59e0b', label: '\u9ec4\u8272' },
+  { value: '#8b5cf6', label: '\u7d2b\u8272' },
+  { value: '#f97316', label: '\u6a59\u8272' },
+];
+
 const getStatusLabel = (status, t) => {
   if (!status) return '-';
   const normalizedStatus = String(status).trim().toUpperCase();
@@ -88,6 +99,353 @@ const downloadImage = (imageUrl, filename) => {
 const openImage = (imageUrl) => {
   if (!imageUrl) return;
   window.open(imageUrl, '_blank', 'noopener,noreferrer');
+};
+
+const createAnnotationId = () =>
+  `annotation-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const getAnnotationColorLabel = (color) =>
+  ANNOTATION_COLORS.find((item) => item.value === color)?.label || '\u6807\u6ce8';
+
+const getAnnotationLabel = (annotation, index) =>
+  annotation?.label || `${getAnnotationColorLabel(annotation?.color)}\u533a\u57df ${index + 1}`;
+
+const getAnnotationPromptCount = (annotations = []) =>
+  annotations.filter((annotation) => String(annotation?.prompt || '').trim()).length;
+
+const buildRedrawPromptWithAnnotations = (basePrompt, annotations = []) => {
+  const normalizedBasePrompt = String(basePrompt || '').trim();
+  const annotationLines = annotations
+    .map((annotation, index) => ({
+      label: getAnnotationLabel(annotation, index),
+      prompt: String(annotation?.prompt || '').trim(),
+    }))
+    .filter((item) => item.prompt)
+    .map((item) => `${item.label}\uff1a${item.prompt}`);
+
+  if (annotationLines.length === 0) {
+    return normalizedBasePrompt;
+  }
+
+  return [
+    normalizedBasePrompt || '\u8bf7\u6839\u636e\u5f69\u8272\u6807\u6ce8\u56fe\u5bf9\u5f53\u524d\u8be6\u60c5\u6bb5\u8fdb\u884c\u5c40\u90e8\u91cd\u7ed8\u3002',
+    '',
+    '\u5c40\u90e8\u91cd\u7ed8\u8981\u6c42\uff1a',
+    ...annotationLines.map((line, index) => `${index + 1}. ${line}`),
+    '\u8bf7\u4f18\u5148\u6839\u636e\u672c\u6b21\u4e0a\u4f20\u7684\u5f69\u8272\u5708\u9009\u6807\u6ce8\u56fe\u8bc6\u522b\u4fee\u6539\u8303\u56f4\uff0c\u4fdd\u7559\u672a\u6807\u6ce8\u533a\u57df\u7684\u7248\u5f0f\u548c\u5546\u54c1\u4fe1\u606f\u3002',
+  ].join('\n');
+};
+
+const blobToDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error || new Error('failed to read blob'));
+    reader.readAsDataURL(blob);
+  });
+
+const loadImageUrlAsDataUrl = async (imageUrl) => {
+  if (!imageUrl) return '';
+  if (imageUrl.startsWith('data:image/')) return imageUrl;
+  const response = await fetch(imageUrl, {
+    headers: imageUrl.startsWith('/api/')
+      ? { 'New-Api-User': getUserIdFromLocalStorage() }
+      : undefined,
+  });
+  if (!response.ok) throw new Error(`fetch failed: ${response.status}`);
+  return blobToDataUrl(await response.blob());
+};
+
+const EcommerceAnnotationModal = ({
+  visible,
+  sourceUrl,
+  sourceLabel,
+  initialAnnotations,
+  onCancel,
+  onSave,
+}) => {
+  const { t } = useTranslation();
+  const canvasRef = useRef(null);
+  const activeAnnotationIdRef = useRef(null);
+  const [sourceDataUrl, setSourceDataUrl] = useState('');
+  const [annotations, setAnnotations] = useState([]);
+  const [selectedColor, setSelectedColor] = useState(ANNOTATION_COLORS[0].value);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const renderCanvas = useCallback((dataUrl, nextAnnotations = []) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !dataUrl) return;
+    const ctx = canvas.getContext('2d');
+    const image = new Image();
+    image.onload = () => {
+      const scale = Math.min(
+        1,
+        ANNOTATION_CANVAS_MAX_SIDE / image.naturalWidth,
+        ANNOTATION_CANVAS_MAX_SIDE / image.naturalHeight,
+      );
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      ctx.lineWidth = Math.max(6, Math.round(Math.min(canvas.width, canvas.height) * 0.008));
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      nextAnnotations.forEach((annotation, annotationIndex) => {
+        const points = Array.isArray(annotation.points) ? annotation.points : [];
+        if (points.length < 2) return;
+        ctx.strokeStyle = annotation.color || ANNOTATION_COLORS[0].value;
+        ctx.beginPath();
+        points.forEach((point, index) => {
+          const x = point.x * canvas.width;
+          const y = point.y * canvas.height;
+          if (index === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        const firstPoint = points[0];
+        ctx.fillStyle = annotation.color || ANNOTATION_COLORS[0].value;
+        ctx.beginPath();
+        ctx.arc(firstPoint.x * canvas.width, firstPoint.y * canvas.height, 18, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 18px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(annotationIndex + 1), firstPoint.x * canvas.width, firstPoint.y * canvas.height);
+      });
+    };
+    image.src = dataUrl;
+  }, []);
+
+  useEffect(() => {
+    if (!visible) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    setSourceDataUrl('');
+    setAnnotations(Array.isArray(initialAnnotations) ? initialAnnotations : []);
+    setSelectedColor(ANNOTATION_COLORS[0].value);
+    loadImageUrlAsDataUrl(sourceUrl)
+      .then((dataUrl) => {
+        if (cancelled) return;
+        setSourceDataUrl(dataUrl);
+        renderCanvas(dataUrl, Array.isArray(initialAnnotations) ? initialAnnotations : []);
+      })
+      .catch(() => {
+        if (!cancelled) showError(t('\u52a0\u8f7d\u56fe\u7247\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5'));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialAnnotations, renderCanvas, sourceUrl, t, visible]);
+
+  useEffect(() => {
+    renderCanvas(sourceDataUrl, annotations);
+  }, [annotations, renderCanvas, sourceDataUrl]);
+
+  const getPoint = (event) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
+    };
+  };
+
+  const handlePointerDown = (event) => {
+    if (!sourceDataUrl || loading) return;
+    const point = getPoint(event);
+    if (!point) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const annotation = {
+      id: createAnnotationId(),
+      color: selectedColor,
+      points: [point],
+      prompt: '',
+    };
+    activeAnnotationIdRef.current = annotation.id;
+    setAnnotations((previous) => [...previous, annotation]);
+    setIsDrawing(true);
+  };
+
+  const handlePointerMove = (event) => {
+    if (!isDrawing || !activeAnnotationIdRef.current) return;
+    const point = getPoint(event);
+    if (!point) return;
+    setAnnotations((previous) =>
+      previous.map((annotation) =>
+        annotation.id === activeAnnotationIdRef.current
+          ? { ...annotation, points: [...annotation.points, point] }
+          : annotation,
+      ),
+    );
+  };
+
+  const handlePointerUp = () => {
+    if (!isDrawing) return;
+    setIsDrawing(false);
+    const activeId = activeAnnotationIdRef.current;
+    activeAnnotationIdRef.current = null;
+    setAnnotations((previous) => {
+      const activeAnnotation = previous.find((annotation) => annotation.id === activeId);
+      const nextAnnotations = previous.filter(
+        (annotation) => annotation.id !== activeId || annotation.points.length > 1,
+      );
+      if (activeAnnotation?.points?.length > 1) {
+        const colorIndex = ANNOTATION_COLORS.findIndex((item) => item.value === activeAnnotation.color);
+        const nextColor = ANNOTATION_COLORS[(colorIndex + 1 + ANNOTATION_COLORS.length) % ANNOTATION_COLORS.length]?.value || ANNOTATION_COLORS[0].value;
+        setSelectedColor(nextColor);
+      }
+      return nextAnnotations;
+    });
+  };
+
+  const updateAnnotationPrompt = (annotationId, value) => {
+    setAnnotations((previous) =>
+      previous.map((annotation) =>
+        annotation.id === annotationId ? { ...annotation, prompt: value } : annotation,
+      ),
+    );
+  };
+
+  const createAnnotatedDataUrl = (nextAnnotations) =>
+    new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        const outputCanvas = document.createElement('canvas');
+        const scale = Math.min(
+          1,
+          ANNOTATION_CANVAS_MAX_SIDE / image.naturalWidth,
+          ANNOTATION_CANVAS_MAX_SIDE / image.naturalHeight,
+        );
+        outputCanvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        outputCanvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const ctx = outputCanvas.getContext('2d');
+        ctx.drawImage(image, 0, 0, outputCanvas.width, outputCanvas.height);
+        ctx.lineWidth = Math.max(6, Math.round(Math.min(outputCanvas.width, outputCanvas.height) * 0.008));
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        nextAnnotations.forEach((annotation, annotationIndex) => {
+          const points = annotation.points || [];
+          if (points.length < 2) return;
+          ctx.strokeStyle = annotation.color;
+          ctx.beginPath();
+          points.forEach((point, index) => {
+            const x = point.x * outputCanvas.width;
+            const y = point.y * outputCanvas.height;
+            if (index === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          });
+          ctx.stroke();
+          const firstPoint = points[0];
+          ctx.fillStyle = annotation.color;
+          ctx.beginPath();
+          ctx.arc(firstPoint.x * outputCanvas.width, firstPoint.y * outputCanvas.height, 18, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 18px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(String(annotationIndex + 1), firstPoint.x * outputCanvas.width, firstPoint.y * outputCanvas.height);
+        });
+        resolve(outputCanvas.toDataURL('image/png'));
+      };
+      image.onerror = reject;
+      image.src = sourceDataUrl;
+    });
+
+  const handleSave = async () => {
+    const cleanedAnnotations = annotations
+      .map((annotation, index) => ({
+        ...annotation,
+        label: getAnnotationLabel(annotation, index),
+        prompt: String(annotation.prompt || '').trim(),
+      }))
+      .filter((annotation) => annotation.points?.length > 1 && annotation.prompt);
+    if (cleanedAnnotations.length === 0) {
+      showError(t('\u8bf7\u5148\u753b\u51fa\u9700\u8981\u4fee\u6539\u7684\u533a\u57df\uff0c\u5e76\u586b\u5199\u5bf9\u5e94\u8981\u6c42'));
+      return;
+    }
+    try {
+      const dataUrl = await createAnnotatedDataUrl(cleanedAnnotations);
+      onSave?.({ dataUrl, annotations: cleanedAnnotations });
+    } catch {
+      showError(t('\u4fdd\u5b58\u6807\u6ce8\u56fe\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5'));
+    }
+  };
+
+  return (
+    <Modal
+      title={t('\u753b\u5708\u6807\u6ce8\u5c40\u90e8\u91cd\u7ed8')}
+      visible={visible}
+      onCancel={onCancel}
+      width={1080}
+      footer={null}
+    >
+      <div className='grid gap-4 lg:grid-cols-[minmax(0,1fr)_330px]'>
+        <div className='min-h-[360px] rounded-[24px] bg-slate-950 p-3'>
+          <canvas
+            ref={canvasRef}
+            className='mx-auto block max-h-[68vh] max-w-full touch-none rounded-[18px] bg-white'
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+          />
+          {loading && <div className='py-6 text-center text-sm text-slate-300'>{t('\u56fe\u7247\u52a0\u8f7d\u4e2d...')}</div>}
+        </div>
+        <div className='flex flex-col gap-3'>
+          <div>
+            <Typography.Title heading={6} style={{ margin: 0 }}>{sourceLabel || t('\u5f53\u524d\u8be6\u60c5\u6bb5')}</Typography.Title>
+            <Typography.Text type='secondary'>{t('\u6bcf\u753b\u5b8c\u4e00\u5904\u4f1a\u81ea\u52a8\u5207\u6362\u989c\u8272\uff0c\u53f3\u4fa7\u586b\u5199\u8be5\u533a\u57df\u7684\u4fee\u6539\u8981\u6c42\u3002')}</Typography.Text>
+          </div>
+          <div className='flex flex-wrap gap-2'>
+            {ANNOTATION_COLORS.map((item) => (
+              <button
+                key={item.value}
+                type='button'
+                title={t(item.label)}
+                className={`h-8 w-8 rounded-full border-2 ${selectedColor === item.value ? 'border-slate-950' : 'border-white'} shadow`}
+                style={{ backgroundColor: item.value }}
+                onClick={() => setSelectedColor(item.value)}
+              />
+            ))}
+          </div>
+          <div className='max-h-[44vh] overflow-auto pr-1'>
+            {annotations.length > 0 ? annotations.map((annotation, index) => (
+              <div key={annotation.id} className='mb-3 rounded-[18px] border border-slate-100 bg-slate-50 p-3'>
+                <div className='mb-2 flex items-center justify-between gap-2'>
+                  <span className='inline-flex items-center gap-2 text-sm font-medium text-slate-800'>
+                    <span className='h-3 w-3 rounded-full' style={{ backgroundColor: annotation.color }} />
+                    {getAnnotationLabel(annotation, index)}
+                  </span>
+                  <Button size='small' type='danger' theme='borderless' icon={<Trash2 size={14} />} onClick={() => setAnnotations((previous) => previous.filter((item) => item.id !== annotation.id))} />
+                </div>
+                <TextArea
+                  value={annotation.prompt}
+                  onChange={(value) => updateAnnotationPrompt(annotation.id, value)}
+                  autosize={{ minRows: 2, maxRows: 4 }}
+                  placeholder={t('\u8fd9\u4e2a\u533a\u57df\u600e\u4e48\u6539\uff1f')}
+                />
+              </div>
+            )) : (
+              <Empty title={t('\u6682\u65e0\u6807\u6ce8')} description={t('\u5728\u56fe\u7247\u4e0a\u5708\u51fa\u8981\u6539\u7684\u4f4d\u7f6e')} />
+            )}
+          </div>
+          <div className='flex gap-2'>
+            <Button className='!rounded-full' onClick={() => setAnnotations([])}>{t('\u6e05\u7a7a\u6807\u6ce8')}</Button>
+            <Button theme='solid' type='primary' className='!rounded-full' icon={<Check size={16} />} onClick={handleSave}>
+              {t('\u4fdd\u5b58\u5c40\u90e8\u8981\u6c42')}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
 };
 
 const AIEcommerceTemplate = () => {
@@ -116,6 +474,9 @@ const AIEcommerceTemplate = () => {
   const [polling, setPolling] = useState(false);
   const [redrawSegment, setRedrawSegment] = useState(null);
   const [redrawPrompt, setRedrawPrompt] = useState('');
+  const [redrawAnnotatedImage, setRedrawAnnotatedImage] = useState('');
+  const [redrawAnnotations, setRedrawAnnotations] = useState([]);
+  const [redrawAnnotationVisible, setRedrawAnnotationVisible] = useState(false);
   const [redrawing, setRedrawing] = useState(false);
   const [historyItems, setHistoryItems] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -289,17 +650,27 @@ const AIEcommerceTemplate = () => {
 
   const submitRedraw = async () => {
     if (!workflow?.workflow_id || !redrawSegment?.segment_key) return;
+    const prompt = buildRedrawPromptWithAnnotations(redrawPrompt, redrawAnnotations);
+    if (!prompt && !redrawAnnotatedImage) {
+      showError(t('请输入重绘要求，或先画圈标注局部修改要求'));
+      return;
+    }
     setRedrawing(true);
     try {
       const res = await API.post(
         `/api/ai-ecommerce/workflows/${workflow.workflow_id}/segments/${redrawSegment.segment_key}/redraw`,
-        { prompt: redrawPrompt },
+        {
+          prompt,
+          annotated_image: redrawAnnotatedImage || undefined,
+        },
       );
       if (!res.data?.success) throw new Error(res.data?.message || 'failed to redraw segment');
       setWorkflow(res.data.data || null);
       loadHistory(true);
       setRedrawSegment(null);
       setRedrawPrompt('');
+      setRedrawAnnotatedImage('');
+      setRedrawAnnotations([]);
       showSuccess(t('重绘任务已提交'));
     } catch (error) {
       showError(error?.response?.data?.message || error.message || t('提交重绘失败'));
@@ -312,6 +683,8 @@ const AIEcommerceTemplate = () => {
     setWorkflow(null);
     setRedrawSegment(null);
     setRedrawPrompt('');
+    setRedrawAnnotatedImage('');
+    setRedrawAnnotations([]);
   };
 
   if (!ready) {
@@ -563,7 +936,7 @@ const AIEcommerceTemplate = () => {
                           </div>
                         )}
                         <div className='mt-2 flex flex-wrap gap-2'>
-                          <Button size='small' className='!rounded-full' disabled={!segment.result_url} onClick={() => { setRedrawSegment(segment); setRedrawPrompt(''); }}>{t('重绘')}</Button>
+                          <Button size='small' className='!rounded-full' disabled={!segment.result_url} onClick={() => { setRedrawSegment(segment); setRedrawPrompt(''); setRedrawAnnotatedImage(''); setRedrawAnnotations([]); }}>{t('重绘')}</Button>
                           <Button size='small' icon={<Download size={13} />} className='!rounded-full' disabled={!segment.result_url} onClick={() => downloadImage(segment.result_url, `ecommerce-${segment.segment_key}.png`)}>{t('下载')}</Button>
                         </div>
                       </div>
@@ -642,24 +1015,64 @@ const AIEcommerceTemplate = () => {
       <Modal
         title={t('重绘详情段')}
         visible={Boolean(redrawSegment)}
-        onCancel={() => setRedrawSegment(null)}
+        onCancel={() => { setRedrawSegment(null); setRedrawAnnotationVisible(false); }}
         width={980}
         footer={null}
       >
         <div className='grid gap-4 md:grid-cols-[320px_minmax(0,1fr)]'>
           <div className='flex flex-col gap-3'>
             <Tag color={statusColorMap[redrawSegment?.status] || 'grey'}>{redrawSegment?.label}</Tag>
-            <Typography.Text type='secondary'>{t('输入额外重绘要求，后端会复用商品图、母版图、当前切片和上一段结果重新生成这一段。')}</Typography.Text>
+            <Typography.Text type='secondary'>{t('输入额外重绘要求，也可以直接在右侧图片上画圈标注局部要求。')}</Typography.Text>
             <TextArea value={redrawPrompt} onChange={setRedrawPrompt} autosize={{ minRows: 8, maxRows: 14 }} placeholder={t('例如：增强产品特写，减少文字密度，背景更统一，保留当前商品外观')} />
+            {getAnnotationPromptCount(redrawAnnotations) > 0 && (
+              <div className='rounded-[18px] border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-800'>
+                {t('已添加 {{count}} 处局部重绘要求，可不填写上方整体提示词直接提交。', {
+                  count: getAnnotationPromptCount(redrawAnnotations),
+                })}
+              </div>
+            )}
             <Button theme='solid' type='primary' loading={redrawing} icon={redrawing ? <Loader2 className='animate-spin' size={16} /> : <Wand2 size={16} />} className='!rounded-full' onClick={submitRedraw}>
               {t('开始重绘')}
             </Button>
           </div>
-          <div className='max-h-[70vh] overflow-auto rounded-[24px] bg-slate-50 p-3'>
-            {redrawSegment?.result_url ? <img src={redrawSegment.result_url} alt={redrawSegment.label} className='mx-auto max-h-[68vh] w-auto max-w-full rounded-[18px]' /> : <Empty description={t('当前段暂无可预览结果')} />}
+          <div className='flex max-h-[70vh] flex-col gap-3 overflow-auto rounded-[24px] bg-slate-50 p-3'>
+            <Button
+              theme='solid'
+              type='primary'
+              icon={<Brush size={16} />}
+              className='!rounded-full !bg-amber-500 !text-white hover:!bg-amber-600'
+              disabled={!redrawSegment?.result_url}
+              onClick={() => setRedrawAnnotationVisible(true)}
+            >
+              {getAnnotationPromptCount(redrawAnnotations) > 0
+                ? t('继续画圈修改')
+                : t('画圈标注局部重绘')}
+            </Button>
+            {redrawSegment?.result_url ? (
+              <img
+                src={redrawAnnotatedImage || redrawSegment.result_url}
+                alt={redrawSegment.label}
+                className='mx-auto max-h-[62vh] w-auto max-w-full rounded-[18px]'
+              />
+            ) : (
+              <Empty description={t('当前段暂无可预览结果')} />
+            )}
           </div>
         </div>
       </Modal>
+      <EcommerceAnnotationModal
+        visible={redrawAnnotationVisible}
+        sourceUrl={redrawSegment?.task_id ? `/api/ai-image/proxy/${redrawSegment.task_id}` : redrawSegment?.result_url}
+        sourceLabel={redrawSegment?.label}
+        initialAnnotations={redrawAnnotations}
+        onCancel={() => setRedrawAnnotationVisible(false)}
+        onSave={({ dataUrl, annotations }) => {
+          setRedrawAnnotatedImage(dataUrl);
+          setRedrawAnnotations(annotations);
+          setRedrawAnnotationVisible(false);
+          showSuccess(t('已保存局部重绘要求'));
+        }}
+      />
     </div>
   );
 };

@@ -26,6 +26,7 @@ import {
   showSuccess,
   timestamp2string,
 } from '../../helpers';
+import { IconSearch } from '@douyinfe/semi-icons';
 
 const { Text, Title } = Typography;
 
@@ -94,6 +95,8 @@ export default function Agent() {
   const [downlinesTotal, setDownlinesTotal] = useState(0);
   const [downlinesPage, setDownlinesPage] = useState(1);
   const [downlinesLoading, setDownlinesLoading] = useState(false);
+  const [downlineKeyword, setDownlineKeyword] = useState('');
+  const [downlineKeywordInput, setDownlineKeywordInput] = useState('');
   const [activeAgentScope, setActiveAgentScope] = useState(null);
   const [inspectModalVisible, setInspectModalVisible] = useState(false);
   const [initModalVisible, setInitModalVisible] = useState(false);
@@ -131,6 +134,7 @@ export default function Agent() {
   const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [transferAgents, setTransferAgents] = useState([]);
   const [transferAgentsLoading, setTransferAgentsLoading] = useState(false);
+  const [transferAgentKeyword, setTransferAgentKeyword] = useState('');
   const [transferPromoLinks, setTransferPromoLinks] = useState([]);
   const [transferPromoLinksLoading, setTransferPromoLinksLoading] = useState(false);
   const [transferForm, setTransferForm] = useState({
@@ -364,7 +368,7 @@ export default function Agent() {
   );
 
   const loadDownlines = useCallback(
-    async (agentUserId = activeAgentScope?.userId || 0, page = downlinesPage) => {
+    async (agentUserId = activeAgentScope?.userId || 0, page = downlinesPage, currentKeyword = downlineKeyword) => {
       if (!status?.initialized || !agentUserId) {
         setDownlines([]);
         setDownlinesTotal(0);
@@ -377,6 +381,7 @@ export default function Agent() {
             agent_user_id: agentUserId,
             p: page,
             page_size: DEFAULT_PAGE_SIZE,
+            keyword: currentKeyword,
           },
         });
         if (!res.data.success) {
@@ -391,7 +396,7 @@ export default function Agent() {
         setDownlinesLoading(false);
       }
     },
-    [activeAgentScope?.userId, downlinesPage, status?.initialized, t],
+    [activeAgentScope?.userId, downlineKeyword, downlinesPage, status?.initialized, t],
   );
 
   useEffect(() => {
@@ -420,7 +425,7 @@ export default function Agent() {
     await loadPromoLinks(promoLinksPage);
     await loadWithdrawRequests();
     await loadPromoLinkStats(activeAgentScope?.userId || 0);
-    await loadDownlines(activeAgentScope?.userId || 0, downlinesPage);
+    await loadDownlines(activeAgentScope?.userId || 0, downlinesPage, downlineKeyword);
   };
 
   const handleOpenCreateGroup = () => {
@@ -519,12 +524,26 @@ export default function Agent() {
   );
 
   const transferAgentOptions = useMemo(
-    () =>
-      transferAgents.map((agent) => ({
+    () => {
+      const normalizedKeyword = transferAgentKeyword.trim().toLowerCase();
+      return transferAgents
+        .filter((agent) => {
+          if (!normalizedKeyword) return true;
+          return [
+            agent.user_id,
+            agent.username,
+            agent.display_name,
+            agent.rebate_group_name,
+          ]
+            .filter((value) => value !== undefined && value !== null)
+            .some((value) => String(value).toLowerCase().includes(normalizedKeyword));
+        })
+        .map((agent) => ({
         label: `${agent.username || agent.user_id} (${formatRate(agent.effective_rate)})`,
         value: agent.user_id,
-      })),
-    [transferAgents],
+      }));
+    },
+    [transferAgentKeyword, transferAgents],
   );
 
   const transferPromoLinkOptions = useMemo(
@@ -627,8 +646,10 @@ export default function Agent() {
     setActiveAgentScope(scope);
     setInspectModalVisible(true);
     setDownlinesPage(1);
+    setDownlineKeyword('');
+    setDownlineKeywordInput('');
     await loadPromoLinkStats(scope.userId);
-    await loadDownlines(scope.userId, 1);
+    await loadDownlines(scope.userId, 1, '');
   };
 
   const handleOpenTransferDownline = async (record) => {
@@ -646,6 +667,7 @@ export default function Agent() {
       remark: '',
     });
     setTransferPromoLinks([]);
+    setTransferAgentKeyword('');
     setTransferModalVisible(true);
     await loadTransferAgents([activeAgentScope.userId, record.user_id]);
   };
@@ -686,7 +708,7 @@ export default function Agent() {
       showSuccess(t('用户已转移'));
       setTransferModalVisible(false);
       if (activeAgentScope?.userId) {
-        await loadDownlines(activeAgentScope.userId, downlinesPage);
+        await loadDownlines(activeAgentScope.userId, downlinesPage, downlineKeyword);
         await loadPromoLinkStats(activeAgentScope.userId);
       }
       await loadOverview();
@@ -1453,6 +1475,12 @@ export default function Agent() {
             ]}
             row
           />
+          <Input
+            prefix={<IconSearch size={14} />}
+            placeholder={t('搜索目标代理ID、用户名或分组')}
+            value={transferAgentKeyword}
+            onChange={setTransferAgentKeyword}
+          />
           <Select
             placeholder={t('目标代理')}
             value={transferForm.targetAgentUserId || undefined}
@@ -1474,7 +1502,7 @@ export default function Agent() {
             {t('转移会更新该用户的邀请归属和推广链接归属，历史返佣记录保持不变。')}
           </Text>
           <TextArea
-            placeholder={t('Remark')}
+            placeholder={t('备注')}
             value={transferForm.remark}
             onChange={(value) => setTransferForm((prev) => ({ ...prev, remark: value }))}
             rows={3}
@@ -1638,9 +1666,48 @@ export default function Agent() {
 
             <Card style={{ width: '100%' }}>
             <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
-              <Title heading={5} style={{ margin: 0 }}>
-                {t('下级用户概况')}
-              </Title>
+              <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
+                <Title heading={5} style={{ margin: 0 }}>
+                  {t('下级用户概况')}
+                </Title>
+                <Space>
+                  <Input
+                    prefix={<IconSearch size={14} />}
+                    placeholder={t('搜索下级用户ID、用户名或显示名称')}
+                    value={downlineKeywordInput}
+                    onChange={setDownlineKeywordInput}
+                    style={{ width: 280 }}
+                    onEnterPress={() => {
+                      const nextKeyword = downlineKeywordInput.trim();
+                      setDownlinesPage(1);
+                      setDownlineKeyword(nextKeyword);
+                      loadDownlines(activeAgentScope?.userId || 0, 1, nextKeyword);
+                    }}
+                  />
+                  <Button
+                    onClick={() => {
+                      const nextKeyword = downlineKeywordInput.trim();
+                      setDownlinesPage(1);
+                      setDownlineKeyword(nextKeyword);
+                      loadDownlines(activeAgentScope?.userId || 0, 1, nextKeyword);
+                    }}
+                  >
+                    {t('搜索')}
+                  </Button>
+                  {downlineKeyword ? (
+                    <Button
+                      onClick={() => {
+                        setDownlineKeyword('');
+                        setDownlineKeywordInput('');
+                        setDownlinesPage(1);
+                        loadDownlines(activeAgentScope?.userId || 0, 1, '');
+                      }}
+                    >
+                      {t('清空')}
+                    </Button>
+                  ) : null}
+                </Space>
+              </div>
               <Table
                 rowKey='user_id'
                 columns={downlineColumns}
@@ -1655,7 +1722,7 @@ export default function Agent() {
                 pageSize={DEFAULT_PAGE_SIZE}
                 onPageChange={(page) => {
                   setDownlinesPage(page);
-                  loadDownlines(activeAgentScope?.userId || 0, page);
+                  loadDownlines(activeAgentScope?.userId || 0, page, downlineKeyword);
                 }}
               />
             </Space>

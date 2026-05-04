@@ -263,7 +263,17 @@ func RedrawEcommerceWorkflowSegment(c *gin.Context) {
 		common.ApiErrorMsg(c, "segment slice is missing")
 		return
 	}
-	if err := createOrReplaceEcommerceSegmentTask(context.Background(), workflow, segment, strings.TrimSpace(req.Prompt), true); err != nil {
+	var extraReferenceKeys []string
+	if strings.TrimSpace(req.AnnotatedImage) != "" {
+		key, err := uploadReferenceImage(context.Background(), workflow.UserID, req.AnnotatedImage)
+		if err != nil {
+			common.ApiError(c, fmt.Errorf("upload annotated image failed: %w", err))
+			return
+		}
+		extraReferenceKeys = append(extraReferenceKeys, key)
+	}
+	if err := createOrReplaceEcommerceSegmentTask(context.Background(), workflow, segment, strings.TrimSpace(req.Prompt), true, extraReferenceKeys); err != nil {
+		cleanupReferenceImages(extraReferenceKeys)
 		common.ApiError(c, err)
 		return
 	}
@@ -355,7 +365,7 @@ func progressEcommerceSegments(ctx context.Context, workflow *model.EcommerceWor
 	}
 	for _, segment := range segments {
 		if segment.TaskID == "" {
-			return createOrReplaceEcommerceSegmentTask(ctx, workflow, segment, "", false)
+			return createOrReplaceEcommerceSegmentTask(ctx, workflow, segment, "", false, nil)
 		}
 		task, err := model.GetImageTaskByTaskID(segment.TaskID)
 		if err != nil {
@@ -425,13 +435,13 @@ func ensureEcommerceMotherSlices(ctx context.Context, workflow *model.EcommerceW
 	return nil
 }
 
-func createOrReplaceEcommerceSegmentTask(ctx context.Context, workflow *model.EcommerceWorkflow, segment *model.EcommerceWorkflowSegment, redrawPrompt string, isRedraw bool) error {
+func createOrReplaceEcommerceSegmentTask(ctx context.Context, workflow *model.EcommerceWorkflow, segment *model.EcommerceWorkflowSegment, redrawPrompt string, isRedraw bool, extraReferenceKeys []string) error {
 	channel, err := selectEcommerceWorkflowChannel(workflow)
 	if err != nil {
 		return err
 	}
 	prompt := buildEcommerceSegmentPrompt(workflow, segment, redrawPrompt)
-	referenceKeys := buildEcommerceSegmentReferenceKeys(workflow, segment)
+	referenceKeys := buildEcommerceSegmentReferenceKeys(workflow, segment, extraReferenceKeys)
 	task := &model.ImageTask{UserID: workflow.UserID, Group: workflow.Group, Model: workflow.Model, Size: "1024x1536", Prompt: prompt, Status: model.ImageTaskStatusPending, Source: ecommerceImageSource, WorkflowID: workflow.WorkflowID, WorkflowStage: "segment_" + segment.SegmentKey, ChannelID: channel.Id}
 	if isRedraw {
 		task.WorkflowStage = "segment_redraw"
@@ -453,15 +463,31 @@ func createOrReplaceEcommerceSegmentTask(ctx context.Context, workflow *model.Ec
 	return model.UpdateEcommerceWorkflowFields(workflow.WorkflowID, map[string]any{"status": model.EcommerceWorkflowStatusSegmentsProcessing, "error_message": ""})
 }
 
-func buildEcommerceSegmentReferenceKeys(workflow *model.EcommerceWorkflow, segment *model.EcommerceWorkflowSegment) []string {
+func buildEcommerceSegmentReferenceKeys(workflow *model.EcommerceWorkflow, segment *model.EcommerceWorkflowSegment, extraReferenceKeys []string) []string {
 	productKeys := workflow.GetReferenceImageKeys()
-	if segment.SegmentIndex == 0 && len(productKeys) > 3 {
-		productKeys = productKeys[:3]
+	keys := append([]string{}, extraReferenceKeys...)
+	reservedSlots := len(keys)
+	if workflow.MotherResultKey != "" {
+		reservedSlots++
 	}
-	if segment.SegmentIndex > 0 && len(productKeys) > 2 {
-		productKeys = productKeys[:2]
+	if segment.SliceKey != "" {
+		reservedSlots++
 	}
-	keys := append([]string{}, productKeys...)
+	productLimit := 2
+	if segment.SegmentIndex == 0 {
+		productLimit = 3
+	}
+	availableProductSlots := maxReferenceImagesPerTask - reservedSlots
+	if availableProductSlots < 0 {
+		availableProductSlots = 0
+	}
+	if productLimit > availableProductSlots {
+		productLimit = availableProductSlots
+	}
+	if len(productKeys) > productLimit {
+		productKeys = productKeys[:productLimit]
+	}
+	keys = append(keys, productKeys...)
 	if workflow.MotherResultKey != "" {
 		keys = append(keys, workflow.MotherResultKey)
 	}

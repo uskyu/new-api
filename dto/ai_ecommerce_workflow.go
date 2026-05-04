@@ -21,7 +21,8 @@ type CreateEcommerceWorkflowRequest struct {
 }
 
 type RedrawEcommerceSegmentRequest struct {
-	Prompt string `json:"prompt,omitempty"`
+	Prompt         string `json:"prompt,omitempty"`
+	AnnotatedImage string `json:"annotated_image,omitempty"`
 }
 
 type EcommerceWorkflowSegmentDTO struct {
