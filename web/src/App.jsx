@@ -18,7 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { lazy, Suspense, useContext, useEffect, useMemo } from 'react';
-import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import {
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useParams,
+} from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
 import User from './pages/User';
 import {
@@ -224,7 +230,7 @@ function App() {
         <Route
           path='/console/redemption'
           element={
-            <PermissionRoute permission={PERMISSIONS.REDEMPTION_MANAGE}>
+            <PermissionRoute permission={PERMISSIONS.REDEMPTION_READ}>
               <Redemption />
             </PermissionRoute>
           }

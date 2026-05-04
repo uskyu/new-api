@@ -184,7 +184,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('兑换码管理'),
         itemKey: 'redemption',
         to: '/redemption',
-        className: can(PERMISSIONS.REDEMPTION_MANAGE) ? '' : 'tableHiddle',
+        className: can(PERMISSIONS.REDEMPTION_READ) ? '' : 'tableHiddle',
       },
       {
         text: t('用户管理'),
@@ -201,10 +201,13 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     ];
 
     return items.filter((item) => {
-      if (
-        item.itemKey === 'agent' &&
-        can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN)
-      ) {
+      if (item.itemKey === 'redemption' && can(PERMISSIONS.REDEMPTION_READ)) {
+        return true;
+      }
+      if (item.itemKey === 'user' && can(PERMISSIONS.USER_QUOTA_DECREASE)) {
+        return true;
+      }
+      if (item.itemKey === 'agent' && can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN)) {
         return true;
       }
       return isModuleVisible('admin', item.itemKey);
@@ -244,9 +247,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
 
     return items
       .map((item) =>
-        item.itemKey === 'ai_console'
-          ? { ...item, text: t('AI 对话') }
-          : item,
+        item.itemKey === 'ai_console' ? { ...item, text: t('AI 对话') } : item,
       )
       .filter((item) => isModuleVisible('chat', item.itemKey));
   }, [chatItems, isModuleVisible, t]);
@@ -426,7 +427,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         collapsed={collapsed}
         showAdmin={
           isAdmin() ||
-          can(PERMISSIONS.REDEMPTION_MANAGE) ||
+          can(PERMISSIONS.REDEMPTION_READ) ||
           can(PERMISSIONS.USER_QUOTA_DECREASE) ||
           can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN)
         }
@@ -441,7 +442,8 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           hoverStyle='sidebar-nav-item:hover'
           selectedStyle='sidebar-nav-item-selected'
           renderWrapper={({ itemElement, props }) => {
-            const to = routerMapState[props.itemKey] || routerMap[props.itemKey];
+            const to =
+              routerMapState[props.itemKey] || routerMap[props.itemKey];
             if (!to) {
               return itemElement;
             }
@@ -472,7 +474,9 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         >
           {hasSectionVisibleModules('chat') && (
             <div className='sidebar-section'>
-              {!collapsed && <div className='sidebar-group-label'>{t('聊天')}</div>}
+              {!collapsed && (
+                <div className='sidebar-group-label'>{t('聊天')}</div>
+              )}
               {chatMenuItems.map((item) => renderSubItem(item))}
             </div>
           )}
@@ -502,20 +506,20 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           )}
 
           {(isAdmin() ||
-            can(PERMISSIONS.REDEMPTION_MANAGE) ||
+            can(PERMISSIONS.REDEMPTION_READ) ||
             can(PERMISSIONS.USER_QUOTA_DECREASE) ||
             can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN)) &&
             hasSectionVisibleModules('admin') && (
-            <>
-              <Divider className='sidebar-divider' />
-              <div>
-                {!collapsed && (
-                  <div className='sidebar-group-label'>{t('管理员')}</div>
-                )}
-                {adminItems.map((item) => renderNavItem(item))}
-              </div>
-            </>
-          )}
+              <>
+                <Divider className='sidebar-divider' />
+                <div>
+                  {!collapsed && (
+                    <div className='sidebar-group-label'>{t('管理员')}</div>
+                  )}
+                  {adminItems.map((item) => renderNavItem(item))}
+                </div>
+              </>
+            )}
         </Nav>
       </SkeletonWrapper>
 

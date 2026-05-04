@@ -84,6 +84,14 @@ type AssignAgentDownlineUserRequest struct {
 	Remark            string `json:"remark"`
 }
 
+type SupportAgentProfileView struct {
+	Id          int    `json:"id"`
+	UserId      int    `json:"user_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Status      int    `json:"status"`
+}
+
 func writeAgentConflict(c *gin.Context, err error) bool {
 	var conflictErr *model.AgentRateConflictError
 	if !errors.As(err, &conflictErr) {
@@ -182,6 +190,22 @@ func GetAgentProfiles(c *gin.Context) {
 	profiles, total, err := model.GetAgentProfiles(pageInfo, keyword)
 	if err != nil {
 		common.ApiError(c, err)
+		return
+	}
+	if c.GetInt("role") < common.RoleAdminUser {
+		safeProfiles := make([]*SupportAgentProfileView, 0, len(profiles))
+		for _, profile := range profiles {
+			safeProfiles = append(safeProfiles, &SupportAgentProfileView{
+				Id:          profile.Id,
+				UserId:      profile.UserId,
+				Username:    profile.Username,
+				DisplayName: profile.DisplayName,
+				Status:      profile.Status,
+			})
+		}
+		pageInfo.SetTotal(int(total))
+		pageInfo.SetItems(safeProfiles)
+		common.ApiSuccess(c, pageInfo)
 		return
 	}
 	pageInfo.SetTotal(int(total))
@@ -564,6 +588,17 @@ func GetAgentDownlineUsers(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	agentUserId, _ := strconv.Atoi(c.Query("agent_user_id"))
 	keyword := c.Query("keyword")
+	if c.GetInt("role") < common.RoleAdminUser {
+		users, total, err := model.GetAgentTransferDownlineUsers(pageInfo, agentUserId, keyword)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		pageInfo.SetTotal(int(total))
+		pageInfo.SetItems(users)
+		common.ApiSuccess(c, pageInfo)
+		return
+	}
 	users, total, err := model.GetAgentDownlineUsers(pageInfo, agentUserId, keyword)
 	if err != nil {
 		common.ApiError(c, err)

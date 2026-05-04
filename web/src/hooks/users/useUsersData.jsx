@@ -19,7 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { API, can, isAdmin, PERMISSIONS, showError, showSuccess } from '../../helpers';
+import {
+  API,
+  can,
+  isAdmin,
+  isSupportConsole,
+  PERMISSIONS,
+  showError,
+  showSuccess,
+} from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 
@@ -36,7 +44,7 @@ export const useUsersData = () => {
   const [groupOptions, setGroupOptions] = useState([]);
   const [userCount, setUserCount] = useState(0);
   const supportMode =
-    can(PERMISSIONS.USER_QUOTA_DECREASE) && !isAdmin();
+    isSupportConsole() || (can(PERMISSIONS.USER_QUOTA_DECREASE) && !isAdmin());
 
   // Modal states
   const [showAddUser, setShowAddUser] = useState(false);
@@ -59,7 +67,7 @@ export const useUsersData = () => {
     const formValues = formApi ? formApi.getValues() : {};
     return {
       searchKeyword: formValues.searchKeyword || '',
-      searchGroup: formValues.searchGroup || '',
+      searchGroup: supportMode ? '' : formValues.searchGroup || '',
     };
   };
 
@@ -101,6 +109,9 @@ export const useUsersData = () => {
       searchKeyword = formValues.searchKeyword;
       searchGroup = formValues.searchGroup;
     }
+    if (supportMode) {
+      searchGroup = '';
+    }
 
     if (searchKeyword === '' && searchGroup === '') {
       // If keyword is blank, load files instead
@@ -108,8 +119,16 @@ export const useUsersData = () => {
       return;
     }
     setSearching(true);
+    const params = new URLSearchParams({
+      keyword: searchKeyword,
+      p: startIdx,
+      page_size: pageSize,
+    });
+    if (!supportMode) {
+      params.set('group', searchGroup);
+    }
     const res = await API.get(
-      `${supportMode ? '/api/support/users/search' : '/api/user/search'}?keyword=${searchKeyword}&group=${searchGroup}&p=${startIdx}&page_size=${pageSize}`,
+      `${supportMode ? '/api/support/users/search' : '/api/user/search'}?${params.toString()}`,
     );
     const { success, message, data } = res.data;
     if (success) {
@@ -216,6 +235,9 @@ export const useUsersData = () => {
 
   // Handle table row styling for disabled/deleted users
   const handleRow = (record, index) => {
+    if (supportMode) {
+      return {};
+    }
     if (record.DeletedAt !== null || record.status !== 1) {
       return {
         style: {

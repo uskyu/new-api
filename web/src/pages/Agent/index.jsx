@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Button,
@@ -23,6 +29,7 @@ import {
   copy,
   isAdmin,
   isRoot,
+  isSupportConsole,
   PERMISSIONS,
   renderQuotaWithAmount,
   showError,
@@ -66,8 +73,13 @@ function getWithdrawStatusTag(status, t) {
 
 export default function Agent() {
   const { t } = useTranslation();
-  const canManageAgentAdmin = isAdmin();
-  const canAssignDownlines = can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN);
+  const supportMode = isSupportConsole();
+  const canManageAgentAdmin = isAdmin() && !supportMode;
+  const canAssignDownlines =
+    supportMode || can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN);
+  const canTransferDownlines =
+    supportMode || can(PERMISSIONS.AGENT_DOWNLINE_TRANSFER);
+  const canViewDownlines = canManageAgentAdmin || canTransferDownlines;
   const [status, setStatus] = useState(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const [overview, setOverview] = useState(null);
@@ -141,7 +153,8 @@ export default function Agent() {
   const [transferAgentsLoading, setTransferAgentsLoading] = useState(false);
   const [transferAgentKeyword, setTransferAgentKeyword] = useState('');
   const [transferPromoLinks, setTransferPromoLinks] = useState([]);
-  const [transferPromoLinksLoading, setTransferPromoLinksLoading] = useState(false);
+  const [transferPromoLinksLoading, setTransferPromoLinksLoading] =
+    useState(false);
   const [transferForm, setTransferForm] = useState({
     sourceAgentUserId: 0,
     sourceAgentUsername: '',
@@ -177,9 +190,12 @@ export default function Agent() {
           <Space vertical align='start' style={{ width: '100%' }}>
             <Text>{message}</Text>
             {conflicts.map((conflict) => (
-              <Text key={`${conflict.parent_agent_user_id}-${conflict.agent_user_id}`}>
-                {conflict.agent_username} ({formatRate(conflict.agent_rate)}) / {conflict.parent_agent_name}{' '}
-                {t('上限')} {formatRate(conflict.parent_allowed_rate)}
+              <Text
+                key={`${conflict.parent_agent_user_id}-${conflict.agent_user_id}`}
+              >
+                {conflict.agent_username} ({formatRate(conflict.agent_rate)}) /{' '}
+                {conflict.parent_agent_name} {t('上限')}{' '}
+                {formatRate(conflict.parent_allowed_rate)}
               </Text>
             ))}
           </Space>
@@ -326,35 +342,45 @@ export default function Agent() {
     [promoLinksPage, status?.initialized, t],
   );
 
-  const loadWithdrawRequests = useCallback(async (page = withdrawRequestsPage) => {
-    if (!status?.initialized) {
-      setWithdrawRequests([]);
-      setWithdrawRequestsTotal(0);
-      return;
-    }
-    setWithdrawRequestsLoading(true);
-    try {
-      const res = await API.get('/api/agent/withdraw-requests', {
-        params: {
-          p: page,
-          page_size: DEFAULT_PAGE_SIZE,
-          status: withdrawStatusFilter,
-          start_date: withdrawStartDate,
-          end_date: withdrawEndDate,
-        },
-      });
-      if (!res.data.success) {
-        showError(res.data.message);
+  const loadWithdrawRequests = useCallback(
+    async (page = withdrawRequestsPage) => {
+      if (!status?.initialized) {
+        setWithdrawRequests([]);
+        setWithdrawRequestsTotal(0);
         return;
       }
-      setWithdrawRequests(res.data.data?.items || []);
-      setWithdrawRequestsTotal(res.data.data?.total || 0);
-    } catch (error) {
-      showError(error.message || t('获取提现申请失败'));
-    } finally {
-      setWithdrawRequestsLoading(false);
-    }
-  }, [status?.initialized, t, withdrawEndDate, withdrawRequestsPage, withdrawStartDate, withdrawStatusFilter]);
+      setWithdrawRequestsLoading(true);
+      try {
+        const res = await API.get('/api/agent/withdraw-requests', {
+          params: {
+            p: page,
+            page_size: DEFAULT_PAGE_SIZE,
+            status: withdrawStatusFilter,
+            start_date: withdrawStartDate,
+            end_date: withdrawEndDate,
+          },
+        });
+        if (!res.data.success) {
+          showError(res.data.message);
+          return;
+        }
+        setWithdrawRequests(res.data.data?.items || []);
+        setWithdrawRequestsTotal(res.data.data?.total || 0);
+      } catch (error) {
+        showError(error.message || t('获取提现申请失败'));
+      } finally {
+        setWithdrawRequestsLoading(false);
+      }
+    },
+    [
+      status?.initialized,
+      t,
+      withdrawEndDate,
+      withdrawRequestsPage,
+      withdrawStartDate,
+      withdrawStatusFilter,
+    ],
+  );
 
   const loadPromoLinkStats = useCallback(
     async (agentUserId = activeAgentScope?.userId || 0) => {
@@ -382,7 +408,11 @@ export default function Agent() {
   );
 
   const loadDownlines = useCallback(
-    async (agentUserId = activeAgentScope?.userId || 0, page = downlinesPage, currentKeyword = downlineKeyword) => {
+    async (
+      agentUserId = activeAgentScope?.userId || 0,
+      page = downlinesPage,
+      currentKeyword = downlineKeyword,
+    ) => {
       if (!status?.initialized || !agentUserId) {
         setDownlines([]);
         setDownlinesTotal(0);
@@ -410,7 +440,13 @@ export default function Agent() {
         setDownlinesLoading(false);
       }
     },
-    [activeAgentScope?.userId, downlineKeyword, downlinesPage, status?.initialized, t],
+    [
+      activeAgentScope?.userId,
+      downlineKeyword,
+      downlinesPage,
+      status?.initialized,
+      t,
+    ],
   );
 
   useEffect(() => {
@@ -443,8 +479,12 @@ export default function Agent() {
       await loadPromoLinks(promoLinksPage);
       await loadWithdrawRequests();
       await loadPromoLinkStats(activeAgentScope?.userId || 0);
-      await loadDownlines(activeAgentScope?.userId || 0, downlinesPage, downlineKeyword);
     }
+    await loadDownlines(
+      activeAgentScope?.userId || 0,
+      downlinesPage,
+      downlineKeyword,
+    );
     await loadProfiles(profilesPage, keyword);
   };
 
@@ -543,51 +583,53 @@ export default function Agent() {
     [groups],
   );
 
-  const transferAgentOptions = useMemo(
-    () => {
-      const normalizedKeyword = transferAgentKeyword.trim().toLowerCase();
-      return transferAgents
-        .filter((agent) => {
-          if (!normalizedKeyword) return true;
-          return [
-            agent.user_id,
-            agent.username,
-            agent.display_name,
-            agent.rebate_group_name,
-          ]
-            .filter((value) => value !== undefined && value !== null)
-            .some((value) => String(value).toLowerCase().includes(normalizedKeyword));
-        })
-        .map((agent) => ({
-        label: `${agent.username || agent.user_id} (${formatRate(agent.effective_rate)})`,
+  const transferAgentOptions = useMemo(() => {
+    const normalizedKeyword = transferAgentKeyword.trim().toLowerCase();
+    return transferAgents
+      .filter((agent) => {
+        if (!normalizedKeyword) return true;
+        return [
+          agent.user_id,
+          agent.username,
+          agent.display_name,
+          agent.rebate_group_name,
+        ]
+          .filter((value) => value !== undefined && value !== null)
+          .some((value) =>
+            String(value).toLowerCase().includes(normalizedKeyword),
+          );
+      })
+      .map((agent) => ({
+        label: supportMode
+          ? `${agent.username || agent.user_id}`
+          : `${agent.username || agent.user_id} (${formatRate(agent.effective_rate)})`,
         value: agent.user_id,
       }));
-    },
-    [transferAgentKeyword, transferAgents],
-  );
+  }, [supportMode, transferAgentKeyword, transferAgents]);
 
-  const assignAgentOptions = useMemo(
-    () => {
-      const normalizedKeyword = assignAgentKeyword.trim().toLowerCase();
-      return transferAgents
-        .filter((agent) => {
-          if (!normalizedKeyword) return true;
-          return [
-            agent.user_id,
-            agent.username,
-            agent.display_name,
-            agent.rebate_group_name,
-          ]
-            .filter((value) => value !== undefined && value !== null)
-            .some((value) => String(value).toLowerCase().includes(normalizedKeyword));
-        })
-        .map((agent) => ({
-          label: `${agent.username || agent.user_id} (${formatRate(agent.effective_rate)})`,
-          value: agent.user_id,
-        }));
-    },
-    [assignAgentKeyword, transferAgents],
-  );
+  const assignAgentOptions = useMemo(() => {
+    const normalizedKeyword = assignAgentKeyword.trim().toLowerCase();
+    return transferAgents
+      .filter((agent) => {
+        if (!normalizedKeyword) return true;
+        return [
+          agent.user_id,
+          agent.username,
+          agent.display_name,
+          agent.rebate_group_name,
+        ]
+          .filter((value) => value !== undefined && value !== null)
+          .some((value) =>
+            String(value).toLowerCase().includes(normalizedKeyword),
+          );
+      })
+      .map((agent) => ({
+        label: supportMode
+          ? `${agent.username || agent.user_id}`
+          : `${agent.username || agent.user_id} (${formatRate(agent.effective_rate)})`,
+        value: agent.user_id,
+      }));
+  }, [assignAgentKeyword, supportMode, transferAgents]);
 
   const transferPromoLinkOptions = useMemo(
     () => [
@@ -647,7 +689,9 @@ export default function Agent() {
           showError(res.data.message);
           return [];
         }
-        const links = (res.data.data?.items || []).filter((link) => link.status === 1);
+        const links = (res.data.data?.items || []).filter(
+          (link) => link.status === 1,
+        );
         setTransferPromoLinks(links);
         return links;
       } catch (error) {
@@ -691,7 +735,9 @@ export default function Agent() {
     setDownlinesPage(1);
     setDownlineKeyword('');
     setDownlineKeywordInput('');
-    await loadPromoLinkStats(scope.userId);
+    if (canManageAgentAdmin) {
+      await loadPromoLinkStats(scope.userId);
+    }
     await loadDownlines(scope.userId, 1, '');
   };
 
@@ -721,6 +767,10 @@ export default function Agent() {
       targetAgentUserId,
       promoLinkId: 0,
     }));
+    if (!canManageAgentAdmin) {
+      setTransferPromoLinks([]);
+      return;
+    }
     const links = await loadTransferPromoLinks(targetAgentUserId);
     if (links.length > 0) {
       setTransferForm((prev) => ({
@@ -741,7 +791,7 @@ export default function Agent() {
         source_agent_user_id: transferForm.sourceAgentUserId,
         target_agent_user_id: transferForm.targetAgentUserId,
         downline_user_id: transferForm.downlineUserId,
-        promo_link_id: transferForm.promoLinkId,
+        promo_link_id: canManageAgentAdmin ? transferForm.promoLinkId : 0,
         remark: transferForm.remark,
       });
       if (!res.data.success) {
@@ -751,10 +801,18 @@ export default function Agent() {
       showSuccess(t('用户已转移'));
       setTransferModalVisible(false);
       if (activeAgentScope?.userId) {
-        await loadDownlines(activeAgentScope.userId, downlinesPage, downlineKeyword);
-        await loadPromoLinkStats(activeAgentScope.userId);
+        await loadDownlines(
+          activeAgentScope.userId,
+          downlinesPage,
+          downlineKeyword,
+        );
+        if (canManageAgentAdmin) {
+          await loadPromoLinkStats(activeAgentScope.userId);
+        }
       }
-      await loadOverview();
+      if (canManageAgentAdmin) {
+        await loadOverview();
+      }
     } catch (error) {
       showError(error.message || t('转移用户失败'));
     } finally {
@@ -979,9 +1037,13 @@ export default function Agent() {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const res = await API.post('/api/agent/withdraw-requests/import', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const res = await API.post(
+        '/api/agent/withdraw-requests/import',
+        formData,
+        {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        },
+      );
       if (!res.data.success) {
         showError(res.data.message);
         return;
@@ -1008,7 +1070,8 @@ export default function Agent() {
     {
       title: t('代理级别'),
       dataIndex: 'agent_level',
-      render: (_, record) => (record.agent_level === 2 ? t('二级代理') : t('一级代理')),
+      render: (_, record) =>
+        record.agent_level === 2 ? t('二级代理') : t('一级代理'),
     },
     {
       title: t('直属上级'),
@@ -1039,34 +1102,61 @@ export default function Agent() {
     {
       title: t('上级上限'),
       dataIndex: 'parent_max_rate',
-      render: (_, record) => (record.parent_max_rate > 0 ? formatRate(record.parent_max_rate) : '-'),
+      render: (_, record) =>
+        record.parent_max_rate > 0 ? formatRate(record.parent_max_rate) : '-',
     },
-    {
-      title: t('返利余额'),
-      dataIndex: 'rebate_balance_amount',
-      render: (_, record) => formatAmount(record.rebate_balance_amount),
-    },
-    {
-      title: t('累计返利'),
-      dataIndex: 'rebate_total_amount',
-      render: (_, record) => formatAmount(record.rebate_total_amount),
-    },
+    ...(canManageAgentAdmin
+      ? [
+          {
+            title: t('返利余额'),
+            dataIndex: 'rebate_balance_amount',
+            render: (_, record) => formatAmount(record.rebate_balance_amount),
+          },
+          {
+            title: t('累计返利'),
+            dataIndex: 'rebate_total_amount',
+            render: (_, record) => formatAmount(record.rebate_total_amount),
+          },
+        ]
+      : []),
     {
       title: t('操作'),
       dataIndex: 'operate',
       render: (_, record) => (
         <Space>
-          {canManageAgentAdmin && <Button size='small' type='tertiary' onClick={() => handleOpenEditProfile(record)}>
-            {t('编辑')}
-          </Button>}
-          {canManageAgentAdmin && <Button size='small' type='secondary' onClick={() => handleOpenAdjust(record)}>
-            {t('调账')}
-          </Button>}
-          {canManageAgentAdmin && <Button size='small' type='primary' onClick={() => handleInspectAgent(record)}>
-            {t('查看下级')}
-          </Button>}
+          {canManageAgentAdmin && (
+            <Button
+              size='small'
+              type='tertiary'
+              onClick={() => handleOpenEditProfile(record)}
+            >
+              {t('编辑')}
+            </Button>
+          )}
+          {canManageAgentAdmin && (
+            <Button
+              size='small'
+              type='secondary'
+              onClick={() => handleOpenAdjust(record)}
+            >
+              {t('调账')}
+            </Button>
+          )}
+          {canViewDownlines && (
+            <Button
+              size='small'
+              type='primary'
+              onClick={() => handleInspectAgent(record)}
+            >
+              {t('查看下级')}
+            </Button>
+          )}
           {canAssignDownlines && (
-            <Button size='small' type='warning' onClick={() => handleOpenAssignDownline(record)}>
+            <Button
+              size='small'
+              type='warning'
+              onClick={() => handleOpenAssignDownline(record)}
+            >
               {t('分配用户')}
             </Button>
           )}
@@ -1074,6 +1164,14 @@ export default function Agent() {
       ),
     },
   ];
+
+  const visibleProfileColumns = supportMode
+    ? profileColumns.filter((column) =>
+        ['user_id', 'username', 'display_name', 'status', 'operate'].includes(
+          column.dataIndex,
+        ),
+      )
+    : profileColumns;
 
   const groupColumns = [
     { title: t('分组ID'), dataIndex: 'id' },
@@ -1091,7 +1189,8 @@ export default function Agent() {
     {
       title: t('默认组'),
       dataIndex: 'is_default',
-      render: (_, record) => (record.is_default ? <Tag color='blue'>{t('是')}</Tag> : '-'),
+      render: (_, record) =>
+        record.is_default ? <Tag color='blue'>{t('是')}</Tag> : '-',
     },
     { title: t('备注'), dataIndex: 'remark' },
     {
@@ -1099,11 +1198,19 @@ export default function Agent() {
       dataIndex: 'operate',
       render: (_, record) => (
         <Space>
-          <Button size='small' type='tertiary' onClick={() => handleOpenEditGroup(record)}>
+          <Button
+            size='small'
+            type='tertiary'
+            onClick={() => handleOpenEditGroup(record)}
+          >
             {t('编辑')}
           </Button>
           {!record.is_default && (
-            <Button size='small' type='danger' onClick={() => handleDeleteGroup(record)}>
+            <Button
+              size='small'
+              type='danger'
+              onClick={() => handleDeleteGroup(record)}
+            >
               {t('删除')}
             </Button>
           )}
@@ -1164,13 +1271,25 @@ export default function Agent() {
       dataIndex: 'operate',
       render: (_, record) => (
         <Space>
-          <Button size='small' type='tertiary' onClick={() => handleCopyPromoLink(record)}>
+          <Button
+            size='small'
+            type='tertiary'
+            onClick={() => handleCopyPromoLink(record)}
+          >
             {t('复制')}
           </Button>
-          <Button size='small' type='tertiary' onClick={() => handleOpenEditPromoLink(record)}>
+          <Button
+            size='small'
+            type='tertiary'
+            onClick={() => handleOpenEditPromoLink(record)}
+          >
             {t('编辑')}
           </Button>
-          <Button size='small' type='danger' onClick={() => handleDeletePromoLink(record)}>
+          <Button
+            size='small'
+            type='danger'
+            onClick={() => handleDeletePromoLink(record)}
+          >
             {t('删除')}
           </Button>
         </Space>
@@ -1201,30 +1320,40 @@ export default function Agent() {
     { title: t('用户名'), dataIndex: 'username' },
     { title: t('显示名称'), dataIndex: 'display_name' },
     { title: t('来源渠道'), dataIndex: 'promo_link_name' },
-    { title: t('充值笔数'), dataIndex: 'topup_count' },
-    {
-      title: t('充值金额'),
-      dataIndex: 'topup_amount',
-      render: (_, record) => formatAmount(record.topup_amount),
-    },
-    {
-      title: t('返利金额(含兑换码)'),
-      dataIndex: 'rebate_amount',
-      render: (_, record) => formatAmount(record.rebate_amount),
-    },
-    {
-      title: t('最近充值时间'),
-      dataIndex: 'latest_topup_time',
-      render: (_, record) =>
-        record.latest_topup_time ? timestamp2string(record.latest_topup_time) : '-',
-    },
+    ...(canManageAgentAdmin
+      ? [
+          { title: t('充值笔数'), dataIndex: 'topup_count' },
+          {
+            title: t('充值金额'),
+            dataIndex: 'topup_amount',
+            render: (_, record) => formatAmount(record.topup_amount),
+          },
+          {
+            title: t('返利金额(含兑换码)'),
+            dataIndex: 'rebate_amount',
+            render: (_, record) => formatAmount(record.rebate_amount),
+          },
+          {
+            title: t('最近充值时间'),
+            dataIndex: 'latest_topup_time',
+            render: (_, record) =>
+              record.latest_topup_time
+                ? timestamp2string(record.latest_topup_time)
+                : '-',
+          },
+        ]
+      : []),
     {
       title: t('操作'),
       dataIndex: 'operate',
       render: (_, record) => (
         <Space>
-          {isRoot() && !record.is_agent && (
-            <Button size='small' type='warning' onClick={() => handleOpenTransferDownline(record)}>
+          {canTransferDownlines && !record.is_agent && (
+            <Button
+              size='small'
+              type='warning'
+              onClick={() => handleOpenTransferDownline(record)}
+            >
               {t('转移')}
             </Button>
           )}
@@ -1232,7 +1361,9 @@ export default function Agent() {
         </Space>
       ),
     },
-  ];
+  ].filter(
+    (column) => canManageAgentAdmin || column.dataIndex !== 'promo_link_name',
+  );
 
   const withdrawColumns = [
     { title: t('申请单ID'), dataIndex: 'id' },
@@ -1270,7 +1401,9 @@ export default function Agent() {
                   {t('代理管理')}
                 </Title>
                 <Text type='secondary'>
-                  {t('独立管理代理返利、初始化状态和人工调账，不与钱包余额混用。')}
+                  {t(
+                    '独立管理代理返利、初始化状态和人工调账，不与钱包余额混用。',
+                  )}
                 </Text>
               </div>
               <Space>
@@ -1288,13 +1421,30 @@ export default function Agent() {
             </div>
 
             {status && (
-              <Descriptions data={[
-                { key: t('迁移状态'), value: status.migration_ready ? t('已就绪') : t('未完成') },
-                { key: t('初始化状态'), value: status.initialized ? t('已初始化') : t('未初始化') },
-                { key: t('功能开关'), value: status.enabled ? t('已启用') : t('未启用') },
-                { key: t('默认比例'), value: formatRate(status.default_rate) },
-                { key: t('默认分组ID'), value: status.default_group_id || '-' },
-              ]} />
+              <Descriptions
+                data={[
+                  {
+                    key: t('迁移状态'),
+                    value: status.migration_ready ? t('已就绪') : t('未完成'),
+                  },
+                  {
+                    key: t('初始化状态'),
+                    value: status.initialized ? t('已初始化') : t('未初始化'),
+                  },
+                  {
+                    key: t('功能开关'),
+                    value: status.enabled ? t('已启用') : t('未启用'),
+                  },
+                  {
+                    key: t('默认比例'),
+                    value: formatRate(status.default_rate),
+                  },
+                  {
+                    key: t('默认分组ID'),
+                    value: status.default_group_id || '-',
+                  },
+                ]}
+              />
             )}
 
             {!!status?.missing_resources?.length && (
@@ -1305,9 +1455,7 @@ export default function Agent() {
             )}
 
             {!isRoot() && !status?.initialized && (
-              <Text type='warning'>
-                {t('仅 root 账号可执行首次初始化。')}
-              </Text>
+              <Text type='warning'>{t('仅 root 账号可执行首次初始化。')}</Text>
             )}
           </Space>
         </Card>
@@ -1315,47 +1463,88 @@ export default function Agent() {
         {status?.initialized ? (
           <>
             {canManageAgentAdmin && (
-            <>
-            <Card style={{ width: '100%' }} loading={overviewLoading}>
-              <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
-                <Title heading={5} style={{ margin: 0 }}>
-                  {t('代理总览')}
-                </Title>
-                <div className='grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4 w-full'>
-                  <Card><Text type='secondary'>{t('代理数')}</Text><Title heading={4}>{overview?.agent_count || 0}</Title></Card>
-                  <Card><Text type='secondary'>{t('分组数')}</Text><Title heading={4}>{overview?.group_count || 0}</Title></Card>
-                  <Card><Text type='secondary'>{t('推广链接数')}</Text><Title heading={4}>{overview?.promo_link_count || 0}</Title></Card>
-                  <Card><Text type='secondary'>{t('下级用户数')}</Text><Title heading={4}>{overview?.downline_user_count || 0}</Title></Card>
-                  <Card><Text type='secondary'>{t('返利总余额')}</Text><Title heading={4}>{formatAmount(overview?.rebate_balance_amount)}</Title></Card>
-                  <Card><Text type='secondary'>{t('累计返利')}</Text><Title heading={4}>{formatAmount(overview?.rebate_total_amount)}</Title></Card>
-                </div>
-              </Space>
-            </Card>
+              <>
+                <Card style={{ width: '100%' }} loading={overviewLoading}>
+                  <Space
+                    vertical
+                    align='start'
+                    style={{ width: '100%' }}
+                    spacing={12}
+                  >
+                    <Title heading={5} style={{ margin: 0 }}>
+                      {t('代理总览')}
+                    </Title>
+                    <div className='grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4 w-full'>
+                      <Card>
+                        <Text type='secondary'>{t('代理数')}</Text>
+                        <Title heading={4}>{overview?.agent_count || 0}</Title>
+                      </Card>
+                      <Card>
+                        <Text type='secondary'>{t('分组数')}</Text>
+                        <Title heading={4}>{overview?.group_count || 0}</Title>
+                      </Card>
+                      <Card>
+                        <Text type='secondary'>{t('推广链接数')}</Text>
+                        <Title heading={4}>
+                          {overview?.promo_link_count || 0}
+                        </Title>
+                      </Card>
+                      <Card>
+                        <Text type='secondary'>{t('下级用户数')}</Text>
+                        <Title heading={4}>
+                          {overview?.downline_user_count || 0}
+                        </Title>
+                      </Card>
+                      <Card>
+                        <Text type='secondary'>{t('返利总余额')}</Text>
+                        <Title heading={4}>
+                          {formatAmount(overview?.rebate_balance_amount)}
+                        </Title>
+                      </Card>
+                      <Card>
+                        <Text type='secondary'>{t('累计返利')}</Text>
+                        <Title heading={4}>
+                          {formatAmount(overview?.rebate_total_amount)}
+                        </Title>
+                      </Card>
+                    </div>
+                  </Space>
+                </Card>
 
-            <Card style={{ width: '100%' }}>
-              <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
-                <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
-                  <Title heading={5} style={{ margin: 0 }}>
-                    {t('代理分组')}
-                  </Title>
-                  <Button type='primary' onClick={handleOpenCreateGroup}>
-                    {t('新增分组')}
-                  </Button>
-                </div>
-                <Table
-                  rowKey='id'
-                  columns={groupColumns}
-                  dataSource={groups}
-                  pagination={false}
-                  empty={<Empty title={t('暂无代理分组')} />}
-                />
-              </Space>
-            </Card>
-            </>
+                <Card style={{ width: '100%' }}>
+                  <Space
+                    vertical
+                    align='start'
+                    style={{ width: '100%' }}
+                    spacing={12}
+                  >
+                    <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
+                      <Title heading={5} style={{ margin: 0 }}>
+                        {t('代理分组')}
+                      </Title>
+                      <Button type='primary' onClick={handleOpenCreateGroup}>
+                        {t('新增分组')}
+                      </Button>
+                    </div>
+                    <Table
+                      rowKey='id'
+                      columns={groupColumns}
+                      dataSource={groups}
+                      pagination={false}
+                      empty={<Empty title={t('暂无代理分组')} />}
+                    />
+                  </Space>
+                </Card>
+              </>
             )}
 
             <Card style={{ width: '100%' }}>
-              <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
+              <Space
+                vertical
+                align='start'
+                style={{ width: '100%' }}
+                spacing={12}
+              >
                 <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
                   <Title heading={5} style={{ margin: 0 }}>
                     {t('代理资料')}
@@ -1377,22 +1566,32 @@ export default function Agent() {
                       {t('搜索')}
                     </Button>
                     {canAssignDownlines && (
-                      <Button type='warning' onClick={() => handleOpenAssignDownline()}>
+                      <Button
+                        type='warning'
+                        onClick={() => handleOpenAssignDownline()}
+                      >
                         {t('分配用户')}
                       </Button>
                     )}
-                    {canManageAgentAdmin && <Button type='primary' onClick={handleOpenCreateProfile}>
-                      {t('新增代理')}
-                    </Button>}
+                    {canManageAgentAdmin && (
+                      <Button type='primary' onClick={handleOpenCreateProfile}>
+                        {t('新增代理')}
+                      </Button>
+                    )}
                   </Space>
                 </div>
                 <Table
                   rowKey='id'
-                  columns={profileColumns}
+                  columns={visibleProfileColumns}
                   dataSource={profiles}
                   loading={profilesLoading}
                   pagination={false}
-                  empty={<Empty title={t('暂无代理资料')} description={t('先新增一个代理用户')} />}
+                  empty={
+                    <Empty
+                      title={t('暂无代理资料')}
+                      description={t('先新增一个代理用户')}
+                    />
+                  }
                 />
                 <Pagination
                   total={profilesTotal}
@@ -1407,134 +1606,185 @@ export default function Agent() {
             </Card>
 
             {canManageAgentAdmin && (
-            <>
-            <Card style={{ width: '100%' }}>
-              <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
-                <Title heading={5} style={{ margin: 0 }}>
-                  {t('最近调账记录')}
-                </Title>
-                <Table
-                  rowKey='id'
-                  columns={adjustmentColumns}
-                  dataSource={adjustments}
-                  loading={adjustmentsLoading}
-                  pagination={false}
-                  empty={<Empty title={t('暂无调账记录')} description={t('管理员调账后会显示在这里')} />}
-                />
-              </Space>
-            </Card>
+              <>
+                <Card style={{ width: '100%' }}>
+                  <Space
+                    vertical
+                    align='start'
+                    style={{ width: '100%' }}
+                    spacing={12}
+                  >
+                    <Title heading={5} style={{ margin: 0 }}>
+                      {t('最近调账记录')}
+                    </Title>
+                    <Table
+                      rowKey='id'
+                      columns={adjustmentColumns}
+                      dataSource={adjustments}
+                      loading={adjustmentsLoading}
+                      pagination={false}
+                      empty={
+                        <Empty
+                          title={t('暂无调账记录')}
+                          description={t('管理员调账后会显示在这里')}
+                        />
+                      }
+                    />
+                  </Space>
+                </Card>
 
-            <Card style={{ width: '100%' }}>
-              <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
-                <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
-                  <Title heading={5} style={{ margin: 0 }}>
-                    {t('推广链接管理')}
-                  </Title>
-                  <Button type='primary' onClick={handleOpenCreatePromoLink}>
-                    {t('新增推广链接')}
-                  </Button>
-                </div>
-                <Table
-                  rowKey='id'
-                  columns={promoLinkColumns}
-                  dataSource={promoLinks}
-                  loading={promoLinksLoading}
-                  pagination={false}
-                  empty={<Empty title={t('暂无推广链接')} description={t('创建后即可生成邀请落地链接')} />}
-                />
-                <Pagination
-                  total={promoLinksTotal}
-                  currentPage={promoLinksPage}
-                  pageSize={DEFAULT_PAGE_SIZE}
-                  onPageChange={(page) => {
-                    setPromoLinksPage(page);
-                    loadPromoLinks(page);
-                  }}
-                />
-              </Space>
-            </Card>
-            </>
+                <Card style={{ width: '100%' }}>
+                  <Space
+                    vertical
+                    align='start'
+                    style={{ width: '100%' }}
+                    spacing={12}
+                  >
+                    <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
+                      <Title heading={5} style={{ margin: 0 }}>
+                        {t('推广链接管理')}
+                      </Title>
+                      <Button
+                        type='primary'
+                        onClick={handleOpenCreatePromoLink}
+                      >
+                        {t('新增推广链接')}
+                      </Button>
+                    </div>
+                    <Table
+                      rowKey='id'
+                      columns={promoLinkColumns}
+                      dataSource={promoLinks}
+                      loading={promoLinksLoading}
+                      pagination={false}
+                      empty={
+                        <Empty
+                          title={t('暂无推广链接')}
+                          description={t('创建后即可生成邀请落地链接')}
+                        />
+                      }
+                    />
+                    <Pagination
+                      total={promoLinksTotal}
+                      currentPage={promoLinksPage}
+                      pageSize={DEFAULT_PAGE_SIZE}
+                      onPageChange={(page) => {
+                        setPromoLinksPage(page);
+                        loadPromoLinks(page);
+                      }}
+                    />
+                  </Space>
+                </Card>
+              </>
             )}
 
             {canManageAgentAdmin && (
-            <Card style={{ width: '100%' }}>
-              <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
-                <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
-                  <div>
-                    <Title heading={5} style={{ margin: 0 }}>
-                      {t('提现申请列表')}
-                    </Title>
-                    <Text type='secondary'>
-                      {t('导出后请在 CSV 最后一列填写打款订单号，再导入回执，系统会按申请单ID匹配并标记已打款。')}
-                    </Text>
+              <Card style={{ width: '100%' }}>
+                <Space
+                  vertical
+                  align='start'
+                  style={{ width: '100%' }}
+                  spacing={12}
+                >
+                  <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
+                    <div>
+                      <Title heading={5} style={{ margin: 0 }}>
+                        {t('提现申请列表')}
+                      </Title>
+                      <Text type='secondary'>
+                        {t(
+                          '导出后请在 CSV 最后一列填写打款订单号，再导入回执，系统会按申请单ID匹配并标记已打款。',
+                        )}
+                      </Text>
+                    </div>
+                    <Space>
+                      <input
+                        type='date'
+                        value={withdrawStartDate}
+                        onChange={(e) => setWithdrawStartDate(e.target.value)}
+                        style={{
+                          width: 170,
+                          height: 32,
+                          padding: '0 12px',
+                          border: '1px solid var(--semi-color-border)',
+                          borderRadius: 6,
+                        }}
+                      />
+                      <input
+                        type='date'
+                        value={withdrawEndDate}
+                        onChange={(e) => setWithdrawEndDate(e.target.value)}
+                        style={{
+                          width: 170,
+                          height: 32,
+                          padding: '0 12px',
+                          border: '1px solid var(--semi-color-border)',
+                          borderRadius: 6,
+                        }}
+                      />
+                      <Select
+                        value={withdrawStatusFilter}
+                        onChange={setWithdrawStatusFilter}
+                        optionList={[
+                          { label: t('全部状态'), value: '' },
+                          { label: t('待处理'), value: 'pending' },
+                          { label: t('已导出'), value: 'exported' },
+                          { label: t('已打款'), value: 'paid' },
+                        ]}
+                        style={{ width: 140 }}
+                      />
+                      <Button onClick={handleSearchWithdrawRequests}>
+                        {t('筛选')}
+                      </Button>
+                      <Button
+                        type='secondary'
+                        onClick={handleExportWithdrawRequests}
+                      >
+                        {t('导出')}
+                      </Button>
+                      <Button
+                        type='primary'
+                        onClick={() => withdrawImportRef.current?.click()}
+                      >
+                        {t('导入回执')}
+                      </Button>
+                      <input
+                        ref={withdrawImportRef}
+                        type='file'
+                        accept='.csv,text/csv'
+                        style={{ display: 'none' }}
+                        onChange={handleImportWithdrawResults}
+                      />
+                    </Space>
                   </div>
-                  <Space>
-                    <input
-                      type='date'
-                      value={withdrawStartDate}
-                      onChange={(e) => setWithdrawStartDate(e.target.value)}
-                      style={{ width: 170, height: 32, padding: '0 12px', border: '1px solid var(--semi-color-border)', borderRadius: 6 }}
-                    />
-                    <input
-                      type='date'
-                      value={withdrawEndDate}
-                      onChange={(e) => setWithdrawEndDate(e.target.value)}
-                      style={{ width: 170, height: 32, padding: '0 12px', border: '1px solid var(--semi-color-border)', borderRadius: 6 }}
-                    />
-                    <Select
-                      value={withdrawStatusFilter}
-                      onChange={setWithdrawStatusFilter}
-                      optionList={[
-                        { label: t('全部状态'), value: '' },
-                        { label: t('待处理'), value: 'pending' },
-                        { label: t('已导出'), value: 'exported' },
-                        { label: t('已打款'), value: 'paid' },
-                      ]}
-                      style={{ width: 140 }}
-                    />
-                    <Button onClick={handleSearchWithdrawRequests}>{t('筛选')}</Button>
-                    <Button type='secondary' onClick={handleExportWithdrawRequests}>
-                      {t('导出')}
-                    </Button>
-                    <Button type='primary' onClick={() => withdrawImportRef.current?.click()}>
-                      {t('导入回执')}
-                    </Button>
-                    <input
-                      ref={withdrawImportRef}
-                      type='file'
-                      accept='.csv,text/csv'
-                      style={{ display: 'none' }}
-                      onChange={handleImportWithdrawResults}
-                    />
-                  </Space>
-                </div>
-                <Table
-                  rowKey='id'
-                  columns={withdrawColumns}
-                  dataSource={withdrawRequests}
-                  loading={withdrawRequestsLoading}
-                  pagination={false}
-                  empty={<Empty title={t('暂无提现申请')} />}
-                />
-                <Pagination
-                  total={withdrawRequestsTotal}
-                  currentPage={withdrawRequestsPage}
-                  pageSize={DEFAULT_PAGE_SIZE}
-                  onPageChange={(page) => {
-                    setWithdrawRequestsPage(page);
-                    loadWithdrawRequests(page);
-                  }}
-                />
-              </Space>
-            </Card>
+                  <Table
+                    rowKey='id'
+                    columns={withdrawColumns}
+                    dataSource={withdrawRequests}
+                    loading={withdrawRequestsLoading}
+                    pagination={false}
+                    empty={<Empty title={t('暂无提现申请')} />}
+                  />
+                  <Pagination
+                    total={withdrawRequestsTotal}
+                    currentPage={withdrawRequestsPage}
+                    pageSize={DEFAULT_PAGE_SIZE}
+                    onPageChange={(page) => {
+                      setWithdrawRequestsPage(page);
+                      loadWithdrawRequests(page);
+                    }}
+                  />
+                </Space>
+              </Card>
             )}
-
           </>
         ) : (
           <Card style={{ width: '100%' }}>
             <Empty
               title={t('代理功能尚未初始化')}
-              description={t('完成数据库自动迁移后，由 root 账号点击初始化代理功能。')}
+              description={t(
+                '完成数据库自动迁移后，由 root 账号点击初始化代理功能。',
+              )}
             />
           </Card>
         )}
@@ -1572,11 +1822,14 @@ export default function Agent() {
             data={[
               {
                 key: t('源代理'),
-                value: transferForm.sourceAgentUsername || transferForm.sourceAgentUserId,
+                value:
+                  transferForm.sourceAgentUsername ||
+                  transferForm.sourceAgentUserId,
               },
               {
                 key: t('下线用户'),
-                value: transferForm.downlineUsername || transferForm.downlineUserId,
+                value:
+                  transferForm.downlineUsername || transferForm.downlineUserId,
               },
             ]}
             row
@@ -1596,21 +1849,29 @@ export default function Agent() {
             filter
             style={{ width: '100%' }}
           />
-          <Select
-            placeholder={t('转移后的推广链接')}
-            value={transferForm.promoLinkId}
-            onChange={(value) => setTransferForm((prev) => ({ ...prev, promoLinkId: value }))}
-            optionList={transferPromoLinkOptions}
-            loading={transferPromoLinksLoading}
-            style={{ width: '100%' }}
-          />
+          {canManageAgentAdmin && (
+            <Select
+              placeholder={t('转移后的推广链接')}
+              value={transferForm.promoLinkId}
+              onChange={(value) =>
+                setTransferForm((prev) => ({ ...prev, promoLinkId: value }))
+              }
+              optionList={transferPromoLinkOptions}
+              loading={transferPromoLinksLoading}
+              style={{ width: '100%' }}
+            />
+          )}
           <Text type='secondary'>
-            {t('转移会更新该用户的邀请归属和推广链接归属，历史返佣记录保持不变。')}
+            {t(
+              '转移会更新该用户的邀请归属和推广链接归属，历史返佣记录保持不变。',
+            )}
           </Text>
           <TextArea
             placeholder={t('备注')}
             value={transferForm.remark}
-            onChange={(value) => setTransferForm((prev) => ({ ...prev, remark: value }))}
+            onChange={(value) =>
+              setTransferForm((prev) => ({ ...prev, remark: value }))
+            }
             rows={3}
           />
         </Space>
@@ -1627,21 +1888,28 @@ export default function Agent() {
           <Input
             placeholder={t('分组名称')}
             value={groupForm.name}
-            onChange={(value) => setGroupForm((prev) => ({ ...prev, name: value }))}
+            onChange={(value) =>
+              setGroupForm((prev) => ({ ...prev, name: value }))
+            }
           />
           <InputNumber
             min={0}
             step={0.1}
             value={groupForm.rebateRatePercent}
             onChange={(value) =>
-              setGroupForm((prev) => ({ ...prev, rebateRatePercent: value || 0 }))
+              setGroupForm((prev) => ({
+                ...prev,
+                rebateRatePercent: value || 0,
+              }))
             }
             suffix='%'
             style={{ width: '100%' }}
           />
           <Select
             value={groupForm.status}
-            onChange={(value) => setGroupForm((prev) => ({ ...prev, status: value }))}
+            onChange={(value) =>
+              setGroupForm((prev) => ({ ...prev, status: value }))
+            }
             optionList={[
               { label: t('启用'), value: 1 },
               { label: t('禁用'), value: 0 },
@@ -1651,7 +1919,9 @@ export default function Agent() {
           <Input
             placeholder={t('备注')}
             value={groupForm.remark}
-            onChange={(value) => setGroupForm((prev) => ({ ...prev, remark: value }))}
+            onChange={(value) =>
+              setGroupForm((prev) => ({ ...prev, remark: value }))
+            }
           />
         </Space>
       </Modal>
@@ -1667,11 +1937,15 @@ export default function Agent() {
           <Input
             placeholder={t('用户ID')}
             value={String(profileForm.userId)}
-            onChange={(value) => setProfileForm((prev) => ({ ...prev, userId: value }))}
+            onChange={(value) =>
+              setProfileForm((prev) => ({ ...prev, userId: value }))
+            }
           />
           <Select
             value={profileForm.status}
-            onChange={(value) => setProfileForm((prev) => ({ ...prev, status: value }))}
+            onChange={(value) =>
+              setProfileForm((prev) => ({ ...prev, status: value }))
+            }
             optionList={[
               { label: t('启用'), value: 1 },
               { label: t('禁用'), value: 0 },
@@ -1692,21 +1966,28 @@ export default function Agent() {
               setProfileForm((prev) => ({
                 ...prev,
                 customRateEnabled: e.target.checked,
-                customRatePercent: e.target.checked ? prev.customRatePercent : 0,
+                customRatePercent: e.target.checked
+                  ? prev.customRatePercent
+                  : 0,
               }))
             }
           >
             {t('启用自定义比例覆盖')}
           </Checkbox>
           <Text type='secondary'>
-            {t('不启用时将完全跟随所选分组比例，后续调整分组比例会自动同步到该代理。')}
+            {t(
+              '不启用时将完全跟随所选分组比例，后续调整分组比例会自动同步到该代理。',
+            )}
           </Text>
           <InputNumber
             min={0}
             step={0.1}
             value={profileForm.customRatePercent}
             onChange={(value) =>
-              setProfileForm((prev) => ({ ...prev, customRatePercent: value || 0 }))
+              setProfileForm((prev) => ({
+                ...prev,
+                customRatePercent: value || 0,
+              }))
             }
             suffix='%'
             style={{ width: '100%' }}
@@ -1715,7 +1996,9 @@ export default function Agent() {
           <Input
             placeholder={t('备注')}
             value={profileForm.remark}
-            onChange={(value) => setProfileForm((prev) => ({ ...prev, remark: value }))}
+            onChange={(value) =>
+              setProfileForm((prev) => ({ ...prev, remark: value }))
+            }
           />
         </Space>
       </Modal>
@@ -1735,43 +2018,63 @@ export default function Agent() {
           <Input
             placeholder={t('调整金额，例如 10.50 或 -5.00')}
             value={adjustForm.amount}
-            onChange={(value) => setAdjustForm((prev) => ({ ...prev, amount: value }))}
+            onChange={(value) =>
+              setAdjustForm((prev) => ({ ...prev, amount: value }))
+            }
           />
           <TextArea
             placeholder={t('请输入调整原因')}
             value={adjustForm.reason}
-            onChange={(value) => setAdjustForm((prev) => ({ ...prev, reason: value }))}
+            onChange={(value) =>
+              setAdjustForm((prev) => ({ ...prev, reason: value }))
+            }
             rows={4}
           />
         </Space>
       </Modal>
 
       <Modal
-        title={activeAgentScope ? `${t('代理详情')} - ${activeAgentScope.username}` : t('代理详情')}
+        title={
+          activeAgentScope
+            ? `${t('代理详情')} - ${activeAgentScope.username}`
+            : t('代理详情')
+        }
         visible={inspectModalVisible}
         onCancel={() => setInspectModalVisible(false)}
         footer={null}
         width={1200}
       >
         <Space vertical align='start' style={{ width: '100%' }} spacing={16}>
-          <Card style={{ width: '100%' }}>
-            <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
-              <Title heading={5} style={{ margin: 0 }}>
-                {t('渠道统计')}
-              </Title>
-              <Table
-                rowKey='promo_link_id'
-                columns={promoLinkStatColumns}
-                dataSource={promoLinkStats}
-                loading={promoLinkStatsLoading}
-                pagination={false}
-                empty={<Empty title={t('暂无推广链接统计')} />}
+          {canManageAgentAdmin && (
+            <Card style={{ width: '100%' }}>
+              <Space
+                vertical
+                align='start'
+                style={{ width: '100%' }}
+                spacing={12}
+              >
+                <Title heading={5} style={{ margin: 0 }}>
+                  {t('渠道统计')}
+                </Title>
+                <Table
+                  rowKey='promo_link_id'
+                  columns={promoLinkStatColumns}
+                  dataSource={promoLinkStats}
+                  loading={promoLinkStatsLoading}
+                  pagination={false}
+                  empty={<Empty title={t('暂无推广链接统计')} />}
                 />
               </Space>
             </Card>
+          )}
 
-            <Card style={{ width: '100%' }}>
-            <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
+          <Card style={{ width: '100%' }}>
+            <Space
+              vertical
+              align='start'
+              style={{ width: '100%' }}
+              spacing={12}
+            >
               <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
                 <Title heading={5} style={{ margin: 0 }}>
                   {t('下级用户概况')}
@@ -1787,7 +2090,11 @@ export default function Agent() {
                       const nextKeyword = downlineKeywordInput.trim();
                       setDownlinesPage(1);
                       setDownlineKeyword(nextKeyword);
-                      loadDownlines(activeAgentScope?.userId || 0, 1, nextKeyword);
+                      loadDownlines(
+                        activeAgentScope?.userId || 0,
+                        1,
+                        nextKeyword,
+                      );
                     }}
                   />
                   <Button
@@ -1795,7 +2102,11 @@ export default function Agent() {
                       const nextKeyword = downlineKeywordInput.trim();
                       setDownlinesPage(1);
                       setDownlineKeyword(nextKeyword);
-                      loadDownlines(activeAgentScope?.userId || 0, 1, nextKeyword);
+                      loadDownlines(
+                        activeAgentScope?.userId || 0,
+                        1,
+                        nextKeyword,
+                      );
                     }}
                   >
                     {t('搜索')}
@@ -1828,7 +2139,11 @@ export default function Agent() {
                 pageSize={DEFAULT_PAGE_SIZE}
                 onPageChange={(page) => {
                   setDownlinesPage(page);
-                  loadDownlines(activeAgentScope?.userId || 0, page, downlineKeyword);
+                  loadDownlines(
+                    activeAgentScope?.userId || 0,
+                    page,
+                    downlineKeyword,
+                  );
                 }}
               />
             </Space>
@@ -1847,21 +2162,29 @@ export default function Agent() {
           <Input
             placeholder={t('代理用户ID')}
             value={String(promoLinkForm.agentUserId)}
-            onChange={(value) => setPromoLinkForm((prev) => ({ ...prev, agentUserId: value }))}
+            onChange={(value) =>
+              setPromoLinkForm((prev) => ({ ...prev, agentUserId: value }))
+            }
           />
           <Input
             placeholder={t('渠道名称')}
             value={promoLinkForm.name}
-            onChange={(value) => setPromoLinkForm((prev) => ({ ...prev, name: value }))}
+            onChange={(value) =>
+              setPromoLinkForm((prev) => ({ ...prev, name: value }))
+            }
           />
           <Input
             placeholder={t('推广码，留空自动生成')}
             value={promoLinkForm.code}
-            onChange={(value) => setPromoLinkForm((prev) => ({ ...prev, code: value }))}
+            onChange={(value) =>
+              setPromoLinkForm((prev) => ({ ...prev, code: value }))
+            }
           />
           <Select
             value={promoLinkForm.status}
-            onChange={(value) => setPromoLinkForm((prev) => ({ ...prev, status: value }))}
+            onChange={(value) =>
+              setPromoLinkForm((prev) => ({ ...prev, status: value }))
+            }
             optionList={[
               { label: t('启用'), value: 1 },
               { label: t('禁用'), value: 0 },
@@ -1871,12 +2194,16 @@ export default function Agent() {
           <Input
             placeholder={t('落地页，默认 /')}
             value={promoLinkForm.landingPage}
-            onChange={(value) => setPromoLinkForm((prev) => ({ ...prev, landingPage: value }))}
+            onChange={(value) =>
+              setPromoLinkForm((prev) => ({ ...prev, landingPage: value }))
+            }
           />
           <Input
             placeholder={t('备注')}
             value={promoLinkForm.remark}
-            onChange={(value) => setPromoLinkForm((prev) => ({ ...prev, remark: value }))}
+            onChange={(value) =>
+              setPromoLinkForm((prev) => ({ ...prev, remark: value }))
+            }
           />
         </Space>
       </Modal>
@@ -1892,7 +2219,9 @@ export default function Agent() {
           <Input
             placeholder={t('普通用户ID')}
             value={String(assignForm.downlineUserId)}
-            onChange={(value) => setAssignForm((prev) => ({ ...prev, downlineUserId: value }))}
+            onChange={(value) =>
+              setAssignForm((prev) => ({ ...prev, downlineUserId: value }))
+            }
           />
           <Input
             prefix={<IconSearch size={14} />}
@@ -1903,19 +2232,25 @@ export default function Agent() {
           <Select
             placeholder={t('目标代理')}
             value={assignForm.targetAgentUserId || undefined}
-            onChange={(value) => setAssignForm((prev) => ({ ...prev, targetAgentUserId: value }))}
+            onChange={(value) =>
+              setAssignForm((prev) => ({ ...prev, targetAgentUserId: value }))
+            }
             optionList={assignAgentOptions}
             loading={transferAgentsLoading}
             filter
             style={{ width: '100%' }}
           />
           <Text type='secondary'>
-            {t('分配后会更新该用户的邀请归属，后续充值和兑换码返利将归到目标代理；历史返佣记录保持不变。')}
+            {t(
+              '分配后会更新该用户的邀请归属，后续充值和兑换码返利将归到目标代理；历史返佣记录保持不变。',
+            )}
           </Text>
           <TextArea
             placeholder={t('备注')}
             value={assignForm.remark}
-            onChange={(value) => setAssignForm((prev) => ({ ...prev, remark: value }))}
+            onChange={(value) =>
+              setAssignForm((prev) => ({ ...prev, remark: value }))
+            }
             rows={3}
           />
         </Space>

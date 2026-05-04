@@ -37,37 +37,73 @@ export const USER_ROLES = {
 };
 
 export const PERMISSIONS = {
+  REDEMPTION_READ: 'redemption.read',
+  REDEMPTION_DISABLE: 'redemption.disable',
+  REDEMPTION_DELETE: 'redemption.delete',
   REDEMPTION_MANAGE: 'redemption.manage',
   USER_QUOTA_DECREASE: 'user.quota.decrease',
   AGENT_DOWNLINE_ASSIGN: 'agent.downline.assign',
+  AGENT_DOWNLINE_TRANSFER: 'agent.downline.transfer',
 };
 
 const rolePermissions = {
   [USER_ROLES.SUPPORT]: {
-    [PERMISSIONS.REDEMPTION_MANAGE]: true,
+    [PERMISSIONS.REDEMPTION_READ]: true,
+    [PERMISSIONS.REDEMPTION_DISABLE]: true,
+    [PERMISSIONS.REDEMPTION_DELETE]: true,
     [PERMISSIONS.USER_QUOTA_DECREASE]: true,
     [PERMISSIONS.AGENT_DOWNLINE_ASSIGN]: true,
+    [PERMISSIONS.AGENT_DOWNLINE_TRANSFER]: true,
   },
   [USER_ROLES.ADMIN]: {
+    [PERMISSIONS.REDEMPTION_READ]: true,
+    [PERMISSIONS.REDEMPTION_DISABLE]: true,
+    [PERMISSIONS.REDEMPTION_DELETE]: true,
     [PERMISSIONS.REDEMPTION_MANAGE]: true,
     [PERMISSIONS.USER_QUOTA_DECREASE]: true,
     [PERMISSIONS.AGENT_DOWNLINE_ASSIGN]: true,
+    [PERMISSIONS.AGENT_DOWNLINE_TRANSFER]: true,
   },
   [USER_ROLES.ROOT]: {
+    [PERMISSIONS.REDEMPTION_READ]: true,
+    [PERMISSIONS.REDEMPTION_DISABLE]: true,
+    [PERMISSIONS.REDEMPTION_DELETE]: true,
     [PERMISSIONS.REDEMPTION_MANAGE]: true,
     [PERMISSIONS.USER_QUOTA_DECREASE]: true,
     [PERMISSIONS.AGENT_DOWNLINE_ASSIGN]: true,
+    [PERMISSIONS.AGENT_DOWNLINE_TRANSFER]: true,
   },
 };
 
-export function getCurrentUserRole() {
+export function getCurrentUser() {
   let user = localStorage.getItem('user');
+  if (!user) return null;
+  try {
+    return JSON.parse(user);
+  } catch (error) {
+    return null;
+  }
+}
+
+export function getCurrentUserRole() {
+  const user = getCurrentUser();
   if (!user) return USER_ROLES.GUEST;
-  user = JSON.parse(user);
   return Number(user.role || USER_ROLES.GUEST);
 }
 
+export function getCurrentUserCapabilities() {
+  const user = getCurrentUser();
+  return user?.permissions?.capabilities || null;
+}
+
 export function can(permission) {
+  const capabilities = getCurrentUserCapabilities();
+  if (
+    capabilities &&
+    Object.prototype.hasOwnProperty.call(capabilities, permission)
+  ) {
+    return capabilities[permission] === true;
+  }
   const role = getCurrentUserRole();
   if (role >= USER_ROLES.ROOT) return true;
   return rolePermissions[role]?.[permission] === true;
@@ -83,6 +119,16 @@ export function isAdmin() {
 
 export function isSupport() {
   return getCurrentUserRole() === USER_ROLES.SUPPORT;
+}
+
+export function isSupportConsole() {
+  if (isSupport()) return true;
+  const capabilities = getCurrentUserCapabilities();
+  if (!capabilities) return false;
+  return (
+    capabilities[PERMISSIONS.USER_QUOTA_DECREASE] === true &&
+    capabilities[PERMISSIONS.REDEMPTION_MANAGE] !== true
+  );
 }
 
 export function isRoot() {
@@ -758,7 +804,9 @@ export const calculateModelPrice = ({
         ? formatTokenPrice(inputRatioPriceUSD * Number(record.cache_ratio))
         : null,
       createCachePrice: hasRatioValue(record.create_cache_ratio)
-        ? formatTokenPrice(inputRatioPriceUSD * Number(record.create_cache_ratio))
+        ? formatTokenPrice(
+            inputRatioPriceUSD * Number(record.create_cache_ratio),
+          )
         : null,
       imagePrice: hasRatioValue(record.image_ratio)
         ? formatTokenPrice(inputRatioPriceUSD * Number(record.image_ratio))
@@ -804,11 +852,7 @@ export const calculateModelPrice = ({
   };
 };
 
-export const getModelPriceItems = (
-  priceData,
-  t,
-  quotaDisplayType = 'USD',
-) => {
+export const getModelPriceItems = (priceData, t, quotaDisplayType = 'USD') => {
   if (priceData.isPerToken) {
     if (quotaDisplayType === 'TOKENS' || priceData.isTokensDisplay) {
       return [
@@ -904,7 +948,10 @@ export const getModelPriceItems = (
         value: priceData.audioOutputPrice,
         suffix: unitSuffix,
       },
-    ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '');
+    ].filter(
+      (item) =>
+        item.value !== null && item.value !== undefined && item.value !== '',
+    );
   }
 
   return [
@@ -914,7 +961,10 @@ export const getModelPriceItems = (
       value: priceData.price,
       suffix: ` / ${t('次')}`,
     },
-  ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '');
+  ].filter(
+    (item) =>
+      item.value !== null && item.value !== undefined && item.value !== '',
+  );
 };
 
 // 格式化价格信息（用于卡片视图）

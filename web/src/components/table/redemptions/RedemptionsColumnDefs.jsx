@@ -86,6 +86,7 @@ export const getRedemptionsColumns = ({
   redemptions,
   activePage,
   showDeleteRedemptionModal,
+  isSupportUser,
 }) => {
   return [
     {
@@ -142,7 +143,7 @@ export const getRedemptionsColumns = ({
       title: '',
       dataIndex: 'operate',
       fixed: 'right',
-      width: 205,
+      width: isSupportUser ? 120 : 205,
       render: (text, record) => {
         // Create dropdown menu items for more operations
         const moreMenuItems = [
@@ -156,7 +157,7 @@ export const getRedemptionsColumns = ({
           },
         ];
 
-        if (record.status === REDEMPTION_STATUS.UNUSED && !isExpired(record)) {
+        if (record.status === REDEMPTION_STATUS.UNUSED) {
           moreMenuItems.push({
             node: 'item',
             name: t('禁用'),
@@ -165,7 +166,7 @@ export const getRedemptionsColumns = ({
               manageRedemption(record.id, REDEMPTION_ACTIONS.DISABLE, record);
             },
           });
-        } else if (!isExpired(record)) {
+        } else if (!isSupportUser && !isExpired(record)) {
           moreMenuItems.push({
             node: 'item',
             name: t('启用'),
@@ -188,25 +189,29 @@ export const getRedemptionsColumns = ({
                 {t('查看')}
               </Button>
             </Popover>
-            <Button
-              size='small'
-              onClick={async () => {
-                await copyText(record.key);
-              }}
-            >
-              {t('复制')}
-            </Button>
-            <Button
-              type='tertiary'
-              size='small'
-              onClick={() => {
-                setEditingRedemption(record);
-                setShowEdit(true);
-              }}
-              disabled={record.status !== REDEMPTION_STATUS.UNUSED}
-            >
-              {t('编辑')}
-            </Button>
+            {!isSupportUser && (
+              <>
+                <Button
+                  size='small'
+                  onClick={async () => {
+                    await copyText(record.key);
+                  }}
+                >
+                  {t('复制')}
+                </Button>
+                <Button
+                  type='tertiary'
+                  size='small'
+                  onClick={() => {
+                    setEditingRedemption(record);
+                    setShowEdit(true);
+                  }}
+                  disabled={record.status !== REDEMPTION_STATUS.UNUSED}
+                >
+                  {t('编辑')}
+                </Button>
+              </>
+            )}
             <Dropdown
               trigger='click'
               position='bottomRight'

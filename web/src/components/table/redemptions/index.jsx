@@ -55,6 +55,7 @@ const RedemptionsPage = () => {
 
     // UI state
     compactMode,
+    isSupportUser,
     setCompactMode,
 
     // Translation
@@ -82,6 +83,7 @@ const RedemptionsPage = () => {
         actionsArea={
           <div className='flex flex-col md:flex-row justify-between items-center gap-2 w-full'>
             <RedemptionsActions
+              isSupportUser={isSupportUser}
               selectedKeys={selectedKeys}
               setEditingRedemption={setEditingRedemption}
               setShowEdit={setShowEdit}

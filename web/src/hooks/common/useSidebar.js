@@ -125,6 +125,14 @@ export const useSidebar = () => {
         (res.data.data.sidebar_modules ||
           res.data.data.permissions?.sidebar_modules)
       ) {
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        localStorage.setItem(
+          'user',
+          JSON.stringify({
+            ...currentUser,
+            ...res.data.data,
+          }),
+        );
         let config;
         // 检查sidebar_modules是字符串还是对象
         const modules =
@@ -135,17 +143,26 @@ export const useSidebar = () => {
         } else {
           config = modules;
         }
+        const capabilities = res.data.data.permissions?.capabilities || {};
         if (
-          res.data.data.permissions?.capabilities?.[
-            PERMISSIONS.AGENT_DOWNLINE_ASSIGN
-          ]
+          capabilities[PERMISSIONS.REDEMPTION_READ] ||
+          capabilities[PERMISSIONS.USER_QUOTA_DECREASE] ||
+          capabilities[PERMISSIONS.AGENT_DOWNLINE_ASSIGN]
         ) {
           config = {
             ...config,
             admin: {
               ...(config?.admin || {}),
               enabled: true,
-              agent: true,
+              ...(capabilities[PERMISSIONS.REDEMPTION_READ]
+                ? { redemption: true }
+                : {}),
+              ...(capabilities[PERMISSIONS.USER_QUOTA_DECREASE]
+                ? { user: true }
+                : {}),
+              ...(capabilities[PERMISSIONS.AGENT_DOWNLINE_ASSIGN]
+                ? { agent: true }
+                : {}),
             },
           };
         }

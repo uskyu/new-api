@@ -107,6 +107,7 @@ const UsersPage = () => {
               groupOptions={groupOptions}
               loading={loading}
               searching={searching}
+              supportMode={supportMode}
               t={t}
             />
           </div>

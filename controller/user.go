@@ -269,9 +269,8 @@ func GetSupportUsers(c *gin.Context) {
 
 func SearchSupportUsers(c *gin.Context) {
 	keyword := c.Query("keyword")
-	group := c.Query("group")
 	pageInfo := common.GetPageQuery(c)
-	users, total, err := model.SearchSupportManageUsers(keyword, group, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	users, total, err := model.SearchSupportManageUsers(keyword, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -287,13 +286,9 @@ func GetSupportUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	user, err := model.GetUserById(id, false)
+	user, err := model.GetSupportManageUserById(id)
 	if err != nil {
 		common.ApiError(c, err)
-		return
-	}
-	if user.Role != common.RoleCommonUser {
-		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{

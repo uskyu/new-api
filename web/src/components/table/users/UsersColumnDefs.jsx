@@ -29,7 +29,12 @@ import {
   Dropdown,
 } from '@douyinfe/semi-ui';
 import { IconMore } from '@douyinfe/semi-icons';
-import { isRoot, renderGroup, renderNumber, renderQuota } from '../../../helpers';
+import {
+  isRoot,
+  renderGroup,
+  renderNumber,
+  renderQuota,
+} from '../../../helpers';
 
 const renderRole = (role, t) => {
   switch (role) {
@@ -203,14 +208,11 @@ const renderOperations = (
     t,
   },
 ) => {
-  if (record.DeletedAt !== null) {
+  if (record.DeletedAt != null) {
     return <></>;
   }
 
   if (supportMode) {
-    if (record.role !== 1) {
-      return <></>;
-    }
     return (
       <Button
         type='warning'
@@ -317,7 +319,7 @@ export const getUsersColumns = ({
   showDecreaseQuotaModal,
   supportMode,
 }) => {
-  return [
+  const columns = [
     {
       title: 'ID',
       dataIndex: 'id',
@@ -379,4 +381,14 @@ export const getUsersColumns = ({
         }),
     },
   ];
+
+  if (supportMode) {
+    return columns.filter((column) =>
+      ['id', 'username', 'quota_usage', 'operate'].includes(
+        column.dataIndex || column.key,
+      ),
+    );
+  }
+
+  return columns;
 };

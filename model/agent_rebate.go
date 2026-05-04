@@ -403,6 +403,16 @@ type AgentDownlineUserView struct {
 	LatestRebateTime int64  `json:"latest_rebate_time"`
 }
 
+type AgentTransferDownlineUserView struct {
+	UserId        int    `json:"user_id"`
+	Username      string `json:"username"`
+	DisplayName   string `json:"display_name"`
+	InviterId     int    `json:"inviter_id"`
+	PromoLinkId   int    `json:"promo_link_id"`
+	PromoLinkName string `json:"promo_link_name"`
+	IsAgent       bool   `json:"is_agent"`
+}
+
 type AgentAdminOverview struct {
 	AgentCount          int64 `json:"agent_count"`
 	GroupCount          int64 `json:"group_count"`
@@ -2276,6 +2286,29 @@ func GetAgentDownlineUsers(pageInfo *common.PageInfo, agentUserId int, keyword s
 	}
 	if err := tx.Order("u.id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&users).Error; err != nil {
 		return nil, 0, err
+	}
+	return users, total, nil
+}
+
+func GetAgentTransferDownlineUsers(pageInfo *common.PageInfo, agentUserId int, keyword string) ([]*AgentTransferDownlineUserView, int64, error) {
+	if agentUserId <= 0 {
+		return nil, 0, errors.New("agent_user_id is required")
+	}
+	rows, total, err := GetAgentDownlineUsers(pageInfo, agentUserId, keyword)
+	if err != nil {
+		return nil, 0, err
+	}
+	users := make([]*AgentTransferDownlineUserView, 0, len(rows))
+	for _, row := range rows {
+		users = append(users, &AgentTransferDownlineUserView{
+			UserId:        row.UserId,
+			Username:      row.Username,
+			DisplayName:   row.DisplayName,
+			InviterId:     row.InviterId,
+			PromoLinkId:   row.PromoLinkId,
+			PromoLinkName: row.PromoLinkName,
+			IsAgent:       row.IsAgent,
+		})
 	}
 	return users, total, nil
 }

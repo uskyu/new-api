@@ -21,6 +21,7 @@ import React from 'react';
 import { Button } from '@douyinfe/semi-ui';
 
 const RedemptionsActions = ({
+  isSupportUser,
   selectedKeys,
   setEditingRedemption,
   setShowEdit,
@@ -28,6 +29,10 @@ const RedemptionsActions = ({
   batchDeleteRedemptions,
   t,
 }) => {
+  if (isSupportUser) {
+    return null;
+  }
+
   // Add new redemption code
   const handleAddRedemption = () => {
     setEditingRedemption({

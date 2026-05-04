@@ -53,6 +53,14 @@ type User struct {
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 }
 
+type SupportManagedUser struct {
+	Id          int    `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Quota       int    `json:"quota"`
+	UsedQuota   int    `json:"used_quota"`
+}
+
 func (user *User) ToBaseUser() *UserBase {
 	cache := &UserBase{
 		Id:       user.Id,
@@ -305,7 +313,7 @@ func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, 
 	return users, total, nil
 }
 
-func GetSupportManageUsers(pageInfo *common.PageInfo) (users []*User, total int64, err error) {
+func GetSupportManageUsers(pageInfo *common.PageInfo) (users []*SupportManagedUser, total int64, err error) {
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -321,7 +329,7 @@ func GetSupportManageUsers(pageInfo *common.PageInfo) (users []*User, total int6
 		tx.Rollback()
 		return nil, 0, err
 	}
-	if err = query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("password").Find(&users).Error; err != nil {
+	if err = query.Select("id", "username", "display_name", "quota", "used_quota").Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&users).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
@@ -331,8 +339,8 @@ func GetSupportManageUsers(pageInfo *common.PageInfo) (users []*User, total int6
 	return users, total, nil
 }
 
-func SearchSupportManageUsers(keyword string, group string, startIdx int, num int) ([]*User, int64, error) {
-	var users []*User
+func SearchSupportManageUsers(keyword string, startIdx int, num int) ([]*SupportManagedUser, int64, error) {
+	var users []*SupportManagedUser
 	var total int64
 	tx := DB.Begin()
 	if tx.Error != nil {
@@ -349,22 +357,16 @@ func SearchSupportManageUsers(keyword string, group string, startIdx int, num in
 	like := "%" + keyword + "%"
 	if keywordInt, err := strconv.Atoi(keyword); err == nil {
 		likeCondition = "id = ? OR " + likeCondition
-		if group != "" {
-			query = query.Where("("+likeCondition+") AND "+commonGroupCol+" = ?", keywordInt, like, like, like, group)
-		} else {
-			query = query.Where(likeCondition, keywordInt, like, like, like)
-		}
-	} else if group != "" {
-		query = query.Where("("+likeCondition+") AND "+commonGroupCol+" = ?", like, like, like, group)
+		query = query.Where("("+likeCondition+")", keywordInt, like, like, like)
 	} else {
-		query = query.Where(likeCondition, like, like, like)
+		query = query.Where("("+likeCondition+")", like, like, like)
 	}
 
 	if err := query.Count(&total).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
-	if err := query.Order("id desc").Limit(num).Offset(startIdx).Omit("password").Find(&users).Error; err != nil {
+	if err := query.Select("id", "username", "display_name", "quota", "used_quota").Order("id desc").Limit(num).Offset(startIdx).Scan(&users).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
@@ -372,6 +374,18 @@ func SearchSupportManageUsers(keyword string, group string, startIdx int, num in
 		return nil, 0, err
 	}
 	return users, total, nil
+}
+
+func GetSupportManageUserById(id int) (*SupportManagedUser, error) {
+	if id == 0 {
+		return nil, errors.New("id is empty")
+	}
+	user := SupportManagedUser{}
+	err := DB.Model(&User{}).
+		Select("id", "username", "display_name", "quota", "used_quota").
+		Where("id = ? AND role = ?", id, common.RoleCommonUser).
+		First(&user).Error
+	return &user, err
 }
 
 func GetUserById(id int, selectAll bool) (*User, error) {

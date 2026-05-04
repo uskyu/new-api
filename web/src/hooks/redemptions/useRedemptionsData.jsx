@@ -18,7 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useState, useEffect } from 'react';
-import { API, showError, showSuccess, copy } from '../../helpers';
+import {
+  API,
+  showError,
+  showSuccess,
+  copy,
+  isSupportConsole,
+} from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import {
   REDEMPTION_ACTIONS,
@@ -30,6 +36,7 @@ import { useTableCompactMode } from '../common/useTableCompactMode';
 
 export const useRedemptionsData = () => {
   const { t } = useTranslation();
+  const isSupportUser = isSupportConsole();
 
   // Basic state
   const [redemptions, setRedemptions] = useState([]);
@@ -195,13 +202,15 @@ export const useRedemptionsData = () => {
   };
 
   // Row selection configuration
-  const rowSelection = {
-    onSelect: (record, selected) => {},
-    onSelectAll: (selected, selectedRows) => {},
-    onChange: (selectedRowKeys, selectedRows) => {
-      setSelectedKeys(selectedRows);
-    },
-  };
+  const rowSelection = isSupportUser
+    ? undefined
+    : {
+        onSelect: (record, selected) => {},
+        onSelectAll: (selected, selectedRows) => {},
+        onChange: (selectedRowKeys, selectedRows) => {
+          setSelectedKeys(selectedRows);
+        },
+      };
 
   // Row style handling - using isExpired function
   const handleRow = (record, index) => {
@@ -323,6 +332,7 @@ export const useRedemptionsData = () => {
 
     // UI state
     compactMode,
+    isSupportUser,
     setCompactMode,
 
     // Data operations
