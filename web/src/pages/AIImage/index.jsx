@@ -75,6 +75,7 @@ const getImageAnnotationCount = (image) =>
     : 0;
 
 const buildPromptWithAnnotations = (basePrompt, images = []) => {
+  const normalizedBasePrompt = String(basePrompt || '').trim();
   const annotationLines = images.flatMap((image, imageIndex) =>
     (Array.isArray(image?.annotations) ? image.annotations : [])
       .map((annotation, annotationIndex) => ({
@@ -87,11 +88,11 @@ const buildPromptWithAnnotations = (basePrompt, images = []) => {
   );
 
   if (annotationLines.length === 0) {
-    return basePrompt;
+    return normalizedBasePrompt;
   }
 
   return [
-    basePrompt,
+    normalizedBasePrompt || '\u8bf7\u6839\u636e\u53c2\u8003\u56fe\u548c\u5c40\u90e8\u4fee\u6539\u8981\u6c42\u751f\u6210\u6216\u7f16\u8f91\u56fe\u7247\u3002',
     '',
     '\u5c40\u90e8\u4fee\u6539\u8981\u6c42\uff1a',
     ...annotationLines.map((line, index) => `${index + 1}. ${line}`),
@@ -616,9 +617,22 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
     const activeId = activeAnnotationIdRef.current;
     activeAnnotationIdRef.current = null;
     setIsDrawing(false);
-    setAnnotations((previous) =>
-      previous.filter((annotation) => annotation.id !== activeId || annotation.points.length > 1),
-    );
+    setAnnotations((previous) => {
+      const activeAnnotation = previous.find((annotation) => annotation.id === activeId);
+      const nextAnnotations = previous.filter(
+        (annotation) => annotation.id !== activeId || annotation.points.length > 1,
+      );
+      if (activeAnnotation?.points?.length > 1) {
+        const colorIndex = ANNOTATION_COLORS.findIndex(
+          (item) => item.value === activeAnnotation.color,
+        );
+        const nextColor = ANNOTATION_COLORS[
+          (colorIndex + 1 + ANNOTATION_COLORS.length) % ANNOTATION_COLORS.length
+        ]?.value || ANNOTATION_COLORS[0].value;
+        setSelectedColor(nextColor);
+      }
+      return nextAnnotations;
+    });
   }, [isDrawing]);
 
   const updateAnnotationPrompt = React.useCallback((annotationId, value) => {
@@ -1502,8 +1516,9 @@ const AIImage = () => {
 
   const handleGenerate = React.useCallback(async () => {
     const trimmedPrompt = prompt.trim();
-    if (!trimmedPrompt) {
-      showError(t('请输入提示词'));
+    const hasAnnotationPrompts = annotatedPromptCount > 0;
+    if (!trimmedPrompt && !hasAnnotationPrompts) {
+      showError(t('\u8bf7\u8f93\u5165\u63d0\u793a\u8bcd\u6216\u6dfb\u52a0\u5c40\u90e8\u4fee\u6539\u8981\u6c42'));
       return;
     }
     if (!fallbackImageModel) {
@@ -1548,6 +1563,7 @@ const AIImage = () => {
     }
   }, [
     appendGeneration,
+    annotatedPromptCount,
     clearDraftImages,
     draftImages,
     fallbackImageModel,
@@ -1564,6 +1580,7 @@ const AIImage = () => {
       .split('\n')
       .map((item) => item.trim())
       .filter(Boolean);
+    const hasAnnotationPrompts = annotatedPromptCount > 0;
 
     if (!fallbackImageModel) {
       showError(t('请选择模型'));
@@ -1573,15 +1590,17 @@ const AIImage = () => {
       selectedModelRef.current = fallbackImageModel;
       setSelectedModel(fallbackImageModel);
     }
-    if (prompts.length === 0) {
-      showError(t('请输入提示词'));
+    if (prompts.length === 0 && !hasAnnotationPrompts) {
+      showError(t('\u8bf7\u8f93\u5165\u63d0\u793a\u8bcd\u6216\u6dfb\u52a0\u5c40\u90e8\u4fee\u6539\u8981\u6c42'));
       return;
     }
 
     const effectiveBatchCount = normalizeBatchCount(batchCount);
     const tasks = Array.from({ length: effectiveBatchCount }, (_, index) =>
       buildPromptWithAnnotations(
-        prompts.length > 1 ? prompts[index % prompts.length] : prompts[0],
+        prompts.length > 0
+          ? prompts.length > 1 ? prompts[index % prompts.length] : prompts[0]
+          : '',
         draftImages,
       ),
     );
@@ -1627,6 +1646,7 @@ const AIImage = () => {
     }
   }, [
     appendBatchGeneration,
+    annotatedPromptCount,
     batchCount,
     clearDraftImages,
     draftImages,
