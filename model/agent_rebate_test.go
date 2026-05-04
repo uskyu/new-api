@@ -15,7 +15,7 @@ func ensureAgentTestTables(t *testing.T) {
 	t.Helper()
 	db := DB
 	require.NotNil(t, db)
-	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &AgentRebateGroup{}, &AgentProfile{}, &AgentPromoLink{}, &AgentRebateRecord{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &AgentRebateGroup{}, &AgentProfile{}, &AgentPromoLink{}, &AgentRebateRecord{}, &AgentRedemptionRebateRecord{}, &Redemption{}))
 	require.NoError(t, db.AutoMigrate(&AgentRebateAdjustment{}, &AgentRelationship{}, &AgentUpgradeRequest{}, &AgentWithdrawAccount{}, &AgentWithdrawRequest{}, &AgentBalanceLedger{}, &Log{}))
 	t.Cleanup(func() {
 		if db == nil {
@@ -29,11 +29,13 @@ func ensureAgentTestTables(t *testing.T) {
 		_ = session.Delete(&AgentUpgradeRequest{}).Error
 		_ = session.Delete(&AgentRelationship{}).Error
 		_ = session.Delete(&AgentRebateAdjustment{}).Error
+		_ = session.Delete(&AgentRedemptionRebateRecord{}).Error
 		_ = session.Delete(&AgentRebateRecord{}).Error
 		_ = session.Delete(&AgentPromoLink{}).Error
 		_ = session.Delete(&AgentProfile{}).Error
 		_ = session.Delete(&AgentRebateGroup{}).Error
 		_ = session.Delete(&TopUp{}).Error
+		_ = session.Delete(&Redemption{}).Error
 		_ = session.Delete(&User{}).Error
 	})
 }
@@ -148,6 +150,102 @@ func TestSettleAgentRebateTx(t *testing.T) {
 	require.Equal(t, int64(10000), records[0].PayAmount)
 	require.Equal(t, 1500, records[0].RebateRate)
 	require.Equal(t, int64(1500), records[0].RebateAmount)
+}
+
+func TestRedeemSettlesAgentRedemptionRebate(t *testing.T) {
+	setupAgentTestDB(t, TestDBDialectSQLite)
+	prevQuotaPerUnit := common.QuotaPerUnit
+	common.AgentEnabled = true
+	common.AgentInitialized = true
+	common.AgentDefaultRebateRate = 0
+	common.QuotaPerUnit = 500000
+	t.Cleanup(func() {
+		common.AgentEnabled = false
+		common.AgentInitialized = false
+		common.AgentDefaultRebateRate = 0
+		common.QuotaPerUnit = prevQuotaPerUnit
+	})
+
+	agent := createAgentTestUser(t, "agent_redeem", "AFF_REDEEM_AGENT")
+	invitee := createAgentTestUser(t, "invitee_redeem", "AFF_REDEEM_INVITEE")
+	group := &AgentRebateGroup{
+		Name:       "redeem-group",
+		RebateRate: 1500,
+		Status:     AgentStatusEnabled,
+	}
+	require.NoError(t, DB.Create(group).Error)
+	promoLink := &AgentPromoLink{
+		AgentUserId: agent.Id,
+		Name:        "redeem-link",
+		Code:        "REDEEMLINK",
+		Status:      AgentPromoLinkEnabled,
+	}
+	require.NoError(t, DB.Create(promoLink).Error)
+	require.NoError(t, DB.Model(invitee).Updates(map[string]interface{}{
+		"inviter_id":    agent.Id,
+		"promo_link_id": promoLink.Id,
+	}).Error)
+	require.NoError(t, DB.Create(&AgentProfile{
+		UserId:        agent.Id,
+		Status:        AgentStatusEnabled,
+		RebateGroupId: group.Id,
+	}).Error)
+	redemption := &Redemption{
+		UserId:      agent.Id,
+		Key:         "R1234567890123456789012345678901",
+		Status:      common.RedemptionCodeStatusEnabled,
+		Name:        "agent redemption rebate",
+		Quota:       int(100 * common.QuotaPerUnit),
+		CreatedTime: common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(redemption).Error)
+
+	quota, err := Redeem(redemption.Key, invitee.Id)
+	require.NoError(t, err)
+	require.Equal(t, redemption.Quota, quota)
+	_, err = Redeem(redemption.Key, invitee.Id)
+	require.ErrorIs(t, err, ErrRedeemFailed)
+
+	updatedProfile, err := GetAgentProfileByUserId(agent.Id)
+	require.NoError(t, err)
+	require.Equal(t, int64(1500), updatedProfile.RebateBalanceAmount)
+	require.Equal(t, int64(1500), updatedProfile.RebateTotalAmount)
+
+	var records []AgentRedemptionRebateRecord
+	require.NoError(t, DB.Find(&records).Error)
+	require.Len(t, records, 1)
+	require.Equal(t, redemption.Id, records[0].RedemptionId)
+	require.Equal(t, invitee.Id, records[0].InviteeUserId)
+	require.Equal(t, agent.Id, records[0].AgentUserId)
+	require.Equal(t, promoLink.Id, records[0].PromoLinkId)
+	require.Equal(t, redemption.Quota, records[0].RedeemQuota)
+	require.Equal(t, int64(10000), records[0].PayAmount)
+	require.Equal(t, 1500, records[0].RebateRate)
+	require.Equal(t, int64(1500), records[0].RebateAmount)
+
+	var ledgers []AgentBalanceLedger
+	require.NoError(t, DB.Find(&ledgers).Error)
+	require.Len(t, ledgers, 1)
+	require.Equal(t, "redemption_rebate_record", ledgers[0].ReferenceType)
+	require.Equal(t, records[0].Id, ledgers[0].ReferenceId)
+	require.Equal(t, int64(1500), ledgers[0].Amount)
+
+	summary, err := GetAgentSelfSummary(agent.Id)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), summary.RecentRebateCount)
+	require.Equal(t, int64(1500), summary.RecentRebateAmount)
+
+	rebateViews, total, err := GetAgentRebateRecords(&common.PageInfo{Page: 1, PageSize: 10}, agent.Id)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, rebateViews, 1)
+	require.Equal(t, fmt.Sprintf("redemption:%d", records[0].Id), rebateViews[0].RecordKey)
+	require.Equal(t, "redemption", rebateViews[0].RecordType)
+	require.Equal(t, records[0].Id, rebateViews[0].RecordId)
+	require.Equal(t, AgentRebateSourceRedemption, rebateViews[0].SourceType)
+	require.Equal(t, fmt.Sprintf("redemption:%d", redemption.Id), rebateViews[0].TradeNo)
+	require.Equal(t, redemption.Quota, rebateViews[0].RedeemQuota)
+	require.Equal(t, int64(1500), rebateViews[0].RebateAmount)
 }
 
 func TestAdjustAgentRebateBalance(t *testing.T) {
@@ -314,6 +412,17 @@ func TestAgentPromoLinkStatsAndDownlines(t *testing.T) {
 	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
 		return SettleAgentRebateTx(tx, topup, AgentRebateSourceEPay)
 	}))
+	redemption := &Redemption{
+		UserId:      agent.Id,
+		Key:         "S1234567890123456789012345678901",
+		Status:      common.RedemptionCodeStatusEnabled,
+		Name:        "stats redemption rebate",
+		Quota:       int(50 * common.QuotaPerUnit),
+		CreatedTime: common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(redemption).Error)
+	_, err = Redeem(redemption.Key, invitee.Id)
+	require.NoError(t, err)
 
 	stats, err := GetAgentPromoLinkStats(agent.Id)
 	require.NoError(t, err)
@@ -328,7 +437,7 @@ func TestAgentPromoLinkStatsAndDownlines(t *testing.T) {
 	require.Equal(t, int64(1), targetStat.InviteeCount)
 	require.Equal(t, int64(1), targetStat.TopupCount)
 	require.Equal(t, int64(8800), targetStat.TopupAmount)
-	require.Equal(t, int64(1056), targetStat.RebateAmount)
+	require.Equal(t, int64(1656), targetStat.RebateAmount)
 
 	downlines, total, err := GetAgentDownlineUsers(&common.PageInfo{Page: 1, PageSize: 10}, agent.Id, "")
 	require.NoError(t, err)
@@ -336,7 +445,7 @@ func TestAgentPromoLinkStatsAndDownlines(t *testing.T) {
 	require.Len(t, downlines, 1)
 	require.Equal(t, invitee.Id, downlines[0].UserId)
 	require.Equal(t, int64(8800), downlines[0].TopupAmount)
-	require.Equal(t, int64(1056), downlines[0].RebateAmount)
+	require.Equal(t, int64(1656), downlines[0].RebateAmount)
 }
 
 func TestAgentUpgradeRequestAndRateConflict(t *testing.T) {
@@ -431,9 +540,21 @@ func TestTransferAgentDownlineUserSyncsAttributionAndFutureRebate(t *testing.T) 
 	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
 		return SettleAgentRebateTx(tx, newTopup, AgentRebateSourceEPay)
 	}))
+	redemption := &Redemption{
+		UserId:      operator.Id,
+		Key:         "T1234567890123456789012345678901",
+		Status:      common.RedemptionCodeStatusEnabled,
+		Name:        "transfer redemption rebate",
+		Quota:       int(100 * common.QuotaPerUnit),
+		CreatedTime: common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(redemption).Error)
+	_, err = Redeem(redemption.Key, downline.Id)
+	require.NoError(t, err)
+
 	targetProfile, err := GetAgentProfileByUserId(targetAgent.Id)
 	require.NoError(t, err)
-	require.Equal(t, int64(3000), targetProfile.RebateBalanceAmount)
+	require.Equal(t, int64(6000), targetProfile.RebateBalanceAmount)
 	sourceProfile, err := GetAgentProfileByUserId(sourceAgent.Id)
 	require.NoError(t, err)
 	require.Equal(t, int64(3000), sourceProfile.RebateBalanceAmount)
@@ -444,6 +565,35 @@ func TestTransferAgentDownlineUserSyncsAttributionAndFutureRebate(t *testing.T) 
 	require.Equal(t, oldPromo.Id, records[0].PromoLinkId)
 	require.Equal(t, targetAgent.Id, records[1].AgentUserId)
 	require.Equal(t, newPromo.Id, records[1].PromoLinkId)
+	var redemptionRecords []AgentRedemptionRebateRecord
+	require.NoError(t, DB.Find(&redemptionRecords).Error)
+	require.Len(t, redemptionRecords, 1)
+	require.Equal(t, targetAgent.Id, redemptionRecords[0].AgentUserId)
+	require.Equal(t, newPromo.Id, redemptionRecords[0].PromoLinkId)
+
+	targetDownlines, total, err := GetAgentDownlineUsers(&common.PageInfo{Page: 1, PageSize: 10}, targetAgent.Id, "")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, targetDownlines, 1)
+	require.Equal(t, downline.Id, targetDownlines[0].UserId)
+	require.Equal(t, int64(10000), targetDownlines[0].TopupAmount)
+	require.Equal(t, int64(6000), targetDownlines[0].RebateAmount)
+
+	sourceStats, err := GetAgentPromoLinkStats(sourceAgent.Id)
+	require.NoError(t, err)
+	require.Len(t, sourceStats, 1)
+	require.Equal(t, oldPromo.Id, sourceStats[0].PromoLinkId)
+	require.Equal(t, int64(1), sourceStats[0].TopupCount)
+	require.Equal(t, int64(10000), sourceStats[0].TopupAmount)
+	require.Equal(t, int64(3000), sourceStats[0].RebateAmount)
+
+	targetStats, err := GetAgentPromoLinkStats(targetAgent.Id)
+	require.NoError(t, err)
+	require.Len(t, targetStats, 1)
+	require.Equal(t, newPromo.Id, targetStats[0].PromoLinkId)
+	require.Equal(t, int64(1), targetStats[0].TopupCount)
+	require.Equal(t, int64(10000), targetStats[0].TopupAmount)
+	require.Equal(t, int64(6000), targetStats[0].RebateAmount)
 }
 
 func TestTransferAgentDownlineUserValidatesOwnershipAndTargetLink(t *testing.T) {

@@ -54,6 +54,7 @@ func CoreSchemaModels() []interface{} {
 		&AgentProfile{},
 		&AgentPromoLink{},
 		&AgentRebateRecord{},
+		&AgentRedemptionRebateRecord{},
 		&AgentRebateAdjustment{},
 		&AgentRelationship{},
 		&AgentUpgradeRequest{},

@@ -30,8 +30,9 @@ const (
 	AgentRebateRecordCanceled = "canceled"
 	AgentRebateRecordRolled   = "rolled_back"
 
-	AgentRebateSourceEPay   = "epay"
-	AgentRebateSourceManual = "manual"
+	AgentRebateSourceEPay       = "epay"
+	AgentRebateSourceManual     = "manual"
+	AgentRebateSourceRedemption = "redemption"
 
 	AgentAdjustmentTypeIncrease   = "increase"
 	AgentAdjustmentTypeDecrease   = "decrease"
@@ -144,6 +145,47 @@ type AgentRebateRecord struct {
 	InviteeUserId int    `json:"invitee_user_id" gorm:"not null;index"`
 	AgentUserId   int    `json:"agent_user_id" gorm:"not null;index"`
 	PromoLinkId   int    `json:"promo_link_id" gorm:"type:int;not null;default:0;index"`
+	PayAmount     int64  `json:"pay_amount" gorm:"type:bigint;not null;default:0"`
+	RebateRate    int    `json:"rebate_rate" gorm:"type:int;not null;default:0"`
+	RebateAmount  int64  `json:"rebate_amount" gorm:"type:bigint;not null;default:0"`
+	Status        string `json:"status" gorm:"type:varchar(32);not null;default:'settled';index"`
+	Remark        string `json:"remark" gorm:"type:varchar(255);default:''"`
+	CreatedAt     int64  `json:"created_at" gorm:"bigint;index"`
+	SettledAt     int64  `json:"settled_at" gorm:"bigint"`
+}
+
+type AgentRebateRecordView struct {
+	Id            int    `json:"id"`
+	RecordKey     string `json:"record_key"`
+	RecordType    string `json:"record_type"`
+	RecordId      int    `json:"record_id"`
+	TopUpId       int    `json:"topup_id"`
+	TradeNo       string `json:"trade_no"`
+	SourceType    string `json:"source_type"`
+	InviteeUserId int    `json:"invitee_user_id"`
+	AgentUserId   int    `json:"agent_user_id"`
+	PromoLinkId   int    `json:"promo_link_id"`
+	RedeemQuota   int    `json:"redeem_quota"`
+	PayAmount     int64  `json:"pay_amount"`
+	RebateRate    int    `json:"rebate_rate"`
+	RebateAmount  int64  `json:"rebate_amount"`
+	Status        string `json:"status"`
+	Remark        string `json:"remark"`
+	CreatedAt     int64  `json:"created_at"`
+	SettledAt     int64  `json:"settled_at"`
+}
+
+// AgentRedemptionRebateRecord stores rebates created by successful redemption-code usage.
+// PayAmount and RebateAmount are stored in the smallest currency unit.
+type AgentRedemptionRebateRecord struct {
+	Id            int    `json:"id"`
+	RedemptionId  int    `json:"redemption_id" gorm:"not null;uniqueIndex"`
+	ReferenceNo   string `json:"reference_no" gorm:"type:varchar(255);not null;index"`
+	SourceType    string `json:"source_type" gorm:"type:varchar(32);not null;index"`
+	InviteeUserId int    `json:"invitee_user_id" gorm:"not null;index"`
+	AgentUserId   int    `json:"agent_user_id" gorm:"not null;index"`
+	PromoLinkId   int    `json:"promo_link_id" gorm:"type:int;not null;default:0;index"`
+	RedeemQuota   int    `json:"redeem_quota" gorm:"type:int;not null;default:0"`
 	PayAmount     int64  `json:"pay_amount" gorm:"type:bigint;not null;default:0"`
 	RebateRate    int    `json:"rebate_rate" gorm:"type:int;not null;default:0"`
 	RebateAmount  int64  `json:"rebate_amount" gorm:"type:bigint;not null;default:0"`
@@ -444,6 +486,17 @@ func (r *AgentRebateRecord) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+func (r *AgentRedemptionRebateRecord) BeforeCreate(tx *gorm.DB) error {
+	now := common.GetTimestamp()
+	if r.CreatedAt == 0 {
+		r.CreatedAt = now
+	}
+	if r.SettledAt == 0 && r.Status == AgentRebateRecordSettled {
+		r.SettledAt = now
+	}
+	return nil
+}
+
 func GetAgentProfileByUserId(userId int) (*AgentProfile, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid user id")
@@ -653,6 +706,92 @@ func SettleAgentRebateTx(tx *gorm.DB, topUp *TopUp, sourceType string) error {
 		ReferenceType: "rebate_record",
 		ReferenceId:   record.Id,
 		Remark:        sourceType,
+	})
+}
+
+func SettleAgentRedemptionRebateTx(tx *gorm.DB, redemption *Redemption, inviteeUserId int) error {
+	if tx == nil || redemption == nil {
+		return errors.New("invalid redemption settlement params")
+	}
+	if !common.AgentEnabled || !common.AgentInitialized {
+		return nil
+	}
+	if redemption.Id <= 0 || inviteeUserId <= 0 || redemption.Quota <= 0 {
+		return nil
+	}
+	var existing AgentRedemptionRebateRecord
+	if err := tx.Where("redemption_id = ?", redemption.Id).First(&existing).Error; err == nil {
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	var invitee User
+	if err := tx.Select("id", "inviter_id", "promo_link_id").First(&invitee, inviteeUserId).Error; err != nil {
+		return err
+	}
+	if invitee.InviterId <= 0 || invitee.InviterId == invitee.Id {
+		return nil
+	}
+	var profile AgentProfile
+	if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("user_id = ?", invitee.InviterId).First(&profile).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if profile.Status != AgentStatusEnabled {
+		return nil
+	}
+	rebateRate, err := getEffectiveAgentRebateRateTx(tx, &profile)
+	if err != nil {
+		return err
+	}
+	if rebateRate <= 0 {
+		return nil
+	}
+	payAmount := convertQuotaToMinorUnit(redemption.Quota)
+	if payAmount <= 0 {
+		return nil
+	}
+	rebateAmount := decimal.NewFromInt(payAmount).Mul(decimal.NewFromInt(int64(rebateRate))).Div(decimal.NewFromInt(10000)).Round(0).IntPart()
+	if rebateAmount <= 0 {
+		return nil
+	}
+	record := AgentRedemptionRebateRecord{
+		RedemptionId:  redemption.Id,
+		ReferenceNo:   fmt.Sprintf("redemption:%d", redemption.Id),
+		SourceType:    AgentRebateSourceRedemption,
+		InviteeUserId: invitee.Id,
+		AgentUserId:   profile.UserId,
+		PromoLinkId:   invitee.PromoLinkId,
+		RedeemQuota:   redemption.Quota,
+		PayAmount:     payAmount,
+		RebateRate:    rebateRate,
+		RebateAmount:  rebateAmount,
+		Status:        AgentRebateRecordSettled,
+	}
+	if err := tx.Create(&record).Error; err != nil {
+		return err
+	}
+	balanceBefore := profile.RebateBalanceAmount
+	balanceAfter := balanceBefore + rebateAmount
+	if err := tx.Model(&AgentProfile{}).Where("id = ?", profile.Id).Updates(map[string]interface{}{
+		"rebate_balance_amount": balanceAfter,
+		"rebate_total_amount":   profile.RebateTotalAmount + rebateAmount,
+	}).Error; err != nil {
+		return err
+	}
+	return createAgentBalanceLedgerTx(tx, &AgentBalanceLedger{
+		AgentUserId:   profile.UserId,
+		ChangeType:    AgentLedgerTypeRebateIncome,
+		Amount:        rebateAmount,
+		BalanceBefore: balanceBefore,
+		BalanceAfter:  balanceAfter,
+		FrozenBefore:  profile.RebateFrozenAmount,
+		FrozenAfter:   profile.RebateFrozenAmount,
+		ReferenceType: "redemption_rebate_record",
+		ReferenceId:   record.Id,
+		Remark:        AgentRebateSourceRedemption,
 	})
 }
 
@@ -1105,6 +1244,17 @@ func convertMoneyToMinorUnit(amount float64) int64 {
 	return decimal.NewFromFloat(amount).Mul(decimal.NewFromInt(100)).Round(0).IntPart()
 }
 
+func convertQuotaToMinorUnit(quota int) int64 {
+	if quota <= 0 || common.QuotaPerUnit <= 0 {
+		return 0
+	}
+	return decimal.NewFromInt(int64(quota)).
+		Div(decimal.NewFromFloat(common.QuotaPerUnit)).
+		Mul(decimal.NewFromInt(100)).
+		Round(0).
+		IntPart()
+}
+
 func GetAllAgentRebateGroups() ([]*AgentRebateGroup, error) {
 	var groups []*AgentRebateGroup
 	err := DB.Order("is_default desc, id asc").Find(&groups).Error
@@ -1425,20 +1575,53 @@ func GetAgentProfileViewByUserId(userId int) (*AgentProfileView, error) {
 	return &profile, nil
 }
 
-func GetAgentRebateRecords(pageInfo *common.PageInfo, agentUserId int) ([]*AgentRebateRecord, int64, error) {
-	var records []*AgentRebateRecord
-	var total int64
-	tx := DB.Model(&AgentRebateRecord{})
+func GetAgentRebateRecords(pageInfo *common.PageInfo, agentUserId int) ([]*AgentRebateRecordView, int64, error) {
+	var records []*AgentRebateRecordView
+	var topupTotal int64
+	topupTx := DB.Model(&AgentRebateRecord{})
 	if agentUserId > 0 {
-		tx = tx.Where("agent_user_id = ?", agentUserId)
+		topupTx = topupTx.Where("agent_user_id = ?", agentUserId)
 	}
-	if err := tx.Count(&total).Error; err != nil {
+	if err := topupTx.Count(&topupTotal).Error; err != nil {
 		return nil, 0, err
 	}
-	if err := tx.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&records).Error; err != nil {
+	var redemptionTotal int64
+	redemptionTx := DB.Model(&AgentRedemptionRebateRecord{})
+	if agentUserId > 0 {
+		redemptionTx = redemptionTx.Where("agent_user_id = ?", agentUserId)
+	}
+	if err := redemptionTx.Count(&redemptionTotal).Error; err != nil {
 		return nil, 0, err
 	}
-	return records, total, nil
+
+	params := make([]interface{}, 0, 4)
+	topupWhere := ""
+	redemptionWhere := ""
+	if agentUserId > 0 {
+		topupWhere = "WHERE agent_user_id = ?"
+		redemptionWhere = "WHERE agent_user_id = ?"
+		params = append(params, agentUserId, agentUserId)
+	}
+	query := fmt.Sprintf(`SELECT *
+FROM (
+	SELECT id, 'topup' AS record_type, id AS record_id, top_up_id, trade_no, source_type, invitee_user_id, agent_user_id, promo_link_id, 0 AS redeem_quota, pay_amount, rebate_rate, rebate_amount, status, remark, created_at, settled_at
+	FROM agent_rebate_records
+	%s
+	UNION ALL
+	SELECT id, 'redemption' AS record_type, id AS record_id, 0 AS top_up_id, reference_no AS trade_no, source_type, invitee_user_id, agent_user_id, promo_link_id, redeem_quota, pay_amount, rebate_rate, rebate_amount, status, remark, created_at, settled_at
+	FROM agent_redemption_rebate_records
+	%s
+) AS rebate_records
+ORDER BY settled_at DESC, id DESC
+LIMIT ? OFFSET ?`, topupWhere, redemptionWhere)
+	params = append(params, pageInfo.GetPageSize(), pageInfo.GetStartIdx())
+	if err := DB.Raw(query, params...).Scan(&records).Error; err != nil {
+		return nil, 0, err
+	}
+	for _, record := range records {
+		record.RecordKey = fmt.Sprintf("%s:%d", record.RecordType, record.RecordId)
+	}
+	return records, topupTotal + redemptionTotal, nil
 }
 
 func GetAgentSelfSummary(userId int) (*AgentSelfSummary, error) {
@@ -1461,14 +1644,24 @@ func GetAgentSelfSummary(userId int) (*AgentSelfSummary, error) {
 	if account, err := GetAgentWithdrawAccount(userId); err == nil {
 		summary.WithdrawAccount = account
 	}
-	var recentRebateAmount int64
-	if err := DB.Model(&AgentRebateRecord{}).Where("agent_user_id = ?", userId).Count(&summary.RecentRebateCount).Error; err != nil {
+	var topupRebateCount int64
+	if err := DB.Model(&AgentRebateRecord{}).Where("agent_user_id = ?", userId).Count(&topupRebateCount).Error; err != nil {
 		return nil, err
 	}
-	if err := DB.Model(&AgentRebateRecord{}).Select("COALESCE(SUM(rebate_amount), 0)").Where("agent_user_id = ?", userId).Scan(&recentRebateAmount).Error; err != nil {
+	var redemptionRebateCount int64
+	if err := DB.Model(&AgentRedemptionRebateRecord{}).Where("agent_user_id = ?", userId).Count(&redemptionRebateCount).Error; err != nil {
 		return nil, err
 	}
-	summary.RecentRebateAmount = recentRebateAmount
+	summary.RecentRebateCount = topupRebateCount + redemptionRebateCount
+	var topupRebateAmount int64
+	if err := DB.Model(&AgentRebateRecord{}).Select("COALESCE(SUM(rebate_amount), 0)").Where("agent_user_id = ?", userId).Scan(&topupRebateAmount).Error; err != nil {
+		return nil, err
+	}
+	var redemptionRebateAmount int64
+	if err := DB.Model(&AgentRedemptionRebateRecord{}).Select("COALESCE(SUM(rebate_amount), 0)").Where("agent_user_id = ?", userId).Scan(&redemptionRebateAmount).Error; err != nil {
+		return nil, err
+	}
+	summary.RecentRebateAmount = topupRebateAmount + redemptionRebateAmount
 	if err := DB.Model(&AgentRebateAdjustment{}).Where("agent_user_id = ?", userId).Count(&summary.RecentAdjustmentCount).Error; err != nil {
 		return nil, err
 	}
@@ -1736,11 +1929,15 @@ func TransferAgentDownlineUser(operatorUserId int, sourceAgentUserId int, target
 			return err
 		}
 		targetPromoLinkId = linkId
-		if err := tx.Model(&User{}).Where("id = ?", downlineUserId).Updates(map[string]interface{}{
+		result := tx.Model(&User{}).Where("id = ? AND inviter_id = ?", downlineUserId, sourceAgentUserId).Updates(map[string]interface{}{
 			"inviter_id":    targetAgentUserId,
 			"promo_link_id": targetPromoLinkId,
-		}).Error; err != nil {
-			return err
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("downline user ownership changed, please refresh and retry")
 		}
 		return nil
 	})

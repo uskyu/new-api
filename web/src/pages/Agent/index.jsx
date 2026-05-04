@@ -1076,7 +1076,7 @@ export default function Agent() {
       render: (_, record) => formatAmount(record.topup_amount),
     },
     {
-      title: t('返利金额'),
+      title: t('返利金额(含兑换码)'),
       dataIndex: 'rebate_amount',
       render: (_, record) => formatAmount(record.rebate_amount),
     },
@@ -1095,7 +1095,7 @@ export default function Agent() {
       render: (_, record) => formatAmount(record.topup_amount),
     },
     {
-      title: t('返利金额'),
+      title: t('返利金额(含兑换码)'),
       dataIndex: 'rebate_amount',
       render: (_, record) => formatAmount(record.rebate_amount),
     },

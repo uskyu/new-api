@@ -34,6 +34,9 @@ func CheckAgentSchemaReady() ([]string, error) {
 	if !DB.Migrator().HasTable(&AgentRebateRecord{}) {
 		missing = append(missing, "agent_rebate_records")
 	}
+	if !DB.Migrator().HasTable(&AgentRedemptionRebateRecord{}) {
+		missing = append(missing, "agent_redemption_rebate_records")
+	}
 	if !DB.Migrator().HasTable(&AgentRebateAdjustment{}) {
 		missing = append(missing, "agent_rebate_adjustments")
 	}

@@ -1,12 +1,6 @@
 package queryx
 
-import (
-	"fmt"
-
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/common/dbx"
-	"gorm.io/gorm"
-)
+import "gorm.io/gorm"
 
 func agentPromoLinkSelectFields() string {
 	return `apl.id AS promo_link_id, apl.agent_user_id, apl.name, apl.code, apl.status, apl.landing_page,
@@ -31,23 +25,29 @@ func agentPromoLinkUserJoin() string {
 }
 
 func agentPromoLinkTopupJoin() string {
-	return fmt.Sprintf(`LEFT JOIN (
-			SELECT u.promo_link_id,
-			COUNT(t.id) AS topup_count,
-			%s AS topup_amount
-			FROM users AS u
-			LEFT JOIN top_ups AS t ON t.user_id = u.id AND t.status = ?
-			WHERE u.promo_link_id > 0 AND u.deleted_at IS NULL
-			GROUP BY u.promo_link_id
-		) AS topup_stats ON topup_stats.promo_link_id = apl.id`, dbx.SumMoneyCentsExpr("t.money"))
+	return `LEFT JOIN (
+			SELECT promo_link_id,
+			COUNT(id) AS topup_count,
+			COALESCE(SUM(pay_amount), 0) AS topup_amount
+			FROM agent_rebate_records
+			WHERE promo_link_id > 0 AND status = ?
+			GROUP BY promo_link_id
+		) AS topup_stats ON topup_stats.promo_link_id = apl.id`
 }
 
 func agentPromoLinkRebateJoin() string {
 	return `LEFT JOIN (
 			SELECT promo_link_id,
 			COALESCE(SUM(rebate_amount), 0) AS rebate_amount
-			FROM agent_rebate_records
-			WHERE promo_link_id > 0 AND status = ?
+			FROM (
+				SELECT promo_link_id, rebate_amount
+				FROM agent_rebate_records
+				WHERE promo_link_id > 0 AND status = ?
+				UNION ALL
+				SELECT promo_link_id, rebate_amount
+				FROM agent_redemption_rebate_records
+				WHERE promo_link_id > 0 AND status = ?
+			) AS rebate_union
 			GROUP BY promo_link_id
 		) AS rebate_stats ON rebate_stats.promo_link_id = apl.id`
 }
@@ -56,8 +56,8 @@ func BuildAgentPromoLinkStatsQuery(db *gorm.DB, agentUserId int, rebateStatus st
 	tx := db.Table("agent_promo_links AS apl").
 		Select(agentPromoLinkSelectFields()).
 		Joins(agentPromoLinkUserJoin()).
-		Joins(agentPromoLinkTopupJoin(), common.TopUpStatusSuccess).
-		Joins(agentPromoLinkRebateJoin(), rebateStatus)
+		Joins(agentPromoLinkTopupJoin(), rebateStatus).
+		Joins(agentPromoLinkRebateJoin(), rebateStatus, rebateStatus)
 	if agentUserId > 0 {
 		tx = tx.Where("apl.agent_user_id = ?", agentUserId)
 	}

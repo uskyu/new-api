@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/common/dbx"
 	"gorm.io/gorm"
+
+	"github.com/QuantumNous/new-api/common/dbx"
 )
 
 func agentDownlineSelectFields() string {
@@ -23,26 +23,35 @@ COALESCE(rebate_stats.latest_rebate_time, 0) AS latest_rebate_time`,
 }
 
 func agentDownlineTopupJoin() string {
-	return fmt.Sprintf(`LEFT JOIN (
-			SELECT user_id,
+	return `LEFT JOIN (
+			SELECT invitee_user_id,
+			agent_user_id,
 			COUNT(id) AS topup_count,
-			%s AS topup_amount,
-			MAX(complete_time) AS latest_topup_time
-			FROM top_ups
+			COALESCE(SUM(pay_amount), 0) AS topup_amount,
+			MAX(settled_at) AS latest_topup_time
+			FROM agent_rebate_records
 			WHERE status = ?
-			GROUP BY user_id
-		) AS topup_stats ON topup_stats.user_id = u.id`, dbx.SumMoneyCentsExpr("money"))
+			GROUP BY invitee_user_id, agent_user_id
+		) AS topup_stats ON topup_stats.invitee_user_id = u.id AND topup_stats.agent_user_id = ?`
 }
 
 func agentDownlineRebateJoin() string {
 	return `LEFT JOIN (
 			SELECT invitee_user_id,
+			agent_user_id,
 			COALESCE(SUM(rebate_amount), 0) AS rebate_amount,
 			MAX(settled_at) AS latest_rebate_time
-			FROM agent_rebate_records
-			WHERE status = ?
-			GROUP BY invitee_user_id
-		) AS rebate_stats ON rebate_stats.invitee_user_id = u.id`
+			FROM (
+				SELECT invitee_user_id, agent_user_id, rebate_amount, settled_at
+				FROM agent_rebate_records
+				WHERE status = ?
+				UNION ALL
+				SELECT invitee_user_id, agent_user_id, rebate_amount, settled_at
+				FROM agent_redemption_rebate_records
+				WHERE status = ?
+			) AS rebate_union
+			GROUP BY invitee_user_id, agent_user_id
+		) AS rebate_stats ON rebate_stats.invitee_user_id = u.id AND rebate_stats.agent_user_id = ?`
 }
 
 func applyDownlineKeywordFilter(tx *gorm.DB, keyword string) *gorm.DB {
@@ -62,8 +71,8 @@ func BuildAgentDownlineUsersQuery(db *gorm.DB, agentUserId int, keyword string, 
 		Select(agentDownlineSelectFields()).
 		Joins("LEFT JOIN agent_promo_links AS apl ON apl.id = u.promo_link_id").
 		Joins("LEFT JOIN agent_profiles AS child_profile ON child_profile.user_id = u.id AND child_profile.status = ?", childAgentStatus).
-		Joins(agentDownlineTopupJoin(), common.TopUpStatusSuccess).
-		Joins(agentDownlineRebateJoin(), rebateStatus).
+		Joins(agentDownlineTopupJoin(), rebateStatus, agentUserId).
+		Joins(agentDownlineRebateJoin(), rebateStatus, rebateStatus, agentUserId).
 		Where("u.inviter_id = ? AND u.deleted_at IS NULL", agentUserId)
 	tx = applyDownlineKeywordFilter(tx, keyword)
 	return tx

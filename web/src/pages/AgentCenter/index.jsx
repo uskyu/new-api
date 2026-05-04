@@ -33,6 +33,33 @@ function formatRate(rate) {
   return `${(Number(rate || 0) / 100).toFixed(2)}%`;
 }
 
+function getRebateSourceTag(sourceType, t) {
+  if (sourceType === 'redemption') {
+    return <Tag color='purple'>{t('兑换码')}</Tag>;
+  }
+  if (sourceType === 'epay') {
+    return <Tag color='green'>{t('在线充值')}</Tag>;
+  }
+  if (sourceType === 'manual') {
+    return <Tag color='blue'>{t('手工补单')}</Tag>;
+  }
+  return <Tag>{sourceType || '-'}</Tag>;
+}
+
+function renderRebateBase(record, t) {
+  if (record?.source_type === 'redemption' && Number(record?.redeem_quota || 0) > 0) {
+    return (
+      <Space vertical align='start' spacing={0}>
+        <Text>{formatAmount(record.pay_amount)}</Text>
+        <Text type='secondary' size='small'>
+          {t('兑换额度')} {renderQuotaWithAmount(record.redeem_quota)}
+        </Text>
+      </Space>
+    );
+  }
+  return formatAmount(record?.pay_amount);
+}
+
 function getWithdrawStatusTag(status, t) {
   if (status === 'pending') {
     return <Tag color='orange'>{t('待处理')}</Tag>;
@@ -418,12 +445,16 @@ export default function AgentCenter() {
   const rebateColumns = useMemo(
     () => [
       { title: t('订单号'), dataIndex: 'trade_no' },
-      { title: t('来源'), dataIndex: 'source_type' },
+      {
+        title: t('来源'),
+        dataIndex: 'source_type',
+        render: (_, record) => getRebateSourceTag(record.source_type, t),
+      },
       { title: t('下级用户ID'), dataIndex: 'invitee_user_id' },
       {
-        title: t('支付金额'),
+        title: t('结算基数'),
         dataIndex: 'pay_amount',
-        render: (_, record) => formatAmount(record.pay_amount),
+        render: (_, record) => renderRebateBase(record, t),
       },
       {
         title: t('返利比例'),
@@ -516,7 +547,7 @@ export default function AgentCenter() {
         render: (_, record) => formatAmount(record.topup_amount),
       },
       {
-        title: t('返利金额'),
+        title: t('返利金额(含兑换码)'),
         dataIndex: 'rebate_amount',
         render: (_, record) => formatAmount(record.rebate_amount),
       },
@@ -709,7 +740,7 @@ export default function AgentCenter() {
                   {t('返利流水')}
                 </Title>
                 <Table
-                  rowKey='id'
+                  rowKey='record_key'
                   columns={rebateColumns}
                   dataSource={rebates}
                   loading={rebatesLoading}

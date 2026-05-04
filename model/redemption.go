@@ -148,7 +148,10 @@ func Redeem(key string, userId int) (quota int, err error) {
 		redemption.Status = common.RedemptionCodeStatusUsed
 		redemption.UsedUserId = userId
 		err = tx.Save(redemption).Error
-		return err
+		if err != nil {
+			return err
+		}
+		return SettleAgentRedemptionRebateTx(tx, redemption, userId)
 	})
 	if err != nil {
 		common.SysError("redemption failed: " + err.Error())
