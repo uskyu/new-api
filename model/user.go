@@ -54,11 +54,14 @@ type User struct {
 }
 
 type SupportManagedUser struct {
-	Id          int    `json:"id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	Quota       int    `json:"quota"`
-	UsedQuota   int    `json:"used_quota"`
+	Id                 int    `json:"id"`
+	Username           string `json:"username"`
+	DisplayName        string `json:"display_name"`
+	Quota              int    `json:"quota"`
+	UsedQuota          int    `json:"used_quota"`
+	InviterId          int    `json:"inviter_id"`
+	InviterUsername    string `json:"inviter_username"`
+	InviterDisplayName string `json:"inviter_display_name"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -324,12 +327,14 @@ func GetSupportManageUsers(pageInfo *common.PageInfo) (users []*SupportManagedUs
 		}
 	}()
 
-	query := tx.Model(&User{}).Where("role = ?", common.RoleCommonUser)
+	query := tx.Model(&User{}).
+		Joins("LEFT JOIN users AS inviter ON inviter.id = users.inviter_id").
+		Where("users.role = ?", common.RoleCommonUser)
 	if err = query.Count(&total).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
-	if err = query.Select("id", "username", "display_name", "quota", "used_quota").Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&users).Error; err != nil {
+	if err = query.Select("users.id, users.username, users.display_name, users.quota, users.used_quota, users.inviter_id, COALESCE(inviter.username, '') AS inviter_username, COALESCE(inviter.display_name, '') AS inviter_display_name").Order("users.id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&users).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
@@ -356,11 +361,13 @@ func SearchSupportManageUsers(keyword string, startIdx int, num int) ([]*Support
 		}
 	}()
 
-	query := tx.Model(&User{}).Where("role = ?", common.RoleCommonUser)
-	likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
+	query := tx.Model(&User{}).
+		Joins("LEFT JOIN users AS inviter ON inviter.id = users.inviter_id").
+		Where("users.role = ?", common.RoleCommonUser)
+	likeCondition := "users.username LIKE ? OR users.email LIKE ? OR users.display_name LIKE ?"
 	like := "%" + keyword + "%"
 	if keywordInt, err := strconv.Atoi(keyword); err == nil {
-		likeCondition = "id = ? OR " + likeCondition
+		likeCondition = "users.id = ? OR " + likeCondition
 		query = query.Where("("+likeCondition+")", keywordInt, like, like, like)
 	} else {
 		query = query.Where("("+likeCondition+")", like, like, like)
@@ -370,7 +377,7 @@ func SearchSupportManageUsers(keyword string, startIdx int, num int) ([]*Support
 		tx.Rollback()
 		return nil, 0, err
 	}
-	if err := query.Select("id", "username", "display_name", "quota", "used_quota").Order("id desc").Limit(num).Offset(startIdx).Scan(&users).Error; err != nil {
+	if err := query.Select("users.id, users.username, users.display_name, users.quota, users.used_quota, users.inviter_id, COALESCE(inviter.username, '') AS inviter_username, COALESCE(inviter.display_name, '') AS inviter_display_name").Order("users.id desc").Limit(num).Offset(startIdx).Scan(&users).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
@@ -386,8 +393,9 @@ func GetSupportManageUserById(id int) (*SupportManagedUser, error) {
 	}
 	user := SupportManagedUser{}
 	err := DB.Model(&User{}).
-		Select("id", "username", "display_name", "quota", "used_quota").
-		Where("id = ? AND role = ?", id, common.RoleCommonUser).
+		Joins("LEFT JOIN users AS inviter ON inviter.id = users.inviter_id").
+		Select("users.id, users.username, users.display_name, users.quota, users.used_quota, users.inviter_id, COALESCE(inviter.username, '') AS inviter_username, COALESCE(inviter.display_name, '') AS inviter_display_name").
+		Where("users.id = ? AND users.role = ?", id, common.RoleCommonUser).
 		First(&user).Error
 	return &user, err
 }

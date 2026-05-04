@@ -190,6 +190,29 @@ const renderInviteInfo = (text, record, t) => {
   );
 };
 
+const renderSupportInviter = (record, t) => {
+  if (!record.inviter_id) {
+    return (
+      <Tag color='white' shape='circle' className='!text-xs'>
+        {t('无上级代理')}
+      </Tag>
+    );
+  }
+
+  const name = record.inviter_display_name || record.inviter_username;
+  const content = name
+    ? `${name} (#${record.inviter_id})`
+    : `${t('代理ID')}: ${record.inviter_id}`;
+
+  return (
+    <Tooltip content={content} position='top'>
+      <Tag color='cyan' shape='circle' className='!text-xs max-w-[180px]'>
+        <span className='block truncate'>{content}</span>
+      </Tag>
+    </Tooltip>
+  );
+};
+
 const renderOperations = (
   text,
   record,
@@ -341,6 +364,11 @@ export const getUsersColumns = ({
       render: (text, record) => renderQuotaUsage(text, record, t),
     },
     {
+      title: t('上级代理'),
+      key: 'support_inviter',
+      render: (text, record) => renderSupportInviter(record, t),
+    },
+    {
       title: t('分组'),
       dataIndex: 'group',
       render: (text, record, index) => {
@@ -384,7 +412,7 @@ export const getUsersColumns = ({
 
   if (supportMode) {
     return columns.filter((column) =>
-      ['id', 'username', 'quota_usage', 'operate'].includes(
+      ['id', 'username', 'support_inviter', 'quota_usage', 'operate'].includes(
         column.dataIndex || column.key,
       ),
     );
