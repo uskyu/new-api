@@ -50,6 +50,24 @@ const statusColorMap = {
   PROCESSING: 'blue',
 };
 
+const statusLabelMap = {
+  MOTHER_PENDING: '母版排队中',
+  MOTHER_PROCESSING: '母版生成中',
+  WAITING_CONFIRM: '等待确认',
+  MOTHER_FAILED: '母版生成失败',
+  SEGMENTS_PENDING: '详情段排队中',
+  SEGMENTS_PROCESSING: '详情段生成中',
+  SUCCEEDED: '生成成功',
+  FAILED: '生成失败',
+  PENDING: '排队中',
+  PROCESSING: '处理中',
+};
+
+const getStatusLabel = (status, t) => {
+  if (!status) return '-';
+  return t(statusLabelMap[status] || status);
+};
+
 const readFileAsDataUrl = (file) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -334,7 +352,7 @@ const AIEcommerceTemplate = () => {
               </div>
             </div>
             <div className='flex flex-wrap gap-2'>
-              {workflow ? <Tag color={statusColorMap[workflow.status] || 'grey'}>{workflow.status}</Tag> : null}
+              {workflow ? <Tag color={statusColorMap[workflow.status] || 'grey'}>{getStatusLabel(workflow.status, t)}</Tag> : null}
               <Button icon={<RefreshCw size={16} />} className='!rounded-full' onClick={() => refreshWorkflow(workflow?.workflow_id)} loading={polling} disabled={!workflow?.workflow_id}>
                 {t('刷新状态')}
               </Button>
@@ -460,7 +478,7 @@ const AIEcommerceTemplate = () => {
                               {item.template_name || item.template_key || '-'} · {timestamp2string(item.created_at)}
                             </div>
                           </div>
-                          <Tag color={statusColorMap[item.status] || 'grey'}>{item.status}</Tag>
+                          <Tag color={statusColorMap[item.status] || 'grey'}>{getStatusLabel(item.status, t)}</Tag>
                         </div>
                         <div className='mt-2 flex items-center gap-2 text-xs text-slate-500'>
                           <span>{t('母版')}: {item.mother_result_url ? t('已生成') : t('未完成')}</span>
@@ -532,7 +550,7 @@ const AIEcommerceTemplate = () => {
                       <div key={segment.segment_key} className='rounded-[22px] border border-slate-100 bg-slate-50 p-2'>
                         <div className='mb-2 flex items-center justify-between gap-2'>
                           <span className='truncate text-xs font-medium text-slate-600'>{t(segment.label)}</span>
-                          <Tag color={statusColorMap[segment.status] || 'grey'}>{segment.status}</Tag>
+                          <Tag color={statusColorMap[segment.status] || 'grey'}>{getStatusLabel(segment.status, t)}</Tag>
                         </div>
                         {segment.result_url ? (
                           <button type='button' onClick={() => openImage(segment.result_url)} className='block w-full overflow-hidden rounded-[16px] bg-white'>

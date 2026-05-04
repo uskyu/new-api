@@ -1451,7 +1451,7 @@
     "授权端点": "Authorization Endpoint",
     "授权范围 (Scopes)": "Scopes",
     "排序": "Sort Order",
-    "排队中": "Queuing",
+    "排队中": "Queued",
     "接受未设置价格模型": "Accept models without price settings",
     "接口凭证": "Interface credentials",
     "接口密钥已过期": "API key has expired",
@@ -3392,6 +3392,14 @@
     "从剪贴板粘贴配置": "Paste Config",
     "剪贴板中未检测到连接信息": "No connection info found in clipboard",
     "连接信息已填入": "Connection info applied",
-    "无法读取剪贴板": "Cannot read clipboard"
+    "无法读取剪贴板": "Cannot read clipboard",
+    "母版排队中": "Mother image queued",
+    "母版生成中": "Generating mother image",
+    "等待确认": "Awaiting confirmation",
+    "母版生成失败": "Mother image failed",
+    "详情段排队中": "Detail sections queued",
+    "详情段生成中": "Generating detail sections",
+    "生成成功": "Generated successfully",
+    "生成失败": "Generation failed"
   }
 }

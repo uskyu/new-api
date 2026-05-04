@@ -1429,7 +1429,7 @@
     "授权，需在遵守": " và phải được sử dụng tuân thủ ",
     "授权失败": "Ủy quyền thất bại",
     "排序": "Thứ tự",
-    "排队中": "Đang xếp hàng",
+    "排队中": "Queued",
     "接受未设置价格模型": "Chấp nhận các mô hình không có cài đặt giá",
     "接口凭证": "Thông tin xác thực giao diện",
     "接口密钥已过期": "API key has expired",
@@ -2200,9 +2200,9 @@
     "生成中...": "Đang tạo...",
     "生成令牌": "Tạo mã thông báo",
     "生成兑换码": "Tạo mã đổi thưởng",
-    "生成失败": "Tạo thất bại",
+    "生成失败": "Generation failed",
     "生成并填入": "Tạo và điền",
-    "生成成功": "Tạo thành công",
+    "生成成功": "Generated successfully",
     "生成数量": "Số lượng tạo",
     "生成数量必须大于0": "Số lượng tạo phải lớn hơn 0",
     "生成新密钥": "Tạo khóa mới",
@@ -3899,6 +3899,12 @@
     "从剪贴板粘贴配置": "Dán cấu hình",
     "剪贴板中未检测到连接信息": "Không tìm thấy thông tin kết nối trong bộ nhớ tạm",
     "连接信息已填入": "Đã áp dụng thông tin kết nối",
-    "无法读取剪贴板": "Không thể đọc bộ nhớ tạm"
+    "无法读取剪贴板": "Không thể đọc bộ nhớ tạm",
+    "母版排队中": "Mother image queued",
+    "母版生成中": "Generating mother image",
+    "等待确认": "Awaiting confirmation",
+    "母版生成失败": "Mother image failed",
+    "详情段排队中": "Detail sections queued",
+    "详情段生成中": "Generating detail sections"
   }
 }

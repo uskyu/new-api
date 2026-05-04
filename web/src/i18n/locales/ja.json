@@ -1428,7 +1428,7 @@
     "授权，需在遵守": "の条件に基づき、",
     "授权失败": "認可に失敗しました",
     "排序": "並び順",
-    "排队中": "待機中",
+    "排队中": "Queued",
     "接受未设置价格模型": "料金未設定モデルを許可",
     "接口凭证": "API認証情報",
     "接口密钥已过期": "API key has expired",
@@ -3329,6 +3329,14 @@
     "从剪贴板粘贴配置": "クリップボードから貼り付け",
     "剪贴板中未检测到连接信息": "クリップボードに接続情報が見つかりません",
     "连接信息已填入": "接続情報を入力しました",
-    "无法读取剪贴板": "クリップボードを読み取れません"
+    "无法读取剪贴板": "クリップボードを読み取れません",
+    "母版排队中": "Mother image queued",
+    "母版生成中": "Generating mother image",
+    "等待确认": "Awaiting confirmation",
+    "母版生成失败": "Mother image failed",
+    "详情段排队中": "Detail sections queued",
+    "详情段生成中": "Generating detail sections",
+    "生成成功": "Generated successfully",
+    "生成失败": "Generation failed"
   }
 }

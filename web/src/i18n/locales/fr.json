@@ -987,7 +987,7 @@
     "填写带https的域名，逗号分隔": "Saisir les domaines avec https, séparés par des virgules",
     "填写用户协议内容后，用户注册时将被要求勾选已阅读用户协议": "Après avoir rempli le contenu de l'accord utilisateur, les utilisateurs devront cocher avoir lu l'accord utilisateur lors de l'inscription",
     "填写隐私政策内容后，用户注册时将被要求勾选已阅读隐私政策": "Après avoir rempli le contenu de la politique de confidentialité, les utilisateurs devront cocher avoir lu la politique de confidentialité lors de l'inscription",
-    "处理中": "Processing",
+    "处理中": "Traitement",
     "备份支持": "Prise en charge de la sauvegarde",
     "备份状态": "État de la sauvegarde",
     "备注": "Remarque",
@@ -1445,7 +1445,7 @@
     "授权，需在遵守": " et doit être utilisé conformément au ",
     "授权失败": "Échec de l'autorisation",
     "排序": "Ordre",
-    "排队中": "En file d'attente",
+    "排队中": "En file d attente",
     "接受未设置价格模型": "Accepter les modèles sans prix défini",
     "接口凭证": "Informations d'identification de l'interface",
     "接口密钥已过期": "API key has expired",
@@ -3348,6 +3348,14 @@
     "从剪贴板粘贴配置": "Coller la config",
     "剪贴板中未检测到连接信息": "Aucune info de connexion trouvée dans le presse-papiers",
     "连接信息已填入": "Informations de connexion appliquées",
-    "无法读取剪贴板": "Impossible de lire le presse-papiers"
+    "无法读取剪贴板": "Impossible de lire le presse-papiers",
+    "母版排队中": "Maquette en file d attente",
+    "母版生成中": "Generation de la maquette",
+    "等待确认": "En attente de confirmation",
+    "母版生成失败": "Echec de la maquette",
+    "详情段排队中": "Sections de detail en file d attente",
+    "详情段生成中": "Generation des sections de detail",
+    "生成成功": "Generation reussie",
+    "生成失败": "Echec de generation"
   }
 }
