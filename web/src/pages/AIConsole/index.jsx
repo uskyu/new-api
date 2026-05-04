@@ -96,7 +96,11 @@ const SessionItem = ({
       </div>
     ) : (
       <div className='flex items-start gap-2'>
-        <button type='button' onClick={onSelect} className='min-w-0 flex-1 text-left'>
+        <button
+          type='button'
+          onClick={onSelect}
+          className='min-w-0 flex-1 text-left'
+        >
           <div className='truncate text-sm font-medium text-slate-900'>
             {session.title || t('新对话')}
           </div>
@@ -250,7 +254,9 @@ const AIConsole = () => {
             '',
             '以下是用户上传文件的解析内容，请作为本轮对话上下文：',
             fileContext,
-          ].filter((item) => item !== '').join('\n')
+          ]
+            .filter((item) => item !== '')
+            .join('\n')
         : trimmed;
 
       const loadingMessage = createLoadingAssistantMessage();
@@ -311,8 +317,7 @@ const AIConsole = () => {
     (messageId) => {
       setMessages((previous) =>
         previous.map((message) =>
-          message.id === messageId &&
-          message.role === MESSAGE_ROLES.ASSISTANT
+          message.id === messageId && message.role === MESSAGE_ROLES.ASSISTANT
             ? {
                 ...message,
                 isReasoningExpanded: !message.isReasoningExpanded,
@@ -345,7 +350,9 @@ const AIConsole = () => {
       if (!imageDataUrl) return;
       setDraftImages((previous) => {
         if (previous.length >= MAX_DRAFT_IMAGES) {
-          showError(t('最多支持 {{count}} 张图片', { count: MAX_DRAFT_IMAGES }));
+          showError(
+            t('最多支持 {{count}} 张图片', { count: MAX_DRAFT_IMAGES }),
+          );
           return previous;
         }
         return [...previous, imageDataUrl];
@@ -433,24 +440,10 @@ const AIConsole = () => {
     label: model.label,
   }));
 
-  const inputControlsNode = (
-    <div
-      className='flex flex-wrap items-center gap-2'
-      onClick={(event) => event.stopPropagation()}
-    >
-      <select
-        value={reasoningEffort}
-        onChange={(event) => setReasoningEffort(event.target.value)}
-        className='h-8 rounded-full border-0 bg-slate-100/80 px-3 text-xs text-slate-700 outline-none transition hover:bg-slate-100 focus:bg-white'
-      >
-        {REASONING_EFFORT_OPTIONS.map((option) => (
-          <option key={option.value || 'auto'} value={option.value}>
-            {t('思考')}: {t(option.label)}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
+  const reasoningOptions = REASONING_EFFORT_OPTIONS.map((option) => ({
+    value: option.value,
+    label: t(option.label),
+  }));
 
   if (!ready) {
     return (
@@ -538,6 +531,17 @@ const AIConsole = () => {
           />
         </div>
 
+        <div>
+          <div className='mb-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-400'>
+            {t('思考深度')}
+          </div>
+          <NativeSelect
+            value={reasoningEffort}
+            options={reasoningOptions}
+            onChange={setReasoningEffort}
+            placeholder={t('选择思考深度')}
+          />
+        </div>
       </div>
     </div>
   );
@@ -605,7 +609,6 @@ const AIConsole = () => {
               onToggleReasoningExpansion={onToggleReasoningExpansion}
               onStopGenerator={onStopGenerator}
               onClearMessages={handleClearMessages}
-              inputControlsNode={inputControlsNode}
             />
           </div>
         </main>

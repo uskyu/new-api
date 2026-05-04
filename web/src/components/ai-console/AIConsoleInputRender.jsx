@@ -94,20 +94,23 @@ const AIConsoleInputRender = ({
     onAddImage?.(dataUrl);
   };
 
-  const handleAddFiles = React.useCallback(async (files) => {
-    const nextFiles = Array.from(files || []).filter(Boolean);
-    if (nextFiles.length === 0) {
-      return;
-    }
-    setIsParsingFile(true);
-    try {
-      for (const file of nextFiles) {
-        await onAddFile?.(file);
+  const handleAddFiles = React.useCallback(
+    async (files) => {
+      const nextFiles = Array.from(files || []).filter(Boolean);
+      if (nextFiles.length === 0) {
+        return;
       }
-    } finally {
-      setIsParsingFile(false);
-    }
-  }, [onAddFile]);
+      setIsParsingFile(true);
+      try {
+        for (const file of nextFiles) {
+          await onAddFile?.(file);
+        }
+      } finally {
+        setIsParsingFile(false);
+      }
+    },
+    [onAddFile],
+  );
 
   const handlePickDocument = async (event) => {
     const files = Array.from(event.target.files || []);
@@ -126,7 +129,9 @@ const AIConsoleInputRender = ({
         .filter((item) => item.kind === 'file')
         .map((item) => item.getAsFile())
         .filter(Boolean);
-      const filesFromList = Array.from(clipboardData.files || []).filter(Boolean);
+      const filesFromList = Array.from(clipboardData.files || []).filter(
+        Boolean,
+      );
       const files = [...filesFromItems, ...filesFromList].filter(
         (file, index, list) =>
           list.findIndex(
@@ -143,8 +148,12 @@ const AIConsoleInputRender = ({
 
       event.preventDefault();
 
-      const imageFiles = files.filter((file) => file.type?.startsWith('image/'));
-      const documentFiles = files.filter((file) => !file.type?.startsWith('image/'));
+      const imageFiles = files.filter((file) =>
+        file.type?.startsWith('image/'),
+      );
+      const documentFiles = files.filter(
+        (file) => !file.type?.startsWith('image/'),
+      );
       for (const imageFile of imageFiles) {
         const dataUrl = await readFileAsDataUrl(imageFile);
         onAddImage?.(dataUrl);
@@ -164,7 +173,11 @@ const AIConsoleInputRender = ({
   }, [handlePaste]);
 
   return (
-    <div ref={containerRef} className='px-3 pb-3 pt-2 sm:px-5 sm:pb-5' onClick={onClick}>
+    <div
+      ref={containerRef}
+      className='px-3 pb-3 pt-2 sm:px-5 sm:pb-5'
+      onClick={onClick}
+    >
       {draftImages.length > 0 && (
         <div className='mb-3 flex flex-wrap gap-2'>
           {draftImages.map((image, index) => (
@@ -229,81 +242,83 @@ const AIConsoleInputRender = ({
         </div>
       )}
 
-      <div
-        className='rounded-[28px] border border-white/70 bg-white/75 p-2 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-shadow hover:shadow-[0_28px_90px_rgba(15,23,42,0.12)]'
-        title={t('支持图片上传与粘贴')}
-      >
+      <div className='flex items-end gap-2'>
         {inputControlsNode ? (
-          <div className='mb-1 border-b border-slate-200/60 px-1 pb-2'>
+          <div className='mb-1 hidden shrink-0 sm:flex'>
             {inputControlsNode}
           </div>
         ) : null}
-        <div className='flex min-h-[46px] items-center gap-2'>
-          {styledClearNode}
-          <input
-            ref={fileInputRef}
-            type='file'
-            accept='image/*'
-            className='hidden'
-            onChange={handlePickImage}
-          />
-          <input
-            ref={documentInputRef}
-            type='file'
-            accept='.txt,.md,.csv,.json,.log,.pdf,.docx,.xlsx,.pptx'
-            multiple
-            className='hidden'
-            onChange={handlePickDocument}
-          />
-          <Button
-            theme='borderless'
-            type='tertiary'
-            icon={<ImagePlus size={16} />}
-            className='!rounded-full !bg-white/75 hover:!bg-sky-50 hover:!text-sky-600'
-            style={{
-              width: 38,
-              height: 38,
-              minWidth: 38,
-              padding: 0,
-              border: '1px solid rgba(255,255,255,0.6)',
-              boxShadow: '0 12px 32px rgba(15, 23, 42, 0.08)',
-            }}
-            onClick={(event) => {
-              event.stopPropagation();
-              fileInputRef.current?.click();
-            }}
-            aria-label={t('上传图片')}
-          />
-          <Button
-            theme='borderless'
-            type='tertiary'
-            icon={
-              isParsingFile ? (
-                <Loader2 size={16} className='animate-spin' />
-              ) : (
-                <FileText size={16} />
-              )
-            }
-            loading={isParsingFile}
-            className='!rounded-full !bg-white/75 hover:!bg-emerald-50 hover:!text-emerald-600'
-            style={{
-              width: 38,
-              height: 38,
-              minWidth: 38,
-              padding: 0,
-              border: '1px solid rgba(255,255,255,0.6)',
-              boxShadow: '0 12px 32px rgba(15, 23, 42, 0.08)',
-            }}
-            onClick={(event) => {
-              event.stopPropagation();
-              documentInputRef.current?.click();
-            }}
-            aria-label={t('上传文件')}
-          />
-          <div className='ai-console-input-node min-w-0 flex-1 overflow-hidden rounded-[22px] bg-transparent px-1'>
-            {inputNode}
+        <div
+          className='min-w-0 flex-1 rounded-[28px] border border-white/70 bg-white/75 p-2 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-shadow hover:shadow-[0_28px_90px_rgba(15,23,42,0.12)]'
+          title={t('支持图片上传与粘贴')}
+        >
+          <div className='flex min-h-[46px] items-center gap-2'>
+            {styledClearNode}
+            <input
+              ref={fileInputRef}
+              type='file'
+              accept='image/*'
+              className='hidden'
+              onChange={handlePickImage}
+            />
+            <input
+              ref={documentInputRef}
+              type='file'
+              accept='.txt,.md,.csv,.json,.log,.pdf,.docx,.xlsx,.pptx'
+              multiple
+              className='hidden'
+              onChange={handlePickDocument}
+            />
+            <Button
+              theme='borderless'
+              type='tertiary'
+              icon={<ImagePlus size={16} />}
+              className='!rounded-full !bg-white/75 hover:!bg-sky-50 hover:!text-sky-600'
+              style={{
+                width: 38,
+                height: 38,
+                minWidth: 38,
+                padding: 0,
+                border: '1px solid rgba(255,255,255,0.6)',
+                boxShadow: '0 12px 32px rgba(15, 23, 42, 0.08)',
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                fileInputRef.current?.click();
+              }}
+              aria-label={t('上传图片')}
+            />
+            <Button
+              theme='borderless'
+              type='tertiary'
+              icon={
+                isParsingFile ? (
+                  <Loader2 size={16} className='animate-spin' />
+                ) : (
+                  <FileText size={16} />
+                )
+              }
+              loading={isParsingFile}
+              className='!rounded-full !bg-white/75 hover:!bg-emerald-50 hover:!text-emerald-600'
+              style={{
+                width: 38,
+                height: 38,
+                minWidth: 38,
+                padding: 0,
+                border: '1px solid rgba(255,255,255,0.6)',
+                boxShadow: '0 12px 32px rgba(15, 23, 42, 0.08)',
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                documentInputRef.current?.click();
+              }}
+              aria-label={t('上传文件')}
+            />
+            <div className='ai-console-input-node min-w-0 flex-1 overflow-hidden rounded-[22px] bg-transparent px-1'>
+              {inputNode}
+            </div>
+            {styledSendNode}
           </div>
-          {styledSendNode}
         </div>
       </div>
 

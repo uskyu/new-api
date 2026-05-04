@@ -1473,9 +1473,9 @@ func GetAgentProfiles(pageInfo *common.PageInfo, keyword string) ([]*AgentProfil
 	if keyword != "" {
 		like := "%" + keyword + "%"
 		if keywordInt, err := strconv.Atoi(keyword); err == nil {
-			tx = tx.Where("ap.user_id = ? OR u.username LIKE ? OR u.display_name LIKE ?", keywordInt, like, like)
+			tx = tx.Where("(ap.id = ? OR ap.user_id = ? OR u.username LIKE ? OR u.display_name LIKE ?)", keywordInt, keywordInt, like, like)
 		} else {
-			tx = tx.Where("u.username LIKE ? OR u.display_name LIKE ?", like, like)
+			tx = tx.Where("(u.username LIKE ? OR u.display_name LIKE ?)", like, like)
 		}
 	}
 	if err := tx.Count(&total).Error; err != nil {

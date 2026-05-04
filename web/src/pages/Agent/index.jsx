@@ -1551,28 +1551,28 @@ export default function Agent() {
                   </Title>
                   <Space>
                     <Input
+                      prefix={<IconSearch size={14} />}
                       placeholder={t('搜索用户ID、用户名或显示名称')}
                       value={keywordInput}
                       onChange={setKeywordInput}
                       style={{ width: 260 }}
+                      onEnterPress={() => {
+                        const nextKeyword = keywordInput.trim();
+                        setProfilesPage(1);
+                        setKeyword(nextKeyword);
+                        loadProfiles(1, nextKeyword);
+                      }}
                     />
                     <Button
                       onClick={() => {
+                        const nextKeyword = keywordInput.trim();
                         setProfilesPage(1);
-                        setKeyword(keywordInput.trim());
-                        loadProfiles(1, keywordInput.trim());
+                        setKeyword(nextKeyword);
+                        loadProfiles(1, nextKeyword);
                       }}
                     >
                       {t('搜索')}
                     </Button>
-                    {canAssignDownlines && (
-                      <Button
-                        type='warning'
-                        onClick={() => handleOpenAssignDownline()}
-                      >
-                        {t('分配用户')}
-                      </Button>
-                    )}
                     {canManageAgentAdmin && (
                       <Button type='primary' onClick={handleOpenCreateProfile}>
                         {t('新增代理')}
