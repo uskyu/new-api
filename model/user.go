@@ -342,6 +342,10 @@ func GetSupportManageUsers(pageInfo *common.PageInfo) (users []*SupportManagedUs
 func SearchSupportManageUsers(keyword string, startIdx int, num int) ([]*SupportManagedUser, int64, error) {
 	var users []*SupportManagedUser
 	var total int64
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return users, 0, nil
+	}
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error

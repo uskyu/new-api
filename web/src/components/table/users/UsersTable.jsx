@@ -53,6 +53,7 @@ const UsersTable = (usersData) => {
     resetUserPasskey,
     resetUserTwoFA,
     supportMode,
+    supportSearchActive,
     t,
   } = usersData;
 
@@ -224,7 +225,11 @@ const UsersTable = (usersData) => {
             darkModeImage={
               <IllustrationNoResultDark style={{ width: 150, height: 150 }} />
             }
-            description={t('搜索无结果')}
+            description={
+              supportMode && !supportSearchActive
+                ? t('请输入用户ID、用户名、显示名称或邮箱进行搜索')
+                : t('搜索无结果')
+            }
             style={{ padding: 30 }}
           />
         }

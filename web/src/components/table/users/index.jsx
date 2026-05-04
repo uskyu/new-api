@@ -48,6 +48,7 @@ const UsersPage = () => {
     setFormApi,
     searchUsers,
     loadUsers,
+    clearSupportUsers,
     activePage,
     pageSize,
     groupOptions,
@@ -102,6 +103,7 @@ const UsersPage = () => {
               setFormApi={setFormApi}
               searchUsers={searchUsers}
               loadUsers={loadUsers}
+              clearSupportUsers={clearSupportUsers}
               activePage={activePage}
               pageSize={pageSize}
               groupOptions={groupOptions}

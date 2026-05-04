@@ -257,19 +257,20 @@ func SearchUsers(c *gin.Context) {
 
 func GetSupportUsers(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	users, total, err := model.GetSupportManageUsers(pageInfo)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(users)
+	pageInfo.SetTotal(0)
+	pageInfo.SetItems([]*model.SupportManagedUser{})
 	common.ApiSuccess(c, pageInfo)
 }
 
 func SearchSupportUsers(c *gin.Context) {
-	keyword := c.Query("keyword")
 	pageInfo := common.GetPageQuery(c)
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	if keyword == "" {
+		pageInfo.SetTotal(0)
+		pageInfo.SetItems([]*model.SupportManagedUser{})
+		common.ApiSuccess(c, pageInfo)
+		return
+	}
 	users, total, err := model.SearchSupportManageUsers(keyword, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)

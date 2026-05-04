@@ -99,9 +99,7 @@ export default function useAiConsoleState() {
   const [selectedGroup, setSelectedGroup] = useState(
     storedPrefs.selectedGroup || '',
   );
-  const [reasoningEffort, setReasoningEffort] = useState(
-    storedPrefs.reasoningEffort || '',
-  );
+  const [reasoningEffort, setReasoningEffort] = useState('');
   const [draftImages, setDraftImages] = useState([]);
   const [draftFiles, setDraftFiles] = useState([]);
 
@@ -119,7 +117,10 @@ export default function useAiConsoleState() {
       return models;
     }
     return models.filter((model) => {
-      if (!Array.isArray(model.enableGroups) || model.enableGroups.length === 0) {
+      if (
+        !Array.isArray(model.enableGroups) ||
+        model.enableGroups.length === 0
+      ) {
         return true;
       }
       return model.enableGroups.includes(selectedGroup);
@@ -255,13 +256,8 @@ export default function useAiConsoleState() {
     writeStoredPrefs({
       selectedModel,
       selectedGroup,
-      reasoningEffort,
     });
-  }, [
-    reasoningEffort,
-    selectedGroup,
-    selectedModel,
-  ]);
+  }, [selectedGroup, selectedModel]);
 
   useEffect(() => {
     if (suppressNextPersistRef.current) {
@@ -339,7 +335,9 @@ export default function useAiConsoleState() {
       }
 
       suppressNextPersistRef.current = true;
-      const targetSession = sessions.find((session) => session.id === sessionId);
+      const targetSession = sessions.find(
+        (session) => session.id === sessionId,
+      );
       persistCurrentSessionId(sessionId);
       setCurrentSessionId(sessionId);
       if (targetSession?.model) {
@@ -356,7 +354,9 @@ export default function useAiConsoleState() {
   const renameSession = useCallback(
     async (sessionId, title) => {
       const normalizedTitle = title.trim() || DEFAULT_SESSION_TITLE;
-      const targetSession = sessions.find((session) => session.id === sessionId);
+      const targetSession = sessions.find(
+        (session) => session.id === sessionId,
+      );
       if (!targetSession) {
         return;
       }
@@ -405,7 +405,9 @@ export default function useAiConsoleState() {
   const removeSession = useCallback(
     async (sessionId) => {
       await deleteSession(sessionId);
-      const remainingSessions = sessions.filter((session) => session.id !== sessionId);
+      const remainingSessions = sessions.filter(
+        (session) => session.id !== sessionId,
+      );
       setSessions(remainingSessions);
 
       if (sessionId !== currentSessionId) {

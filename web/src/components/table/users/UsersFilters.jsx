@@ -26,6 +26,7 @@ const UsersFilters = ({
   setFormApi,
   searchUsers,
   loadUsers,
+  clearSupportUsers,
   activePage,
   pageSize,
   groupOptions,
@@ -40,6 +41,10 @@ const UsersFilters = ({
     if (!formApiRef.current) return;
     formApiRef.current.reset();
     setTimeout(() => {
+      if (supportMode) {
+        clearSupportUsers?.();
+        return;
+      }
       loadUsers(1, pageSize);
     }, 100);
   };

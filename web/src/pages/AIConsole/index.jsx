@@ -146,7 +146,7 @@ const NativeSelect = ({ value, options, onChange, placeholder }) => (
 
 const MAX_DRAFT_IMAGES = 5;
 const REASONING_EFFORT_OPTIONS = [
-  { value: '', label: '自动' },
+  { value: '', label: '关闭' },
   { value: 'low', label: '低' },
   { value: 'medium', label: '中' },
   { value: 'high', label: '高' },

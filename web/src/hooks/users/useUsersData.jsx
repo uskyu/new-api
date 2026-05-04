@@ -45,6 +45,7 @@ export const useUsersData = () => {
   const [userCount, setUserCount] = useState(0);
   const supportMode =
     isSupportConsole() || (can(PERMISSIONS.USER_QUOTA_DECREASE) && !isAdmin());
+  const [supportSearchActive, setSupportSearchActive] = useState(false);
 
   // Modal states
   const [showAddUser, setShowAddUser] = useState(false);
@@ -79,11 +80,23 @@ export const useUsersData = () => {
     setUsers(users);
   };
 
+  const clearSupportUsers = () => {
+    setUsers([]);
+    setActivePage(1);
+    setUserCount(0);
+    setSupportSearchActive(false);
+    setLoading(false);
+    setSearching(false);
+  };
+
   // Load users data
   const loadUsers = async (startIdx, pageSize) => {
+    if (supportMode) {
+      clearSupportUsers();
+      return;
+    }
     setLoading(true);
-    const baseUrl = supportMode ? '/api/support/users' : '/api/user/';
-    const res = await API.get(`${baseUrl}?p=${startIdx}&page_size=${pageSize}`);
+    const res = await API.get(`/api/user/?p=${startIdx}&page_size=${pageSize}`);
     const { success, message, data } = res.data;
     if (success) {
       const newPageData = data.items;
@@ -111,10 +124,15 @@ export const useUsersData = () => {
     }
     if (supportMode) {
       searchGroup = '';
+      searchKeyword = String(searchKeyword || '').trim();
     }
 
     if (searchKeyword === '' && searchGroup === '') {
-      // If keyword is blank, load files instead
+      if (supportMode) {
+        clearSupportUsers();
+        return;
+      }
+      // If keyword is blank, load users instead
       await loadUsers(startIdx, pageSize);
       return;
     }
@@ -136,6 +154,9 @@ export const useUsersData = () => {
       setActivePage(data.page);
       setUserCount(data.total);
       setUserFormat(newPageData);
+      if (supportMode) {
+        setSupportSearchActive(true);
+      }
     } else {
       showError(message);
     }
@@ -215,6 +236,10 @@ export const useUsersData = () => {
     setActivePage(page);
     const { searchKeyword, searchGroup } = getFormValues();
     if (searchKeyword === '' && searchGroup === '') {
+      if (supportMode) {
+        clearSupportUsers();
+        return;
+      }
       loadUsers(page, pageSize).then();
     } else {
       searchUsers(page, pageSize, searchKeyword, searchGroup).then();
@@ -226,11 +251,20 @@ export const useUsersData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    loadUsers(activePage, size)
-      .then()
-      .catch((reason) => {
-        showError(reason);
-      });
+    const { searchKeyword, searchGroup } = getFormValues();
+    try {
+      if (searchKeyword === '' && searchGroup === '') {
+        if (supportMode) {
+          clearSupportUsers();
+          return;
+        }
+        await loadUsers(1, size);
+      } else {
+        await searchUsers(1, size, searchKeyword, searchGroup);
+      }
+    } catch (reason) {
+      showError(reason);
+    }
   };
 
   // Handle table row styling for disabled/deleted users
@@ -253,6 +287,10 @@ export const useUsersData = () => {
   const refresh = async (page = activePage) => {
     const { searchKeyword, searchGroup } = getFormValues();
     if (searchKeyword === '' && searchGroup === '') {
+      if (supportMode) {
+        clearSupportUsers();
+        return;
+      }
       await loadUsers(page, pageSize);
     } else {
       await searchUsers(page, pageSize, searchKeyword, searchGroup);
@@ -295,11 +333,15 @@ export const useUsersData = () => {
 
   // Initialize data on component mount
   useEffect(() => {
-    loadUsers(0, pageSize)
-      .then()
-      .catch((reason) => {
-        showError(reason);
-      });
+    if (supportMode) {
+      clearSupportUsers();
+    } else {
+      loadUsers(0, pageSize)
+        .then()
+        .catch((reason) => {
+          showError(reason);
+        });
+    }
     fetchGroups().then();
   }, []);
 
@@ -313,6 +355,7 @@ export const useUsersData = () => {
     searching,
     groupOptions,
     supportMode,
+    supportSearchActive,
 
     // Modal state
     showAddUser,
@@ -334,6 +377,7 @@ export const useUsersData = () => {
     // Actions
     loadUsers,
     searchUsers,
+    clearSupportUsers,
     manageUser,
     resetUserPasskey,
     resetUserTwoFA,
