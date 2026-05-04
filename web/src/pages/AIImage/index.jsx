@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Button, Empty, InputNumber, Modal, Pagination, Spin, TextArea, Typography } from '@douyinfe/semi-ui';
-import { Bookmark, Check, Edit3, ImagePlus, Loader2, Search, Sparkles, Trash2, Wand2, X } from 'lucide-react';
+import { Bookmark, Brush, Check, Edit3, ImagePlus, Loader2, RotateCcw, Search, Sparkles, Trash2, Wand2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import useAiImageState from '../../hooks/ai-image/useAiImageState';
 import { API_ENDPOINTS, MESSAGE_ROLES } from '../../constants/playground.constants';
@@ -39,6 +39,15 @@ const PROMPT_OPTIMIZER_SYSTEM_PROMPT = [
   'Keep the meaning, add useful visual detail, and make it directly usable for image generation.',
   'Return plain text only. Do not use markdown, JSON, lists, or explanations.',
 ].join('\n');
+const ANNOTATION_CANVAS_MAX_SIDE = 1400;
+const ANNOTATION_COLORS = [
+  { value: '#ef4444', label: '\u7ea2\u8272' },
+  { value: '#2563eb', label: '\u84dd\u8272' },
+  { value: '#16a34a', label: '\u7eff\u8272' },
+  { value: '#f59e0b', label: '\u9ec4\u8272' },
+  { value: '#8b5cf6', label: '\u7d2b\u8272' },
+  { value: '#f97316', label: '\u6a59\u8272' },
+];
 
 const createDraftImageEntry = (file, overrides = {}) => ({
   id: `draft-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -50,6 +59,81 @@ const createDraftImageEntry = (file, overrides = {}) => ({
   sourceDataUrl: '',
   ...overrides,
 });
+
+const createAnnotationId = () =>
+  `annotation-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const getAnnotationColorLabel = (color) =>
+  ANNOTATION_COLORS.find((item) => item.value === color)?.label || '\u6807\u6ce8';
+
+const getAnnotationLabel = (annotation, index) =>
+  annotation?.label || `${getAnnotationColorLabel(annotation?.color)}\u533a\u57df ${index + 1}`;
+
+const getImageAnnotationCount = (image) =>
+  Array.isArray(image?.annotations)
+    ? image.annotations.filter((item) => item?.prompt?.trim()).length
+    : 0;
+
+const buildPromptWithAnnotations = (basePrompt, images = []) => {
+  const annotationLines = images.flatMap((image, imageIndex) =>
+    (Array.isArray(image?.annotations) ? image.annotations : [])
+      .map((annotation, annotationIndex) => ({
+        label: getAnnotationLabel(annotation, annotationIndex),
+        prompt: String(annotation?.prompt || '').trim(),
+        imageIndex,
+      }))
+      .filter((item) => item.prompt)
+      .map((item) => `\u53c2\u8003\u56fe ${item.imageIndex + 1} ${item.label}\uff1a${item.prompt}`),
+  );
+
+  if (annotationLines.length === 0) {
+    return basePrompt;
+  }
+
+  return [
+    basePrompt,
+    '',
+    '\u5c40\u90e8\u4fee\u6539\u8981\u6c42\uff1a',
+    ...annotationLines.map((line, index) => `${index + 1}. ${line}`),
+    '\u8bf7\u4f18\u5148\u6839\u636e\u53c2\u8003\u56fe\u4e0a\u7684\u5f69\u8272\u5708\u9009\u533a\u57df\u6267\u884c\u8fd9\u4e9b\u5c40\u90e8\u4fee\u6539\u3002',
+  ].join('\n');
+};
+
+const getAnnotatedPromptCount = (images = []) =>
+  images.reduce((count, image) => count + getImageAnnotationCount(image), 0);
+
+const dataUrlToFile = (dataUrl, filename = `annotated-${Date.now()}.png`) => {
+  const [meta, base64Data] = String(dataUrl || '').split(',', 2);
+  const mimeType = meta.match(/^data:(.+?);base64$/)?.[1] || 'image/png';
+  const binary = atob(base64Data || '');
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new File([bytes], filename, { type: mimeType });
+};
+
+const blobToDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error || new Error('failed to read blob'));
+    reader.readAsDataURL(blob);
+  });
+
+const createDraftImageFromImageUrl = async (imageUrl, filenamePrefix = 'referenced') => {
+  if (imageUrl?.startsWith('data:image/')) {
+    const file = dataUrlToFile(imageUrl, `${filenamePrefix}-${Date.now()}.png`);
+    return createDraftImageEntry(file, { sourceDataUrl: imageUrl });
+  }
+  const response = await fetch(imageUrl);
+  if (!response.ok) throw new Error(`fetch failed: ${response.status}`);
+  const blob = await response.blob();
+  const extension = blob.type?.split('/')[1] || 'png';
+  const file = new File([blob], `${filenamePrefix}-${Date.now()}.${extension}`, { type: blob.type || 'image/png' });
+  const dataUrl = await blobToDataUrl(blob);
+  return createDraftImageEntry(file, { sourceDataUrl: dataUrl });
+};
 
 const revokeDraftImage = (image) => {
   if (image?.previewUrl?.startsWith('blob:')) {
@@ -405,6 +489,336 @@ const GalleryImage = ({ src, alt, active, onClick }) => (
   </button>
 );
 
+const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
+  const { t } = useTranslation();
+  const canvasRef = useRef(null);
+  const imageRef = useRef(null);
+  const activeAnnotationIdRef = useRef(null);
+  const [annotations, setAnnotations] = useState([]);
+  const [selectedColor, setSelectedColor] = useState(ANNOTATION_COLORS[0].value);
+  const [canvasSize, setCanvasSize] = useState({ width: 900, height: 560 });
+  const [isDrawing, setIsDrawing] = useState(false);
+
+  const drawCanvas = React.useCallback(() => {
+    const canvas = canvasRef.current;
+    const image = imageRef.current;
+    if (!canvas || !image) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    annotations.forEach((annotation, annotationIndex) => {
+      const points = Array.isArray(annotation.points) ? annotation.points : [];
+      if (points.length < 2) return;
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = annotation.color || ANNOTATION_COLORS[0].value;
+      ctx.shadowColor = 'rgba(15,23,42,0.35)';
+      ctx.shadowBlur = 3;
+      ctx.beginPath();
+      points.forEach((point, pointIndex) => {
+        const x = point.x * canvas.width;
+        const y = point.y * canvas.height;
+        if (pointIndex === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.stroke();
+      const firstPoint = points[0];
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = annotation.color || ANNOTATION_COLORS[0].value;
+      ctx.beginPath();
+      ctx.arc(firstPoint.x * canvas.width, firstPoint.y * canvas.height, 16, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 15px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(annotationIndex + 1), firstPoint.x * canvas.width, firstPoint.y * canvas.height);
+      ctx.restore();
+    });
+  }, [annotations]);
+
+  React.useEffect(() => {
+    if (!visible || !source?.image?.previewUrl) return undefined;
+    const image = new Image();
+    image.onload = () => {
+      const ratio = Math.min(
+        ANNOTATION_CANVAS_MAX_SIDE / image.naturalWidth,
+        ANNOTATION_CANVAS_MAX_SIDE / image.naturalHeight,
+        1,
+      );
+      const width = Math.max(320, Math.round(image.naturalWidth * ratio));
+      const height = Math.max(240, Math.round(image.naturalHeight * ratio));
+      imageRef.current = image;
+      setCanvasSize({ width, height });
+      setAnnotations(Array.isArray(source.image.annotations) ? source.image.annotations : []);
+    };
+    image.src = source.image.sourceDataUrl || source.image.previewUrl;
+    return () => {
+      imageRef.current = null;
+    };
+  }, [source, visible]);
+
+  React.useEffect(() => {
+    drawCanvas();
+  }, [canvasSize, drawCanvas]);
+
+  const getCanvasPoint = React.useCallback((event) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = event.clientX ?? event.touches?.[0]?.clientX;
+    const clientY = event.clientY ?? event.touches?.[0]?.clientY;
+    if (typeof clientX !== 'number' || typeof clientY !== 'number') return null;
+    return {
+      x: Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height)),
+    };
+  }, []);
+
+  const handlePointerDown = React.useCallback((event) => {
+    const point = getCanvasPoint(event);
+    if (!point) return;
+    event.preventDefault();
+    const annotation = {
+      id: createAnnotationId(),
+      color: selectedColor,
+      points: [point],
+      prompt: '',
+    };
+    activeAnnotationIdRef.current = annotation.id;
+    setAnnotations((previous) => [...previous, annotation]);
+    setIsDrawing(true);
+  }, [getCanvasPoint, selectedColor]);
+
+  const handlePointerMove = React.useCallback((event) => {
+    if (!isDrawing || !activeAnnotationIdRef.current) return;
+    const point = getCanvasPoint(event);
+    if (!point) return;
+    event.preventDefault();
+    setAnnotations((previous) =>
+      previous.map((annotation) =>
+        annotation.id === activeAnnotationIdRef.current
+          ? { ...annotation, points: [...annotation.points, point] }
+          : annotation,
+      ),
+    );
+  }, [getCanvasPoint, isDrawing]);
+
+  const stopDrawing = React.useCallback(() => {
+    if (!isDrawing) return;
+    const activeId = activeAnnotationIdRef.current;
+    activeAnnotationIdRef.current = null;
+    setIsDrawing(false);
+    setAnnotations((previous) =>
+      previous.filter((annotation) => annotation.id !== activeId || annotation.points.length > 1),
+    );
+  }, [isDrawing]);
+
+  const updateAnnotationPrompt = React.useCallback((annotationId, value) => {
+    setAnnotations((previous) =>
+      previous.map((annotation) =>
+        annotation.id === annotationId ? { ...annotation, prompt: value } : annotation,
+      ),
+    );
+  }, []);
+
+  const removeAnnotation = React.useCallback((annotationId) => {
+    setAnnotations((previous) => previous.filter((annotation) => annotation.id !== annotationId));
+  }, []);
+
+  const handleSave = React.useCallback(() => {
+    const canvas = canvasRef.current;
+    const image = imageRef.current;
+    if (!canvas || !image || !source?.image) return;
+    const cleanedAnnotations = annotations
+      .map((annotation, index) => ({
+        ...annotation,
+        label: getAnnotationLabel(annotation, index),
+        prompt: String(annotation.prompt || '').trim(),
+      }))
+      .filter((annotation) => annotation.points.length > 1 && annotation.prompt);
+    if (cleanedAnnotations.length === 0) {
+      showError(t('\u8bf7\u5148\u5708\u9009\u533a\u57df\u5e76\u586b\u5199\u4fee\u6539\u8981\u6c42'));
+      return;
+    }
+
+    const outputCanvas = document.createElement('canvas');
+    outputCanvas.width = canvas.width;
+    outputCanvas.height = canvas.height;
+    const ctx = outputCanvas.getContext('2d');
+    ctx.drawImage(image, 0, 0, outputCanvas.width, outputCanvas.height);
+    cleanedAnnotations.forEach((annotation, annotationIndex) => {
+      const points = annotation.points || [];
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = annotation.color;
+      ctx.shadowColor = 'rgba(15,23,42,0.35)';
+      ctx.shadowBlur = 3;
+      ctx.beginPath();
+      points.forEach((point, pointIndex) => {
+        const x = point.x * outputCanvas.width;
+        const y = point.y * outputCanvas.height;
+        if (pointIndex === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      const firstPoint = points[0];
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = annotation.color;
+      ctx.beginPath();
+      ctx.arc(firstPoint.x * outputCanvas.width, firstPoint.y * outputCanvas.height, 16, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 15px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(annotationIndex + 1), firstPoint.x * outputCanvas.width, firstPoint.y * outputCanvas.height);
+      ctx.restore();
+    });
+    const dataUrl = outputCanvas.toDataURL('image/png');
+    const file = dataUrlToFile(dataUrl);
+    onSave({
+      ...source.image,
+      file,
+      previewUrl: dataUrl,
+      sourceDataUrl: dataUrl,
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      annotations: cleanedAnnotations,
+      annotated: true,
+    });
+  }, [annotations, onSave, source, t]);
+
+  return (
+    <Modal
+      visible={visible}
+      title={null}
+      footer={null}
+      width='min(1180px, calc(100vw - 32px))'
+      onCancel={onCancel}
+      bodyStyle={{ padding: 0, background: 'transparent' }}
+    >
+      <div className='overflow-hidden rounded-[28px] border border-white/70 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.18)]'>
+        <div className='flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4'>
+          <div>
+            <Typography.Title heading={5} className='!mb-1 !text-slate-900'>
+              {t('\u753b\u5708\u4fee\u6539\u56fe\u7247')}
+            </Typography.Title>
+            <Typography.Text className='!text-sm !text-slate-500'>
+              {t('\u5728\u56fe\u4e0a\u5708\u9009\u8981\u4fee\u6539\u7684\u90e8\u5206\uff0c\u7136\u540e\u7ed9\u6bcf\u4e2a\u533a\u57df\u5199\u5177\u4f53\u8981\u6c42')}
+            </Typography.Text>
+          </div>
+          <div className='flex flex-wrap items-center gap-2'>
+            {ANNOTATION_COLORS.map((item) => (
+              <button
+                key={item.value}
+                type='button'
+                title={t(item.label)}
+                onClick={() => setSelectedColor(item.value)}
+                className={`h-8 w-8 rounded-full border-2 transition ${
+                  selectedColor === item.value ? 'border-slate-900 scale-110' : 'border-white shadow'
+                }`}
+                style={{ backgroundColor: item.value }}
+              />
+            ))}
+            <Button
+              theme='light'
+              type='tertiary'
+              icon={<RotateCcw size={15} />}
+              className='!rounded-full'
+              onClick={() => setAnnotations([])}
+            >
+              {t('\u6e05\u7a7a')}
+            </Button>
+            <Button
+              theme='solid'
+              type='primary'
+              icon={<Check size={16} />}
+              className='!rounded-full'
+              onClick={handleSave}
+            >
+              {t('\u4f7f\u7528\u6807\u6ce8')}
+            </Button>
+          </div>
+        </div>
+
+        <div className='grid max-h-[78vh] gap-4 overflow-y-auto bg-slate-50 p-4 lg:grid-cols-[minmax(0,1fr)_360px]'>
+          <div className='flex min-h-[420px] items-center justify-center overflow-auto rounded-[24px] bg-slate-950 p-3'>
+            <canvas
+              ref={canvasRef}
+              width={canvasSize.width}
+              height={canvasSize.height}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={stopDrawing}
+              onPointerCancel={stopDrawing}
+              onPointerLeave={stopDrawing}
+              className='max-h-[70vh] max-w-full cursor-crosshair rounded-[18px] shadow-[0_18px_60px_rgba(0,0,0,0.35)]'
+            />
+          </div>
+
+          <div className='rounded-[24px] border border-slate-200 bg-white p-4'>
+            <Typography.Text className='!text-xs !font-semibold !uppercase !tracking-[0.2em] !text-slate-400'>
+              {t('\u5c40\u90e8\u63d0\u793a\u8bcd')}
+            </Typography.Text>
+            <p className='mt-2 text-sm text-slate-500'>
+              {t('\u6bcf\u753b\u4e00\u7b14\u4f1a\u751f\u6210\u4e00\u4e2a\u533a\u57df\uff0c\u5199\u6e05\u695a\u8fd9\u4e2a\u533a\u57df\u8981\u600e\u4e48\u6539')}
+            </p>
+            <div className='mt-4 flex flex-col gap-3'>
+              {annotations.length > 0 ? (
+                annotations.map((annotation, index) => (
+                  <div key={annotation.id} className='rounded-[18px] border border-slate-100 bg-slate-50 p-3'>
+                    <div className='mb-2 flex items-center justify-between gap-2'>
+                      <div className='flex min-w-0 items-center gap-2'>
+                        <span
+                          className='h-3 w-3 shrink-0 rounded-full'
+                          style={{ backgroundColor: annotation.color }}
+                        />
+                        <span className='truncate text-sm font-semibold text-slate-700'>
+                          {getAnnotationLabel(annotation, index)}
+                        </span>
+                      </div>
+                      <Button
+                        theme='borderless'
+                        type='danger'
+                        size='small'
+                        icon={<X size={14} />}
+                        onClick={() => removeAnnotation(annotation.id)}
+                      />
+                    </div>
+                    <TextArea
+                      value={annotation.prompt}
+                      onChange={(value) => updateAnnotationPrompt(annotation.id, value)}
+                      autosize={{ minRows: 2, maxRows: 5 }}
+                      placeholder={t('\u4f8b\u5982\uff1a\u628a\u8fd9\u91cc\u6539\u6210\u514d\u8d39\u8bd5\u7528\uff0c\u5b57\u4f53\u66f4\u9192\u76ee')}
+                    />
+                  </div>
+                ))
+              ) : (
+                <Empty
+                  image={<Brush size={34} className='text-slate-400' />}
+                  title={t('\u8fd8\u6ca1\u6709\u6807\u6ce8\u533a\u57df')}
+                  description={t('\u76f4\u63a5\u5728\u5de6\u4fa7\u56fe\u7247\u4e0a\u753b\u5708\u5373\u53ef\u5f00\u59cb')}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
 const openImageInNewTab = (imageUrl) => {
   if (!imageUrl) return;
   window.open(imageUrl, '_blank', 'noopener,noreferrer');
@@ -472,6 +886,8 @@ const AIImage = () => {
   const [favoriteDraftTitle, setFavoriteDraftTitle] = useState('');
   const [favoriteDraftPrompt, setFavoriteDraftPrompt] = useState('');
   const [editingFavoriteId, setEditingFavoriteId] = useState(null);
+  const [annotationSource, setAnnotationSource] = useState(null);
+  const [isPreparingAnnotation, setIsPreparingAnnotation] = useState(false);
   const previousDraftImagesRef = useRef([]);
   const selectedModelRef = useRef('');
   const promptOptimizerModelRef = useRef('');
@@ -539,6 +955,10 @@ const AIImage = () => {
   const activeImages = activeRecord?.images || [];
   const activeImage =
     activeImages[activeImageIndex] || activeImages[0] || '';
+  const annotatedPromptCount = useMemo(
+    () => getAnnotatedPromptCount(draftImages),
+    [draftImages],
+  );
 
   React.useEffect(() => {
     const previousImages = previousDraftImagesRef.current;
@@ -610,6 +1030,81 @@ const AIImage = () => {
   const clearDraftImages = React.useCallback(() => {
     setDraftImages([]);
   }, [setDraftImages]);
+
+  const openDraftAnnotation = React.useCallback((index) => {
+    const image = draftImages[index];
+    if (!image) return;
+    setAnnotationSource({ type: 'draft', index, image });
+  }, [draftImages]);
+
+  const openRecordAnnotation = React.useCallback(
+    async (record, imageIndex = 0) => {
+      if (!record || record.status === 'FAILED') {
+        showError(t('\u8be5\u56fe\u7247\u65e0\u6cd5\u7f16\u8f91'));
+        return;
+      }
+      const imageUrl = record?.images?.[imageIndex] || record?.images?.[0];
+      if (!imageUrl && !record?.taskId) {
+        showError(t('\u6ca1\u6709\u53ef\u7f16\u8f91\u7684\u56fe\u7247'));
+        return;
+      }
+
+      setIsPreparingAnnotation(true);
+      try {
+        let draftImage;
+        if (record.isRemote && record.taskId) {
+          const response = await fetch(`/api/ai-image/proxy/${record.taskId}`, {
+            headers: { 'New-Api-User': getUserIdFromLocalStorage() },
+          });
+          if (!response.ok) throw new Error(`proxy fetch failed: ${response.status}`);
+          const blob = await response.blob();
+          const extension = blob.type?.split('/')[1] || 'png';
+          const file = new File([blob], `editable-${Date.now()}.${extension}`, { type: blob.type || 'image/png' });
+          const dataUrl = await blobToDataUrl(blob);
+          draftImage = createDraftImageEntry(file, { sourceDataUrl: dataUrl });
+        } else {
+          draftImage = await createDraftImageFromImageUrl(imageUrl, 'editable');
+        }
+        setAnnotationSource({ type: 'new', image: draftImage });
+      } catch {
+        showError(t('\u52a0\u8f7d\u56fe\u7247\u5931\u8d25\uff0c\u8bf7\u5148\u4e0b\u8f7d\u540e\u624b\u52a8\u4e0a\u4f20'));
+      } finally {
+        setIsPreparingAnnotation(false);
+      }
+    },
+    [t],
+  );
+
+  const handleSaveAnnotation = React.useCallback(
+    (nextImage) => {
+      if (!annotationSource || !nextImage) return;
+      if (annotationSource.type !== 'draft' && draftImages.length >= MAX_REFERENCE_IMAGES) {
+        showError(t('\u6700\u591a\u652f\u6301 {{count}} \u5f20\u53c2\u8003\u56fe', { count: MAX_REFERENCE_IMAGES }));
+        return;
+      }
+      if (annotationSource.image?.previewUrl !== nextImage.previewUrl) {
+        revokeDraftImage(annotationSource.image);
+      }
+      setDraftImages((previous) => {
+        if (annotationSource.type === 'draft') {
+          return previous.map((image, index) =>
+            index === annotationSource.index ? nextImage : image,
+          );
+        }
+        return [...previous, nextImage];
+      });
+      setAnnotationSource(null);
+      showSuccess(t('\u5df2\u6dfb\u52a0\u5c40\u90e8\u4fee\u6539\u8981\u6c42'));
+    },
+    [annotationSource, draftImages.length, setDraftImages, t],
+  );
+
+  const closeAnnotationModal = React.useCallback(() => {
+    if (annotationSource?.type === 'new') {
+      revokeDraftImage(annotationSource.image);
+    }
+    setAnnotationSource(null);
+  }, [annotationSource]);
 
   const serializeDraftImagesForRequest = React.useCallback(async () => {
     const images = draftImages.filter(Boolean).slice(0, MAX_REFERENCE_IMAGES);
@@ -1022,8 +1517,9 @@ const AIImage = () => {
 
     setIsGenerating(true);
     try {
+      const effectivePrompt = buildPromptWithAnnotations(trimmedPrompt, draftImages);
       if (isOpenAIImageModel(fallbackImageModel)) {
-        await submitImageTask(trimmedPrompt);
+        await submitImageTask(effectivePrompt);
         setRemotePage(1);
         await loadRemoteTasks(1);
         setPrompt('');
@@ -1033,12 +1529,12 @@ const AIImage = () => {
         showSuccess(t('已加入生成队列'));
         return;
       }
-      const parsed = await requestOneImage(trimmedPrompt);
+      const parsed = await requestOneImage(effectivePrompt);
       if (parsed.imageUrls.length === 0) {
         showError(t('未返回可展示的图片，请检查模型返回格式'));
         return;
       }
-      appendGeneration([{ itemPrompt: trimmedPrompt, imageUrls: parsed.imageUrls }]);
+      appendGeneration([{ itemPrompt: effectivePrompt, imageUrls: parsed.imageUrls }]);
       setPrompt('');
       setOptimizedPromptDraft('');
       setOriginalPrompt('');
@@ -1053,6 +1549,7 @@ const AIImage = () => {
   }, [
     appendGeneration,
     clearDraftImages,
+    draftImages,
     fallbackImageModel,
     loadRemoteTasks,
     prompt,
@@ -1083,7 +1580,10 @@ const AIImage = () => {
 
     const effectiveBatchCount = normalizeBatchCount(batchCount);
     const tasks = Array.from({ length: effectiveBatchCount }, (_, index) =>
-      prompts.length > 1 ? prompts[index % prompts.length] : prompts[0],
+      buildPromptWithAnnotations(
+        prompts.length > 1 ? prompts[index % prompts.length] : prompts[0],
+        draftImages,
+      ),
     );
 
     setIsGenerating(true);
@@ -1129,6 +1629,7 @@ const AIImage = () => {
     appendBatchGeneration,
     batchCount,
     clearDraftImages,
+    draftImages,
     fallbackImageModel,
     loadRemoteTasks,
     prompt,
@@ -1706,13 +2207,33 @@ const AIImage = () => {
                     {draftImages.map((image, index) => (
                       <div
                         key={image.id || `${index}-${image.previewUrl}`}
-                        className='group relative overflow-hidden rounded-[18px] border border-white/70 bg-white'
+                        className={`group relative overflow-hidden rounded-[18px] border bg-white shadow-sm transition ${
+                          getImageAnnotationCount(image) > 0
+                            ? 'border-sky-300 ring-2 ring-sky-100'
+                            : 'border-white/70 hover:border-sky-200'
+                        }`}
                       >
                         <img
                           src={image.previewUrl}
                           alt={`${t('参考图')} ${index + 1}`}
                           className='h-24 w-24 object-cover'
                         />
+                        <button
+                          type='button'
+                          onClick={() => openDraftAnnotation(index)}
+                          className='absolute inset-x-1.5 bottom-1.5 flex h-7 items-center justify-center gap-1 rounded-full bg-slate-950/80 px-2 text-[11px] font-semibold text-white shadow-lg transition hover:bg-sky-600'
+                          title={t('圈选参考图局部并填写修改要求')}
+                        >
+                          <Brush size={12} />
+                          <span>
+                            {getImageAnnotationCount(image) > 0
+                              ? t('已标注 {{count}} 处', { count: getImageAnnotationCount(image) })
+                              : t('标注修改')}
+                          </span>
+                        </button>
+                        <span className='absolute left-1.5 top-1.5 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow'>
+                          {t('可编辑')}
+                        </span>
                         <button
                           type='button'
                           onClick={() => handleRemoveDraftImage(index)}
@@ -1722,6 +2243,39 @@ const AIImage = () => {
                         </button>
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {annotatedPromptCount > 0 && (
+                  <div className='mt-3 rounded-[18px] border border-sky-100 bg-sky-50/80 p-3'>
+                    <div className='mb-2 flex items-center gap-2 text-sm font-semibold text-sky-700'>
+                      <Brush size={15} />
+                      <span>{t('已添加 {{count}} 个局部修改要求', { count: annotatedPromptCount })}</span>
+                    </div>
+                    <div className='flex flex-wrap gap-2'>
+                      {draftImages.flatMap((image, imageIndex) =>
+                        (Array.isArray(image.annotations) ? image.annotations : [])
+                          .filter((annotation) => annotation?.prompt?.trim())
+                          .map((annotation, annotationIndex) => (
+                            <span
+                              key={`${image.id}-${annotation.id}`}
+                              className='inline-flex max-w-full items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs text-slate-700 shadow-sm'
+                              title={annotation.prompt}
+                            >
+                              <span
+                                className='h-2 w-2 shrink-0 rounded-full'
+                                style={{ backgroundColor: annotation.color }}
+                              />
+                              <span className='shrink-0 text-slate-400'>
+                                {t('图{{index}}', { index: imageIndex + 1 })}
+                              </span>
+                              <span className='max-w-[220px] truncate'>
+                                {getAnnotationLabel(annotation, annotationIndex)}：{annotation.prompt}
+                              </span>
+                            </span>
+                          )),
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -1744,7 +2298,7 @@ const AIImage = () => {
                   </label>
 
                   <Typography.Text className='!text-xs !text-slate-500'>
-                    {t('最多 {{count}} 张参考图', { count: MAX_REFERENCE_IMAGES })}
+                    {t('最多 {{count}} 张参考图，上传后可圈选局部修改', { count: MAX_REFERENCE_IMAGES })}
                   </Typography.Text>
 
                   <Button
@@ -1853,6 +2407,28 @@ const AIImage = () => {
                           ))}
                         </div>
                       ) : null}
+                      <div className='mt-4'>
+                        <Button
+                          theme='solid'
+                          type='primary'
+                          icon={
+                            isPreparingAnnotation ? (
+                              <Loader2 size={17} className='animate-spin' />
+                            ) : (
+                              <Brush size={17} />
+                            )
+                          }
+                          loading={isPreparingAnnotation}
+                          className='!h-11 !rounded-full !bg-slate-950 !px-5 !text-white shadow-[0_14px_34px_rgba(15,23,42,0.22)]'
+                          onClick={() => openRecordAnnotation(activeRecord, activeImageIndex)}
+                          disabled={!activeRecord || activeRecord?.status === 'FAILED'}
+                        >
+                          {t('画圈修改图片')}
+                        </Button>
+                        <Typography.Text className='!ml-3 !text-xs !text-slate-500'>
+                          {t('圈选区域，写修改要求，再次生成')}
+                        </Typography.Text>
+                      </div>
                       <div className='mt-3 flex flex-wrap gap-2'>
                         <Button
                           theme='light'
@@ -1982,6 +2558,17 @@ const AIImage = () => {
                       </button>
                       <div className='mt-2 grid grid-cols-2 gap-1.5'>
                         <Button
+                          theme='solid'
+                          type='primary'
+                          size='small'
+                          icon={<Brush size={13} />}
+                          className='!col-span-2 !h-7 !rounded-full !bg-slate-950 !px-2 !text-xs !text-white'
+                          onClick={() => openRecordAnnotation(record, 0)}
+                          disabled={record.status === 'FAILED' || isPreparingAnnotation}
+                        >
+                          {t('画圈编辑')}
+                        </Button>
+                        <Button
                           theme='light'
                           type='primary'
                           size='small'
@@ -2046,6 +2633,12 @@ const AIImage = () => {
           )}
         </section>
       </div>
+      <ImageAnnotationModal
+        visible={Boolean(annotationSource)}
+        source={annotationSource}
+        onCancel={closeAnnotationModal}
+        onSave={handleSaveAnnotation}
+      />
       <Modal
         visible={favoritesVisible}
         title={null}
