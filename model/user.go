@@ -128,7 +128,19 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 	}
 
 	// 管理员区域 - 根据角色决定
-	if userRole == common.RoleAdminUser {
+	if userRole == common.RoleSupportUser {
+		delete(defaultConfig, "chat")
+		delete(defaultConfig, "console")
+		delete(defaultConfig, "personal")
+		defaultConfig["admin"] = map[string]interface{}{
+			"enabled":    true,
+			"channel":    false,
+			"models":     false,
+			"redemption": true,
+			"user":       true,
+			"setting":    false,
+		}
+	} else if userRole == common.RoleAdminUser {
 		// 管理员可以访问管理员区域，但不能访问系统设置
 		defaultConfig["admin"] = map[string]interface{}{
 			"enabled":    true,
@@ -289,6 +301,75 @@ func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, 
 		return nil, 0, err
 	}
 
+	return users, total, nil
+}
+
+func GetSupportManageUsers(pageInfo *common.PageInfo) (users []*User, total int64, err error) {
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return nil, 0, tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	query := tx.Model(&User{}).Where("role = ?", common.RoleCommonUser)
+	if err = query.Count(&total).Error; err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err = query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("password").Find(&users).Error; err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err = tx.Commit().Error; err != nil {
+		return nil, 0, err
+	}
+	return users, total, nil
+}
+
+func SearchSupportManageUsers(keyword string, group string, startIdx int, num int) ([]*User, int64, error) {
+	var users []*User
+	var total int64
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return nil, 0, tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	query := tx.Model(&User{}).Where("role = ?", common.RoleCommonUser)
+	likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
+	like := "%" + keyword + "%"
+	if keywordInt, err := strconv.Atoi(keyword); err == nil {
+		likeCondition = "id = ? OR " + likeCondition
+		if group != "" {
+			query = query.Where("("+likeCondition+") AND "+commonGroupCol+" = ?", keywordInt, like, like, like, group)
+		} else {
+			query = query.Where(likeCondition, keywordInt, like, like, like)
+		}
+	} else if group != "" {
+		query = query.Where("("+likeCondition+") AND "+commonGroupCol+" = ?", like, like, like, group)
+	} else {
+		query = query.Where(likeCondition, like, like, like)
+	}
+
+	if err := query.Count(&total).Error; err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err := query.Order("id desc").Limit(num).Offset(startIdx).Omit("password").Find(&users).Error; err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return nil, 0, err
+	}
 	return users, total, nil
 }
 
@@ -913,6 +994,69 @@ func DecreaseUserQuota(id int, quota int) (err error) {
 		return nil
 	}
 	return decreaseUserQuota(id, quota)
+}
+
+type UserQuotaDecreaseResult struct {
+	UserId      int `json:"user_id"`
+	QuotaDelta  int `json:"quota_delta"`
+	QuotaBefore int `json:"quota_before"`
+	QuotaAfter  int `json:"quota_after"`
+}
+
+func DecreaseUserQuotaBySupport(operatorUserId int, operatorRole int, targetUserId int, quota int, reason string) (*UserQuotaDecreaseResult, error) {
+	if operatorUserId <= 0 || targetUserId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	if quota <= 0 {
+		return nil, errors.New("quota must be greater than 0")
+	}
+	if !common.RoleHasPermission(operatorRole, common.PermissionUserQuotaDecrease) {
+		return nil, errors.New("no permission to decrease quota")
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "manual decrease"
+	}
+	result := &UserQuotaDecreaseResult{
+		UserId:     targetUserId,
+		QuotaDelta: quota,
+	}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var target User
+		if err := tx.Where("id = ?", targetUserId).First(&target).Error; err != nil {
+			return err
+		}
+		if target.Role != common.RoleCommonUser {
+			return errors.New("support user can only decrease common user quota")
+		}
+		if operatorRole != common.RoleRootUser && operatorRole <= target.Role {
+			return errors.New("no permission to manage this user")
+		}
+		update := tx.Model(&User{}).
+			Where("id = ? AND role = ? AND quota >= ?", targetUserId, common.RoleCommonUser, quota).
+			Update("quota", gorm.Expr("quota - ?", quota))
+		if update.Error != nil {
+			return update.Error
+		}
+		if update.RowsAffected == 0 {
+			return errors.New("quota is insufficient")
+		}
+		var after User
+		if err := tx.Select("quota").Where("id = ?", targetUserId).First(&after).Error; err != nil {
+			return err
+		}
+		result.QuotaAfter = after.Quota
+		result.QuotaBefore = after.Quota + quota
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := updateUserQuotaCache(targetUserId, result.QuotaAfter); err != nil {
+		common.SysLog("failed to update user quota cache: " + err.Error())
+	}
+	RecordLog(targetUserId, LogTypeManage, fmt.Sprintf("客服管理员 %d 将用户额度从 %s 减少为 %s，扣减 %s，原因：%s", operatorUserId, logger.LogQuota(result.QuotaBefore), logger.LogQuota(result.QuotaAfter), logger.LogQuota(quota), reason))
+	return result, nil
 }
 
 func decreaseUserQuota(id int, quota int) (err error) {

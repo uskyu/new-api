@@ -23,7 +23,7 @@ import { useTranslation } from 'react-i18next';
 import { ChevronLeft, Sparkles, Waves } from 'lucide-react';
 import { Nav, Divider, Button } from '@douyinfe/semi-ui';
 import { getLucideIcon } from '../../helpers/render';
-import { isAdmin, isRoot, showError } from '../../helpers';
+import { can, isAdmin, isRoot, PERMISSIONS, showError } from '../../helpers';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useSidebar } from '../../hooks/common/useSidebar';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
@@ -184,13 +184,13 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('兑换码管理'),
         itemKey: 'redemption',
         to: '/redemption',
-        className: isAdmin() ? '' : 'tableHiddle',
+        className: can(PERMISSIONS.REDEMPTION_MANAGE) ? '' : 'tableHiddle',
       },
       {
         text: t('用户管理'),
         itemKey: 'user',
         to: '/user',
-        className: isAdmin() ? '' : 'tableHiddle',
+        className: can(PERMISSIONS.USER_QUOTA_DECREASE) ? '' : 'tableHiddle',
       },
       {
         text: t('系统设置'),
@@ -416,7 +416,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         type='sidebar'
         className=''
         collapsed={collapsed}
-        showAdmin={isAdmin()}
+        showAdmin={
+          isAdmin() ||
+          can(PERMISSIONS.REDEMPTION_MANAGE) ||
+          can(PERMISSIONS.USER_QUOTA_DECREASE)
+        }
       >
         <Nav
           className='sidebar-nav'
@@ -488,7 +492,10 @@ const SiderBar = ({ onNavigate = () => {} }) => {
             </>
           )}
 
-          {isAdmin() && hasSectionVisibleModules('admin') && (
+          {(isAdmin() ||
+            can(PERMISSIONS.REDEMPTION_MANAGE) ||
+            can(PERMISSIONS.USER_QUOTA_DECREASE)) &&
+            hasSectionVisibleModules('admin') && (
             <>
               <Divider className='sidebar-divider' />
               <div>

@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { API, showError, showSuccess } from '../../helpers';
+import { API, can, isAdmin, PERMISSIONS, showError, showSuccess } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 
@@ -35,6 +35,8 @@ export const useUsersData = () => {
   const [searching, setSearching] = useState(false);
   const [groupOptions, setGroupOptions] = useState([]);
   const [userCount, setUserCount] = useState(0);
+  const supportMode =
+    can(PERMISSIONS.USER_QUOTA_DECREASE) && !isAdmin();
 
   // Modal states
   const [showAddUser, setShowAddUser] = useState(false);
@@ -72,7 +74,8 @@ export const useUsersData = () => {
   // Load users data
   const loadUsers = async (startIdx, pageSize) => {
     setLoading(true);
-    const res = await API.get(`/api/user/?p=${startIdx}&page_size=${pageSize}`);
+    const baseUrl = supportMode ? '/api/support/users' : '/api/user/';
+    const res = await API.get(`${baseUrl}?p=${startIdx}&page_size=${pageSize}`);
     const { success, message, data } = res.data;
     if (success) {
       const newPageData = data.items;
@@ -106,7 +109,7 @@ export const useUsersData = () => {
     }
     setSearching(true);
     const res = await API.get(
-      `/api/user/search?keyword=${searchKeyword}&group=${searchGroup}&p=${startIdx}&page_size=${pageSize}`,
+      `${supportMode ? '/api/support/users/search' : '/api/user/search'}?keyword=${searchKeyword}&group=${searchGroup}&p=${startIdx}&page_size=${pageSize}`,
     );
     const { success, message, data } = res.data;
     if (success) {
@@ -237,6 +240,10 @@ export const useUsersData = () => {
   // Fetch groups data
   const fetchGroups = async () => {
     try {
+      if (supportMode) {
+        setGroupOptions([]);
+        return;
+      }
       let res = await API.get(`/api/group/`);
       if (res === undefined) {
         return;
@@ -283,6 +290,7 @@ export const useUsersData = () => {
     userCount,
     searching,
     groupOptions,
+    supportMode,
 
     // Modal state
     showAddUser,

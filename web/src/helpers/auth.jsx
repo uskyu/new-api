@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { history } from './history';
+import { can } from './utils';
 
 export function authHeader() {
   // return authorization header with jwt token
@@ -61,6 +62,16 @@ export function AdminRoute({ children }) {
     }
   } catch (e) {
     // ignore
+  }
+  return <Navigate to='/forbidden' replace />;
+}
+
+export function PermissionRoute({ permission, children }) {
+  if (!localStorage.getItem('user')) {
+    return <Navigate to='/login' state={{ from: history.location }} />;
+  }
+  if (can(permission)) {
+    return children;
   }
   return <Navigate to='/forbidden' replace />;
 }

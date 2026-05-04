@@ -30,7 +30,7 @@ func validUserInfo(username string, role int) bool {
 	return true
 }
 
-func authHelper(c *gin.Context, minRole int) {
+func authHelper(c *gin.Context, isRoleAllowed func(int) bool) {
 	session := sessions.Default(c)
 	username := session.Get("username")
 	role := session.Get("role")
@@ -109,7 +109,7 @@ func authHelper(c *gin.Context, minRole int) {
 		c.Abort()
 		return
 	}
-	if role.(int) < minRole {
+	if !isRoleAllowed(role.(int)) {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "无权进行此操作，权限不足",
@@ -150,19 +150,33 @@ func TryUserAuth() func(c *gin.Context) {
 
 func UserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		authHelper(c, common.RoleCommonUser)
+		authHelper(c, func(role int) bool {
+			return role >= common.RoleCommonUser
+		})
 	}
 }
 
 func AdminAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		authHelper(c, common.RoleAdminUser)
+		authHelper(c, func(role int) bool {
+			return role >= common.RoleAdminUser
+		})
 	}
 }
 
 func RootAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		authHelper(c, common.RoleRootUser)
+		authHelper(c, func(role int) bool {
+			return role >= common.RoleRootUser
+		})
+	}
+}
+
+func PermissionAuth(permission string) func(c *gin.Context) {
+	return func(c *gin.Context) {
+		authHelper(c, func(role int) bool {
+			return common.RoleHasPermission(role, permission)
+		})
 	}
 }
 

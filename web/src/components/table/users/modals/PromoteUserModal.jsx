@@ -17,19 +17,61 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
-import { Modal } from '@douyinfe/semi-ui';
+import React, { useEffect, useState } from 'react';
+import { Modal, Select, Space, Typography } from '@douyinfe/semi-ui';
 
-const PromoteUserModal = ({ visible, onCancel, onConfirm, user, t }) => {
+const { Text } = Typography;
+
+const text = {
+  title: '\u63d0\u5347\u7528\u6237\u7b49\u7ea7',
+  ok: '\u786e\u5b9a',
+  cancel: '\u53d6\u6d88',
+  user: '\u7528\u6237',
+  placeholder: '\u8bf7\u9009\u62e9\u76ee\u6807\u7b49\u7ea7',
+  help:
+    '\u5ba2\u670d\u7ba1\u7406\u5458\u53ea\u80fd\u7ba1\u7406\u5151\u6362\u7801\uff0c\u5e76\u51cf\u5c11\u666e\u901a\u7528\u6237\u989d\u5ea6\uff1b\u7ba1\u7406\u5458\u62e5\u6709\u5b8c\u6574\u7ba1\u7406\u6743\u9650\u3002',
+};
+
+const PromoteUserModal = ({
+  visible,
+  onCancel,
+  onConfirm,
+  user,
+  t,
+  roleOptions = [],
+}) => {
+  const [action, setAction] = useState('');
+
+  useEffect(() => {
+    if (visible) {
+      setAction(roleOptions[0]?.value || '');
+    }
+  }, [visible, roleOptions]);
+
   return (
     <Modal
-      title={t('确定要提升此用户吗？')}
+      title={t(text.title)}
       visible={visible}
       onCancel={onCancel}
-      onOk={onConfirm}
+      onOk={() => onConfirm(action)}
+      okText={t(text.ok)}
+      cancelText={t(text.cancel)}
       type='warning'
+      okButtonProps={{ disabled: !action }}
     >
-      {t('此操作将提升用户的权限级别')}
+      <Space vertical align='start' spacing='medium' style={{ width: '100%' }}>
+        <Text>
+          {t(text.user)}: {user?.username || user?.id || '-'}
+        </Text>
+        <Select
+          value={action}
+          optionList={roleOptions}
+          onChange={setAction}
+          placeholder={t(text.placeholder)}
+          style={{ width: '100%' }}
+        />
+        <Text type='tertiary'>{t(text.help)}</Text>
+      </Space>
     </Modal>
   );
 };

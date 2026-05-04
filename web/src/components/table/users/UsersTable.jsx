@@ -32,6 +32,8 @@ import DeleteUserModal from './modals/DeleteUserModal';
 import ResetPasskeyModal from './modals/ResetPasskeyModal';
 import ResetTwoFAModal from './modals/ResetTwoFAModal';
 import UserSubscriptionsModal from './modals/UserSubscriptionsModal';
+import DecreaseQuotaModal from './modals/DecreaseQuotaModal';
+import { isRoot } from '../../../helpers';
 
 const UsersTable = (usersData) => {
   const {
@@ -50,6 +52,7 @@ const UsersTable = (usersData) => {
     refresh,
     resetUserPasskey,
     resetUserTwoFA,
+    supportMode,
     t,
   } = usersData;
 
@@ -64,6 +67,7 @@ const UsersTable = (usersData) => {
   const [showResetTwoFAModal, setShowResetTwoFAModal] = useState(false);
   const [showUserSubscriptionsModal, setShowUserSubscriptionsModal] =
     useState(false);
+  const [showDecreaseQuotaModal, setShowDecreaseQuotaModal] = useState(false);
 
   // Modal handlers
   const showPromoteUserModal = (user) => {
@@ -102,9 +106,14 @@ const UsersTable = (usersData) => {
     setShowUserSubscriptionsModal(true);
   };
 
+  const showDecreaseQuotaUserModal = (user) => {
+    setModalUser(user);
+    setShowDecreaseQuotaModal(true);
+  };
+
   // Modal confirm handlers
-  const handlePromoteConfirm = () => {
-    manageUser(modalUser.id, 'promote', modalUser);
+  const handlePromoteConfirm = (action) => {
+    manageUser(modalUser.id, action || 'promote', modalUser);
     setShowPromoteModal(false);
   };
 
@@ -141,6 +150,8 @@ const UsersTable = (usersData) => {
       showResetPasskeyModal: showResetPasskeyUserModal,
       showResetTwoFAModal: showResetTwoFAUserModal,
       showUserSubscriptionsModal: showUserSubscriptionsUserModal,
+      showDecreaseQuotaModal: showDecreaseQuotaUserModal,
+      supportMode,
     });
   }, [
     t,
@@ -153,7 +164,28 @@ const UsersTable = (usersData) => {
     showResetPasskeyUserModal,
     showResetTwoFAUserModal,
     showUserSubscriptionsUserModal,
+    showDecreaseQuotaUserModal,
+    supportMode,
   ]);
+
+  const promoteRoleOptions = useMemo(() => {
+    if (!modalUser || !isRoot()) {
+      return [];
+    }
+    if (modalUser.role === 1) {
+      return [
+        {
+          label: t('\u5ba2\u670d\u7ba1\u7406\u5458'),
+          value: 'promote_support',
+        },
+        { label: t('\u7ba1\u7406\u5458'), value: 'promote' },
+      ];
+    }
+    if (modalUser.role === 5) {
+      return [{ label: t('\u7ba1\u7406\u5458'), value: 'promote' }];
+    }
+    return [];
+  }, [modalUser, t]);
 
   // Handle compact mode by removing fixed positioning
   const tableColumns = useMemo(() => {
@@ -207,6 +239,7 @@ const UsersTable = (usersData) => {
         onConfirm={handlePromoteConfirm}
         user={modalUser}
         t={t}
+        roleOptions={promoteRoleOptions}
       />
 
       <DemoteUserModal
@@ -259,6 +292,13 @@ const UsersTable = (usersData) => {
         user={modalUser}
         t={t}
         onSuccess={() => refresh?.()}
+      />
+
+      <DecreaseQuotaModal
+        visible={showDecreaseQuotaModal}
+        user={modalUser}
+        onCancel={() => setShowDecreaseQuotaModal(false)}
+        refresh={refresh}
       />
     </>
   );

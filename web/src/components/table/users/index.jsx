@@ -53,6 +53,7 @@ const UsersPage = () => {
     groupOptions,
     loading,
     searching,
+    supportMode,
 
     // Description state
     compactMode,
@@ -64,18 +65,22 @@ const UsersPage = () => {
 
   return (
     <>
-      <AddUserModal
-        refresh={refresh}
-        visible={showAddUser}
-        handleClose={closeAddUser}
-      />
+      {!supportMode && (
+        <AddUserModal
+          refresh={refresh}
+          visible={showAddUser}
+          handleClose={closeAddUser}
+        />
+      )}
 
-      <EditUserModal
-        refresh={refresh}
-        visible={showEditUser}
-        handleClose={closeEditUser}
-        editingUser={editingUser}
-      />
+      {!supportMode && (
+        <EditUserModal
+          refresh={refresh}
+          visible={showEditUser}
+          handleClose={closeEditUser}
+          editingUser={editingUser}
+        />
+      )}
 
       <CardPro
         type='type1'
@@ -88,7 +93,9 @@ const UsersPage = () => {
         }
         actionsArea={
           <div className='flex flex-col md:flex-row justify-between items-center gap-2 w-full'>
-            <UsersActions setShowAddUser={setShowAddUser} t={t} />
+            {!supportMode && (
+              <UsersActions setShowAddUser={setShowAddUser} t={t} />
+            )}
 
             <UsersFilters
               formInitValues={formInitValues}

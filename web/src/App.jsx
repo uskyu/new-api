@@ -18,13 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { lazy, Suspense, useContext, useEffect, useMemo } from 'react';
-import { Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
 import User from './pages/User';
 import {
   AuthRedirect,
   PrivateRoute,
   AdminRoute,
+  PermissionRoute,
+  PERMISSIONS,
+  isSupport,
   captureAffiliateCodeFromSearch,
 } from './helpers';
 import RegisterForm from './components/auth/RegisterForm';
@@ -221,17 +224,17 @@ function App() {
         <Route
           path='/console/redemption'
           element={
-            <AdminRoute>
+            <PermissionRoute permission={PERMISSIONS.REDEMPTION_MANAGE}>
               <Redemption />
-            </AdminRoute>
+            </PermissionRoute>
           }
         />
         <Route
           path='/console/user'
           element={
-            <AdminRoute>
+            <PermissionRoute permission={PERMISSIONS.USER_QUOTA_DECREASE}>
               <User />
-            </AdminRoute>
+            </PermissionRoute>
           }
         />
         <Route
@@ -359,11 +362,18 @@ function App() {
         <Route
           path='/console'
           element={
-            <PrivateRoute>
-              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
-                <Dashboard />
-              </Suspense>
-            </PrivateRoute>
+            isSupport() ? (
+              <Navigate to='/console/user' replace />
+            ) : (
+              <PrivateRoute>
+                <Suspense
+                  fallback={<Loading></Loading>}
+                  key={location.pathname}
+                >
+                  <Dashboard />
+                </Suspense>
+              </PrivateRoute>
+            )
           }
         />
         <Route

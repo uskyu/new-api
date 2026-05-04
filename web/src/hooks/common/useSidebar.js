@@ -120,13 +120,20 @@ export const useSidebar = () => {
       }
 
       const res = await API.get('/api/user/self');
-      if (res.data.success && res.data.data.sidebar_modules) {
+      if (
+        res.data.success &&
+        (res.data.data.sidebar_modules ||
+          res.data.data.permissions?.sidebar_modules)
+      ) {
         let config;
         // 检查sidebar_modules是字符串还是对象
-        if (typeof res.data.data.sidebar_modules === 'string') {
-          config = JSON.parse(res.data.data.sidebar_modules);
+        const modules =
+          res.data.data.sidebar_modules ||
+          res.data.data.permissions?.sidebar_modules;
+        if (typeof modules === 'string') {
+          config = JSON.parse(modules);
         } else {
-          config = res.data.data.sidebar_modules;
+          config = modules;
         }
         setUserConfig(config);
       } else {

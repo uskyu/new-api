@@ -1,6 +1,7 @@
 package router
 
 import (
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
 
@@ -306,7 +307,7 @@ func SetApiRouter(router *gin.Engine) {
 		}
 
 		redemptionRoute := apiRouter.Group("/redemption")
-		redemptionRoute.Use(middleware.AdminAuth())
+		redemptionRoute.Use(middleware.PermissionAuth(common.PermissionRedemptionManage))
 		{
 			redemptionRoute.GET("/", controller.GetAllRedemptions)
 			redemptionRoute.GET("/search", controller.SearchRedemptions)
@@ -315,6 +316,14 @@ func SetApiRouter(router *gin.Engine) {
 			redemptionRoute.PUT("/", controller.UpdateRedemption)
 			redemptionRoute.DELETE("/invalid", controller.DeleteInvalidRedemption)
 			redemptionRoute.DELETE("/:id", controller.DeleteRedemption)
+		}
+		supportRoute := apiRouter.Group("/support")
+		supportRoute.Use(middleware.PermissionAuth(common.PermissionUserQuotaDecrease))
+		{
+			supportRoute.GET("/users", controller.GetSupportUsers)
+			supportRoute.GET("/users/search", controller.SearchSupportUsers)
+			supportRoute.GET("/users/:id", controller.GetSupportUser)
+			supportRoute.POST("/users/:id/quota/decrease", controller.SupportDecreaseUserQuota)
 		}
 		logRoute := apiRouter.Group("/log")
 		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)

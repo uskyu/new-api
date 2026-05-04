@@ -29,17 +29,20 @@ import {
   Dropdown,
 } from '@douyinfe/semi-ui';
 import { IconMore } from '@douyinfe/semi-icons';
-import { renderGroup, renderNumber, renderQuota } from '../../../helpers';
+import { isRoot, renderGroup, renderNumber, renderQuota } from '../../../helpers';
 
-/**
- * Render user role
- */
 const renderRole = (role, t) => {
   switch (role) {
     case 1:
       return (
         <Tag color='blue' shape='circle'>
           {t('普通用户')}
+        </Tag>
+      );
+    case 5:
+      return (
+        <Tag color='cyan' shape='circle'>
+          {t('客服管理员')}
         </Tag>
       );
     case 10:
@@ -63,9 +66,6 @@ const renderRole = (role, t) => {
   }
 };
 
-/**
- * Render username with remark
- */
 const renderUsername = (text, record) => {
   const remark = record.remark;
   if (!remark) {
@@ -73,7 +73,7 @@ const renderUsername = (text, record) => {
   }
   const maxLen = 10;
   const displayRemark =
-    remark.length > maxLen ? remark.slice(0, maxLen) + '…' : remark;
+    remark.length > maxLen ? remark.slice(0, maxLen) + '...' : remark;
   return (
     <Space spacing={2}>
       <span>{text}</span>
@@ -92,13 +92,9 @@ const renderUsername = (text, record) => {
   );
 };
 
-/**
- * Render user statistics
- */
 const renderStatistics = (text, record, showEnableDisableModal, t) => {
   const isDeleted = record.DeletedAt !== null;
 
-  // Determine tag text & color like original status column
   let tagColor = 'grey';
   let tagText = t('未知状态');
   if (isDeleted) {
@@ -133,7 +129,6 @@ const renderStatistics = (text, record, showEnableDisableModal, t) => {
   );
 };
 
-// Render separate quota usage column
 const renderQuotaUsage = (text, record, t) => {
   const { Paragraph } = Typography;
   const used = parseInt(record.used_quota) || 0;
@@ -170,9 +165,6 @@ const renderQuotaUsage = (text, record, t) => {
   );
 };
 
-/**
- * Render invite information
- */
 const renderInviteInfo = (text, record, t) => {
   return (
     <div>
@@ -193,9 +185,6 @@ const renderInviteInfo = (text, record, t) => {
   );
 };
 
-/**
- * Render operations column
- */
 const renderOperations = (
   text,
   record,
@@ -209,11 +198,28 @@ const renderOperations = (
     showResetPasskeyModal,
     showResetTwoFAModal,
     showUserSubscriptionsModal,
+    showDecreaseQuotaModal,
+    supportMode,
     t,
   },
 ) => {
   if (record.DeletedAt !== null) {
     return <></>;
+  }
+
+  if (supportMode) {
+    if (record.role !== 1) {
+      return <></>;
+    }
+    return (
+      <Button
+        type='warning'
+        size='small'
+        onClick={() => showDecreaseQuotaModal(record)}
+      >
+        {t('减少额度')}
+      </Button>
+    );
   }
 
   const moreMenu = [
@@ -274,13 +280,15 @@ const renderOperations = (
       >
         {t('编辑')}
       </Button>
-      <Button
-        type='warning'
-        size='small'
-        onClick={() => showPromoteModal(record)}
-      >
-        {t('提升')}
-      </Button>
+      {isRoot() && record.role < 10 && (
+        <Button
+          type='warning'
+          size='small'
+          onClick={() => showPromoteModal(record)}
+        >
+          {t('提升')}
+        </Button>
+      )}
       <Button
         type='secondary'
         size='small'
@@ -295,9 +303,6 @@ const renderOperations = (
   );
 };
 
-/**
- * Get users table column definitions
- */
 export const getUsersColumns = ({
   t,
   setEditingUser,
@@ -309,6 +314,8 @@ export const getUsersColumns = ({
   showResetPasskeyModal,
   showResetTwoFAModal,
   showUserSubscriptionsModal,
+  showDecreaseQuotaModal,
+  supportMode,
 }) => {
   return [
     {
@@ -354,7 +361,7 @@ export const getUsersColumns = ({
       title: '',
       dataIndex: 'operate',
       fixed: 'right',
-      width: 200,
+      width: supportMode ? 120 : 200,
       render: (text, record, index) =>
         renderOperations(text, record, {
           setEditingUser,
@@ -366,6 +373,8 @@ export const getUsersColumns = ({
           showResetPasskeyModal,
           showResetTwoFAModal,
           showUserSubscriptionsModal,
+          showDecreaseQuotaModal,
+          supportMode,
           t,
         }),
     },

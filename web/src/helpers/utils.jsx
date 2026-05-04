@@ -28,22 +28,61 @@ import {
 import { TABLE_COMPACT_MODES_KEY } from '../constants';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
 
+export const USER_ROLES = {
+  GUEST: 0,
+  COMMON: 1,
+  SUPPORT: 5,
+  ADMIN: 10,
+  ROOT: 100,
+};
+
+export const PERMISSIONS = {
+  REDEMPTION_MANAGE: 'redemption.manage',
+  USER_QUOTA_DECREASE: 'user.quota.decrease',
+};
+
+const rolePermissions = {
+  [USER_ROLES.SUPPORT]: {
+    [PERMISSIONS.REDEMPTION_MANAGE]: true,
+    [PERMISSIONS.USER_QUOTA_DECREASE]: true,
+  },
+  [USER_ROLES.ADMIN]: {
+    [PERMISSIONS.REDEMPTION_MANAGE]: true,
+    [PERMISSIONS.USER_QUOTA_DECREASE]: true,
+  },
+  [USER_ROLES.ROOT]: {
+    [PERMISSIONS.REDEMPTION_MANAGE]: true,
+    [PERMISSIONS.USER_QUOTA_DECREASE]: true,
+  },
+};
+
+export function getCurrentUserRole() {
+  let user = localStorage.getItem('user');
+  if (!user) return USER_ROLES.GUEST;
+  user = JSON.parse(user);
+  return Number(user.role || USER_ROLES.GUEST);
+}
+
+export function can(permission) {
+  const role = getCurrentUserRole();
+  if (role >= USER_ROLES.ROOT) return true;
+  return rolePermissions[role]?.[permission] === true;
+}
+
 const HTMLToastContent = ({ htmlContent }) => {
   return <div dangerouslySetInnerHTML={{ __html: htmlContent }} />;
 };
 export default HTMLToastContent;
 export function isAdmin() {
-  let user = localStorage.getItem('user');
-  if (!user) return false;
-  user = JSON.parse(user);
-  return user.role >= 10;
+  return getCurrentUserRole() >= USER_ROLES.ADMIN;
+}
+
+export function isSupport() {
+  return getCurrentUserRole() === USER_ROLES.SUPPORT;
 }
 
 export function isRoot() {
-  let user = localStorage.getItem('user');
-  if (!user) return false;
-  user = JSON.parse(user);
-  return user.role >= 100;
+  return getCurrentUserRole() >= USER_ROLES.ROOT;
 }
 
 export function getSystemName() {

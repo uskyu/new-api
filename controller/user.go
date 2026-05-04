@@ -255,6 +255,82 @@ func SearchUsers(c *gin.Context) {
 	return
 }
 
+func GetSupportUsers(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	users, total, err := model.GetSupportManageUsers(pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(users)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func SearchSupportUsers(c *gin.Context) {
+	keyword := c.Query("keyword")
+	group := c.Query("group")
+	pageInfo := common.GetPageQuery(c)
+	users, total, err := model.SearchSupportManageUsers(keyword, group, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(users)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func GetSupportUser(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	user, err := model.GetUserById(id, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if user.Role != common.RoleCommonUser {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    user,
+	})
+}
+
+type SupportDecreaseUserQuotaRequest struct {
+	Quota  int    `json:"quota"`
+	Reason string `json:"reason"`
+}
+
+func SupportDecreaseUserQuota(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var req SupportDecreaseUserQuotaRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	result, err := model.DecreaseUserQuotaBySupport(c.GetInt("id"), c.GetInt("role"), id, req.Quota, req.Reason)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    result,
+	})
+}
+
 func GetUser(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -379,6 +455,10 @@ func GetSelf(c *gin.Context) {
 
 	// 获取用户设置并提取sidebar_modules
 	userSetting := user.GetSetting()
+	var sidebarModules interface{} = userSetting.SidebarModules
+	if userRole == common.RoleSupportUser {
+		sidebarModules = permissions["sidebar_modules"]
+	}
 
 	// 构建响应数据，包含用户信息和权限
 	responseData := map[string]interface{}{
@@ -406,8 +486,8 @@ func GetSelf(c *gin.Context) {
 		"linux_do_id":       user.LinuxDOId,
 		"setting":           user.Setting,
 		"stripe_customer":   user.StripeCustomer,
-		"sidebar_modules":   userSetting.SidebarModules, // 正确提取sidebar_modules字段
-		"permissions":       permissions,                // 新增权限字段
+		"sidebar_modules":   sidebarModules, // 正确提取sidebar_modules字段
+		"permissions":       permissions,    // 新增权限字段
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -427,6 +507,33 @@ func calculateUserPermissions(userRole int) map[string]interface{} {
 		// 超级管理员不需要边栏设置功能
 		permissions["sidebar_settings"] = false
 		permissions["sidebar_modules"] = map[string]interface{}{}
+		permissions["capabilities"] = common.RolePermissions[common.RoleRootUser]
+	} else if userRole == common.RoleSupportUser {
+		permissions["sidebar_settings"] = false
+		permissions["sidebar_modules"] = map[string]interface{}{
+			"chat": map[string]interface{}{
+				"enabled": false,
+			},
+			"console": map[string]interface{}{
+				"enabled": false,
+			},
+			"personal": map[string]interface{}{
+				"enabled": false,
+			},
+			"admin": map[string]interface{}{
+				"enabled":       true,
+				"redemption":    true,
+				"user":          true,
+				"channel":       false,
+				"models":        false,
+				"deployment":    false,
+				"agent":         false,
+				"subscription":  false,
+				"ai_image_logs": false,
+				"setting":       false,
+			},
+		}
+		permissions["capabilities"] = common.RolePermissions[common.RoleSupportUser]
 	} else if userRole == common.RoleAdminUser {
 		// 管理员可以设置边栏，但不包含系统设置功能
 		permissions["sidebar_settings"] = true
@@ -435,12 +542,14 @@ func calculateUserPermissions(userRole int) map[string]interface{} {
 				"setting": false, // 管理员不能访问系统设置
 			},
 		}
+		permissions["capabilities"] = common.RolePermissions[common.RoleAdminUser]
 	} else {
 		// 普通用户只能设置个人功能，不包含管理员区域
 		permissions["sidebar_settings"] = true
 		permissions["sidebar_modules"] = map[string]interface{}{
 			"admin": false, // 普通用户不能访问管理员区域
 		}
+		permissions["capabilities"] = map[string]bool{}
 	}
 
 	return permissions
@@ -477,7 +586,21 @@ func generateDefaultSidebarConfig(userRole int) string {
 	}
 
 	// 管理员区域 - 根据角色决定
-	if userRole == common.RoleAdminUser {
+	if userRole == common.RoleSupportUser {
+		delete(defaultConfig, "chat")
+		delete(defaultConfig, "console")
+		delete(defaultConfig, "personal")
+		defaultConfig["admin"] = map[string]interface{}{
+			"enabled":      true,
+			"channel":      false,
+			"models":       false,
+			"redemption":   true,
+			"user":         true,
+			"setting":      false,
+			"agent":        false,
+			"subscription": false,
+		}
+	} else if userRole == common.RoleAdminUser {
 		// 管理员可以访问管理员区域，但不能访问系统设置
 		defaultConfig["admin"] = map[string]interface{}{
 			"enabled":    true,
@@ -898,6 +1021,16 @@ func ManageUser(c *gin.Context) {
 			return
 		}
 		user.Role = common.RoleAdminUser
+	case "promote_support":
+		if myRole != common.RoleRootUser {
+			common.ApiErrorI18n(c, i18n.MsgUserAdminCannotPromote)
+			return
+		}
+		if user.Role != common.RoleCommonUser {
+			common.ApiErrorI18n(c, i18n.MsgUserCannotCreateHigherLevel)
+			return
+		}
+		user.Role = common.RoleSupportUser
 	case "demote":
 		if user.Role == common.RoleRootUser {
 			common.ApiErrorI18n(c, i18n.MsgUserCannotDemoteRootUser)
@@ -908,6 +1041,11 @@ func ManageUser(c *gin.Context) {
 			return
 		}
 		user.Role = common.RoleCommonUser
+	}
+	if req.Action == "promote" || req.Action == "promote_support" || req.Action == "demote" {
+		currentSetting := user.GetSetting()
+		currentSetting.SidebarModules = generateDefaultSidebarConfig(user.Role)
+		user.SetSetting(currentSetting)
 	}
 
 	if err := user.Update(false); err != nil {

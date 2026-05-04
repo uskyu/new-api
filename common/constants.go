@@ -141,14 +141,61 @@ const (
 )
 
 const (
-	RoleGuestUser  = 0
-	RoleCommonUser = 1
-	RoleAdminUser  = 10
-	RoleRootUser   = 100
+	RoleGuestUser   = 0
+	RoleCommonUser  = 1
+	RoleSupportUser = 5
+	RoleAdminUser   = 10
+	RoleRootUser    = 100
 )
 
 func IsValidateRole(role int) bool {
-	return role == RoleGuestUser || role == RoleCommonUser || role == RoleAdminUser || role == RoleRootUser
+	return role == RoleGuestUser || role == RoleCommonUser || role == RoleSupportUser || role == RoleAdminUser || role == RoleRootUser
+}
+
+const (
+	PermissionRedemptionManage  = "redemption.manage"
+	PermissionUserQuotaDecrease = "user.quota.decrease"
+)
+
+var RolePermissions = map[int]map[string]bool{
+	RoleSupportUser: {
+		PermissionRedemptionManage:  true,
+		PermissionUserQuotaDecrease: true,
+	},
+	RoleAdminUser: {
+		PermissionRedemptionManage:  true,
+		PermissionUserQuotaDecrease: true,
+	},
+	RoleRootUser: {
+		PermissionRedemptionManage:  true,
+		PermissionUserQuotaDecrease: true,
+	},
+}
+
+func RoleHasPermission(role int, permission string) bool {
+	if role == RoleRootUser {
+		return true
+	}
+	permissions, ok := RolePermissions[role]
+	if !ok {
+		return false
+	}
+	return permissions[permission]
+}
+
+func MinRoleForPermission(permission string) (int, bool) {
+	minRole := RoleRootUser
+	found := false
+	for role, permissions := range RolePermissions {
+		if !permissions[permission] {
+			continue
+		}
+		if !found || role < minRole {
+			minRole = role
+		}
+		found = true
+	}
+	return minRole, found
 }
 
 var (
