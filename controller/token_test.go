@@ -12,6 +12,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -36,6 +37,10 @@ type tokenResponseItem struct {
 
 type tokenKeyResponse struct {
 	Key string `json:"key"`
+}
+
+type tokenBatchCreateResponse struct {
+	Count int `json:"count"`
 }
 
 func setupTokenControllerTestDB(t *testing.T) *gorm.DB {
@@ -67,6 +72,20 @@ func setupTokenControllerTestDB(t *testing.T) *gorm.DB {
 	})
 
 	return db
+}
+
+func newTokenCreateRequest(name string, count int) map[string]any {
+	return map[string]any{
+		"name":                 name,
+		"count":                count,
+		"expired_time":         -1,
+		"remain_quota":         100,
+		"unlimited_quota":      true,
+		"model_limits_enabled": false,
+		"model_limits":         "",
+		"group":                "default",
+		"cross_group_retry":    false,
+	}
 }
 
 func seedToken(t *testing.T, db *gorm.DB, userID int, name string, rawKey string) *model.Token {
@@ -271,5 +290,132 @@ func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {
 	}
 	if strings.Contains(unauthorizedRecorder.Body.String(), token.Key) {
 		t.Fatalf("unauthorized key response leaked raw token key: %s", unauthorizedRecorder.Body.String())
+	}
+}
+
+func TestAddTokenBatchCreatesTokensWithCompatibleNamesAndUniqueKeys(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/batch-create", newTokenCreateRequest("batch-token", 3), 1)
+	AddTokenBatch(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected batch create to succeed, got message: %s", response.Message)
+	}
+
+	var batchData tokenBatchCreateResponse
+	if err := common.Unmarshal(response.Data, &batchData); err != nil {
+		t.Fatalf("failed to decode batch create response: %v", err)
+	}
+	if batchData.Count != 3 {
+		t.Fatalf("expected response count 3, got %d", batchData.Count)
+	}
+
+	var tokens []model.Token
+	if err := db.Where("user_id = ?", 1).Order("id asc").Find(&tokens).Error; err != nil {
+		t.Fatalf("failed to fetch created tokens: %v", err)
+	}
+	if len(tokens) != 3 {
+		t.Fatalf("expected 3 created tokens, got %d", len(tokens))
+	}
+	if tokens[0].Name != "batch-token" {
+		t.Fatalf("expected first token to keep original name, got %q", tokens[0].Name)
+	}
+	for i := 1; i < len(tokens); i++ {
+		if !strings.HasPrefix(tokens[i].Name, "batch-token-") {
+			t.Fatalf("expected token %d to have random suffixed name, got %q", i, tokens[i].Name)
+		}
+		if len(tokens[i].Name) != len("batch-token-")+6 {
+			t.Fatalf("expected token %d suffix length 6, got name %q", i, tokens[i].Name)
+		}
+	}
+
+	keys := make(map[string]struct{})
+	for _, token := range tokens {
+		if token.Key == "" {
+			t.Fatalf("expected generated key for token %d", token.Id)
+		}
+		if _, ok := keys[token.Key]; ok {
+			t.Fatalf("duplicate generated key %q", token.Key)
+		}
+		keys[token.Key] = struct{}{}
+	}
+}
+
+func TestAddTokenBatchUsesDefaultNameWithSuffixWhenNameEmpty(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/batch-create", newTokenCreateRequest("", 2), 1)
+	AddTokenBatch(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected empty-name batch create to succeed, got message: %s", response.Message)
+	}
+
+	var tokens []model.Token
+	if err := db.Where("user_id = ?", 1).Order("id asc").Find(&tokens).Error; err != nil {
+		t.Fatalf("failed to fetch created tokens: %v", err)
+	}
+	if len(tokens) != 2 {
+		t.Fatalf("expected 2 created tokens, got %d", len(tokens))
+	}
+	for i, token := range tokens {
+		if !strings.HasPrefix(token.Name, "default-") {
+			t.Fatalf("expected empty-name token %d to use default random suffix, got %q", i, token.Name)
+		}
+		if len(token.Name) != len("default-")+6 {
+			t.Fatalf("expected empty-name token %d suffix length 6, got name %q", i, token.Name)
+		}
+	}
+}
+
+func TestAddTokenBatchRejectsInvalidCount(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+
+	for _, count := range []int{0, 1001} {
+		ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/batch-create", newTokenCreateRequest("invalid-count", count), 1)
+		AddTokenBatch(ctx)
+
+		response := decodeAPIResponse(t, recorder)
+		if response.Success {
+			t.Fatalf("expected count %d to fail", count)
+		}
+	}
+
+	var total int64
+	if err := db.Model(&model.Token{}).Count(&total).Error; err != nil {
+		t.Fatalf("failed to count tokens: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("expected invalid batch creates to insert nothing, got %d tokens", total)
+	}
+}
+
+func TestAddTokenBatchRejectsWhenUserTokenLimitWouldBeExceeded(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	originalMaxTokens := operation_setting.GetTokenSetting().MaxUserTokens
+	operation_setting.GetTokenSetting().MaxUserTokens = 2
+	t.Cleanup(func() {
+		operation_setting.GetTokenSetting().MaxUserTokens = originalMaxTokens
+	})
+
+	seedToken(t, db, 1, "existing-token", "existing1234567890")
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/batch-create", newTokenCreateRequest("too-many", 2), 1)
+	AddTokenBatch(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if response.Success {
+		t.Fatalf("expected batch create to fail when existing count plus batch count exceeds limit")
+	}
+
+	var total int64
+	if err := db.Model(&model.Token{}).Where("user_id = ?", 1).Count(&total).Error; err != nil {
+		t.Fatalf("failed to count tokens: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("expected limit failure to leave existing token only, got %d tokens", total)
 	}
 }

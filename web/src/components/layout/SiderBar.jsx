@@ -32,6 +32,7 @@ import SkeletonWrapper from './components/SkeletonWrapper';
 const routerMap = {
   home: '/',
   channel: '/console/channel',
+  analytics: '/console/analytics',
   token: '/console/token',
   redemption: '/console/redemption',
   topup: '/console/topup',
@@ -148,6 +149,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('渠道管理'),
         itemKey: 'channel',
         to: '/channel',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('数据分析'),
+        itemKey: 'analytics',
+        to: '/console/analytics',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

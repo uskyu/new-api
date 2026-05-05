@@ -323,11 +323,17 @@ const EditRedemptionModal = (props) => {
                           field='count'
                           label={t('生成数量')}
                           min={1}
+                          max={1000}
                           rules={[
                             { required: true, message: t('请输入生成数量') },
                             {
                               validator: (rule, v) => {
                                 const num = parseInt(v, 10);
+                                if (num > 1000) {
+                                  return Promise.reject(
+                                    t('生成数量不能大于1000'),
+                                  );
+                                }
                                 return num > 0
                                   ? Promise.resolve()
                                   : Promise.reject(t('生成数量必须大于0'));

@@ -75,6 +75,7 @@ const AIConsole = lazy(() => import('./pages/AIConsole'));
 const AIImage = lazy(() => import('./pages/AIImage'));
 const AIEcommerceTemplate = lazy(() => import('./pages/AIEcommerceTemplate'));
 const AIImageLogs = lazy(() => import('./pages/AIImageLogs'));
+const Analytics = lazy(() => import('./pages/Analytics'));
 
 function DynamicOAuth2Callback() {
   const { provider } = useParams();
@@ -160,6 +161,16 @@ function App() {
           element={
             <AdminRoute>
               <Channel />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/analytics'
+          element={
+            <AdminRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <Analytics />
+              </Suspense>
             </AdminRoute>
           }
         />

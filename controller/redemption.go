@@ -12,6 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const maxBatchCreateRedemptions = 1000
+
 func GetAllRedemptions(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	redemptions, total, err := model.GetAllRedemptions(pageInfo.GetStartIdx(), pageInfo.GetPageSize())
@@ -73,7 +75,7 @@ func AddRedemption(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgRedemptionCountPositive)
 		return
 	}
-	if redemption.Count > 100 {
+	if redemption.Count > maxBatchCreateRedemptions {
 		common.ApiErrorI18n(c, i18n.MsgRedemptionCountMax)
 		return
 	}
@@ -82,27 +84,28 @@ func AddRedemption(c *gin.Context) {
 		return
 	}
 	var keys []string
+	redemptions := make([]model.Redemption, 0, redemption.Count)
+	now := common.GetTimestamp()
 	for i := 0; i < redemption.Count; i++ {
 		key := common.GetUUID()
-		cleanRedemption := model.Redemption{
+		redemptions = append(redemptions, model.Redemption{
 			UserId:      c.GetInt("id"),
 			Name:        redemption.Name,
 			Key:         key,
-			CreatedTime: common.GetTimestamp(),
+			CreatedTime: now,
 			Quota:       redemption.Quota,
 			ExpiredTime: redemption.ExpiredTime,
-		}
-		err = cleanRedemption.Insert()
-		if err != nil {
-			common.SysError("failed to insert redemption: " + err.Error())
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": i18n.T(c, i18n.MsgRedemptionCreateFailed),
-				"data":    keys,
-			})
-			return
-		}
+		})
 		keys = append(keys, key)
+	}
+	if err = model.BatchInsertRedemptions(redemptions); err != nil {
+		common.SysError("failed to insert redemptions: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": i18n.T(c, i18n.MsgRedemptionCreateFailed),
+			"data":    []string{},
+		})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

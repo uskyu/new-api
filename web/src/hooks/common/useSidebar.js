@@ -51,6 +51,7 @@ export const DEFAULT_ADMIN_CONFIG = {
   admin: {
     enabled: true,
     channel: true,
+    analytics: true,
     agent: true,
     models: true,
     deployment: true,

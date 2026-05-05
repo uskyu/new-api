@@ -255,6 +255,7 @@ func SetApiRouter(router *gin.Engine) {
 			tokenRoute.GET("/:id", controller.GetToken)
 			tokenRoute.POST("/:id/key", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.GetTokenKey)
 			tokenRoute.POST("/", controller.AddToken)
+			tokenRoute.POST("/batch-create", controller.AddTokenBatch)
 			tokenRoute.PUT("/", controller.UpdateToken)
 			tokenRoute.DELETE("/:id", controller.DeleteToken)
 			tokenRoute.POST("/batch", controller.DeleteTokenBatch)
@@ -416,6 +417,11 @@ func SetApiRouter(router *gin.Engine) {
 		aiEcommerceAdminRoute.Use(middleware.AdminAuth())
 		{
 			aiEcommerceAdminRoute.GET("/workflows", controller.GetAllEcommerceWorkflows)
+		}
+		adminAnalyticsRoute := apiRouter.Group("/admin/analytics")
+		adminAnalyticsRoute.Use(middleware.AdminAuth())
+		{
+			adminAnalyticsRoute.GET("/overview", controller.GetAdminAnalyticsOverview)
 		}
 
 		taskRoute := apiRouter.Group("/task")

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const maxBatchCreateTokens = 1000
 
 func buildMaskedTokenResponse(token *model.Token) *model.Token {
 	if token == nil {
@@ -29,6 +32,56 @@ func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
 		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token))
 	}
 	return maskedTokens
+}
+
+func validateTokenCreateRequest(c *gin.Context, token *model.Token) bool {
+	if len(token.Name) > 50 {
+		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
+		return false
+	}
+	if !token.UnlimitedQuota {
+		if token.RemainQuota < 0 {
+			common.ApiErrorI18n(c, i18n.MsgTokenQuotaNegative)
+			return false
+		}
+		maxQuotaValue := int((1000000000 * common.QuotaPerUnit))
+		if token.RemainQuota > maxQuotaValue {
+			common.ApiErrorI18n(c, i18n.MsgTokenQuotaExceedMax, map[string]any{"Max": maxQuotaValue})
+			return false
+		}
+	}
+	return true
+}
+
+func buildCleanToken(userId int, token *model.Token, key string, name string) model.Token {
+	now := common.GetTimestamp()
+	return model.Token{
+		UserId:             userId,
+		Name:               name,
+		Key:                key,
+		CreatedTime:        now,
+		AccessedTime:       now,
+		ExpiredTime:        token.ExpiredTime,
+		RemainQuota:        token.RemainQuota,
+		UnlimitedQuota:     token.UnlimitedQuota,
+		ModelLimitsEnabled: token.ModelLimitsEnabled,
+		ModelLimits:        token.ModelLimits,
+		AllowIps:           token.AllowIps,
+		Group:              token.Group,
+		CrossGroupRetry:    token.CrossGroupRetry,
+	}
+}
+
+func buildBatchTokenName(inputName string, index int) string {
+	baseName := strings.TrimSpace(inputName)
+	hasOriginalName := baseName != ""
+	if baseName == "" {
+		baseName = "default"
+	}
+	if index == 0 && hasOriginalName {
+		return baseName
+	}
+	return fmt.Sprintf("%s-%s", baseName, common.GetRandomString(6))
 }
 
 func GetAllTokens(c *gin.Context) {
@@ -164,11 +217,35 @@ func GetTokenUsage(c *gin.Context) {
 	})
 }
 
+func checkUserTokenLimit(c *gin.Context, addCount int) bool {
+	if addCount <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return false
+	}
+	maxTokens := operation_setting.GetMaxUserTokens()
+	count, err := model.CountUserTokens(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return false
+	}
+	if int(count)+addCount > maxTokens {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("token count exceeds maximum limit (%d)", maxTokens),
+		})
+		return false
+	}
+	return true
+}
+
 func AddToken(c *gin.Context) {
 	token := model.Token{}
 	err := c.ShouldBindJSON(&token)
 	if err != nil {
 		common.ApiError(c, err)
+		return
+	}
+	if !validateTokenCreateRequest(c, &token) {
 		return
 	}
 	if len(token.Name) > 50 {
@@ -230,6 +307,90 @@ func AddToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
+	})
+}
+
+type AddTokenBatchRequest struct {
+	model.Token
+	Count           int `json:"count"`
+	TokenCount      int `json:"token_count"`
+	TokenCountCamel int `json:"tokenCount"`
+}
+
+func (request AddTokenBatchRequest) BatchCount() int {
+	if request.Count != 0 {
+		return request.Count
+	}
+	if request.TokenCount != 0 {
+		return request.TokenCount
+	}
+	return request.TokenCountCamel
+}
+
+func generateUniqueTokenKey(usedKeys map[string]struct{}) (string, error) {
+	for i := 0; i < 20; i++ {
+		key, err := common.GenerateKey()
+		if err != nil {
+			return "", err
+		}
+		if _, ok := usedKeys[key]; ok {
+			continue
+		}
+		exists, err := model.TokenKeyExists(key)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			continue
+		}
+		usedKeys[key] = struct{}{}
+		return key, nil
+	}
+	return "", errors.New("failed to generate unique token key")
+}
+
+func AddTokenBatch(c *gin.Context) {
+	request := AddTokenBatchRequest{}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	count := request.BatchCount()
+	if count < 1 || count > maxBatchCreateTokens {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	token := request.Token
+	if !validateTokenCreateRequest(c, &token) {
+		return
+	}
+	if !checkUserTokenLimit(c, count) {
+		return
+	}
+
+	usedKeys := make(map[string]struct{}, count)
+	tokens := make([]model.Token, 0, count)
+	for i := 0; i < count; i++ {
+		key, err := generateUniqueTokenKey(usedKeys)
+		if err != nil {
+			common.ApiErrorI18n(c, i18n.MsgTokenGenerateFailed)
+			common.SysLog("failed to generate token key: " + err.Error())
+			return
+		}
+		name := buildBatchTokenName(token.Name, i)
+		tokens = append(tokens, buildCleanToken(c.GetInt("id"), &token, key, name))
+	}
+
+	if err := model.BatchInsertTokens(tokens); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"count": len(tokens),
+		},
 	})
 }
 

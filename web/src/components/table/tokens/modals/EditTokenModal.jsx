@@ -193,18 +193,6 @@ const EditTokenModal = (props) => {
     }
   }, [props.visiable, props.editingToken.id]);
 
-  const generateRandomSuffix = () => {
-    const characters =
-      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let result = '';
-    for (let i = 0; i < 6; i++) {
-      result += characters.charAt(
-        Math.floor(Math.random() * characters.length),
-      );
-    }
-    return result;
-  };
-
   const submit = async (values) => {
     setLoading(true);
     if (isEdit) {
@@ -235,42 +223,37 @@ const EditTokenModal = (props) => {
       }
     } else {
       const count = parseInt(values.tokenCount, 10) || 1;
-      let successCount = 0;
-      for (let i = 0; i < count; i++) {
-        let { tokenCount: _tc, ...localInputs } = values;
-        const baseName =
-          values.name.trim() === '' ? 'default' : values.name.trim();
-        if (i !== 0 || values.name.trim() === '') {
-          localInputs.name = `${baseName}-${generateRandomSuffix()}`;
-        } else {
-          localInputs.name = baseName;
-        }
-        localInputs.remain_quota = parseInt(localInputs.remain_quota);
-
-        if (localInputs.expired_time !== -1) {
-          let time = Date.parse(localInputs.expired_time);
-          if (isNaN(time)) {
-            showError(t('过期时间格式错误！'));
-            setLoading(false);
-            break;
-          }
-          localInputs.expired_time = Math.ceil(time / 1000);
-        }
-        localInputs.model_limits = localInputs.model_limits.join(',');
-        localInputs.model_limits_enabled = localInputs.model_limits.length > 0;
-        let res = await API.post(`/api/token/`, localInputs);
-        const { success, message } = res.data;
-        if (success) {
-          successCount++;
-        } else {
-          showError(t(message));
-          break;
-        }
+      if (count < 1 || count > 1000) {
+        showError(t('每批最多创建 1000 个令牌'));
+        setLoading(false);
+        return;
       }
-      if (successCount > 0) {
+      let { tokenCount: _tc, ...localInputs } = values;
+      localInputs.name = values.name.trim();
+      localInputs.remain_quota = parseInt(localInputs.remain_quota);
+
+      if (localInputs.expired_time !== -1) {
+        let time = Date.parse(localInputs.expired_time);
+        if (isNaN(time)) {
+          showError(t('过期时间格式错误！'));
+          setLoading(false);
+          return;
+        }
+        localInputs.expired_time = Math.ceil(time / 1000);
+      }
+      localInputs.model_limits = localInputs.model_limits.join(',');
+      localInputs.model_limits_enabled = localInputs.model_limits.length > 0;
+      let res = await API.post(`/api/token/batch-create`, {
+        ...localInputs,
+        count,
+      });
+      const { success, message } = res.data;
+      if (success) {
         showSuccess(t('令牌创建成功，请在列表页面点击复制获取令牌！'));
         props.refresh();
         props.handleClose();
+      } else {
+        showError(t(message));
       }
     }
     setLoading(false);
@@ -463,9 +446,23 @@ const EditTokenModal = (props) => {
                         field='tokenCount'
                         label={t('新建数量')}
                         min={1}
-                        extraText={t('批量创建时会在名称后自动添加随机后缀')}
+                        max={1000}
+                        extraText={t(
+                          '批量创建时会在名称后自动添加随机后缀，每批最多 1000 个',
+                        )}
                         rules={[
                           { required: true, message: t('请输入新建数量') },
+                          {
+                            validator: (rule, value) => {
+                              const count = parseInt(value, 10);
+                              if (count >= 1 && count <= 1000) {
+                                return Promise.resolve();
+                              }
+                              return Promise.reject(
+                                t('每批最多创建 1000 个令牌'),
+                              );
+                            },
+                          },
                         ]}
                         style={{ width: '100%' }}
                       />

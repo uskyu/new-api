@@ -285,10 +285,25 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 	return token, err
 }
 
+func TokenKeyExists(key string) (bool, error) {
+	var count int64
+	err := DB.Unscoped().Model(&Token{}).Where(&Token{Key: key}).Count(&count).Error
+	return count > 0, err
+}
+
 func (token *Token) Insert() error {
 	var err error
 	err = DB.Create(token).Error
 	return err
+}
+
+func BatchInsertTokens(tokens []Token) error {
+	if len(tokens) == 0 {
+		return errors.New("tokens 不能为空！")
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		return tx.CreateInBatches(&tokens, 100).Error
+	})
 }
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
