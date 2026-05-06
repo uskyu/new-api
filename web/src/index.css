@@ -170,8 +170,14 @@ code {
   position: relative;
   display: inline-block;
   color: transparent !important;
-  background:
-    linear-gradient(90deg, #0f172a 0%, #0f172a 34%, #38bdf8 48%, #0f172a 62%, #0f172a 100%);
+  background: linear-gradient(
+    90deg,
+    #0f172a 0%,
+    #0f172a 34%,
+    #38bdf8 48%,
+    #0f172a 62%,
+    #0f172a 100%
+  );
   background-size: 240% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -182,8 +188,14 @@ code {
 }
 
 .sidebar-nav-item-selected .sidebar-ai-nav-text {
-  background:
-    linear-gradient(90deg, #0284c7 0%, #0284c7 30%, #e0f2fe 48%, #0284c7 66%, #0284c7 100%);
+  background: linear-gradient(
+    90deg,
+    #0284c7 0%,
+    #0284c7 30%,
+    #e0f2fe 48%,
+    #0284c7 66%,
+    #0284c7 100%
+  );
   background-size: 240% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -211,8 +223,11 @@ code {
   overflow: hidden;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.62);
-  background:
-    linear-gradient(145deg, rgba(250, 252, 255, 0.96), rgba(216, 244, 255, 0.72)),
+  background: linear-gradient(
+      145deg,
+      rgba(250, 252, 255, 0.96),
+      rgba(216, 244, 255, 0.72)
+    ),
     linear-gradient(180deg, rgba(148, 163, 184, 0.08), rgba(255, 255, 255, 0));
   box-shadow:
     0 18px 38px rgba(14, 116, 144, 0.14),
@@ -285,7 +300,11 @@ code {
   height: 32px;
   border-radius: 12px;
   color: #0f766e;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(219, 244, 255, 0.78));
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.92),
+    rgba(219, 244, 255, 0.78)
+  );
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.92),
     0 8px 18px rgba(15, 118, 110, 0.14);
@@ -323,7 +342,11 @@ code {
   width: 112px;
   height: 112px;
   border-radius: 9999px;
-  background: radial-gradient(circle, rgba(34, 211, 238, 0.26), rgba(34, 211, 238, 0));
+  background: radial-gradient(
+    circle,
+    rgba(34, 211, 238, 0.26),
+    rgba(34, 211, 238, 0)
+  );
 }
 
 .sidebar-ai-card-reflection {
@@ -331,7 +354,13 @@ code {
   left: -12px;
   width: 130%;
   height: 28px;
-  background: linear-gradient(110deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0.08) 45%, rgba(255, 255, 255, 0.34) 70%, rgba(255, 255, 255, 0));
+  background: linear-gradient(
+    110deg,
+    rgba(255, 255, 255, 0.76),
+    rgba(255, 255, 255, 0.08) 45%,
+    rgba(255, 255, 255, 0.34) 70%,
+    rgba(255, 255, 255, 0)
+  );
   transform: rotate(-8deg);
   opacity: 0.92;
 }
@@ -340,7 +369,11 @@ code {
   right: -22px;
   bottom: -26px;
   border-radius: 9999px;
-  background: linear-gradient(180deg, rgba(56, 189, 248, 0.22), rgba(14, 165, 233, 0.08));
+  background: linear-gradient(
+    180deg,
+    rgba(56, 189, 248, 0.22),
+    rgba(14, 165, 233, 0.08)
+  );
 }
 
 .sidebar-ai-card-wave-primary {
@@ -354,7 +387,11 @@ code {
   bottom: -16px;
   width: 88px;
   height: 40px;
-  background: linear-gradient(180deg, rgba(16, 185, 129, 0.16), rgba(34, 211, 238, 0.02));
+  background: linear-gradient(
+    180deg,
+    rgba(16, 185, 129, 0.16),
+    rgba(34, 211, 238, 0.02)
+  );
   transform: rotate(10deg);
 }
 
@@ -562,6 +599,118 @@ code {
   padding-bottom: 8px !important;
 }
 
+.solo-ai-surface {
+  background: linear-gradient(
+      115deg,
+      rgba(239, 246, 255, 0.96),
+      rgba(248, 250, 252, 0.98) 45%,
+      rgba(236, 253, 245, 0.9)
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(15, 23, 42, 0.03) 0 1px,
+      transparent 1px 80px
+    );
+}
+
+.xiaoyang-studio-surface {
+  background: linear-gradient(
+      118deg,
+      rgba(240, 253, 250, 0.94),
+      rgba(248, 250, 252, 0.98) 42%,
+      rgba(239, 246, 255, 0.94)
+    ),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.028) 1px, transparent 1px);
+  background-size:
+    auto,
+    72px 72px,
+    72px 72px;
+}
+
+.xiaoyang-studio-shell::after {
+  content: '';
+  position: absolute;
+  inset: 20px;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 30px;
+  border: 1px solid rgba(14, 165, 233, 0.08);
+}
+
+.xiaoyang-canvas-stage {
+  background: linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.92),
+      rgba(236, 253, 245, 0.82)
+    ),
+    linear-gradient(90deg, rgba(14, 165, 233, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(14, 165, 233, 0.03) 1px, transparent 1px);
+  background-size:
+    auto,
+    56px 56px,
+    56px 56px;
+}
+
+.xiaoyang-canvas-empty .semi-empty-title {
+  color: #0f172a !important;
+  font-weight: 800 !important;
+}
+
+.xiaoyang-canvas-empty .semi-empty-description {
+  color: #64748b !important;
+}
+
+.solo-side-panel,
+.solo-workbench-panel {
+  position: relative;
+}
+
+.solo-side-panel::before,
+.solo-workbench-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.64),
+    rgba(255, 255, 255, 0.12)
+  );
+  opacity: 0.7;
+}
+
+.solo-side-panel > :not(.solo-panel-overlay),
+.solo-workbench-panel > :not(.solo-panel-overlay) {
+  position: relative;
+  z-index: 1;
+}
+
+.solo-panel-overlay {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.solo-empty-hero .semi-empty-title {
+  margin-top: 18px !important;
+  font-size: clamp(32px, 5vw, 56px) !important;
+  line-height: 1.05 !important;
+  font-weight: 900 !important;
+  color: #0f172a !important;
+  letter-spacing: 0 !important;
+}
+
+.solo-empty-hero .semi-empty-description {
+  max-width: 640px;
+  margin: 12px auto 0 !important;
+  color: #64748b !important;
+  font-size: 16px !important;
+  line-height: 1.75 !important;
+}
+
 .semi-chat-chatBox-action {
   column-gap: 0 !important;
 }
@@ -630,7 +779,9 @@ code {
   line-height: 1;
   background-color: var(--semi-color-fill-0);
   color: var(--semi-color-text-2);
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .sbg-badge-active {
@@ -1268,4 +1419,6 @@ html.dark .with-pastel-balls::before {
   }
 }
 
-.ec-dbcd0a3c01b55203 { forced-color-adjust: auto; }
+.ec-dbcd0a3c01b55203 {
+  forced-color-adjust: auto;
+}

@@ -4,6 +4,7 @@ import { MessageSquare, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import AIConsoleInputRender from './AIConsoleInputRender';
 import { OptimizedMessageContent } from '../playground/OptimizedComponents';
+import { getLogo } from '../../helpers';
 
 const ActionButton = ({ label, tone = 'default', onClick }) => {
   const toneClass =
@@ -51,11 +52,15 @@ const AIConsoleChatPanel = ({
   emptyDescription,
   headerIcon,
   emptyIcon,
+  headerAccessory,
+  featurePills = [],
+  promptSuggestions = [],
+  modelBrands = [],
 }) => {
   const { t } = useTranslation();
 
   const resolvedHeaderIcon = headerIcon || (
-    <MessageSquare size={20} className='text-sky-600' />
+    <MessageSquare size={20} className='text-white' />
   );
   const resolvedEmptyIcon = emptyIcon || (
     <Sparkles size={28} className='text-sky-500' />
@@ -127,11 +132,12 @@ const AIConsoleChatPanel = ({
 
   const emptyContent = useMemo(
     () => (
-      <div className='flex h-full items-center justify-center px-5'>
+      <div className='relative flex h-full items-center justify-center px-5'>
         <Empty
+          className='solo-empty-hero'
           image={
-            <div className='flex h-16 w-16 items-center justify-center rounded-[22px] bg-white/70 shadow-[0_20px_40px_rgba(15,23,42,0.08)] backdrop-blur-xl'>
-              {resolvedEmptyIcon}
+            <div className='flex h-20 min-w-48 items-center justify-center rounded-[28px] bg-white/80 px-6 shadow-[0_24px_60px_rgba(15,23,42,0.10)] backdrop-blur-xl'>
+              <img src={getLogo()} alt='AI' className='h-10 w-auto' />
             </div>
           }
           title={emptyTitle || t('今天想让我帮你做什么？')}
@@ -139,29 +145,93 @@ const AIConsoleChatPanel = ({
             emptyDescription || t('直接输入问题，或者上传一张图片开始')
           }
         />
+        {featurePills.length > 0 || promptSuggestions.length > 0 ? (
+          <div className='pointer-events-auto absolute bottom-[18%] left-1/2 hidden w-full max-w-[760px] -translate-x-1/2 px-5 lg:block'>
+            <div className='mb-5 flex flex-wrap justify-center gap-2'>
+              {featurePills.map((item) => (
+                <span
+                  key={item.key || item.label}
+                  className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-semibold shadow-sm ${
+                    item.active
+                      ? 'border-sky-200 bg-sky-50 text-sky-700'
+                      : 'border-slate-200 bg-white/80 text-slate-600'
+                  }`}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                  {item.badge ? (
+                    <span className='rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-400'>
+                      {item.badge}
+                    </span>
+                  ) : null}
+                </span>
+              ))}
+            </div>
+            <div className='grid gap-3 sm:grid-cols-3'>
+              {promptSuggestions.map((item) => (
+                <div
+                  key={item}
+                  className='rounded-[18px] border border-slate-200 bg-white/75 px-4 py-3 text-left text-sm font-semibold leading-6 text-slate-700 shadow-sm backdrop-blur'
+                >
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {modelBrands.length > 0 ? (
+          <div className='pointer-events-none absolute bottom-[9%] left-1/2 hidden -translate-x-1/2 flex-wrap justify-center gap-2 opacity-75 lg:flex'>
+            {modelBrands.map((brand) => (
+              <span
+                key={brand}
+                className='rounded-full border border-slate-100 bg-white/60 px-3 py-1 text-xs font-bold text-slate-500 shadow-sm'
+              >
+                {brand}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
     ),
-    [emptyDescription, emptyTitle, resolvedEmptyIcon, t],
+    [
+      emptyDescription,
+      emptyTitle,
+      featurePills,
+      modelBrands,
+      promptSuggestions,
+      resolvedEmptyIcon,
+      t,
+    ],
   );
 
   return (
-    <div className='relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[30px] border border-white/70 bg-white/55 shadow-[0_32px_100px_rgba(15,23,42,0.10)] backdrop-blur-2xl'>
-      <div className='absolute inset-x-0 top-0 h-24 bg-gradient-to-r from-sky-100/60 via-white/20 to-emerald-100/40 blur-2xl' />
+    <div className='solo-workbench-panel relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[36px] border border-cyan-100/75 bg-white/75 shadow-[0_34px_110px_rgba(8,47,73,0.13)] backdrop-blur-2xl'>
+      <div className='solo-panel-overlay inset-x-0 top-0 h-28 bg-[linear-gradient(90deg,rgba(45,212,191,0.20),rgba(255,255,255,0.45),rgba(56,189,248,0.22))] blur-2xl' />
 
       {!hideHeader && (
-        <div className='relative border-b border-white/60 px-5 py-4 sm:px-6'>
-          <div className='flex items-center gap-3'>
-            <div className='flex h-11 w-11 items-center justify-center rounded-[18px] bg-white/85 shadow-[0_16px_36px_rgba(15,23,42,0.08)] backdrop-blur-xl'>
-              {resolvedHeaderIcon}
+        <div className='relative border-b border-cyan-100/70 px-5 py-4 sm:px-6'>
+          <div className='flex flex-wrap items-center justify-between gap-4'>
+            <div className='flex min-w-0 items-center gap-3'>
+              <div className='flex h-12 w-12 items-center justify-center rounded-[20px] bg-slate-950 text-white shadow-[0_18px_36px_rgba(15,23,42,0.20)] backdrop-blur-xl'>
+                {resolvedHeaderIcon}
+              </div>
+              <div className='min-w-0'>
+                <div className='mb-1 text-[11px] font-black uppercase tracking-[0.24em] text-teal-600'>
+                  COMMAND CENTER
+                </div>
+                <Typography.Title heading={5} className='!mb-0 !text-slate-900'>
+                  {headerTitle || t('AI 控制台')}
+                </Typography.Title>
+                <Typography.Text className='!text-sm !text-slate-500'>
+                  {headerDescription || t('输入问题，或上传图片继续')}
+                </Typography.Text>
+              </div>
             </div>
-            <div className='min-w-0'>
-              <Typography.Title heading={5} className='!mb-0 !text-slate-900'>
-                {headerTitle || t('AI 控制台')}
-              </Typography.Title>
-              <Typography.Text className='!text-sm !text-slate-500'>
-                {headerDescription || t('输入问题，或上传图片继续')}
-              </Typography.Text>
-            </div>
+            {headerAccessory ? (
+              <div className='min-w-0 flex-1 lg:flex-none'>
+                {headerAccessory}
+              </div>
+            ) : null}
           </div>
         </div>
       )}

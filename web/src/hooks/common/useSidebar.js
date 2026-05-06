@@ -30,7 +30,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     enabled: true,
     ai_console: true,
     ai_image: true,
-    ai_ecommerce_template: true,
+    ai_ecommerce_template: false,
     playground: true,
     chat: true,
   },
@@ -51,7 +51,7 @@ export const DEFAULT_ADMIN_CONFIG = {
   admin: {
     enabled: true,
     channel: true,
-    analytics: true,
+    analytics: false,
     agent: true,
     models: true,
     deployment: true,
@@ -71,13 +71,19 @@ export const mergeAdminConfig = (savedConfig) => {
 
   for (const [sectionKey, sectionConfig] of Object.entries(savedConfig)) {
     if (!sectionConfig || typeof sectionConfig !== 'object') continue;
+    if (!merged[sectionKey]) continue;
 
-    if (!merged[sectionKey]) {
-      merged[sectionKey] = { ...sectionConfig };
-      continue;
+    for (const [moduleKey, moduleValue] of Object.entries(sectionConfig)) {
+      if (!(moduleKey in merged[sectionKey])) continue;
+      if (moduleKey === 'enabled') {
+        merged[sectionKey][moduleKey] =
+          merged[sectionKey][moduleKey] && moduleValue !== false;
+        continue;
+      }
+      if (merged[sectionKey][moduleKey]) {
+        merged[sectionKey][moduleKey] = moduleValue !== false;
+      }
     }
-
-    merged[sectionKey] = { ...merged[sectionKey], ...sectionConfig };
   }
 
   return merged;

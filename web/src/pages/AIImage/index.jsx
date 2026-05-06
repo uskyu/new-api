@@ -1,9 +1,34 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Button, Empty, InputNumber, Modal, Pagination, Spin, TextArea, Typography } from '@douyinfe/semi-ui';
-import { Bookmark, Brush, Check, Edit3, ImagePlus, Loader2, RotateCcw, Search, Sparkles, Trash2, Wand2, X } from 'lucide-react';
+import {
+  Button,
+  Empty,
+  InputNumber,
+  Modal,
+  Pagination,
+  Spin,
+  TextArea,
+  Typography,
+} from '@douyinfe/semi-ui';
+import {
+  Bookmark,
+  Brush,
+  Check,
+  Edit3,
+  ImagePlus,
+  Loader2,
+  RotateCcw,
+  Search,
+  Sparkles,
+  Trash2,
+  Wand2,
+  X,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import useAiImageState from '../../hooks/ai-image/useAiImageState';
-import { API_ENDPOINTS, MESSAGE_ROLES } from '../../constants/playground.constants';
+import {
+  API_ENDPOINTS,
+  MESSAGE_ROLES,
+} from '../../constants/playground.constants';
 import { MAX_HISTORY_RECORDS } from '../../utils/aiImageStorage';
 import {
   buildApiPayload,
@@ -64,10 +89,12 @@ const createAnnotationId = () =>
   `annotation-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 const getAnnotationColorLabel = (color) =>
-  ANNOTATION_COLORS.find((item) => item.value === color)?.label || '\u6807\u6ce8';
+  ANNOTATION_COLORS.find((item) => item.value === color)?.label ||
+  '\u6807\u6ce8';
 
 const getAnnotationLabel = (annotation, index) =>
-  annotation?.label || `${getAnnotationColorLabel(annotation?.color)}\u533a\u57df ${index + 1}`;
+  annotation?.label ||
+  `${getAnnotationColorLabel(annotation?.color)}\u533a\u57df ${index + 1}`;
 
 const getImageAnnotationCount = (image) =>
   Array.isArray(image?.annotations)
@@ -84,7 +111,10 @@ const buildPromptWithAnnotations = (basePrompt, images = []) => {
         imageIndex,
       }))
       .filter((item) => item.prompt)
-      .map((item) => `\u53c2\u8003\u56fe ${item.imageIndex + 1} ${item.label}\uff1a${item.prompt}`),
+      .map(
+        (item) =>
+          `\u53c2\u8003\u56fe ${item.imageIndex + 1} ${item.label}\uff1a${item.prompt}`,
+      ),
   );
 
   if (annotationLines.length === 0) {
@@ -92,7 +122,8 @@ const buildPromptWithAnnotations = (basePrompt, images = []) => {
   }
 
   return [
-    normalizedBasePrompt || '\u8bf7\u6839\u636e\u53c2\u8003\u56fe\u548c\u5c40\u90e8\u4fee\u6539\u8981\u6c42\u751f\u6210\u6216\u7f16\u8f91\u56fe\u7247\u3002',
+    normalizedBasePrompt ||
+      '\u8bf7\u6839\u636e\u53c2\u8003\u56fe\u548c\u5c40\u90e8\u4fee\u6539\u8981\u6c42\u751f\u6210\u6216\u7f16\u8f91\u56fe\u7247\u3002',
     '',
     '\u5c40\u90e8\u4fee\u6539\u8981\u6c42\uff1a',
     ...annotationLines.map((line, index) => `${index + 1}. ${line}`),
@@ -117,12 +148,17 @@ const dataUrlToFile = (dataUrl, filename = `annotated-${Date.now()}.png`) => {
 const blobToDataUrl = (blob) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
-    reader.onerror = () => reject(reader.error || new Error('failed to read blob'));
+    reader.onload = () =>
+      resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () =>
+      reject(reader.error || new Error('failed to read blob'));
     reader.readAsDataURL(blob);
   });
 
-const createDraftImageFromImageUrl = async (imageUrl, filenamePrefix = 'referenced') => {
+const createDraftImageFromImageUrl = async (
+  imageUrl,
+  filenamePrefix = 'referenced',
+) => {
   if (imageUrl?.startsWith('data:image/')) {
     const file = dataUrlToFile(imageUrl, `${filenamePrefix}-${Date.now()}.png`);
     return createDraftImageEntry(file, { sourceDataUrl: imageUrl });
@@ -131,7 +167,11 @@ const createDraftImageFromImageUrl = async (imageUrl, filenamePrefix = 'referenc
   if (!response.ok) throw new Error(`fetch failed: ${response.status}`);
   const blob = await response.blob();
   const extension = blob.type?.split('/')[1] || 'png';
-  const file = new File([blob], `${filenamePrefix}-${Date.now()}.${extension}`, { type: blob.type || 'image/png' });
+  const file = new File(
+    [blob],
+    `${filenamePrefix}-${Date.now()}.${extension}`,
+    { type: blob.type || 'image/png' },
+  );
   const dataUrl = await blobToDataUrl(blob);
   return createDraftImageEntry(file, { sourceDataUrl: dataUrl });
 };
@@ -155,13 +195,16 @@ const normalizeBatchCount = (value) => {
 const normalizeImageSource = (value, mimeType = 'image/png') => {
   if (typeof value !== 'string' || value.trim() === '') return '';
   const source = value.trim();
-  if (source.startsWith('data:image/') || source.startsWith('http')) return source;
+  if (source.startsWith('data:image/') || source.startsWith('http'))
+    return source;
   return `data:${mimeType || 'image/png'};base64,${source}`;
 };
 
 const extractImageUrlsFromMarkdown = (content) => {
   if (typeof content !== 'string') return [];
-  const matches = [...content.matchAll(/!\[[^\]]*\]\((data:image\/[^)]+|https?:\/\/[^)]+)\)/g)];
+  const matches = [
+    ...content.matchAll(/!\[[^\]]*\]\((data:image\/[^)]+|https?:\/\/[^)]+)\)/g),
+  ];
   return matches.map((match) => match[1]).filter(Boolean);
 };
 
@@ -182,7 +225,10 @@ const extractImageUrlsFromParts = (parts = []) =>
       }
       if (part?.image_url?.url) return normalizeImageSource(part.image_url.url);
       if (part?.imageUrl?.url) return normalizeImageSource(part.imageUrl.url);
-      if (typeof part?.data === 'string' && (part?.mimeType || part?.mime_type)) {
+      if (
+        typeof part?.data === 'string' &&
+        (part?.mimeType || part?.mime_type)
+      ) {
         return normalizeImageSource(part.data, part.mimeType || part.mime_type);
       }
       if (typeof part?.text === 'string') {
@@ -250,7 +296,8 @@ const taskToGenerationRecord = (task) => {
   };
 };
 
-const trimMessagesToHistoryLimit = (messages = []) => messages.slice(-(MAX_HISTORY_RECORDS * 2));
+const trimMessagesToHistoryLimit = (messages = []) =>
+  messages.slice(-(MAX_HISTORY_RECORDS * 2));
 
 const createImageAssistantMessage = (imageUrls, prompt) => ({
   role: MESSAGE_ROLES.ASSISTANT,
@@ -265,7 +312,11 @@ const createImageAssistantMessage = (imageUrls, prompt) => ({
 const extractOptimizedPrompt = (rawContent) => {
   if (typeof rawContent !== 'string') return '';
   const normalized = rawContent.trim();
-  if (!normalized || normalized.includes('data:image/') || normalized.length > 5000) {
+  if (
+    !normalized ||
+    normalized.includes('data:image/') ||
+    normalized.length > 5000
+  ) {
     return '';
   }
 
@@ -302,8 +353,10 @@ const extractOptimizedPrompt = (rawContent) => {
 const readFileAsDataUrl = (file) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
-    reader.onerror = () => reject(reader.error || new Error('failed to read file'));
+    reader.onload = () =>
+      resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () =>
+      reject(reader.error || new Error('failed to read file'));
     reader.readAsDataURL(file);
   });
 
@@ -369,7 +422,7 @@ const parseImageResponse = async (response) => {
     : [];
 
   const imageUrls = [
-    ...((Array.isArray(data?.data)
+    ...(Array.isArray(data?.data)
       ? data.data.flatMap((item) => {
           if (item?.url) {
             return [normalizeImageSource(item.url)];
@@ -379,7 +432,7 @@ const parseImageResponse = async (response) => {
           }
           return [];
         })
-      : [])),
+      : []),
     ...extractImageUrlsFromMarkdown(typeof content === 'string' ? content : ''),
     ...extractImageUrlsFromParts(contentParts),
     ...extractImageUrlsFromParts(messageParts),
@@ -410,7 +463,9 @@ const postJsonPayload = async (payload) => {
     } catch {
       errorBody = '';
     }
-    throw new Error(`HTTP error! status: ${response.status}, body: ${errorBody}`);
+    throw new Error(
+      `HTTP error! status: ${response.status}, body: ${errorBody}`,
+    );
   }
 
   return response;
@@ -436,13 +491,20 @@ const postOpenAIImagePayload = async (payload, selectedGroup) => {
     } catch {
       errorBody = '';
     }
-    throw new Error(`HTTP error! status: ${response.status}, body: ${errorBody}`);
+    throw new Error(
+      `HTTP error! status: ${response.status}, body: ${errorBody}`,
+    );
   }
 
   return response;
 };
 
-const postOpenAIImageEditPayload = async ({ model, prompt, images, selectedGroup }) => {
+const postOpenAIImageEditPayload = async ({
+  model,
+  prompt,
+  images,
+  selectedGroup,
+}) => {
   const query = selectedGroup
     ? `?group=${encodeURIComponent(selectedGroup)}`
     : '';
@@ -451,9 +513,12 @@ const postOpenAIImageEditPayload = async ({ model, prompt, images, selectedGroup
   formData.append('prompt', prompt);
   formData.append('n', '1');
 
-  images.filter((image) => image?.file).slice(0, MAX_REFERENCE_IMAGES).forEach((image, index) => {
-    formData.append('image', image.file, image.name || image.file.name);
-  });
+  images
+    .filter((image) => image?.file)
+    .slice(0, MAX_REFERENCE_IMAGES)
+    .forEach((image, index) => {
+      formData.append('image', image.file, image.name || image.file.name);
+    });
 
   const response = await fetch(`${API_ENDPOINTS.IMAGE_EDITS}${query}`, {
     method: 'POST',
@@ -470,7 +535,9 @@ const postOpenAIImageEditPayload = async ({ model, prompt, images, selectedGroup
     } catch {
       errorBody = '';
     }
-    throw new Error(`HTTP error! status: ${response.status}, body: ${errorBody}`);
+    throw new Error(
+      `HTTP error! status: ${response.status}, body: ${errorBody}`,
+    );
   }
 
   return response;
@@ -486,7 +553,13 @@ const GalleryImage = ({ src, alt, active, onClick }) => (
         : 'border-white/70 hover:border-slate-300'
     }`}
   >
-    <img src={src} alt={alt} loading='lazy' decoding='async' className='h-24 w-24 object-cover sm:h-28 sm:w-28' />
+    <img
+      src={src}
+      alt={alt}
+      loading='lazy'
+      decoding='async'
+      className='h-24 w-24 object-cover sm:h-28 sm:w-28'
+    />
   </button>
 );
 
@@ -496,7 +569,9 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
   const imageRef = useRef(null);
   const activeAnnotationIdRef = useRef(null);
   const [annotations, setAnnotations] = useState([]);
-  const [selectedColor, setSelectedColor] = useState(ANNOTATION_COLORS[0].value);
+  const [selectedColor, setSelectedColor] = useState(
+    ANNOTATION_COLORS[0].value,
+  );
   const [canvasSize, setCanvasSize] = useState({ width: 900, height: 560 });
   const [isDrawing, setIsDrawing] = useState(false);
 
@@ -534,13 +609,23 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
       ctx.shadowBlur = 0;
       ctx.fillStyle = annotation.color || ANNOTATION_COLORS[0].value;
       ctx.beginPath();
-      ctx.arc(firstPoint.x * canvas.width, firstPoint.y * canvas.height, 16, 0, Math.PI * 2);
+      ctx.arc(
+        firstPoint.x * canvas.width,
+        firstPoint.y * canvas.height,
+        16,
+        0,
+        Math.PI * 2,
+      );
       ctx.fill();
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 15px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(String(annotationIndex + 1), firstPoint.x * canvas.width, firstPoint.y * canvas.height);
+      ctx.fillText(
+        String(annotationIndex + 1),
+        firstPoint.x * canvas.width,
+        firstPoint.y * canvas.height,
+      );
       ctx.restore();
     });
   }, [annotations]);
@@ -558,7 +643,9 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
       const height = Math.max(240, Math.round(image.naturalHeight * ratio));
       imageRef.current = image;
       setCanvasSize({ width, height });
-      setAnnotations(Array.isArray(source.image.annotations) ? source.image.annotations : []);
+      setAnnotations(
+        Array.isArray(source.image.annotations) ? source.image.annotations : [],
+      );
     };
     image.src = source.image.sourceDataUrl || source.image.previewUrl;
     return () => {
@@ -583,34 +670,40 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
     };
   }, []);
 
-  const handlePointerDown = React.useCallback((event) => {
-    const point = getCanvasPoint(event);
-    if (!point) return;
-    event.preventDefault();
-    const annotation = {
-      id: createAnnotationId(),
-      color: selectedColor,
-      points: [point],
-      prompt: '',
-    };
-    activeAnnotationIdRef.current = annotation.id;
-    setAnnotations((previous) => [...previous, annotation]);
-    setIsDrawing(true);
-  }, [getCanvasPoint, selectedColor]);
+  const handlePointerDown = React.useCallback(
+    (event) => {
+      const point = getCanvasPoint(event);
+      if (!point) return;
+      event.preventDefault();
+      const annotation = {
+        id: createAnnotationId(),
+        color: selectedColor,
+        points: [point],
+        prompt: '',
+      };
+      activeAnnotationIdRef.current = annotation.id;
+      setAnnotations((previous) => [...previous, annotation]);
+      setIsDrawing(true);
+    },
+    [getCanvasPoint, selectedColor],
+  );
 
-  const handlePointerMove = React.useCallback((event) => {
-    if (!isDrawing || !activeAnnotationIdRef.current) return;
-    const point = getCanvasPoint(event);
-    if (!point) return;
-    event.preventDefault();
-    setAnnotations((previous) =>
-      previous.map((annotation) =>
-        annotation.id === activeAnnotationIdRef.current
-          ? { ...annotation, points: [...annotation.points, point] }
-          : annotation,
-      ),
-    );
-  }, [getCanvasPoint, isDrawing]);
+  const handlePointerMove = React.useCallback(
+    (event) => {
+      if (!isDrawing || !activeAnnotationIdRef.current) return;
+      const point = getCanvasPoint(event);
+      if (!point) return;
+      event.preventDefault();
+      setAnnotations((previous) =>
+        previous.map((annotation) =>
+          annotation.id === activeAnnotationIdRef.current
+            ? { ...annotation, points: [...annotation.points, point] }
+            : annotation,
+        ),
+      );
+    },
+    [getCanvasPoint, isDrawing],
+  );
 
   const stopDrawing = React.useCallback(() => {
     if (!isDrawing) return;
@@ -618,17 +711,22 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
     activeAnnotationIdRef.current = null;
     setIsDrawing(false);
     setAnnotations((previous) => {
-      const activeAnnotation = previous.find((annotation) => annotation.id === activeId);
+      const activeAnnotation = previous.find(
+        (annotation) => annotation.id === activeId,
+      );
       const nextAnnotations = previous.filter(
-        (annotation) => annotation.id !== activeId || annotation.points.length > 1,
+        (annotation) =>
+          annotation.id !== activeId || annotation.points.length > 1,
       );
       if (activeAnnotation?.points?.length > 1) {
         const colorIndex = ANNOTATION_COLORS.findIndex(
           (item) => item.value === activeAnnotation.color,
         );
-        const nextColor = ANNOTATION_COLORS[
-          (colorIndex + 1 + ANNOTATION_COLORS.length) % ANNOTATION_COLORS.length
-        ]?.value || ANNOTATION_COLORS[0].value;
+        const nextColor =
+          ANNOTATION_COLORS[
+            (colorIndex + 1 + ANNOTATION_COLORS.length) %
+              ANNOTATION_COLORS.length
+          ]?.value || ANNOTATION_COLORS[0].value;
         setSelectedColor(nextColor);
       }
       return nextAnnotations;
@@ -638,13 +736,17 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
   const updateAnnotationPrompt = React.useCallback((annotationId, value) => {
     setAnnotations((previous) =>
       previous.map((annotation) =>
-        annotation.id === annotationId ? { ...annotation, prompt: value } : annotation,
+        annotation.id === annotationId
+          ? { ...annotation, prompt: value }
+          : annotation,
       ),
     );
   }, []);
 
   const removeAnnotation = React.useCallback((annotationId) => {
-    setAnnotations((previous) => previous.filter((annotation) => annotation.id !== annotationId));
+    setAnnotations((previous) =>
+      previous.filter((annotation) => annotation.id !== annotationId),
+    );
   }, []);
 
   const handleSave = React.useCallback(() => {
@@ -657,9 +759,15 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
         label: getAnnotationLabel(annotation, index),
         prompt: String(annotation.prompt || '').trim(),
       }))
-      .filter((annotation) => annotation.points.length > 1 && annotation.prompt);
+      .filter(
+        (annotation) => annotation.points.length > 1 && annotation.prompt,
+      );
     if (cleanedAnnotations.length === 0) {
-      showError(t('\u8bf7\u5148\u5708\u9009\u533a\u57df\u5e76\u586b\u5199\u4fee\u6539\u8981\u6c42'));
+      showError(
+        t(
+          '\u8bf7\u5148\u5708\u9009\u533a\u57df\u5e76\u586b\u5199\u4fee\u6539\u8981\u6c42',
+        ),
+      );
       return;
     }
 
@@ -689,13 +797,23 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
       ctx.shadowBlur = 0;
       ctx.fillStyle = annotation.color;
       ctx.beginPath();
-      ctx.arc(firstPoint.x * outputCanvas.width, firstPoint.y * outputCanvas.height, 16, 0, Math.PI * 2);
+      ctx.arc(
+        firstPoint.x * outputCanvas.width,
+        firstPoint.y * outputCanvas.height,
+        16,
+        0,
+        Math.PI * 2,
+      );
       ctx.fill();
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 15px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(String(annotationIndex + 1), firstPoint.x * outputCanvas.width, firstPoint.y * outputCanvas.height);
+      ctx.fillText(
+        String(annotationIndex + 1),
+        firstPoint.x * outputCanvas.width,
+        firstPoint.y * outputCanvas.height,
+      );
       ctx.restore();
     });
     const dataUrl = outputCanvas.toDataURL('image/png');
@@ -729,7 +847,9 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
               {t('\u753b\u5708\u4fee\u6539\u56fe\u7247')}
             </Typography.Title>
             <Typography.Text className='!text-sm !text-slate-500'>
-              {t('\u5728\u56fe\u4e0a\u5708\u9009\u8981\u4fee\u6539\u7684\u90e8\u5206\uff0c\u7136\u540e\u7ed9\u6bcf\u4e2a\u533a\u57df\u5199\u5177\u4f53\u8981\u6c42')}
+              {t(
+                '\u5728\u56fe\u4e0a\u5708\u9009\u8981\u4fee\u6539\u7684\u90e8\u5206\uff0c\u7136\u540e\u7ed9\u6bcf\u4e2a\u533a\u57df\u5199\u5177\u4f53\u8981\u6c42',
+              )}
             </Typography.Text>
           </div>
           <div className='flex flex-wrap items-center gap-2'>
@@ -740,7 +860,9 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
                 title={t(item.label)}
                 onClick={() => setSelectedColor(item.value)}
                 className={`h-8 w-8 rounded-full border-2 transition ${
-                  selectedColor === item.value ? 'border-slate-900 scale-110' : 'border-white shadow'
+                  selectedColor === item.value
+                    ? 'border-slate-900 scale-110'
+                    : 'border-white shadow'
                 }`}
                 style={{ backgroundColor: item.value }}
               />
@@ -786,12 +908,17 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
               {t('\u5c40\u90e8\u63d0\u793a\u8bcd')}
             </Typography.Text>
             <p className='mt-2 text-sm text-slate-500'>
-              {t('\u6bcf\u753b\u4e00\u7b14\u4f1a\u751f\u6210\u4e00\u4e2a\u533a\u57df\uff0c\u5199\u6e05\u695a\u8fd9\u4e2a\u533a\u57df\u8981\u600e\u4e48\u6539')}
+              {t(
+                '\u6bcf\u753b\u4e00\u7b14\u4f1a\u751f\u6210\u4e00\u4e2a\u533a\u57df\uff0c\u5199\u6e05\u695a\u8fd9\u4e2a\u533a\u57df\u8981\u600e\u4e48\u6539',
+              )}
             </p>
             <div className='mt-4 flex flex-col gap-3'>
               {annotations.length > 0 ? (
                 annotations.map((annotation, index) => (
-                  <div key={annotation.id} className='rounded-[18px] border border-slate-100 bg-slate-50 p-3'>
+                  <div
+                    key={annotation.id}
+                    className='rounded-[18px] border border-slate-100 bg-slate-50 p-3'
+                  >
                     <div className='mb-2 flex items-center justify-between gap-2'>
                       <div className='flex min-w-0 items-center gap-2'>
                         <span
@@ -812,9 +939,13 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
                     </div>
                     <TextArea
                       value={annotation.prompt}
-                      onChange={(value) => updateAnnotationPrompt(annotation.id, value)}
+                      onChange={(value) =>
+                        updateAnnotationPrompt(annotation.id, value)
+                      }
                       autosize={{ minRows: 2, maxRows: 5 }}
-                      placeholder={t('\u4f8b\u5982\uff1a\u628a\u8fd9\u91cc\u6539\u6210\u514d\u8d39\u8bd5\u7528\uff0c\u5b57\u4f53\u66f4\u9192\u76ee')}
+                      placeholder={t(
+                        '\u4f8b\u5982\uff1a\u628a\u8fd9\u91cc\u6539\u6210\u514d\u8d39\u8bd5\u7528\uff0c\u5b57\u4f53\u66f4\u9192\u76ee',
+                      )}
                     />
                   </div>
                 ))
@@ -822,7 +953,9 @@ const ImageAnnotationModal = ({ visible, source, onCancel, onSave }) => {
                 <Empty
                   image={<Brush size={34} className='text-slate-400' />}
                   title={t('\u8fd8\u6ca1\u6709\u6807\u6ce8\u533a\u57df')}
-                  description={t('\u76f4\u63a5\u5728\u5de6\u4fa7\u56fe\u7247\u4e0a\u753b\u5708\u5373\u53ef\u5f00\u59cb')}
+                  description={t(
+                    '\u76f4\u63a5\u5728\u5de6\u4fa7\u56fe\u7247\u4e0a\u753b\u5708\u5373\u53ef\u5f00\u59cb',
+                  )}
                 />
               )}
             </div>
@@ -839,7 +972,9 @@ const openImageInNewTab = (imageUrl) => {
 };
 
 const createPromptFavoriteTitle = (value) => {
-  const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+  const normalized = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!normalized) return '';
   return normalized.length > 36 ? `${normalized.slice(0, 36)}...` : normalized;
 };
@@ -908,12 +1043,18 @@ const AIImage = () => {
   const stableTaskUrlRef = useRef(new Map());
 
   const pendingRemoteTasks = useMemo(
-    () => remoteTasks.filter((task) => task.status === 'PENDING' || task.status === 'PROCESSING'),
+    () =>
+      remoteTasks.filter(
+        (task) => task.status === 'PENDING' || task.status === 'PROCESSING',
+      ),
     [remoteTasks],
   );
 
   const completedRemoteTasks = useMemo(
-    () => remoteTasks.filter((task) => task.status === 'SUCCEEDED' || task.status === 'FAILED'),
+    () =>
+      remoteTasks.filter(
+        (task) => task.status === 'SUCCEEDED' || task.status === 'FAILED',
+      ),
     [remoteTasks],
   );
 
@@ -946,7 +1087,10 @@ const AIImage = () => {
     for (let index = 0; index < messages.length; index += 1) {
       const current = messages[index];
       const next = messages[index + 1];
-      if (current?.role !== MESSAGE_ROLES.USER || next?.role !== MESSAGE_ROLES.ASSISTANT) {
+      if (
+        current?.role !== MESSAGE_ROLES.USER ||
+        next?.role !== MESSAGE_ROLES.ASSISTANT
+      ) {
         continue;
       }
       const record = extractGenerationRecord(current, next);
@@ -965,10 +1109,11 @@ const AIImage = () => {
   }, [localRecords, remoteTasks]);
 
   const activeRecord =
-    records.find((record) => record.id === activeRecordId) || records[0] || null;
+    records.find((record) => record.id === activeRecordId) ||
+    records[0] ||
+    null;
   const activeImages = activeRecord?.images || [];
-  const activeImage =
-    activeImages[activeImageIndex] || activeImages[0] || '';
+  const activeImage = activeImages[activeImageIndex] || activeImages[0] || '';
   const annotatedPromptCount = useMemo(
     () => getAnnotatedPromptCount(draftImages),
     [draftImages],
@@ -1017,7 +1162,9 @@ const AIImage = () => {
       if (nextFiles.length === 0) return;
       const remaining = MAX_REFERENCE_IMAGES - draftImages.length;
       if (remaining <= 0) {
-        showError(t('最多支持 {{count}} 张参考图', { count: MAX_REFERENCE_IMAGES }));
+        showError(
+          t('最多支持 {{count}} 张参考图', { count: MAX_REFERENCE_IMAGES }),
+        );
         return;
       }
       const acceptedFiles = nextFiles.slice(0, remaining);
@@ -1026,7 +1173,9 @@ const AIImage = () => {
         ...acceptedFiles.map(createDraftImageEntry),
       ]);
       if (acceptedFiles.length < nextFiles.length) {
-        showError(t('最多支持 {{count}} 张参考图', { count: MAX_REFERENCE_IMAGES }));
+        showError(
+          t('最多支持 {{count}} 张参考图', { count: MAX_REFERENCE_IMAGES }),
+        );
       }
     },
     [draftImages.length, setDraftImages, t],
@@ -1045,11 +1194,14 @@ const AIImage = () => {
     setDraftImages([]);
   }, [setDraftImages]);
 
-  const openDraftAnnotation = React.useCallback((index) => {
-    const image = draftImages[index];
-    if (!image) return;
-    setAnnotationSource({ type: 'draft', index, image });
-  }, [draftImages]);
+  const openDraftAnnotation = React.useCallback(
+    (index) => {
+      const image = draftImages[index];
+      if (!image) return;
+      setAnnotationSource({ type: 'draft', index, image });
+    },
+    [draftImages],
+  );
 
   const openRecordAnnotation = React.useCallback(
     async (record, imageIndex = 0) => {
@@ -1070,10 +1222,13 @@ const AIImage = () => {
           const response = await fetch(`/api/ai-image/proxy/${record.taskId}`, {
             headers: { 'New-Api-User': getUserIdFromLocalStorage() },
           });
-          if (!response.ok) throw new Error(`proxy fetch failed: ${response.status}`);
+          if (!response.ok)
+            throw new Error(`proxy fetch failed: ${response.status}`);
           const blob = await response.blob();
           const extension = blob.type?.split('/')[1] || 'png';
-          const file = new File([blob], `editable-${Date.now()}.${extension}`, { type: blob.type || 'image/png' });
+          const file = new File([blob], `editable-${Date.now()}.${extension}`, {
+            type: blob.type || 'image/png',
+          });
           const dataUrl = await blobToDataUrl(blob);
           draftImage = createDraftImageEntry(file, { sourceDataUrl: dataUrl });
         } else {
@@ -1081,7 +1236,11 @@ const AIImage = () => {
         }
         setAnnotationSource({ type: 'new', image: draftImage });
       } catch {
-        showError(t('\u52a0\u8f7d\u56fe\u7247\u5931\u8d25\uff0c\u8bf7\u5148\u4e0b\u8f7d\u540e\u624b\u52a8\u4e0a\u4f20'));
+        showError(
+          t(
+            '\u52a0\u8f7d\u56fe\u7247\u5931\u8d25\uff0c\u8bf7\u5148\u4e0b\u8f7d\u540e\u624b\u52a8\u4e0a\u4f20',
+          ),
+        );
       } finally {
         setIsPreparingAnnotation(false);
       }
@@ -1092,8 +1251,15 @@ const AIImage = () => {
   const handleSaveAnnotation = React.useCallback(
     (nextImage) => {
       if (!annotationSource || !nextImage) return;
-      if (annotationSource.type !== 'draft' && draftImages.length >= MAX_REFERENCE_IMAGES) {
-        showError(t('\u6700\u591a\u652f\u6301 {{count}} \u5f20\u53c2\u8003\u56fe', { count: MAX_REFERENCE_IMAGES }));
+      if (
+        annotationSource.type !== 'draft' &&
+        draftImages.length >= MAX_REFERENCE_IMAGES
+      ) {
+        showError(
+          t('\u6700\u591a\u652f\u6301 {{count}} \u5f20\u53c2\u8003\u56fe', {
+            count: MAX_REFERENCE_IMAGES,
+          }),
+        );
         return;
       }
       if (annotationSource.image?.previewUrl !== nextImage.previewUrl) {
@@ -1156,52 +1322,77 @@ const AIImage = () => {
       if (resultURL) {
         urlCache.set(cacheKey, resultURL);
       }
-      return resultURL === task.result_url ? task : { ...task, result_url: resultURL };
+      return resultURL === task.result_url
+        ? task
+        : { ...task, result_url: resultURL };
     });
   }, []);
 
-  const loadRemoteTasks = React.useCallback(async (nextPage = remotePage) => {
-    const headers = {
-      Accept: 'application/json',
-      'New-Api-User': getUserIdFromLocalStorage(),
-    };
+  const loadRemoteTasks = React.useCallback(
+    async (nextPage = remotePage) => {
+      const headers = {
+        Accept: 'application/json',
+        'New-Api-User': getUserIdFromLocalStorage(),
+      };
 
-    const page = Math.max(1, Number(nextPage) || 1);
-    const response = await fetch(`/api/ai-image/tasks?p=${page}&page_size=${REMOTE_TASK_PAGE_SIZE}`, { headers });
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    const result = await response.json();
-    if (!result?.success) throw new Error(result?.message || 'failed to load image tasks');
-    const data = result?.data || {};
-    const items = Array.isArray(data.items) ? mergeStableTaskUrls(data.items) : [];
-    setRemotePage(Number(data.page) || page);
-    setRemoteTotal(Number(data.total) || 0);
-    setRemoteTasks(items);
-    try { localStorage.setItem(TASKS_CACHE_KEY, JSON.stringify(items)); } catch { /* ignore */ }
-  }, [mergeStableTaskUrls, remotePage]);
-
-  const loadPromptFavorites = React.useCallback(async (keyword = favoriteSearch, options = {}) => {
-    setFavoritesLoading(true);
-    try {
-      const params = new URLSearchParams({
-        p: '1',
-        page_size: String(PROMPT_FAVORITES_PAGE_SIZE),
-      });
-      const trimmedKeyword = keyword.trim();
-      if (trimmedKeyword) params.set('q', trimmedKeyword);
-      const response = await fetch(`${PROMPT_FAVORITES_ENDPOINT}?${params.toString()}`, {
-        headers: { 'New-Api-User': getUserIdFromLocalStorage() },
-      });
+      const page = Math.max(1, Number(nextPage) || 1);
+      const response = await fetch(
+        `/api/ai-image/tasks?p=${page}&page_size=${REMOTE_TASK_PAGE_SIZE}`,
+        { headers },
+      );
+      if (!response.ok)
+        throw new Error(`HTTP error! status: ${response.status}`);
       const result = await response.json();
-      if (!result?.success) throw new Error(result?.message || 'failed to load favorites');
-      setPromptFavorites(Array.isArray(result?.data?.items) ? result.data.items : []);
-    } catch (error) {
-      if (!options.silent) {
-        showError(error.message || t('加载收藏夹失败'));
+      if (!result?.success)
+        throw new Error(result?.message || 'failed to load image tasks');
+      const data = result?.data || {};
+      const items = Array.isArray(data.items)
+        ? mergeStableTaskUrls(data.items)
+        : [];
+      setRemotePage(Number(data.page) || page);
+      setRemoteTotal(Number(data.total) || 0);
+      setRemoteTasks(items);
+      try {
+        localStorage.setItem(TASKS_CACHE_KEY, JSON.stringify(items));
+      } catch {
+        /* ignore */
       }
-    } finally {
-      setFavoritesLoading(false);
-    }
-  }, [favoriteSearch, t]);
+    },
+    [mergeStableTaskUrls, remotePage],
+  );
+
+  const loadPromptFavorites = React.useCallback(
+    async (keyword = favoriteSearch, options = {}) => {
+      setFavoritesLoading(true);
+      try {
+        const params = new URLSearchParams({
+          p: '1',
+          page_size: String(PROMPT_FAVORITES_PAGE_SIZE),
+        });
+        const trimmedKeyword = keyword.trim();
+        if (trimmedKeyword) params.set('q', trimmedKeyword);
+        const response = await fetch(
+          `${PROMPT_FAVORITES_ENDPOINT}?${params.toString()}`,
+          {
+            headers: { 'New-Api-User': getUserIdFromLocalStorage() },
+          },
+        );
+        const result = await response.json();
+        if (!result?.success)
+          throw new Error(result?.message || 'failed to load favorites');
+        setPromptFavorites(
+          Array.isArray(result?.data?.items) ? result.data.items : [],
+        );
+      } catch (error) {
+        if (!options.silent) {
+          showError(error.message || t('加载收藏夹失败'));
+        }
+      } finally {
+        setFavoritesLoading(false);
+      }
+    },
+    [favoriteSearch, t],
+  );
 
   const resetFavoriteDraft = React.useCallback((nextPrompt = '') => {
     setEditingFavoriteId(null);
@@ -1215,41 +1406,53 @@ const AIImage = () => {
     loadPromptFavorites(favoriteSearch, { silent: true });
   }, [favoriteSearch, loadPromptFavorites, prompt, resetFavoriteDraft]);
 
-  const buildFavoritePayload = React.useCallback((sourcePrompt, sourceTitle = '') => ({
-    title: sourceTitle || createPromptFavoriteTitle(sourcePrompt),
-    prompt: sourcePrompt,
-    model: selectedModelRef.current || selectedModel || '',
-    group: selectedGroup || '',
-    size: openaiImageSize || '',
-    resolution: resolution || '',
-    aspect_ratio: aspectRatio || '',
-  }), [aspectRatio, openaiImageSize, resolution, selectedGroup, selectedModel]);
+  const buildFavoritePayload = React.useCallback(
+    (sourcePrompt, sourceTitle = '') => ({
+      title: sourceTitle || createPromptFavoriteTitle(sourcePrompt),
+      prompt: sourcePrompt,
+      model: selectedModelRef.current || selectedModel || '',
+      group: selectedGroup || '',
+      size: openaiImageSize || '',
+      resolution: resolution || '',
+      aspect_ratio: aspectRatio || '',
+    }),
+    [aspectRatio, openaiImageSize, resolution, selectedGroup, selectedModel],
+  );
 
-  const createPromptFavorite = React.useCallback(async (sourcePrompt, sourceTitle = '') => {
-    const trimmedPrompt = String(sourcePrompt || '').trim();
-    if (!trimmedPrompt) {
-      showError(t('请先输入提示词'));
-      return false;
-    }
-    try {
-      const response = await fetch(PROMPT_FAVORITES_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'New-Api-User': getUserIdFromLocalStorage(),
-        },
-        body: JSON.stringify(buildFavoritePayload(trimmedPrompt, sourceTitle)),
-      });
-      const result = await response.json();
-      if (!result?.success) throw new Error(result?.message || 'failed to save favorite');
-      setPromptFavorites((previous) => [result.data, ...previous.filter((item) => item.id !== result.data?.id)]);
-      showSuccess(t('已收藏提示词'));
-      return true;
-    } catch (error) {
-      showError(error.message || t('收藏失败'));
-      return false;
-    }
-  }, [buildFavoritePayload, t]);
+  const createPromptFavorite = React.useCallback(
+    async (sourcePrompt, sourceTitle = '') => {
+      const trimmedPrompt = String(sourcePrompt || '').trim();
+      if (!trimmedPrompt) {
+        showError(t('请先输入提示词'));
+        return false;
+      }
+      try {
+        const response = await fetch(PROMPT_FAVORITES_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'New-Api-User': getUserIdFromLocalStorage(),
+          },
+          body: JSON.stringify(
+            buildFavoritePayload(trimmedPrompt, sourceTitle),
+          ),
+        });
+        const result = await response.json();
+        if (!result?.success)
+          throw new Error(result?.message || 'failed to save favorite');
+        setPromptFavorites((previous) => [
+          result.data,
+          ...previous.filter((item) => item.id !== result.data?.id),
+        ]);
+        showSuccess(t('已收藏提示词'));
+        return true;
+      } catch (error) {
+        showError(error.message || t('收藏失败'));
+        return false;
+      }
+    },
+    [buildFavoritePayload, t],
+  );
 
   const saveFavoriteDraft = React.useCallback(async () => {
     const trimmedPrompt = favoriteDraftPrompt.trim();
@@ -1257,10 +1460,15 @@ const AIImage = () => {
       showError(t('请先输入提示词'));
       return;
     }
-    const payload = buildFavoritePayload(trimmedPrompt, favoriteDraftTitle.trim());
+    const payload = buildFavoritePayload(
+      trimmedPrompt,
+      favoriteDraftTitle.trim(),
+    );
     try {
       const response = await fetch(
-        editingFavoriteId ? `${PROMPT_FAVORITES_ENDPOINT}/${editingFavoriteId}` : PROMPT_FAVORITES_ENDPOINT,
+        editingFavoriteId
+          ? `${PROMPT_FAVORITES_ENDPOINT}/${editingFavoriteId}`
+          : PROMPT_FAVORITES_ENDPOINT,
         {
           method: editingFavoriteId ? 'PUT' : 'POST',
           headers: {
@@ -1271,7 +1479,8 @@ const AIImage = () => {
         },
       );
       const result = await response.json();
-      if (!result?.success) throw new Error(result?.message || 'failed to save favorite');
+      if (!result?.success)
+        throw new Error(result?.message || 'failed to save favorite');
       setPromptFavorites((previous) => [
         result.data,
         ...previous.filter((item) => item.id !== result.data?.id),
@@ -1281,55 +1490,76 @@ const AIImage = () => {
     } catch (error) {
       showError(error.message || t('保存失败'));
     }
-  }, [buildFavoritePayload, editingFavoriteId, favoriteDraftPrompt, favoriteDraftTitle, resetFavoriteDraft, t]);
+  }, [
+    buildFavoritePayload,
+    editingFavoriteId,
+    favoriteDraftPrompt,
+    favoriteDraftTitle,
+    resetFavoriteDraft,
+    t,
+  ]);
 
-  const usePromptFavorite = React.useCallback(async (favorite) => {
-    if (!favorite?.prompt) return;
-    setPrompt(favorite.prompt);
-    if (favorite.model) {
-      selectedModelRef.current = favorite.model;
-      setSelectedModel(favorite.model);
-    }
-    if (favorite.group) setSelectedGroup(favorite.group);
-    if (favorite.size) setOpenaiImageSize(favorite.size);
-    if (favorite.resolution) setResolution(favorite.resolution);
-    if (favorite.aspect_ratio) setAspectRatio(favorite.aspect_ratio);
-    setOptimizedPromptDraft('');
-    setOriginalPrompt('');
-    setFavoritesVisible(false);
-    showSuccess(t('已填入收藏提示词'));
-    try {
-      await fetch(`${PROMPT_FAVORITES_ENDPOINT}/${favorite.id}/use`, {
-        method: 'POST',
-        headers: { 'New-Api-User': getUserIdFromLocalStorage() },
-      });
-    } catch {
-      // Last-used time is best-effort only.
-    }
-  }, [setSelectedGroup, setSelectedModel, t]);
+  const usePromptFavorite = React.useCallback(
+    async (favorite) => {
+      if (!favorite?.prompt) return;
+      setPrompt(favorite.prompt);
+      if (favorite.model) {
+        selectedModelRef.current = favorite.model;
+        setSelectedModel(favorite.model);
+      }
+      if (favorite.group) setSelectedGroup(favorite.group);
+      if (favorite.size) setOpenaiImageSize(favorite.size);
+      if (favorite.resolution) setResolution(favorite.resolution);
+      if (favorite.aspect_ratio) setAspectRatio(favorite.aspect_ratio);
+      setOptimizedPromptDraft('');
+      setOriginalPrompt('');
+      setFavoritesVisible(false);
+      showSuccess(t('已填入收藏提示词'));
+      try {
+        await fetch(`${PROMPT_FAVORITES_ENDPOINT}/${favorite.id}/use`, {
+          method: 'POST',
+          headers: { 'New-Api-User': getUserIdFromLocalStorage() },
+        });
+      } catch {
+        // Last-used time is best-effort only.
+      }
+    },
+    [setSelectedGroup, setSelectedModel, t],
+  );
 
   const editPromptFavorite = React.useCallback((favorite) => {
     setEditingFavoriteId(favorite.id);
-    setFavoriteDraftTitle(favorite.title || createPromptFavoriteTitle(favorite.prompt));
+    setFavoriteDraftTitle(
+      favorite.title || createPromptFavoriteTitle(favorite.prompt),
+    );
     setFavoriteDraftPrompt(favorite.prompt || '');
   }, []);
 
-  const deletePromptFavorite = React.useCallback(async (favorite) => {
-    if (!favorite?.id) return;
-    try {
-      const response = await fetch(`${PROMPT_FAVORITES_ENDPOINT}/${favorite.id}`, {
-        method: 'DELETE',
-        headers: { 'New-Api-User': getUserIdFromLocalStorage() },
-      });
-      const result = await response.json();
-      if (!result?.success) throw new Error(result?.message || 'failed to delete favorite');
-      setPromptFavorites((previous) => previous.filter((item) => item.id !== favorite.id));
-      if (editingFavoriteId === favorite.id) resetFavoriteDraft('');
-      showSuccess(t('已删除收藏'));
-    } catch (error) {
-      showError(error.message || t('删除失败'));
-    }
-  }, [editingFavoriteId, resetFavoriteDraft, t]);
+  const deletePromptFavorite = React.useCallback(
+    async (favorite) => {
+      if (!favorite?.id) return;
+      try {
+        const response = await fetch(
+          `${PROMPT_FAVORITES_ENDPOINT}/${favorite.id}`,
+          {
+            method: 'DELETE',
+            headers: { 'New-Api-User': getUserIdFromLocalStorage() },
+          },
+        );
+        const result = await response.json();
+        if (!result?.success)
+          throw new Error(result?.message || 'failed to delete favorite');
+        setPromptFavorites((previous) =>
+          previous.filter((item) => item.id !== favorite.id),
+        );
+        if (editingFavoriteId === favorite.id) resetFavoriteDraft('');
+        showSuccess(t('已删除收藏'));
+      } catch (error) {
+        showError(error.message || t('删除失败'));
+      }
+    },
+    [editingFavoriteId, resetFavoriteDraft, t],
+  );
 
   React.useEffect(() => {
     if (!ready) {
@@ -1356,22 +1586,29 @@ const AIImage = () => {
 
   const submitImageTask = React.useCallback(
     async (itemPrompt) => {
-      const effectiveModel = selectedModelRef.current || modelOptions[0]?.value || '';
+      const effectiveModel =
+        selectedModelRef.current || modelOptions[0]?.value || '';
       if (!effectiveModel) {
         throw new Error('image model is required');
       }
       let referenceImages = [];
       if (draftImages.length > 0) {
         const dataUrls = await Promise.all(
-          draftImages.filter(Boolean).slice(0, MAX_REFERENCE_IMAGES).map(async (image) => {
-            if (typeof image?.sourceDataUrl === 'string' && image.sourceDataUrl.startsWith('data:image/')) {
-              return image.sourceDataUrl;
-            }
-            if (image?.file) {
-              return readFileAsDataUrl(image.file);
-            }
-            return '';
-          }),
+          draftImages
+            .filter(Boolean)
+            .slice(0, MAX_REFERENCE_IMAGES)
+            .map(async (image) => {
+              if (
+                typeof image?.sourceDataUrl === 'string' &&
+                image.sourceDataUrl.startsWith('data:image/')
+              ) {
+                return image.sourceDataUrl;
+              }
+              if (image?.file) {
+                return readFileAsDataUrl(image.file);
+              }
+              return '';
+            }),
         );
         referenceImages = dataUrls.filter(Boolean);
       }
@@ -1393,7 +1630,9 @@ const AIImage = () => {
       });
       if (!response.ok) {
         const errorBody = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorBody}`);
+        throw new Error(
+          `HTTP error! status: ${response.status}, body: ${errorBody}`,
+        );
       }
       const result = await response.json();
       if (!result?.success) {
@@ -1406,7 +1645,8 @@ const AIImage = () => {
 
   const requestOneImage = React.useCallback(
     async (itemPrompt) => {
-      const effectiveModel = selectedModelRef.current || modelOptions[0]?.value || '';
+      const effectiveModel =
+        selectedModelRef.current || modelOptions[0]?.value || '';
       if (!effectiveModel) {
         throw new Error('image model is required');
       }
@@ -1414,22 +1654,23 @@ const AIImage = () => {
       const activeDraftImages = draftImages.slice(0, MAX_REFERENCE_IMAGES);
 
       if (isOpenAIImageModel(effectiveModel)) {
-        const response = activeDraftImages.length > 0
-          ? await postOpenAIImageEditPayload({
-              model: effectiveModel,
-              prompt: itemPrompt,
-              images: activeDraftImages,
-              selectedGroup,
-            })
-          : await postOpenAIImagePayload(
-              {
+        const response =
+          activeDraftImages.length > 0
+            ? await postOpenAIImageEditPayload({
                 model: effectiveModel,
                 prompt: itemPrompt,
-                size: openaiImageSize,
-                n: 1,
-              },
-              selectedGroup,
-            );
+                images: activeDraftImages,
+                selectedGroup,
+              })
+            : await postOpenAIImagePayload(
+                {
+                  model: effectiveModel,
+                  prompt: itemPrompt,
+                  size: openaiImageSize,
+                  n: 1,
+                },
+                selectedGroup,
+              );
         return parseImageResponse(response);
       }
 
@@ -1451,7 +1692,7 @@ const AIImage = () => {
         {
           method: 'POST',
           headers: {
-            'Accept': 'application/json',
+            Accept: 'application/json',
             'Content-Type': 'application/json',
             'New-Api-User': getUserIdFromLocalStorage(),
           },
@@ -1466,12 +1707,22 @@ const AIImage = () => {
         } catch {
           errorBody = '';
         }
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorBody}`);
+        throw new Error(
+          `HTTP error! status: ${response.status}, body: ${errorBody}`,
+        );
       }
 
       return parseImageResponse(response);
     },
-    [aspectRatio, draftImages, modelOptions, openaiImageSize, resolution, selectedGroup, serializeDraftImagesForRequest],
+    [
+      aspectRatio,
+      draftImages,
+      modelOptions,
+      openaiImageSize,
+      resolution,
+      selectedGroup,
+      serializeDraftImagesForRequest,
+    ],
   );
 
   const appendGeneration = React.useCallback(
@@ -1483,7 +1734,9 @@ const AIImage = () => {
 
       if (createdMessages.length === 0) return;
       markSessionActivity();
-      setMessages((previous) => trimMessagesToHistoryLimit([...previous, ...createdMessages]));
+      setMessages((previous) =>
+        trimMessagesToHistoryLimit([...previous, ...createdMessages]),
+      );
       const lastAssistant = [...createdMessages]
         .reverse()
         .find((message) => message.role === MESSAGE_ROLES.ASSISTANT);
@@ -1506,7 +1759,11 @@ const AIImage = () => {
 
       markSessionActivity();
       setMessages((previous) =>
-        trimMessagesToHistoryLimit([...previous, userMessage, assistantMessage]),
+        trimMessagesToHistoryLimit([
+          ...previous,
+          userMessage,
+          assistantMessage,
+        ]),
       );
       setActiveRecordId(assistantMessage.id);
       setActiveImageIndex(0);
@@ -1518,7 +1775,11 @@ const AIImage = () => {
     const trimmedPrompt = prompt.trim();
     const hasAnnotationPrompts = annotatedPromptCount > 0;
     if (!trimmedPrompt && !hasAnnotationPrompts) {
-      showError(t('\u8bf7\u8f93\u5165\u63d0\u793a\u8bcd\u6216\u6dfb\u52a0\u5c40\u90e8\u4fee\u6539\u8981\u6c42'));
+      showError(
+        t(
+          '\u8bf7\u8f93\u5165\u63d0\u793a\u8bcd\u6216\u6dfb\u52a0\u5c40\u90e8\u4fee\u6539\u8981\u6c42',
+        ),
+      );
       return;
     }
     if (!fallbackImageModel) {
@@ -1532,7 +1793,10 @@ const AIImage = () => {
 
     setIsGenerating(true);
     try {
-      const effectivePrompt = buildPromptWithAnnotations(trimmedPrompt, draftImages);
+      const effectivePrompt = buildPromptWithAnnotations(
+        trimmedPrompt,
+        draftImages,
+      );
       if (isOpenAIImageModel(fallbackImageModel)) {
         await submitImageTask(effectivePrompt);
         setRemotePage(1);
@@ -1549,7 +1813,9 @@ const AIImage = () => {
         showError(t('未返回可展示的图片，请检查模型返回格式'));
         return;
       }
-      appendGeneration([{ itemPrompt: effectivePrompt, imageUrls: parsed.imageUrls }]);
+      appendGeneration([
+        { itemPrompt: effectivePrompt, imageUrls: parsed.imageUrls },
+      ]);
       setPrompt('');
       setOptimizedPromptDraft('');
       setOriginalPrompt('');
@@ -1591,7 +1857,11 @@ const AIImage = () => {
       setSelectedModel(fallbackImageModel);
     }
     if (prompts.length === 0 && !hasAnnotationPrompts) {
-      showError(t('\u8bf7\u8f93\u5165\u63d0\u793a\u8bcd\u6216\u6dfb\u52a0\u5c40\u90e8\u4fee\u6539\u8981\u6c42'));
+      showError(
+        t(
+          '\u8bf7\u8f93\u5165\u63d0\u793a\u8bcd\u6216\u6dfb\u52a0\u5c40\u90e8\u4fee\u6539\u8981\u6c42',
+        ),
+      );
       return;
     }
 
@@ -1599,7 +1869,9 @@ const AIImage = () => {
     const tasks = Array.from({ length: effectiveBatchCount }, (_, index) =>
       buildPromptWithAnnotations(
         prompts.length > 0
-          ? prompts.length > 1 ? prompts[index % prompts.length] : prompts[0]
+          ? prompts.length > 1
+            ? prompts[index % prompts.length]
+            : prompts[0]
           : '',
         draftImages,
       ),
@@ -1608,7 +1880,9 @@ const AIImage = () => {
     setIsGenerating(true);
     try {
       if (isOpenAIImageModel(fallbackImageModel)) {
-        await Promise.all(tasks.map((itemPrompt) => submitImageTask(itemPrompt)));
+        await Promise.all(
+          tasks.map((itemPrompt) => submitImageTask(itemPrompt)),
+        );
         setRemotePage(1);
         await loadRemoteTasks(1);
         setPrompt('');
@@ -1676,7 +1950,9 @@ const AIImage = () => {
 
     Modal.confirm({
       title: t('确认一键删除历史记录'),
-      content: t('将删除所有已完成的历史记录，排队中和生成中的任务不会删除。此操作不可恢复。'),
+      content: t(
+        '将删除所有已完成的历史记录，排队中和生成中的任务不会删除。此操作不可恢复。',
+      ),
       okText: t('确认删除'),
       cancelText: t('取消'),
       okType: 'danger',
@@ -1703,7 +1979,10 @@ const AIImage = () => {
 
           setRemoteTasks(nextRemoteTasks);
           try {
-            localStorage.setItem(TASKS_CACHE_KEY, JSON.stringify(nextRemoteTasks));
+            localStorage.setItem(
+              TASKS_CACHE_KEY,
+              JSON.stringify(nextRemoteTasks),
+            );
           } catch {
             // Ignore storage sync errors.
           }
@@ -1714,7 +1993,13 @@ const AIImage = () => {
         }
       },
     });
-  }, [clearCurrentSession, completedRemoteTasks.length, localRecords.length, remoteTasks, t]);
+  }, [
+    clearCurrentSession,
+    completedRemoteTasks.length,
+    localRecords.length,
+    remoteTasks,
+    t,
+  ]);
 
   const handleCopyPrompt = React.useCallback(
     async (record) => {
@@ -1747,10 +2032,14 @@ const AIImage = () => {
 
       if (record.isRemote && record.taskId) {
         try {
-          const response = await fetch(`/api/ai-image/download/${record.taskId}`, {
-            headers: { 'New-Api-User': getUserIdFromLocalStorage() },
-          });
-          if (!response.ok) throw new Error(`download failed: ${response.status}`);
+          const response = await fetch(
+            `/api/ai-image/download/${record.taskId}`,
+            {
+              headers: { 'New-Api-User': getUserIdFromLocalStorage() },
+            },
+          );
+          if (!response.ok)
+            throw new Error(`download failed: ${response.status}`);
           const blob = await response.blob();
           const blobUrl = URL.createObjectURL(blob);
           const anchor = document.createElement('a');
@@ -1803,7 +2092,9 @@ const AIImage = () => {
             showError(result?.message || t('删除失败'));
             return;
           }
-          setRemoteTasks((previous) => previous.filter((task) => task.task_id !== record.taskId));
+          setRemoteTasks((previous) =>
+            previous.filter((task) => task.task_id !== record.taskId),
+          );
           setRemoteTotal((previous) => Math.max(0, previous - 1));
         } catch (error) {
           showError(t('删除失败'));
@@ -1839,22 +2130,32 @@ const AIImage = () => {
         return;
       }
       if (draftImages.length >= MAX_REFERENCE_IMAGES) {
-        showError(t('最多支持 {{count}} 张参考图', { count: MAX_REFERENCE_IMAGES }));
+        showError(
+          t('最多支持 {{count}} 张参考图', { count: MAX_REFERENCE_IMAGES }),
+        );
         return;
       }
 
       try {
         if (imageUrl && imageUrl.startsWith('data:image/')) {
           const [meta, base64Data] = imageUrl.split(',', 2);
-          const mimeType = meta.match(/^data:(.+?);base64$/)?.[1] || 'image/png';
+          const mimeType =
+            meta.match(/^data:(.+?);base64$/)?.[1] || 'image/png';
           const binary = atob(base64Data || '');
           const bytes = new Uint8Array(binary.length);
           for (let index = 0; index < binary.length; index += 1) {
             bytes[index] = binary.charCodeAt(index);
           }
           const extension = mimeType.split('/')[1] || 'png';
-          const file = new File([bytes], `referenced-${Date.now()}.${extension}`, { type: mimeType });
-          setDraftImages((previous) => [...previous, createDraftImageEntry(file, { sourceDataUrl: imageUrl })]);
+          const file = new File(
+            [bytes],
+            `referenced-${Date.now()}.${extension}`,
+            { type: mimeType },
+          );
+          setDraftImages((previous) => [
+            ...previous,
+            createDraftImageEntry(file, { sourceDataUrl: imageUrl }),
+          ]);
           showSuccess(t('已引用到参考图'));
           return;
         }
@@ -1864,7 +2165,8 @@ const AIImage = () => {
           const response = await fetch(`/api/ai-image/proxy/${record.taskId}`, {
             headers: { 'New-Api-User': getUserIdFromLocalStorage() },
           });
-          if (!response.ok) throw new Error(`proxy fetch failed: ${response.status}`);
+          if (!response.ok)
+            throw new Error(`proxy fetch failed: ${response.status}`);
           blob = await response.blob();
         } else if (imageUrl) {
           const response = await fetch(imageUrl);
@@ -1875,8 +2177,13 @@ const AIImage = () => {
           return;
         }
         const extension = blob.type?.split('/')[1] || 'png';
-        const file = new File([blob], `referenced-${Date.now()}.${extension}`, { type: blob.type || 'image/png' });
-        setDraftImages((previous) => [...previous, createDraftImageEntry(file)]);
+        const file = new File([blob], `referenced-${Date.now()}.${extension}`, {
+          type: blob.type || 'image/png',
+        });
+        setDraftImages((previous) => [
+          ...previous,
+          createDraftImageEntry(file),
+        ]);
         showSuccess(t('已引用到参考图'));
       } catch {
         showError(t('引用图片失败，请右键保存后手动上传'));
@@ -1937,7 +2244,13 @@ const AIImage = () => {
     } finally {
       setIsOptimizingPrompt(false);
     }
-  }, [prompt, promptOptimizerModel, selectedGroup, serializeDraftImagesForRequest, t]);
+  }, [
+    prompt,
+    promptOptimizerModel,
+    selectedGroup,
+    serializeDraftImagesForRequest,
+    t,
+  ]);
 
   const handleRevertOptimizedPrompt = React.useCallback(() => {
     setPrompt(originalPrompt);
@@ -1975,82 +2288,102 @@ const AIImage = () => {
   }
 
   return (
-    <div className='mt-[64px] min-h-[calc(100vh-64px)] bg-[#eef2f7] px-2 py-3 sm:px-3 lg:px-4'>
+    <div className='ai-image-page xiaoyang-studio-surface mt-[64px] min-h-[calc(100vh-64px)] px-2 py-3 sm:px-3 lg:px-4'>
       <div className='mx-auto flex min-h-[calc(100vh-88px)] w-full max-w-none flex-col gap-4'>
-        <section className='rounded-[32px] border border-white/70 bg-white/75 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-5'>
-          <div className='flex min-h-[60vh] flex-col gap-4 xl:flex-row'>
-            <div className='flex min-w-0 flex-1 flex-col gap-4'>
-              <div className='flex items-center gap-3'>
-                <div className='flex h-12 w-12 items-center justify-center rounded-[18px] bg-sky-50 text-sky-600 shadow-[0_16px_36px_rgba(15,23,42,0.08)]'>
-                  <ImagePlus size={22} />
+        <section className='solo-workbench-panel xiaoyang-studio-shell rounded-[36px] border border-white/75 bg-white/75 p-4 shadow-[0_26px_90px_rgba(17,24,39,0.10)] backdrop-blur-2xl sm:p-5'>
+          <div className='grid min-h-[62vh] gap-4 xl:grid-cols-[minmax(420px,1fr)_minmax(360px,0.82fr)] 2xl:grid-cols-[minmax(560px,1fr)_720px]'>
+            <div className='flex min-w-0 flex-col gap-4'>
+              <div className='flex flex-wrap items-center justify-between gap-4 rounded-[28px] border border-white/70 bg-white/60 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.06)] backdrop-blur-xl'>
+                <div className='flex min-w-0 items-center gap-3'>
+                  <div className='flex h-12 w-12 items-center justify-center rounded-[18px] bg-cyan-50 text-cyan-700 shadow-[0_16px_36px_rgba(15,23,42,0.08)]'>
+                    <ImagePlus size={22} />
+                  </div>
+                  <div className='min-w-0'>
+                    <div className='mb-1 text-xs font-black uppercase tracking-[0.22em] text-cyan-700'>
+                      PROMPT BAY
+                    </div>
+                    <Typography.Title
+                      heading={4}
+                      className='!mb-0 !text-slate-900'
+                    >
+                      {t('AI 绘图')}
+                    </Typography.Title>
+                    <Typography.Text className='!text-sm !text-slate-500'>
+                      {t(
+                        '选择 gpt-image-2 图片模型，输入提示词后直接查看生成结果',
+                      )}
+                    </Typography.Text>
+                  </div>
                 </div>
-                <div>
-                  <Typography.Title heading={4} className='!mb-0 !text-slate-900'>
-                    {t('AI 绘图')}
-                  </Typography.Title>
-                  <Typography.Text className='!text-sm !text-slate-500'>
-                    {t('选择 gpt-image-2 图片模型，输入提示词后直接查看生成结果')}
-                  </Typography.Text>
+                <div className='flex h-12 min-w-[220px] items-center justify-between gap-3 rounded-full border border-cyan-100 bg-white/80 px-4 text-sm font-black text-slate-900 shadow-[0_14px_36px_rgba(15,23,42,0.08)] backdrop-blur-xl'>
+                  <span className='truncate'>
+                    {selectedModel || t('选择模型')}
+                  </span>
+                  <span className='text-xs text-slate-400'>v</span>
                 </div>
               </div>
 
-              <div className='rounded-[28px] border border-slate-200 bg-slate-50/70 p-4'>
+              <div className='rounded-[30px] border border-cyan-100/75 bg-white/70 p-4 shadow-[0_18px_50px_rgba(8,47,73,0.07)] backdrop-blur-xl'>
                 <div className='mb-3 flex items-center justify-between gap-3'>
                   <div>
-                    <Typography.Text className='!text-xs !font-semibold !uppercase !tracking-[0.2em] !text-slate-400'>
+                    <Typography.Text className='!text-xs !font-black !uppercase !tracking-[0.22em] !text-teal-600'>
                       {t('基础设置')}
                     </Typography.Text>
-                    <p className='mt-1 text-sm text-slate-500'>{t('选择模型、分组和生成规格')}</p>
+                    <p className='mt-1 text-sm text-slate-500'>
+                      {t('选择模型、分组和生成规格')}
+                    </p>
                   </div>
                 </div>
                 <div className='grid gap-3 md:grid-cols-2'>
-                <label className='flex flex-col gap-2'>
-                  <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
-                    {t('分组')}
-                  </span>
-                  <select
-                    value={selectedGroup}
-                    onChange={(event) => setSelectedGroup(event.target.value)}
-                    className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
-                  >
-                    {groupOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  <label className='flex flex-col gap-2'>
+                    <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
+                      {t('分组')}
+                    </span>
+                    <select
+                      value={selectedGroup}
+                      onChange={(event) => setSelectedGroup(event.target.value)}
+                      className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                    >
+                      {groupOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-                <label className='flex flex-col gap-2'>
-                  <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
+                  <label className='flex flex-col gap-2'>
+                    <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
                       {t('绘图模型')}
-                  </span>
-                  <select
-                    value={selectedModel}
-                    onChange={(event) => {
-                      selectedModelRef.current = event.target.value;
-                      setSelectedModel(event.target.value);
-                    }}
-                    className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
-                  >
-                    <option value=''>{t('选择模型')}</option>
-                    {modelOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    </span>
+                    <select
+                      value={selectedModel}
+                      onChange={(event) => {
+                        selectedModelRef.current = event.target.value;
+                        setSelectedModel(event.target.value);
+                      }}
+                      className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                    >
+                      <option value=''>{t('选择模型')}</option>
+                      {modelOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
               </div>
 
-              <div className='rounded-[28px] border border-slate-200 bg-slate-50/70 p-4'>
+              <div className='rounded-[30px] border border-white/75 bg-white/75 p-4 shadow-[0_22px_70px_rgba(8,47,73,0.08)] backdrop-blur-xl'>
                 <div className='mb-3 flex flex-wrap items-center justify-between gap-3'>
                   <div>
-                    <Typography.Text className='!text-xs !font-semibold !uppercase !tracking-[0.2em] !text-slate-400'>
+                    <Typography.Text className='!text-xs !font-black !uppercase !tracking-[0.22em] !text-cyan-700'>
                       {t('提示词与参考')}
                     </Typography.Text>
-                    <p className='mt-1 text-sm text-slate-500'>{t('编辑提示词、收藏常用灵感，并上传参考图')}</p>
+                    <p className='mt-1 text-sm text-slate-500'>
+                      {t('编辑提示词、收藏常用灵感，并上传参考图')}
+                    </p>
                   </div>
                   <div className='flex flex-wrap gap-2'>
                     <Button
@@ -2072,7 +2405,9 @@ const AIImage = () => {
                       </span>
                       <select
                         value={openaiImageSize}
-                        onChange={(event) => setOpenaiImageSize(event.target.value)}
+                        onChange={(event) =>
+                          setOpenaiImageSize(event.target.value)
+                        }
                         className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
                       >
                         {OPENAI_IMAGE_SIZE_OPTIONS.map((item) => (
@@ -2090,8 +2425,10 @@ const AIImage = () => {
                         </span>
                         <select
                           value={resolution}
-                          onChange={(event) => setResolution(event.target.value)}
-                            className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                          onChange={(event) =>
+                            setResolution(event.target.value)
+                          }
+                          className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
                         >
                           {RESOLUTION_OPTIONS.map((item) => (
                             <option key={item} value={item}>
@@ -2107,8 +2444,10 @@ const AIImage = () => {
                         </span>
                         <select
                           value={aspectRatio}
-                          onChange={(event) => setAspectRatio(event.target.value)}
-                            className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                          onChange={(event) =>
+                            setAspectRatio(event.target.value)
+                          }
+                          className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
                         >
                           {ASPECT_RATIO_OPTIONS.map((item) => (
                             <option key={item} value={item}>
@@ -2142,7 +2481,9 @@ const AIImage = () => {
                         min={1}
                         max={MAX_BATCH_COUNT}
                         value={batchCount}
-                        onChange={(value) => setBatchCount(normalizeBatchCount(value))}
+                        onChange={(value) =>
+                          setBatchCount(normalizeBatchCount(value))
+                        }
                         className='!w-[112px] shrink-0'
                         placeholder='1-10'
                       />
@@ -2167,7 +2508,9 @@ const AIImage = () => {
                   maxLength={MAX_PROMPT_LENGTH}
                   showClear
                   autosize={{ minRows: 7, maxRows: 14 }}
-                  placeholder={t('描述你想生成的图片；批量生成时可一行一个提示词')}
+                  placeholder={t(
+                    '描述你想生成的图片；批量生成时可一行一个提示词',
+                  )}
                   className='!bg-transparent'
                 />
 
@@ -2247,7 +2590,9 @@ const AIImage = () => {
                           <Brush size={12} />
                           <span>
                             {getImageAnnotationCount(image) > 0
-                              ? t('已标注 {{count}} 处', { count: getImageAnnotationCount(image) })
+                              ? t('已标注 {{count}} 处', {
+                                  count: getImageAnnotationCount(image),
+                                })
                               : t('标注修改')}
                           </span>
                         </button>
@@ -2270,11 +2615,18 @@ const AIImage = () => {
                   <div className='mt-3 rounded-[18px] border border-sky-100 bg-sky-50/80 p-3'>
                     <div className='mb-2 flex items-center gap-2 text-sm font-semibold text-sky-700'>
                       <Brush size={15} />
-                      <span>{t('已添加 {{count}} 个局部修改要求', { count: annotatedPromptCount })}</span>
+                      <span>
+                        {t('已添加 {{count}} 个局部修改要求', {
+                          count: annotatedPromptCount,
+                        })}
+                      </span>
                     </div>
                     <div className='flex flex-wrap gap-2'>
                       {draftImages.flatMap((image, imageIndex) =>
-                        (Array.isArray(image.annotations) ? image.annotations : [])
+                        (Array.isArray(image.annotations)
+                          ? image.annotations
+                          : []
+                        )
                           .filter((annotation) => annotation?.prompt?.trim())
                           .map((annotation, annotationIndex) => (
                             <span
@@ -2290,7 +2642,11 @@ const AIImage = () => {
                                 {t('图{{index}}', { index: imageIndex + 1 })}
                               </span>
                               <span className='max-w-[220px] truncate'>
-                                {getAnnotationLabel(annotation, annotationIndex)}：{annotation.prompt}
+                                {getAnnotationLabel(
+                                  annotation,
+                                  annotationIndex,
+                                )}
+                                ：{annotation.prompt}
                               </span>
                             </span>
                           )),
@@ -2318,7 +2674,9 @@ const AIImage = () => {
                   </label>
 
                   <Typography.Text className='!text-xs !text-slate-500'>
-                    {t('最多 {{count}} 张参考图，上传后可圈选局部修改', { count: MAX_REFERENCE_IMAGES })}
+                    {t('最多 {{count}} 张参考图，上传后可圈选局部修改', {
+                      count: MAX_REFERENCE_IMAGES,
+                    })}
                   </Typography.Text>
 
                   <Button
@@ -2332,7 +2690,11 @@ const AIImage = () => {
                       )
                     }
                     loading={isGenerating}
-                    onClick={normalizeBatchCount(batchCount) > 1 ? handleBatchGenerate : handleGenerate}
+                    onClick={
+                      normalizeBatchCount(batchCount) > 1
+                        ? handleBatchGenerate
+                        : handleGenerate
+                    }
                     className='!rounded-full'
                   >
                     {t('生成图片')}
@@ -2365,7 +2727,6 @@ const AIImage = () => {
                   >
                     {t('收藏夹')}
                   </Button>
-
                 </div>
 
                 <Typography.Text className='mt-3 block text-xs text-slate-500'>
@@ -2376,12 +2737,15 @@ const AIImage = () => {
               </div>
             </div>
 
-            <div className='w-full xl:w-[52%]'>
-              <div className='flex h-full min-h-[70vh] flex-col rounded-[28px] border border-white/70 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)]'>
-                <div className='border-b border-slate-100 px-4 py-3'>
-                  <Typography.Text className='!text-xs !font-medium !uppercase !tracking-[0.2em] !text-slate-400'>
+            <div className='w-full min-w-0'>
+              <div className='xiaoyang-canvas-stage flex h-full min-h-[54vh] flex-col overflow-hidden rounded-[30px] border border-cyan-100 bg-white/82 shadow-[0_22px_70px_rgba(8,47,73,0.10)] backdrop-blur-xl'>
+                <div className='flex items-center justify-between gap-3 border-b border-cyan-100/75 px-4 py-3'>
+                  <Typography.Text className='!text-xs !font-black !uppercase !tracking-[0.22em] !text-cyan-700'>
                     {t('当前结果')}
                   </Typography.Text>
+                  <span className='rounded-full border border-cyan-100 bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700'>
+                    Preview
+                  </span>
                 </div>
                 <div className='flex flex-1 items-center justify-center p-4'>
                   {activeImage ? (
@@ -2389,7 +2753,7 @@ const AIImage = () => {
                       <button
                         type='button'
                         onClick={() => openImageInNewTab(activeImage)}
-                        className='mx-auto flex h-[420px] w-full max-w-[680px] items-center justify-center overflow-hidden rounded-[24px] bg-slate-50 shadow-[0_20px_60px_rgba(15,23,42,0.12)]'
+                        className='mx-auto flex h-[360px] w-full max-w-[560px] items-center justify-center overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.10)]'
                         title={t('点击查看大图')}
                       >
                         <img
@@ -2399,7 +2763,7 @@ const AIImage = () => {
                         />
                       </button>
                       {activeRecord?.prompt ? (
-                        <p className='mt-3 text-sm text-slate-500'>
+                        <p className='mt-3 max-h-28 overflow-y-auto rounded-[20px] border border-slate-200 bg-white/80 px-4 py-3 text-sm leading-6 text-slate-600'>
                           {activeRecord.prompt}
                         </p>
                       ) : null}
@@ -2412,7 +2776,7 @@ const AIImage = () => {
                               onClick={() => setActiveImageIndex(index)}
                               className={`overflow-hidden rounded-2xl border transition ${
                                 index === activeImageIndex
-                                  ? 'border-sky-400 shadow-[0_10px_24px_rgba(59,130,246,0.18)]'
+                                  ? 'border-cyan-300 shadow-[0_10px_24px_rgba(34,211,238,0.22)]'
                                   : 'border-slate-200 hover:border-slate-300'
                               }`}
                             >
@@ -2439,9 +2803,13 @@ const AIImage = () => {
                             )
                           }
                           loading={isPreparingAnnotation}
-                          className='!h-11 !rounded-full !bg-slate-950 !px-5 !text-white shadow-[0_14px_34px_rgba(15,23,42,0.22)]'
-                          onClick={() => openRecordAnnotation(activeRecord, activeImageIndex)}
-                          disabled={!activeRecord || activeRecord?.status === 'FAILED'}
+                          className='!h-11 !rounded-full !bg-slate-950 !px-5 !text-white shadow-[0_14px_34px_rgba(15,23,42,0.18)]'
+                          onClick={() =>
+                            openRecordAnnotation(activeRecord, activeImageIndex)
+                          }
+                          disabled={
+                            !activeRecord || activeRecord?.status === 'FAILED'
+                          }
                         >
                           {t('画圈修改图片')}
                         </Button>
@@ -2455,7 +2823,9 @@ const AIImage = () => {
                           type='primary'
                           icon={<Bookmark size={15} />}
                           className='!rounded-full'
-                          onClick={() => createPromptFavorite(activeRecord?.prompt || '')}
+                          onClick={() =>
+                            createPromptFavorite(activeRecord?.prompt || '')
+                          }
                           disabled={!activeRecord?.prompt}
                         >
                           {t('收藏提示词')}
@@ -2472,7 +2842,8 @@ const AIImage = () => {
                     </div>
                   ) : (
                     <Empty
-                      image={<ImagePlus size={40} className='text-slate-400' />}
+                      image={<ImagePlus size={42} className='text-cyan-500' />}
+                      className='xiaoyang-canvas-empty'
                       title={t('还没有生成图片')}
                       description={t('输入提示词后，生成结果会直接显示在这里')}
                     />
@@ -2483,25 +2854,32 @@ const AIImage = () => {
           </div>
         </section>
 
-        <section className='rounded-[32px] border border-white/70 bg-white/75 p-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-5'>
+        <section className='solo-workbench-panel rounded-[34px] border border-slate-900/10 bg-slate-950 p-4 text-white shadow-[0_24px_80px_rgba(15,23,42,0.16)] backdrop-blur-2xl sm:p-5'>
           <div className='mb-4 flex items-center justify-between gap-3'>
             <div>
-              <Typography.Title heading={6} className='!mb-0 !text-slate-900'>
+              <div className='mb-1 text-xs font-black uppercase tracking-[0.24em] text-cyan-300'>
+                FILM STRIP
+              </div>
+              <Typography.Title heading={6} className='!mb-0 !text-white'>
                 {t('最近生成')}
               </Typography.Title>
-              <Typography.Text className='!ml-2 !text-sm !font-medium !text-slate-500'>
-                {t('点击下方缩略图即可切换查看历史结果，图片保留 7 天后自动清理')}
+              <Typography.Text className='!text-sm !font-medium !text-white/60'>
+                {t(
+                  '点击下方缩略图即可切换查看历史结果，图片保留 7 天后自动清理',
+                )}
               </Typography.Text>
             </div>
             <div className='flex items-center gap-3'>
-              <Typography.Text className='!text-sm !text-slate-400'>
+              <Typography.Text className='!text-sm !text-white/60'>
                 {t('{{count}} 条记录', { count: records.length })}
               </Typography.Text>
               <Button
                 theme='light'
                 type='danger'
                 className='!rounded-full'
-                disabled={localRecords.length === 0 && completedRemoteTasks.length === 0}
+                disabled={
+                  localRecords.length === 0 && completedRemoteTasks.length === 0
+                }
                 onClick={handleDeleteHistory}
               >
                 {t('一键删除历史')}
@@ -2516,13 +2894,18 @@ const AIImage = () => {
               </div>
               <div className='flex flex-col gap-2'>
                 {pendingRemoteTasks.map((task) => (
-                  <div key={task.task_id} className='flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm'>
+                  <div
+                    key={task.task_id}
+                    className='flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm'
+                  >
                     <Loader2 size={14} className='animate-spin text-blue-500' />
-                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                      task.status === 'PROCESSING'
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'bg-amber-100 text-amber-700'
-                    }`}>
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                        task.status === 'PROCESSING'
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-amber-100 text-amber-700'
+                      }`}
+                    >
                       {task.status === 'PROCESSING' ? t('生成中') : t('排队中')}
                     </span>
                     <span className='flex-1 truncate text-slate-600'>
@@ -2539,12 +2922,15 @@ const AIImage = () => {
 
           {records.length > 0 ? (
             <>
-              <div className='flex gap-3 overflow-x-auto pb-1'>
+              <div className='flex gap-4 overflow-x-auto pb-2'>
                 {records.map((record) => (
-                  <div key={record.id} className='w-[168px] shrink-0 space-y-2'>
+                  <div
+                    key={record.id}
+                    className='w-[178px] shrink-0 space-y-2 rounded-[26px] border border-white/10 bg-white/10 p-3 shadow-[0_18px_44px_rgba(0,0,0,0.18)]'
+                  >
                     {record.status === 'FAILED' ? (
                       <div
-                        className='flex h-24 w-24 items-center justify-center rounded-[22px] border border-red-200 bg-red-50 sm:h-28 sm:w-28'
+                        className='flex h-24 w-24 items-center justify-center rounded-[22px] border border-red-300/40 bg-red-500/10 sm:h-28 sm:w-28'
                         title={record.errorMessage || t('生成失败')}
                       >
                         <div className='px-2 text-center'>
@@ -2568,7 +2954,7 @@ const AIImage = () => {
                     <div className='w-full px-1'>
                       <button
                         type='button'
-                        className='h-12 w-full overflow-hidden rounded-xl px-1 py-1 text-left text-sm leading-5 text-slate-700 transition hover:bg-slate-100/80'
+                        className='h-12 w-full overflow-hidden rounded-xl px-1 py-1 text-left text-sm leading-5 text-white/70 transition hover:bg-white/10'
                         onClick={() => handleCopyPrompt(record)}
                         title={record.prompt || t('未命名提示词')}
                       >
@@ -2584,7 +2970,9 @@ const AIImage = () => {
                           icon={<Brush size={13} />}
                           className='!col-span-2 !h-7 !rounded-full !bg-slate-950 !px-2 !text-xs !text-white'
                           onClick={() => openRecordAnnotation(record, 0)}
-                          disabled={record.status === 'FAILED' || isPreparingAnnotation}
+                          disabled={
+                            record.status === 'FAILED' || isPreparingAnnotation
+                          }
                         >
                           {t('画圈编辑')}
                         </Button>
@@ -2593,7 +2981,9 @@ const AIImage = () => {
                           type='primary'
                           size='small'
                           className='!h-7 !rounded-full !px-2 !text-xs'
-                          onClick={() => createPromptFavorite(record.prompt || '')}
+                          onClick={() =>
+                            createPromptFavorite(record.prompt || '')
+                          }
                           disabled={!record.prompt}
                         >
                           {t('收藏提示词')}
@@ -2689,7 +3079,8 @@ const AIImage = () => {
                   value={favoriteSearch}
                   onChange={(event) => setFavoriteSearch(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter') loadPromptFavorites(event.currentTarget.value);
+                    if (event.key === 'Enter')
+                      loadPromptFavorites(event.currentTarget.value);
                   }}
                   placeholder={t('搜索标题或提示词')}
                   className='h-10 min-w-0 flex-1 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
@@ -2709,16 +3100,30 @@ const AIImage = () => {
                 {promptFavorites.length > 0 ? (
                   <div className='grid gap-2'>
                     {promptFavorites.map((favorite) => (
-                      <div key={favorite.id} className='min-w-0 overflow-hidden rounded-[20px] border border-white/70 bg-white/60 p-3 shadow-sm backdrop-blur'>
+                      <div
+                        key={favorite.id}
+                        className='min-w-0 overflow-hidden rounded-[20px] border border-white/70 bg-white/60 p-3 shadow-sm backdrop-blur'
+                      >
                         <div className='mb-2 flex items-start justify-between gap-3'>
                           <div className='min-w-0'>
-                            <div className='truncate text-sm font-semibold text-slate-900' title={favorite.title || favorite.prompt}>
-                              {favorite.title || createPromptFavoriteTitle(favorite.prompt) || t('未命名收藏')}
+                            <div
+                              className='truncate text-sm font-semibold text-slate-900'
+                              title={favorite.title || favorite.prompt}
+                            >
+                              {favorite.title ||
+                                createPromptFavoriteTitle(favorite.prompt) ||
+                                t('未命名收藏')}
                             </div>
                             <div className='mt-1 flex min-w-0 flex-wrap gap-2 text-xs text-slate-400'>
-                              {favorite.model ? <span>{favorite.model}</span> : null}
-                              {favorite.size ? <span>{favorite.size}</span> : null}
-                              {favorite.aspect_ratio ? <span>{favorite.aspect_ratio}</span> : null}
+                              {favorite.model ? (
+                                <span>{favorite.model}</span>
+                              ) : null}
+                              {favorite.size ? (
+                                <span>{favorite.size}</span>
+                              ) : null}
+                              {favorite.aspect_ratio ? (
+                                <span>{favorite.aspect_ratio}</span>
+                              ) : null}
                             </div>
                           </div>
                           <div className='flex shrink-0 gap-1'>
@@ -2756,7 +3161,9 @@ const AIImage = () => {
                   <Empty
                     image={<Bookmark size={34} className='text-slate-400' />}
                     title={t('暂无收藏')}
-                    description={t('可以从当前提示词或历史记录中收藏常用提示词')}
+                    description={t(
+                      '可以从当前提示词或历史记录中收藏常用提示词',
+                    )}
                   />
                 )}
               </Spin>
@@ -2767,16 +3174,22 @@ const AIImage = () => {
                 {editingFavoriteId ? t('编辑收藏') : t('保存当前提示词')}
               </Typography.Text>
               <label className='mt-3 flex flex-col gap-2'>
-                <span className='text-xs font-medium text-slate-500'>{t('标题')}</span>
+                <span className='text-xs font-medium text-slate-500'>
+                  {t('标题')}
+                </span>
                 <input
                   value={favoriteDraftTitle}
-                  onChange={(event) => setFavoriteDraftTitle(event.target.value)}
+                  onChange={(event) =>
+                    setFavoriteDraftTitle(event.target.value)
+                  }
                   placeholder={t('给这个提示词起个名字')}
                   className='h-10 rounded-2xl border border-white/70 bg-white/70 px-3 text-sm text-slate-900 shadow-sm outline-none backdrop-blur focus:border-sky-400'
                 />
               </label>
               <label className='mt-3 flex flex-col gap-2'>
-                <span className='text-xs font-medium text-slate-500'>{t('提示词')}</span>
+                <span className='text-xs font-medium text-slate-500'>
+                  {t('提示词')}
+                </span>
                 <TextArea
                   value={favoriteDraftPrompt}
                   onChange={setFavoriteDraftPrompt}

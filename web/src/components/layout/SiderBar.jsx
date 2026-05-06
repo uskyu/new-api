@@ -207,18 +207,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       },
     ];
 
-    return items.filter((item) => {
-      if (item.itemKey === 'redemption' && can(PERMISSIONS.REDEMPTION_READ)) {
-        return true;
-      }
-      if (item.itemKey === 'user' && can(PERMISSIONS.USER_QUOTA_DECREASE)) {
-        return true;
-      }
-      if (item.itemKey === 'agent' && can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN)) {
-        return true;
-      }
-      return isModuleVisible('admin', item.itemKey);
-    });
+    return items.filter((item) => isModuleVisible('admin', item.itemKey));
   }, [isModuleVisible, t]);
 
   const chatMenuItems = useMemo(() => {
@@ -432,12 +421,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         type='sidebar'
         className=''
         collapsed={collapsed}
-        showAdmin={
-          isAdmin() ||
-          can(PERMISSIONS.REDEMPTION_READ) ||
-          can(PERMISSIONS.USER_QUOTA_DECREASE) ||
-          can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN)
-        }
+        showAdmin={adminItems.some((item) => item.className !== 'tableHiddle')}
       >
         <Nav
           className='sidebar-nav'

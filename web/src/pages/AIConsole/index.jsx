@@ -1,7 +1,9 @@
 import React, { useContext, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Input, Spin } from '@douyinfe/semi-ui';
 import {
+  Bot,
   Check,
+  Clock3,
   MessageSquarePlus,
   PanelLeftOpen,
   Pencil,
@@ -63,12 +65,15 @@ const SessionItem = ({
   t,
 }) => (
   <div
-    className={`group rounded-[22px] border px-3 py-3 text-left transition-all ${
+    className={`group relative overflow-hidden rounded-[20px] border px-3.5 py-3 text-left transition-all ${
       active
-        ? 'border-sky-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.08)]'
-        : 'border-transparent bg-white/50 hover:border-slate-200 hover:bg-white'
+        ? 'border-sky-200 bg-sky-50/85 shadow-[0_12px_30px_rgba(14,165,233,0.12)]'
+        : 'border-white/50 bg-white/50 hover:border-slate-200 hover:bg-white/80'
     }`}
   >
+    {active ? (
+      <span className='absolute inset-y-3 left-0 w-1 rounded-r-full bg-sky-500' />
+    ) : null}
     {editing ? (
       <div className='space-y-2'>
         <Input
@@ -129,11 +134,17 @@ const SessionItem = ({
   </div>
 );
 
-const NativeSelect = ({ value, options, onChange, placeholder }) => (
+const NativeSelect = ({
+  value,
+  options,
+  onChange,
+  placeholder,
+  className = '',
+}) => (
   <select
     value={value}
     onChange={(event) => onChange(event.target.value)}
-    className='h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+    className={`h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400 ${className}`}
   >
     {options.length === 0 ? <option value=''>{placeholder}</option> : null}
     {options.map((option) => (
@@ -445,6 +456,44 @@ const AIConsole = () => {
     label: t(option.label),
   }));
 
+  const featurePills = useMemo(
+    () => [
+      {
+        key: 'chat',
+        label: t('聊天'),
+        active: true,
+        icon: <MessageSquarePlus size={15} />,
+      },
+      {
+        key: 'agent',
+        label: t('综合 Agent'),
+        icon: <Sparkles size={15} />,
+      },
+      {
+        key: 'draw',
+        label: t('绘图'),
+        badge: t('待开发'),
+        icon: <Sparkles size={15} />,
+      },
+      {
+        key: 'data',
+        label: t('数据'),
+        badge: t('待开发'),
+        icon: <Sparkles size={15} />,
+      },
+    ],
+    [t],
+  );
+
+  const promptSuggestions = useMemo(
+    () => [
+      t('帮我把这个想法拆成可执行计划'),
+      t('阅读下面内容并提炼关键结论'),
+      t('帮我写一份简洁的产品介绍'),
+    ],
+    [t],
+  );
+
   if (!ready) {
     return (
       <div className='mt-[64px] flex h-[calc(100vh-64px)] items-center justify-center bg-[#eef2f7]'>
@@ -465,14 +514,89 @@ const AIConsole = () => {
     );
   }
 
+  const renderChatConfigControls = (compact = false) => (
+    <div
+      className={`grid gap-2 rounded-[24px] border border-cyan-100/80 bg-white/80 p-2 shadow-[0_18px_46px_rgba(8,47,73,0.10)] backdrop-blur-xl ${
+        compact
+          ? 'grid-cols-1'
+          : 'w-full grid-cols-1 sm:grid-cols-3 xl:w-[780px]'
+      }`}
+    >
+      <label className='min-w-0'>
+        <span className='mb-1 block px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400'>
+          {t('分组')}
+        </span>
+        <NativeSelect
+          value={selectedGroup}
+          options={groupOptions}
+          onChange={setSelectedGroup}
+          placeholder={t('选择分组')}
+          className='!h-10 !rounded-full !bg-white/90 !text-xs'
+        />
+      </label>
+
+      <label className='min-w-0'>
+        <span className='mb-1 block px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400'>
+          {t('模型')}
+        </span>
+        <NativeSelect
+          value={selectedModel}
+          options={modelOptions}
+          onChange={setSelectedModel}
+          placeholder={t('选择模型')}
+          className='!h-10 !rounded-full !bg-white/90 !text-xs !font-bold'
+        />
+      </label>
+
+      <label className='min-w-0'>
+        <span className='mb-1 block px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400'>
+          {t('思考深度')}
+        </span>
+        <NativeSelect
+          value={reasoningEffort}
+          options={reasoningOptions}
+          onChange={setReasoningEffort}
+          placeholder={t('选择思考深度')}
+          className='!h-10 !rounded-full !bg-white/90 !text-xs'
+        />
+      </label>
+    </div>
+  );
+
   const sidebarContent = (
-    <div className='flex h-full flex-col overflow-hidden rounded-[30px] border border-white/70 bg-white/70 shadow-[0_22px_70px_rgba(15,23,42,0.12)] backdrop-blur-2xl'>
-      <div className='border-b border-white/60 p-4'>
+    <div className='solo-side-panel flex h-full flex-col overflow-hidden rounded-[34px] border border-cyan-100/70 bg-white/75 shadow-[0_24px_70px_rgba(8,47,73,0.12)] backdrop-blur-2xl'>
+      <div className='border-b border-cyan-100/70 p-4'>
+        <div className='mb-4 flex items-center justify-between gap-3'>
+          <img src={getLogo()} alt='AI' className='h-8 w-auto object-contain' />
+          <span className='rounded-full border border-teal-100 bg-teal-50 px-3 py-1 text-xs font-bold text-teal-700'>
+            Command
+          </span>
+        </div>
+        <div className='mb-3 grid grid-cols-2 gap-2'>
+          <div className='rounded-[18px] border border-white/70 bg-white/60 px-3 py-2 shadow-sm'>
+            <div className='flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400'>
+              <Clock3 size={12} />
+              {t('会话')}
+            </div>
+            <div className='mt-1 text-lg font-black text-slate-900'>
+              {sessions.length}
+            </div>
+          </div>
+          <div className='rounded-[18px] border border-white/70 bg-white/60 px-3 py-2 shadow-sm'>
+            <div className='flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400'>
+              <Bot size={12} />
+              {t('模型')}
+            </div>
+            <div className='mt-1 truncate text-sm font-black text-slate-900'>
+              {selectedModel || t('待选择')}
+            </div>
+          </div>
+        </div>
         <Button
           theme='solid'
           type='primary'
           icon={<MessageSquarePlus size={16} />}
-          className='!h-11 !w-full !rounded-2xl !bg-[#111827] !text-white'
+          className='!h-12 !w-full !rounded-[20px] !bg-[#0f172a] !text-white shadow-[0_18px_34px_rgba(15,23,42,0.20)]'
           onClick={() => createSession()}
         >
           {t('新对话')}
@@ -480,8 +604,18 @@ const AIConsole = () => {
       </div>
 
       <div className='min-h-0 flex-1 overflow-y-auto px-3 py-4'>
-        <div className='mb-3 px-2 text-xs font-medium uppercase tracking-[0.24em] text-slate-400'>
-          {t('最近会话')}
+        <div className='mb-3 flex items-end justify-between gap-3 px-2'>
+          <div>
+            <div className='text-xs font-bold uppercase tracking-[0.22em] text-teal-600'>
+              MEMORY
+            </div>
+            <div className='mt-1 text-sm font-bold text-slate-900'>
+              {t('最近会话')}
+            </div>
+          </div>
+          <span className='rounded-full border border-white/70 bg-white/70 px-2.5 py-1 text-xs font-bold text-slate-500 shadow-sm'>
+            live
+          </span>
         </div>
         <div className='space-y-2'>
           {sessions.map((session) => (
@@ -506,54 +640,14 @@ const AIConsole = () => {
         </div>
       </div>
 
-      <div className='space-y-3 border-t border-white/60 px-4 py-4'>
-        <div>
-          <div className='mb-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-400'>
-            {t('分组')}
-          </div>
-          <NativeSelect
-            value={selectedGroup}
-            options={groupOptions}
-            onChange={setSelectedGroup}
-            placeholder={t('选择分组')}
-          />
-        </div>
-
-        <div>
-          <div className='mb-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-400'>
-            {t('模型')}
-          </div>
-          <NativeSelect
-            value={selectedModel}
-            options={modelOptions}
-            onChange={setSelectedModel}
-            placeholder={t('选择模型')}
-          />
-        </div>
-
-        <div>
-          <div className='mb-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-400'>
-            {t('思考深度')}
-          </div>
-          <NativeSelect
-            value={reasoningEffort}
-            options={reasoningOptions}
-            onChange={setReasoningEffort}
-            placeholder={t('选择思考深度')}
-          />
-        </div>
+      <div className='border-t border-white/60 px-4 py-4 lg:hidden'>
+        {renderChatConfigControls(true)}
       </div>
     </div>
   );
 
   return (
-    <div className='ai-console-page mt-[64px] h-[calc(100vh-64px)] overflow-hidden bg-[#eef2f7]'>
-      <div className='pointer-events-none absolute inset-0 mt-[64px] overflow-hidden'>
-        <div className='absolute left-[-8%] top-[-12%] h-72 w-72 rounded-full bg-[#c7d2fe]/70 blur-3xl' />
-        <div className='absolute right-[-8%] top-[15%] h-80 w-80 rounded-full bg-[#bfdbfe]/60 blur-3xl' />
-        <div className='absolute bottom-[-10%] left-[20%] h-72 w-72 rounded-full bg-[#e2e8f0]/90 blur-3xl' />
-      </div>
-
+    <div className='ai-console-page solo-ai-surface mt-[64px] h-[calc(100vh-64px)] overflow-hidden'>
       {isMobile && showMobileSidebar && (
         <button
           type='button'
@@ -564,7 +658,7 @@ const AIConsole = () => {
       )}
 
       <div className='relative flex h-full gap-4 p-3 sm:p-4 lg:p-5'>
-        <aside className='hidden h-full w-[320px] shrink-0 lg:block'>
+        <aside className='hidden h-full w-[340px] shrink-0 lg:block'>
           {sidebarContent}
         </aside>
 
@@ -589,7 +683,7 @@ const AIConsole = () => {
             )}
           </div>
 
-          <div className='min-h-0 flex-1 lg:flex-none lg:h-full'>
+          <div className='min-h-0 flex-1'>
             <AIConsoleChatPanel
               chatRef={chatRef}
               messages={messages}
@@ -609,6 +703,16 @@ const AIConsole = () => {
               onToggleReasoningExpansion={onToggleReasoningExpansion}
               onStopGenerator={onStopGenerator}
               onClearMessages={handleClearMessages}
+              headerTitle={t('聊天工作台')}
+              headerDescription={t('对话、写作、代码、总结和推理都从这里开始')}
+              emptyTitle={t('把任务交给 AI 工作台')}
+              emptyDescription={t(
+                '直接开始对话、写作、代码、总结和推理，后续可以继续扩展为可执行任务的 Agent 工作流。',
+              )}
+              featurePills={featurePills}
+              promptSuggestions={promptSuggestions}
+              modelBrands={['DeepSeek', 'OpenAI', 'Kimi', 'Gemini']}
+              headerAccessory={renderChatConfigControls(false)}
             />
           </div>
         </main>
