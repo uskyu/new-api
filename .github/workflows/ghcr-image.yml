@@ -10,6 +10,7 @@ on:
   push:
     branches:
       - feat/agent-rebate-system
+      - feat/personal-ai-console-mvp
 
 jobs:
   build-and-push:
@@ -39,7 +40,9 @@ jobs:
           if [ -n "${{ github.event.inputs.tag }}" ]; then
             CUSTOM_TAG="${{ github.event.inputs.tag }}"
           else
-            CUSTOM_TAG="agent-rebate-system"
+            BRANCH_NAME="${GITHUB_REF_NAME}"
+            CUSTOM_TAG="${BRANCH_NAME#feat/}"
+            CUSTOM_TAG="$(echo "$CUSTOM_TAG" | tr '/_' '--' | tr '[:upper:]' '[:lower:]')"
           fi
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
           echo "custom_tag=$CUSTOM_TAG" >> $GITHUB_OUTPUT
