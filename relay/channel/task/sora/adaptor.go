@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -159,6 +160,10 @@ func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, erro
 // BuildRequestHeader sets required headers.
 func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo) error {
 	req.Header.Set("Authorization", "Bearer "+a.apiKey)
+	if isDomesticVideoModel(info.UpstreamModelName) {
+		req.Header.Set("Content-Type", "application/json")
+		return nil
+	}
 	req.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 	return nil
 }
@@ -173,6 +178,10 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		return nil, errors.Wrap(err, "read_body_bytes_failed")
 	}
 	contentType := c.GetHeader("Content-Type")
+
+	if isDomesticVideoModel(info.UpstreamModelName) {
+		return a.buildDomesticVideoRequestBody(c, info, cachedBody, contentType)
+	}
 
 	if strings.HasPrefix(contentType, "application/json") {
 		var bodyMap map[string]interface{}
@@ -237,6 +246,155 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	}
 
 	return common.ReaderOnly(storage), nil
+}
+
+func isDomesticVideoModel(modelName string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(modelName))
+	return strings.HasPrefix(normalized, "kling") || strings.HasPrefix(normalized, "king")
+}
+
+func firstFormValue(values map[string][]string, key string) string {
+	if valueList := values[key]; len(valueList) > 0 {
+		return strings.TrimSpace(valueList[0])
+	}
+	return ""
+}
+
+func imageExtFromFile(filename, contentType string) string {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(filename)), ".")
+	switch ext {
+	case "jpg", "jpeg", "png", "webp":
+		return ext
+	}
+	switch strings.ToLower(strings.TrimSpace(contentType)) {
+	case "image/jpeg", "image/jpg":
+		return "jpg"
+	case "image/webp":
+		return "webp"
+	default:
+		return "png"
+	}
+}
+
+func uploadAIVideoReferenceFiles(c *gin.Context, formData *multipart.Form, userID int) ([]map[string]string, error) {
+	if formData == nil {
+		return nil, nil
+	}
+	fileHeaders := formData.File["input_reference"]
+	if len(fileHeaders) == 0 {
+		return nil, nil
+	}
+	if !service.IsObjectStorageEnabled() {
+		return nil, fmt.Errorf("AI video reference images require object storage to be enabled")
+	}
+	fileInfos := make([]map[string]string, 0, len(fileHeaders))
+	for _, fileHeader := range fileHeaders {
+		file, err := fileHeader.Open()
+		if err != nil {
+			return nil, fmt.Errorf("open reference image failed: %w", err)
+		}
+		fileBytes, err := io.ReadAll(file)
+		_ = file.Close()
+		if err != nil {
+			return nil, fmt.Errorf("read reference image failed: %w", err)
+		}
+		contentType := fileHeader.Header.Get("Content-Type")
+		if contentType == "" || contentType == "application/octet-stream" {
+			contentType = http.DetectContentType(fileBytes)
+		}
+		if !strings.HasPrefix(strings.ToLower(contentType), "image/") {
+			return nil, fmt.Errorf("reference file %s is not an image", fileHeader.Filename)
+		}
+		ext := imageExtFromFile(fileHeader.Filename, contentType)
+		objectKey := service.BuildAIImageRefObjectKey(userID, ext)
+		_, accessURL, err := service.UploadBytesToObjectStorage(c.Request.Context(), objectKey, contentType, fileBytes)
+		if err != nil {
+			return nil, err
+		}
+		fileInfos = append(fileInfos, map[string]string{
+			"type":     "Url",
+			"category": "Image",
+			"url":      accessURL,
+		})
+	}
+	return fileInfos, nil
+}
+
+func (a *TaskAdaptor) buildDomesticVideoRequestBody(c *gin.Context, info *relaycommon.RelayInfo, cachedBody []byte, contentType string) (io.Reader, error) {
+	req, _ := relaycommon.GetTaskRequest(c)
+	if strings.HasPrefix(contentType, "application/json") {
+		_ = common.Unmarshal(cachedBody, &req)
+	}
+
+	var fileInfos []map[string]string
+	if strings.Contains(contentType, "multipart/form-data") {
+		formData, err := common.ParseMultipartFormReusable(c)
+		if err != nil {
+			return nil, err
+		}
+		if req.Prompt == "" {
+			req.Prompt = firstFormValue(formData.Value, "prompt")
+		}
+		if req.Seconds == "" {
+			req.Seconds = firstFormValue(formData.Value, "seconds")
+		}
+		fileInfos, err = uploadAIVideoReferenceFiles(c, formData, info.UserId)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for _, imageURL := range req.Images {
+		imageURL = strings.TrimSpace(imageURL)
+		if imageURL == "" {
+			continue
+		}
+		fileInfos = append(fileInfos, map[string]string{
+			"type":     "Url",
+			"category": "Image",
+			"url":      imageURL,
+		})
+	}
+	if strings.TrimSpace(req.InputReference) != "" {
+		fileInfos = append(fileInfos, map[string]string{
+			"type":     "Url",
+			"category": "Image",
+			"url":      strings.TrimSpace(req.InputReference),
+		})
+	}
+
+	outputConfig := map[string]any{
+		"resolution":       "1080P",
+		"audio_generation": "Enabled",
+	}
+	metadata := map[string]any{
+		"offpeak":       true,
+		"output_config": outputConfig,
+	}
+	if len(fileInfos) > 0 {
+		metadata["file_infos"] = fileInfos
+	}
+
+	seconds := strings.TrimSpace(req.Seconds)
+	if seconds == "" && req.Duration > 0 {
+		seconds = strconv.Itoa(req.Duration)
+	}
+	if seconds == "" {
+		seconds = "5"
+	}
+
+	bodyMap := map[string]any{
+		"model":         info.UpstreamModelName,
+		"prompt":        req.Prompt,
+		"seconds":       seconds,
+		"metadata":      metadata,
+		"output_config": outputConfig,
+	}
+	body, err := common.Marshal(bodyMap)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(body), nil
 }
 
 // DoRequest delegates to common helper.
