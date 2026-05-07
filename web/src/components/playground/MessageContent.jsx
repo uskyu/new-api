@@ -42,6 +42,18 @@ const MessageContent = ({
   const isThinkingStatus =
     message.status === 'loading' || message.status === 'incomplete';
 
+  const getTextContent = (content) => {
+    if (Array.isArray(content)) {
+      const textItem = content.find((item) => item.type === 'text');
+      return textItem && textItem.text && typeof textItem.text === 'string'
+        ? textItem.text
+        : '';
+    } else if (typeof content === 'string') {
+      return content;
+    }
+    return '';
+  };
+
   useEffect(() => {
     if (!isThinkingStatus) {
       previousContentLengthRef.current = 0;
@@ -64,6 +76,24 @@ const MessageContent = ({
       errorText = t('请求发生错误');
     }
 
+    const likelyStreamedAnswer =
+      message.role === 'assistant' &&
+      errorText.trim().length > 240 &&
+      !/^(HTTP error|SSE Error|Error:|Stream|status:)/i.test(errorText.trim());
+
+    if (likelyStreamedAnswer) {
+      return (
+        <div className='prose prose-xs sm:prose-sm prose-gray max-w-none overflow-x-auto text-xs sm:text-sm'>
+          <MarkdownRenderer
+            content={errorText}
+            className=''
+            animated={false}
+            previousContentLength={0}
+          />
+        </div>
+      );
+    }
+
     return (
       <div className={`${className}`}>
         <Typography.Text className='text-white'>{errorText}</Typography.Text>
@@ -74,18 +104,6 @@ const MessageContent = ({
   let currentExtractedThinkingContent = null;
   let currentDisplayableFinalContent = '';
   let thinkingSource = null;
-
-  const getTextContent = (content) => {
-    if (Array.isArray(content)) {
-      const textItem = content.find((item) => item.type === 'text');
-      return textItem && textItem.text && typeof textItem.text === 'string'
-        ? textItem.text
-        : '';
-    } else if (typeof content === 'string') {
-      return content;
-    }
-    return '';
-  };
 
   currentDisplayableFinalContent = getTextContent(message.content);
 

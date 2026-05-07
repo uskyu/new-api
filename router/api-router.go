@@ -405,6 +405,13 @@ func SetApiRouter(router *gin.Engine) {
 			aiImageProxyRoute.GET("download/:task_id", controller.ProxyImageDownload)
 			aiImageProxyRoute.GET("proxy/:task_id", controller.ProxyImageData)
 		}
+		aiVideoRoute := apiRouter.Group("/ai-video")
+		aiVideoRoute.Use(middleware.UserAuth())
+		{
+			aiVideoRoute.GET("/models", controller.GetAIVideoModels)
+			aiVideoRoute.POST("/videos", controller.PrepareAIVideoRelayContext(), controller.RelayTask)
+			aiVideoRoute.GET("/videos/:task_id", controller.FetchAIVideoTask)
+		}
 		aiImageAdminRoute := apiRouter.Group("/admin/ai-image")
 		aiImageAdminRoute.Use(middleware.AdminAuth())
 		{
@@ -412,6 +419,12 @@ func SetApiRouter(router *gin.Engine) {
 			aiImageAdminRoute.GET("/stats", controller.GetImageTaskStats)
 			aiImageAdminRoute.GET("/daily-stats", controller.GetAIImageDailyStats)
 			aiImageAdminRoute.POST("/test-s3", controller.TestS3Connection)
+		}
+		aiVideoAdminRoute := apiRouter.Group("/admin/ai-video")
+		aiVideoAdminRoute.Use(middleware.AdminAuth())
+		{
+			aiVideoAdminRoute.GET("/models", controller.GetAdminAIVideoModels)
+			aiVideoAdminRoute.PUT("/models", controller.UpdateAdminAIVideoModels)
 		}
 		aiEcommerceAdminRoute := apiRouter.Group("/admin/ai-ecommerce")
 		aiEcommerceAdminRoute.Use(middleware.AdminAuth())

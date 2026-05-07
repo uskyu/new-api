@@ -73,8 +73,10 @@ const UserAgreement = lazy(() => import('./pages/UserAgreement'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const AIConsole = lazy(() => import('./pages/AIConsole'));
 const AIImage = lazy(() => import('./pages/AIImage'));
+const AIVideo = lazy(() => import('./pages/AIVideo'));
 const AIEcommerceTemplate = lazy(() => import('./pages/AIEcommerceTemplate'));
 const AIImageLogs = lazy(() => import('./pages/AIImageLogs'));
+const AIVideoLogs = lazy(() => import('./pages/AIVideoLogs'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 
 function DynamicOAuth2Callback() {
@@ -211,6 +213,16 @@ function App() {
           }
         />
         <Route
+          path='/console/ai-video'
+          element={
+            <PrivateRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <AIVideo />
+              </Suspense>
+            </PrivateRoute>
+          }
+        />
+        <Route
           path='/console/ai-ecommerce-template'
           element={
             <PrivateRoute>
@@ -226,6 +238,16 @@ function App() {
             <AdminRoute>
               <Suspense fallback={<Loading></Loading>} key={location.pathname}>
                 <AIImageLogs />
+              </Suspense>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/ai-video-logs'
+          element={
+            <AdminRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <AIVideoLogs />
               </Suspense>
             </AdminRoute>
           }

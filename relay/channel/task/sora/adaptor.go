@@ -39,22 +39,42 @@ type ImageURL struct {
 }
 
 type responseTask struct {
-	ID                 string `json:"id"`
-	TaskID             string `json:"task_id,omitempty"` //兼容旧接口
-	Object             string `json:"object"`
-	Model              string `json:"model"`
-	Status             string `json:"status"`
-	Progress           int    `json:"progress"`
-	CreatedAt          int64  `json:"created_at"`
-	CompletedAt        int64  `json:"completed_at,omitempty"`
-	ExpiresAt          int64  `json:"expires_at,omitempty"`
-	Seconds            string `json:"seconds,omitempty"`
-	Size               string `json:"size,omitempty"`
-	RemixedFromVideoID string `json:"remixed_from_video_id,omitempty"`
+	ID                 string         `json:"id"`
+	TaskID             string         `json:"task_id,omitempty"` //兼容旧接口
+	Object             string         `json:"object"`
+	Model              string         `json:"model"`
+	Status             string         `json:"status"`
+	Progress           int            `json:"progress"`
+	CreatedAt          int64          `json:"created_at"`
+	CompletedAt        int64          `json:"completed_at,omitempty"`
+	ExpiresAt          int64          `json:"expires_at,omitempty"`
+	Seconds            string         `json:"seconds,omitempty"`
+	Size               string         `json:"size,omitempty"`
+	VideoURL           string         `json:"video_url,omitempty"`
+	URL                string         `json:"url,omitempty"`
+	Metadata           map[string]any `json:"metadata,omitempty"`
+	MetaData           map[string]any `json:"meta_data,omitempty"`
+	RemixedFromVideoID string         `json:"remixed_from_video_id,omitempty"`
 	Error              *struct {
 		Message string `json:"message"`
 		Code    string `json:"code"`
 	} `json:"error,omitempty"`
+}
+
+func (t responseTask) resultURL() string {
+	if t.VideoURL != "" {
+		return t.VideoURL
+	}
+	if t.URL != "" {
+		return t.URL
+	}
+	if value, ok := t.Metadata["url"].(string); ok {
+		return value
+	}
+	if value, ok := t.MetaData["url"].(string); ok {
+		return value
+	}
+	return ""
 }
 
 // ============================
@@ -304,7 +324,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		taskResult.Status = model.TaskStatusInProgress
 	case "completed":
 		taskResult.Status = model.TaskStatusSuccess
-		// Url intentionally left empty — the caller constructs the proxy URL using the public task ID
+		taskResult.Url = resTask.resultURL()
 	case "failed", "cancelled":
 		taskResult.Status = model.TaskStatusFailure
 		if resTask.Error != nil {
@@ -322,10 +342,41 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 }
 
 func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
+	var resTask responseTask
+	if err := common.Unmarshal(task.Data, &resTask); err != nil {
+		return nil, errors.Wrap(err, "unmarshal sora task data failed")
+	}
+
 	data := task.Data
 	var err error
 	if data, err = sjson.SetBytes(data, "id", task.TaskID); err != nil {
 		return nil, errors.Wrap(err, "set id failed")
+	}
+	if data, err = sjson.SetBytes(data, "task_id", task.TaskID); err != nil {
+		return nil, errors.Wrap(err, "set task_id failed")
+	}
+	if data, err = sjson.SetBytes(data, "status", task.Status.ToVideoStatus()); err != nil {
+		return nil, errors.Wrap(err, "set status failed")
+	}
+	if task.Progress != "" {
+		progress := strings.TrimSuffix(task.Progress, "%")
+		if progressValue, convErr := strconv.Atoi(progress); convErr == nil {
+			if data, err = sjson.SetBytes(data, "progress", progressValue); err != nil {
+				return nil, errors.Wrap(err, "set progress failed")
+			}
+		}
+	}
+	resultURL := resTask.resultURL()
+	if resultURL == "" {
+		resultURL = task.GetResultURL()
+	}
+	if resultURL != "" {
+		if data, err = sjson.SetBytes(data, "video_url", resultURL); err != nil {
+			return nil, errors.Wrap(err, "set video_url failed")
+		}
+		if data, err = sjson.SetBytes(data, "metadata.url", resultURL); err != nil {
+			return nil, errors.Wrap(err, "set metadata url failed")
+		}
 	}
 	return data, nil
 }

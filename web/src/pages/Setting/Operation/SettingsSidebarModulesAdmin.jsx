@@ -44,6 +44,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       enabled: true,
       ai_console: true,
       ai_image: true,
+      ai_video: true,
       ai_ecommerce_template: true,
       playground: true,
       chat: true,
@@ -70,6 +71,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       models: true,
       deployment: true,
       ai_image_logs: true,
+      ai_video_logs: true,
       redemption: true,
       user: true,
       subscription: true,
@@ -112,6 +114,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         enabled: true,
         ai_console: true,
         ai_image: true,
+        ai_video: true,
         ai_ecommerce_template: true,
         playground: true,
         chat: true,
@@ -138,6 +141,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         models: true,
         deployment: true,
         ai_image_logs: true,
+        ai_video_logs: true,
         redemption: true,
         user: true,
         subscription: true,
@@ -191,10 +195,16 @@ export default function SettingsSidebarModulesAdmin(props) {
         setSidebarModulesAdmin((previous) => ({
           ...previous,
           ...modules,
+          chat: {
+            ...previous.chat,
+            ...(modules.chat || {}),
+            ai_video: modules.chat?.ai_video ?? true,
+          },
           admin: {
             ...previous.admin,
             ...(modules.admin || {}),
             analytics: modules.admin?.analytics ?? true,
+            ai_video_logs: modules.admin?.ai_video_logs ?? true,
           },
         }));
       } catch (error) {
@@ -204,6 +214,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             enabled: true,
             ai_console: true,
             ai_image: true,
+            ai_video: true,
             ai_ecommerce_template: true,
             playground: true,
             chat: true,
@@ -224,6 +235,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             models: true,
             deployment: true,
             ai_image_logs: true,
+            ai_video_logs: true,
             redemption: true,
             user: true,
             subscription: true,
@@ -251,6 +263,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           key: 'ai_image',
           title: t('AI 绘图'),
           description: t('Google 图片生成页面'),
+        },
+        {
+          key: 'ai_video',
+          title: t('AI 视频'),
+          description: t('Sora / Veo 视频生成页面'),
         },
         {
           key: 'ai_ecommerce_template',
@@ -325,6 +342,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           key: 'ai_image_logs',
           title: t('AI 绘图日志'),
           description: t('异步 AI 绘图任务与对象存储配置'),
+        },
+        {
+          key: 'ai_video_logs',
+          title: t('AI 视频日志'),
+          description: t('视频模型可见范围与生成任务记录'),
         },
         {
           key: 'subscription',

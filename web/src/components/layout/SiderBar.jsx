@@ -51,8 +51,10 @@ const routerMap = {
   deployment: '/console/deployment',
   ai_console: '/console/ai',
   ai_image: '/console/ai-image',
+  ai_video: '/console/ai-video',
   ai_ecommerce_template: '/console/ai-ecommerce-template',
   ai_image_logs: '/console/ai-image-logs',
+  ai_video_logs: '/console/ai-video-logs',
   playground: '/console/playground',
   personal: '/console/personal',
 };
@@ -164,6 +166,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {
+        text: t('AI 视频日志'),
+        itemKey: 'ai_video_logs',
+        to: '/console/ai-video-logs',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
         text: t('订阅管理'),
         itemKey: 'subscription',
         to: '/subscription',
@@ -247,6 +255,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     });
 
     items.splice(2, 0, {
+      text: t('AI 视频'),
+      itemKey: 'ai_video',
+      to: '/console/ai-video',
+    });
+
+    items.splice(3, 0, {
       text: t('AI 电商绘图模板'),
       itemKey: 'ai_ecommerce_template',
       to: '/console/ai-ecommerce-template',
@@ -357,6 +371,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
             className={`truncate font-medium text-sm ${
               item.itemKey === 'ai_console' ||
               item.itemKey === 'ai_image' ||
+              item.itemKey === 'ai_video' ||
               item.itemKey === 'ai_ecommerce_template'
                 ? 'sidebar-ai-nav-text'
                 : ''

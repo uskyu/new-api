@@ -123,7 +123,6 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 	var model string
 	var seconds int
 	var size string
-	var hasInputReference bool
 
 	var req TaskSubmitReq
 	if err := common.UnmarshalBodyReusable(c, &req); err != nil {
@@ -145,18 +144,11 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 		return createTaskError(fmt.Errorf("model field is required"), "missing_model", http.StatusBadRequest, true)
 	}
 
-	if req.HasImage() {
-		hasInputReference = true
-	}
-
 	if taskErr := validatePrompt(prompt); taskErr != nil {
 		return taskErr
 	}
 
-	action := constant.TaskActionTextGenerate
-	if hasInputReference {
-		action = constant.TaskActionGenerate
-	}
+	action := constant.TaskActionGenerate
 	if strings.HasPrefix(model, "sora-2") {
 
 		if size == "" {

@@ -31,6 +31,8 @@ const (
 	LastMessageTypeThinking = "thinking"
 )
 
+const ContextKeyConsoleRelayRequest = "console_relay_request"
+
 type ClaudeConvertInfo struct {
 	LastMessagesType string
 	Index            int
@@ -493,6 +495,8 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		info.IsPlayground = true
 		info.RequestURLPath = strings.TrimPrefix(info.RequestURLPath, "/pg")
 		info.RequestURLPath = "/v1" + info.RequestURLPath
+	} else if c.GetBool(ContextKeyConsoleRelayRequest) {
+		info.IsPlayground = true
 	}
 
 	userSetting, ok := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)

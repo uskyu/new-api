@@ -17,6 +17,7 @@ import {
 const RESOLUTION_OPTIONS = ['1K', '2K', '4K'];
 const ASPECT_RATIO_OPTIONS = ['1:1', '3:2', '4:3', '16:9', '9:16'];
 const OPENAI_IMAGE_SIZE_OPTIONS = [
+  { value: 'auto', label: 'Auto (跟随参考图)' },
   { value: '1024x1024', label: '1024×1024 (1:1)' },
   { value: '1536x1024', label: '1536×1024 (3:2)' },
   { value: '1024x1536', label: '1024×1536 (2:3)' },
@@ -250,6 +251,16 @@ const taskToGenerationRecord = (task) => {
   };
 };
 
+const imageTaskStatusTextMap = {
+  PENDING: '排队中',
+  PROCESSING: '生成中',
+  SUCCEEDED: '已完成',
+  FAILED: '生成失败',
+};
+
+const getImageTaskStatusText = (status) =>
+  imageTaskStatusTextMap[status] || status || '未知状态';
+
 const trimMessagesToHistoryLimit = (messages = []) => messages.slice(-(MAX_HISTORY_RECORDS * 2));
 
 const createImageAssistantMessage = (imageUrls, prompt) => ({
@@ -442,13 +453,14 @@ const postOpenAIImagePayload = async (payload, selectedGroup) => {
   return response;
 };
 
-const postOpenAIImageEditPayload = async ({ model, prompt, images, selectedGroup }) => {
+const postOpenAIImageEditPayload = async ({ model, prompt, images, selectedGroup, size }) => {
   const query = selectedGroup
     ? `?group=${encodeURIComponent(selectedGroup)}`
     : '';
   const formData = new FormData();
   formData.append('model', model);
   formData.append('prompt', prompt);
+  formData.append('size', size || 'auto');
   formData.append('n', '1');
 
   images.filter((image) => image?.file).slice(0, MAX_REFERENCE_IMAGES).forEach((image, index) => {
@@ -1025,6 +1037,9 @@ const AIImage = () => {
         ...previous,
         ...acceptedFiles.map(createDraftImageEntry),
       ]);
+      if (acceptedFiles.length > 0) {
+        setOpenaiImageSize('auto');
+      }
       if (acceptedFiles.length < nextFiles.length) {
         showError(t('最多支持 {{count}} 张参考图', { count: MAX_REFERENCE_IMAGES }));
       }
@@ -1107,6 +1122,7 @@ const AIImage = () => {
         }
         return [...previous, nextImage];
       });
+      setOpenaiImageSize('auto');
       setAnnotationSource(null);
       showSuccess(t('\u5df2\u6dfb\u52a0\u5c40\u90e8\u4fee\u6539\u8981\u6c42'));
     },
@@ -1386,7 +1402,7 @@ const AIImage = () => {
           model: effectiveModel,
           prompt: itemPrompt,
           group: selectedGroup,
-          size: openaiImageSize,
+          size: referenceImages.length > 0 ? openaiImageSize || 'auto' : openaiImageSize,
           n: 1,
           reference_images: referenceImages,
         }),
@@ -1420,6 +1436,7 @@ const AIImage = () => {
               prompt: itemPrompt,
               images: activeDraftImages,
               selectedGroup,
+              size: openaiImageSize || 'auto',
             })
           : await postOpenAIImagePayload(
               {
@@ -1855,6 +1872,7 @@ const AIImage = () => {
           const extension = mimeType.split('/')[1] || 'png';
           const file = new File([bytes], `referenced-${Date.now()}.${extension}`, { type: mimeType });
           setDraftImages((previous) => [...previous, createDraftImageEntry(file, { sourceDataUrl: imageUrl })]);
+          setOpenaiImageSize('auto');
           showSuccess(t('已引用到参考图'));
           return;
         }
@@ -1877,12 +1895,13 @@ const AIImage = () => {
         const extension = blob.type?.split('/')[1] || 'png';
         const file = new File([blob], `referenced-${Date.now()}.${extension}`, { type: blob.type || 'image/png' });
         setDraftImages((previous) => [...previous, createDraftImageEntry(file)]);
+        setOpenaiImageSize('auto');
         showSuccess(t('已引用到参考图'));
       } catch {
         showError(t('引用图片失败，请右键保存后手动上传'));
       }
     },
-    [setDraftImages, t],
+    [draftImages.length, setDraftImages, t],
   );
 
   const handleOptimizePrompt = React.useCallback(async () => {
@@ -2222,50 +2241,6 @@ const AIImage = () => {
                   </div>
                 )}
 
-                {draftImages.length > 0 && (
-                  <div className='mt-3 flex flex-wrap gap-2'>
-                    {draftImages.map((image, index) => (
-                      <div
-                        key={image.id || `${index}-${image.previewUrl}`}
-                        className={`group relative overflow-hidden rounded-[18px] border bg-white shadow-sm transition ${
-                          getImageAnnotationCount(image) > 0
-                            ? 'border-sky-300 ring-2 ring-sky-100'
-                            : 'border-white/70 hover:border-sky-200'
-                        }`}
-                      >
-                        <img
-                          src={image.previewUrl}
-                          alt={`${t('参考图')} ${index + 1}`}
-                          className='h-24 w-24 object-cover'
-                        />
-                        <button
-                          type='button'
-                          onClick={() => openDraftAnnotation(index)}
-                          className='absolute inset-x-1.5 bottom-1.5 flex h-7 items-center justify-center gap-1 rounded-full bg-slate-950/80 px-2 text-[11px] font-semibold text-white shadow-lg transition hover:bg-sky-600'
-                          title={t('圈选参考图局部并填写修改要求')}
-                        >
-                          <Brush size={12} />
-                          <span>
-                            {getImageAnnotationCount(image) > 0
-                              ? t('已标注 {{count}} 处', { count: getImageAnnotationCount(image) })
-                              : t('标注修改')}
-                          </span>
-                        </button>
-                        <span className='absolute left-1.5 top-1.5 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow'>
-                          {t('可编辑')}
-                        </span>
-                        <button
-                          type='button'
-                          onClick={() => handleRemoveDraftImage(index)}
-                          className='absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white'
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
                 {annotatedPromptCount > 0 && (
                   <div className='mt-3 rounded-[18px] border border-sky-100 bg-sky-50/80 p-3'>
                     <div className='mb-2 flex items-center gap-2 text-sm font-semibold text-sky-700'>
@@ -2320,7 +2295,63 @@ const AIImage = () => {
                   <Typography.Text className='!text-xs !text-slate-500'>
                     {t('最多 {{count}} 张参考图，上传后可圈选局部修改', { count: MAX_REFERENCE_IMAGES })}
                   </Typography.Text>
+                </div>
 
+                {draftImages.length > 0 && (
+                  <div className='mt-3 rounded-[22px] border border-slate-200 bg-white/70 p-3'>
+                    <div className='mb-2 flex items-center justify-between gap-3'>
+                      <Typography.Text className='!text-xs !font-semibold !uppercase !tracking-[0.18em] !text-slate-400'>
+                        {t('已上传参考图')}
+                      </Typography.Text>
+                      <Typography.Text className='!text-xs !text-slate-400'>
+                        {t('{{count}} 张', { count: draftImages.length })}
+                      </Typography.Text>
+                    </div>
+                    <div className='flex flex-wrap gap-2'>
+                      {draftImages.map((image, index) => (
+                        <div
+                          key={image.id || `${index}-${image.previewUrl}`}
+                          className={`group relative overflow-hidden rounded-[18px] border bg-white shadow-sm transition ${
+                            getImageAnnotationCount(image) > 0
+                              ? 'border-sky-300 ring-2 ring-sky-100'
+                              : 'border-white/70 hover:border-sky-200'
+                          }`}
+                        >
+                          <img
+                            src={image.previewUrl}
+                            alt={`${t('参考图')} ${index + 1}`}
+                            className='h-24 w-24 object-cover'
+                          />
+                          <button
+                            type='button'
+                            onClick={() => openDraftAnnotation(index)}
+                            className='absolute inset-x-1.5 bottom-1.5 flex h-7 items-center justify-center gap-1 rounded-full bg-slate-950/80 px-2 text-[11px] font-semibold text-white shadow-lg transition hover:bg-sky-600'
+                            title={t('圈选参考图局部并填写修改要求')}
+                          >
+                            <Brush size={12} />
+                            <span>
+                              {getImageAnnotationCount(image) > 0
+                                ? t('已标注 {{count}} 处', { count: getImageAnnotationCount(image) })
+                                : t('标注修改')}
+                            </span>
+                          </button>
+                          <span className='absolute left-1.5 top-1.5 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow'>
+                            {t('可编辑')}
+                          </span>
+                          <button
+                            type='button'
+                            onClick={() => handleRemoveDraftImage(index)}
+                            className='absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white'
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className='mt-3 flex flex-wrap items-center gap-3'>
                   <Button
                     theme='solid'
                     type='primary'
@@ -2523,7 +2554,7 @@ const AIImage = () => {
                         ? 'bg-blue-100 text-blue-700'
                         : 'bg-amber-100 text-amber-700'
                     }`}>
-                      {task.status === 'PROCESSING' ? t('生成中') : t('排队中')}
+                      {t(getImageTaskStatusText(task.status))}
                     </span>
                     <span className='flex-1 truncate text-slate-600'>
                       {task.prompt || t('未命名任务')}

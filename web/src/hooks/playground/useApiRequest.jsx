@@ -314,6 +314,7 @@ export const useApiRequest = (
 
       let responseData = '';
       let hasReceivedFirstResponse = false;
+      let hasReceivedContent = false;
       let isStreamComplete = false; // 添加标志位跟踪流是否正常完成
 
       source.addEventListener('message', (e) => {
@@ -354,12 +355,15 @@ export const useApiRequest = (
           const delta = payload.choices?.[0]?.delta;
           if (delta) {
             if (delta.reasoning_content) {
+              hasReceivedContent = true;
               streamMessageUpdate(delta.reasoning_content, 'reasoning');
             }
             if (delta.reasoning) {
+              hasReceivedContent = true;
               streamMessageUpdate(delta.reasoning, 'reasoning');
             }
             if (delta.content) {
+              hasReceivedContent = true;
               streamMessageUpdate(delta.content, 'content');
             }
           }
@@ -375,8 +379,12 @@ export const useApiRequest = (
           }));
           setActiveDebugTab(DEBUG_TABS.RESPONSE);
 
-          streamMessageUpdate(t('解析响应数据时发生错误'), 'content');
-          completeMessage(MESSAGE_STATUS.ERROR);
+          if (hasReceivedContent) {
+            completeMessage(MESSAGE_STATUS.COMPLETE);
+          } else {
+            streamMessageUpdate(t('解析响应数据时发生错误'), 'content');
+            completeMessage(MESSAGE_STATUS.ERROR);
+          }
         }
       });
 
@@ -398,8 +406,12 @@ export const useApiRequest = (
           }));
           setActiveDebugTab(DEBUG_TABS.RESPONSE);
 
-          streamMessageUpdate(errorMessage, 'content');
-          completeMessage(MESSAGE_STATUS.ERROR);
+          if (hasReceivedContent) {
+            completeMessage(MESSAGE_STATUS.COMPLETE);
+          } else {
+            streamMessageUpdate(errorMessage, 'content');
+            completeMessage(MESSAGE_STATUS.ERROR);
+          }
           sseSourceRef.current = null;
           source.close();
         }
@@ -427,8 +439,12 @@ export const useApiRequest = (
           setActiveDebugTab(DEBUG_TABS.RESPONSE);
 
           source.close();
-          streamMessageUpdate(t('连接已断开'), 'content');
-          completeMessage(MESSAGE_STATUS.ERROR);
+          if (hasReceivedContent) {
+            completeMessage(MESSAGE_STATUS.COMPLETE);
+          } else {
+            streamMessageUpdate(t('连接已断开'), 'content');
+            completeMessage(MESSAGE_STATUS.ERROR);
+          }
         }
       });
 
