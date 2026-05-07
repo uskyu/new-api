@@ -196,10 +196,18 @@ const AIVideo = () => {
   const [size, setSize] = useState(initialPreferences.size || '720x1280');
   const [seconds, setSeconds] = useState(initialPreferences.seconds || '10');
   const [referenceFiles, setReferenceFiles] = useState([]);
+  const [referencePreviews, setReferencePreviews] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [tasks, setTasks] = useState([]);
-  const activeTask = tasks[0] || null;
+  const [selectedTaskId, setSelectedTaskId] = useState('');
+  const activeTask = useMemo(
+    () =>
+      tasks.find((item) => item.task_id === selectedTaskId) ||
+      tasks[0] ||
+      null,
+    [selectedTaskId, tasks],
+  );
   const activeVideoUrl =
     activeTask?.status === 'completed'
       ? getVideoUrl(activeTask) || `/v1/videos/${activeTask.task_id}/content`
@@ -298,6 +306,18 @@ const AIVideo = () => {
     }
   }, [loadTasks, models.length]);
 
+  useEffect(() => {
+    const previews = referenceFiles.map((file) => ({
+      key: `${file.name}-${file.size}-${file.lastModified}`,
+      name: file.name,
+      url: URL.createObjectURL(file),
+    }));
+    setReferencePreviews(previews);
+    return () => {
+      previews.forEach((item) => URL.revokeObjectURL(item.url));
+    };
+  }, [referenceFiles]);
+
   const refreshTask = useCallback(async (taskId) => {
     if (!taskId) return;
     try {
@@ -314,7 +334,9 @@ const AIVideo = () => {
   useEffect(() => {
     const timer = window.setInterval(() => {
       tasks
-        .filter((task) => ['queued', 'processing', 'in_progress'].includes(task.status))
+        .filter((task) =>
+          ['queued', 'pending', 'processing', 'in_progress'].includes(task.status),
+        )
         .slice(0, 5)
         .forEach((task) => refreshTask(task.task_id));
     }, 5000);
@@ -368,6 +390,7 @@ const AIVideo = () => {
           ...nextTask,
         }),
       );
+      setSelectedTaskId(nextTask.task_id);
       setPrompt('');
       setReferenceFiles([]);
       showSuccess(t('AI 视频任务已提交'));
@@ -389,7 +412,19 @@ const AIVideo = () => {
       {
         title: t('任务'),
         dataIndex: 'task_id',
-        render: (value) => <span className='font-mono text-xs'>{value}</span>,
+        render: (value) => (
+          <button
+            type='button'
+            className={`font-mono text-xs ${
+              value === activeTask?.task_id
+                ? 'font-semibold text-sky-600'
+                : 'text-slate-600'
+            }`}
+            onClick={() => setSelectedTaskId(value)}
+          >
+            {value}
+          </button>
+        ),
         width: 190,
       },
       { title: t('模型'), dataIndex: 'model', width: 160 },
@@ -448,7 +483,7 @@ const AIVideo = () => {
           ),
       },
     ],
-    [t],
+    [activeTask?.task_id, t],
   );
 
   return (
@@ -572,11 +607,19 @@ const AIVideo = () => {
                   {t('上传参考图')}
                 </Button>
                 {referenceFiles.length > 0 ? (
-                  <div className='mt-3 flex flex-wrap gap-2'>
-                    {referenceFiles.map((file) => (
-                      <Tag key={`${file.name}-${file.size}`} color='blue'>
-                        {file.name}
-                      </Tag>
+                  <div className='mt-3 flex flex-wrap items-center gap-2'>
+                    {referencePreviews.map((file) => (
+                      <div
+                        key={file.key}
+                        className='group relative h-16 w-16 overflow-hidden rounded-md border border-slate-200 bg-slate-100'
+                        title={file.name}
+                      >
+                        <img
+                          src={file.url}
+                          alt={file.name}
+                          className='h-full w-full object-cover'
+                        />
+                      </div>
                     ))}
                     <Button
                       size='small'
@@ -683,6 +726,13 @@ const AIVideo = () => {
             columns={columns}
             dataSource={tasks}
             pagination={false}
+            onRow={(record) => ({
+              onClick: () => setSelectedTaskId(record.task_id),
+              className:
+                record.task_id === activeTask?.task_id
+                  ? 'cursor-pointer bg-sky-50'
+                  : 'cursor-pointer',
+            })}
             empty={<Empty title={t('暂无视频任务')} />}
           />
         </section>
