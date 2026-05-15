@@ -169,39 +169,16 @@ code {
 .sidebar-ai-nav-text {
   position: relative;
   display: inline-block;
-  color: transparent !important;
-  background: linear-gradient(
-    90deg,
-    #0f172a 0%,
-    #0f172a 34%,
-    #38bdf8 48%,
-    #0f172a 62%,
-    #0f172a 100%
-  );
-  background-size: 240% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  text-shadow:
-    0 0 10px rgba(56, 189, 248, 0.18),
-    0 0 18px rgba(14, 165, 233, 0.12);
-  animation: sidebar-ai-nav-sheen 3.8s ease-in-out infinite;
+  color: inherit !important;
+  background: none;
+  text-shadow: none;
+  animation: none;
 }
 
 .sidebar-nav-item-selected .sidebar-ai-nav-text {
-  background: linear-gradient(
-    90deg,
-    #0284c7 0%,
-    #0284c7 30%,
-    #e0f2fe 48%,
-    #0284c7 66%,
-    #0284c7 100%
-  );
-  background-size: 240% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  text-shadow:
-    0 0 12px rgba(56, 189, 248, 0.35),
-    0 0 24px rgba(14, 165, 233, 0.22);
+  color: var(--semi-color-primary) !important;
+  background: none;
+  text-shadow: none;
 }
 
 @keyframes sidebar-ai-nav-sheen {
@@ -600,32 +577,11 @@ code {
 }
 
 .solo-ai-surface {
-  background: linear-gradient(
-      115deg,
-      rgba(239, 246, 255, 0.96),
-      rgba(248, 250, 252, 0.98) 45%,
-      rgba(236, 253, 245, 0.9)
-    ),
-    repeating-linear-gradient(
-      90deg,
-      rgba(15, 23, 42, 0.03) 0 1px,
-      transparent 1px 80px
-    );
+  background: var(--semi-color-bg-1);
 }
 
 .xiaoyang-studio-surface {
-  background: linear-gradient(
-      118deg,
-      rgba(240, 253, 250, 0.94),
-      rgba(248, 250, 252, 0.98) 42%,
-      rgba(239, 246, 255, 0.94)
-    ),
-    linear-gradient(90deg, rgba(15, 23, 42, 0.035) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(15, 23, 42, 0.028) 1px, transparent 1px);
-  background-size:
-    auto,
-    72px 72px,
-    72px 72px;
+  background: var(--semi-color-bg-1);
 }
 
 .xiaoyang-studio-shell::after {
@@ -668,18 +624,7 @@ code {
 
 .solo-side-panel::before,
 .solo-workbench-panel::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.64),
-    rgba(255, 255, 255, 0.12)
-  );
-  opacity: 0.7;
+  display: none;
 }
 
 .solo-side-panel > :not(.solo-panel-overlay),
@@ -689,26 +634,88 @@ code {
 }
 
 .solo-panel-overlay {
-  position: absolute;
-  z-index: 0;
-  pointer-events: none;
+  display: none;
 }
 
 .solo-empty-hero .semi-empty-title {
-  margin-top: 18px !important;
-  font-size: clamp(32px, 5vw, 56px) !important;
-  line-height: 1.05 !important;
-  font-weight: 900 !important;
-  color: #0f172a !important;
+  margin-top: 12px !important;
+  font-size: 22px !important;
+  line-height: 1.35 !important;
+  font-weight: 600 !important;
+  color: var(--semi-color-text-0) !important;
   letter-spacing: 0 !important;
 }
 
 .solo-empty-hero .semi-empty-description {
   max-width: 640px;
-  margin: 12px auto 0 !important;
-  color: #64748b !important;
-  font-size: 16px !important;
-  line-height: 1.75 !important;
+  margin: 8px auto 0 !important;
+  color: var(--semi-color-text-2) !important;
+  font-size: 14px !important;
+  line-height: 1.6 !important;
+}
+
+.ai-console-page .solo-side-panel,
+.ai-console-page .solo-workbench-panel,
+.ai-image-page .solo-workbench-panel {
+  border-color: var(--semi-color-border) !important;
+  border-radius: 8px !important;
+  background: var(--semi-color-bg-0) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+.ai-console-page [class*='rounded-['],
+.ai-image-page [class*='rounded-['] {
+  border-radius: 8px !important;
+}
+
+.ai-console-page [class*='shadow-['],
+.ai-image-page [class*='shadow-['] {
+  box-shadow: none !important;
+}
+
+.ai-console-page [class*='backdrop-blur'],
+.ai-image-page [class*='backdrop-blur'] {
+  backdrop-filter: none !important;
+}
+
+.ai-console-page .semi-chat-chatBox-content-user,
+.ai-console-page .semi-chat-chatBox-content-userBubble {
+  background: var(--semi-color-primary-light-default) !important;
+  border-color: var(--semi-color-primary-light-active) !important;
+}
+
+.ai-console-page select,
+.ai-image-page select,
+.ai-image-page textarea,
+.ai-image-page input {
+  border-radius: 6px !important;
+  background: var(--semi-color-bg-0) !important;
+  color: var(--semi-color-text-0) !important;
+  border-color: var(--semi-color-border) !important;
+}
+
+.ai-console-page .semi-button,
+.ai-image-page .semi-button {
+  border-radius: 6px !important;
+}
+
+.ai-image-page .xiaoyang-studio-shell::after {
+  display: none;
+}
+
+.ai-image-page .xiaoyang-canvas-stage {
+  background: var(--semi-color-bg-0) !important;
+  border-color: var(--semi-color-border) !important;
+}
+
+.ai-image-page .xiaoyang-canvas-empty .semi-empty-title {
+  color: var(--semi-color-text-0) !important;
+  font-weight: 600 !important;
+}
+
+.ai-image-page .xiaoyang-canvas-empty .semi-empty-description {
+  color: var(--semi-color-text-2) !important;
 }
 
 .semi-chat-chatBox-action {

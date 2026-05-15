@@ -42,6 +42,7 @@ import {
 const RESOLUTION_OPTIONS = ['1K', '2K', '4K'];
 const ASPECT_RATIO_OPTIONS = ['1:1', '3:2', '4:3', '16:9', '9:16'];
 const OPENAI_IMAGE_SIZE_OPTIONS = [
+  { value: 'auto', label: 'Auto (跟随参考图)' },
   { value: '1024x1024', label: '1024×1024 (1:1)' },
   { value: '1536x1024', label: '1536×1024 (3:2)' },
   { value: '1024x1536', label: '1024×1536 (2:3)' },
@@ -504,6 +505,7 @@ const postOpenAIImageEditPayload = async ({
   prompt,
   images,
   selectedGroup,
+  size,
 }) => {
   const query = selectedGroup
     ? `?group=${encodeURIComponent(selectedGroup)}`
@@ -511,6 +513,7 @@ const postOpenAIImageEditPayload = async ({
   const formData = new FormData();
   formData.append('model', model);
   formData.append('prompt', prompt);
+  formData.append('size', size || 'auto');
   formData.append('n', '1');
 
   images
@@ -547,10 +550,10 @@ const GalleryImage = ({ src, alt, active, onClick }) => (
   <button
     type='button'
     onClick={onClick}
-    className={`overflow-hidden rounded-[22px] border transition ${
+    className={`overflow-hidden rounded-lg border transition ${
       active
-        ? 'border-sky-400 shadow-[0_18px_44px_rgba(59,130,246,0.18)]'
-        : 'border-white/70 hover:border-slate-300'
+        ? 'border-blue-400 ring-2 ring-blue-100'
+        : 'border-slate-200 hover:border-slate-300'
     }`}
   >
     <img
@@ -1172,6 +1175,9 @@ const AIImage = () => {
         ...previous,
         ...acceptedFiles.map(createDraftImageEntry),
       ]);
+      if (acceptedFiles.length > 0) {
+        setOpenaiImageSize('auto');
+      }
       if (acceptedFiles.length < nextFiles.length) {
         showError(
           t('最多支持 {{count}} 张参考图', { count: MAX_REFERENCE_IMAGES }),
@@ -1273,6 +1279,7 @@ const AIImage = () => {
         }
         return [...previous, nextImage];
       });
+      setOpenaiImageSize('auto');
       setAnnotationSource(null);
       showSuccess(t('\u5df2\u6dfb\u52a0\u5c40\u90e8\u4fee\u6539\u8981\u6c42'));
     },
@@ -1619,14 +1626,17 @@ const AIImage = () => {
           'Content-Type': 'application/json',
           'New-Api-User': getUserIdFromLocalStorage(),
         },
-        body: JSON.stringify({
-          model: effectiveModel,
-          prompt: itemPrompt,
-          group: selectedGroup,
-          size: openaiImageSize,
-          n: 1,
-          reference_images: referenceImages,
-        }),
+          body: JSON.stringify({
+            model: effectiveModel,
+            prompt: itemPrompt,
+            group: selectedGroup,
+            size:
+              referenceImages.length > 0
+                ? openaiImageSize || 'auto'
+                : openaiImageSize,
+            n: 1,
+            reference_images: referenceImages,
+          }),
       });
       if (!response.ok) {
         const errorBody = await response.text();
@@ -1661,6 +1671,7 @@ const AIImage = () => {
                 prompt: itemPrompt,
                 images: activeDraftImages,
                 selectedGroup,
+                size: openaiImageSize || 'auto',
               })
             : await postOpenAIImagePayload(
                 {
@@ -2156,6 +2167,7 @@ const AIImage = () => {
             ...previous,
             createDraftImageEntry(file, { sourceDataUrl: imageUrl }),
           ]);
+          setOpenaiImageSize('auto');
           showSuccess(t('已引用到参考图'));
           return;
         }
@@ -2184,6 +2196,7 @@ const AIImage = () => {
           ...previous,
           createDraftImageEntry(file),
         ]);
+        setOpenaiImageSize('auto');
         showSuccess(t('已引用到参考图'));
       } catch {
         showError(t('引用图片失败，请右键保存后手动上传'));
@@ -2290,18 +2303,15 @@ const AIImage = () => {
   return (
     <div className='ai-image-page xiaoyang-studio-surface mt-[64px] min-h-[calc(100vh-64px)] px-2 py-3 sm:px-3 lg:px-4'>
       <div className='mx-auto flex min-h-[calc(100vh-88px)] w-full max-w-none flex-col gap-4'>
-        <section className='solo-workbench-panel xiaoyang-studio-shell rounded-[36px] border border-white/75 bg-white/75 p-4 shadow-[0_26px_90px_rgba(17,24,39,0.10)] backdrop-blur-2xl sm:p-5'>
+        <section className='solo-workbench-panel xiaoyang-studio-shell rounded-lg border border-slate-200 bg-white p-4 sm:p-5'>
           <div className='grid min-h-[62vh] gap-4 xl:grid-cols-[minmax(420px,1fr)_minmax(360px,0.82fr)] 2xl:grid-cols-[minmax(560px,1fr)_720px]'>
             <div className='flex min-w-0 flex-col gap-4'>
-              <div className='flex flex-wrap items-center justify-between gap-4 rounded-[28px] border border-white/70 bg-white/60 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.06)] backdrop-blur-xl'>
+              <div className='flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white p-4'>
                 <div className='flex min-w-0 items-center gap-3'>
-                  <div className='flex h-12 w-12 items-center justify-center rounded-[18px] bg-cyan-50 text-cyan-700 shadow-[0_16px_36px_rgba(15,23,42,0.08)]'>
+                  <div className='flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600'>
                     <ImagePlus size={22} />
                   </div>
                   <div className='min-w-0'>
-                    <div className='mb-1 text-xs font-black uppercase tracking-[0.22em] text-cyan-700'>
-                      PROMPT BAY
-                    </div>
                     <Typography.Title
                       heading={4}
                       className='!mb-0 !text-slate-900'
@@ -2315,7 +2325,7 @@ const AIImage = () => {
                     </Typography.Text>
                   </div>
                 </div>
-                <div className='flex h-12 min-w-[220px] items-center justify-between gap-3 rounded-full border border-cyan-100 bg-white/80 px-4 text-sm font-black text-slate-900 shadow-[0_14px_36px_rgba(15,23,42,0.08)] backdrop-blur-xl'>
+                <div className='flex h-10 min-w-[220px] items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-900'>
                   <span className='truncate'>
                     {selectedModel || t('选择模型')}
                   </span>
@@ -2323,10 +2333,10 @@ const AIImage = () => {
                 </div>
               </div>
 
-              <div className='rounded-[30px] border border-cyan-100/75 bg-white/70 p-4 shadow-[0_18px_50px_rgba(8,47,73,0.07)] backdrop-blur-xl'>
+              <div className='rounded-lg border border-slate-200 bg-white p-4'>
                 <div className='mb-3 flex items-center justify-between gap-3'>
                   <div>
-                    <Typography.Text className='!text-xs !font-black !uppercase !tracking-[0.22em] !text-teal-600'>
+                    <Typography.Text className='!text-sm !font-semibold !text-slate-900'>
                       {t('基础设置')}
                     </Typography.Text>
                     <p className='mt-1 text-sm text-slate-500'>
@@ -2336,13 +2346,13 @@ const AIImage = () => {
                 </div>
                 <div className='grid gap-3 md:grid-cols-2'>
                   <label className='flex flex-col gap-2'>
-                    <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
+                    <span className='text-xs font-medium text-slate-500'>
                       {t('分组')}
                     </span>
                     <select
                       value={selectedGroup}
                       onChange={(event) => setSelectedGroup(event.target.value)}
-                      className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                      className='h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-400'
                     >
                       {groupOptions.map((option) => (
                         <option key={option.value} value={option.value}>
@@ -2353,7 +2363,7 @@ const AIImage = () => {
                   </label>
 
                   <label className='flex flex-col gap-2'>
-                    <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
+                    <span className='text-xs font-medium text-slate-500'>
                       {t('绘图模型')}
                     </span>
                     <select
@@ -2362,7 +2372,7 @@ const AIImage = () => {
                         selectedModelRef.current = event.target.value;
                         setSelectedModel(event.target.value);
                       }}
-                      className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                      className='h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-400'
                     >
                       <option value=''>{t('选择模型')}</option>
                       {modelOptions.map((option) => (
@@ -2375,10 +2385,10 @@ const AIImage = () => {
                 </div>
               </div>
 
-              <div className='rounded-[30px] border border-white/75 bg-white/75 p-4 shadow-[0_22px_70px_rgba(8,47,73,0.08)] backdrop-blur-xl'>
+              <div className='rounded-lg border border-slate-200 bg-white p-4'>
                 <div className='mb-3 flex flex-wrap items-center justify-between gap-3'>
                   <div>
-                    <Typography.Text className='!text-xs !font-black !uppercase !tracking-[0.22em] !text-cyan-700'>
+                    <Typography.Text className='!text-sm !font-semibold !text-slate-900'>
                       {t('提示词与参考')}
                     </Typography.Text>
                     <p className='mt-1 text-sm text-slate-500'>
@@ -2390,7 +2400,7 @@ const AIImage = () => {
                       theme='light'
                       type='primary'
                       icon={<Bookmark size={15} />}
-                      className='!rounded-full'
+                      className='!rounded-md'
                       onClick={() => createPromptFavorite(prompt)}
                     >
                       {t('收藏当前')}
@@ -2400,7 +2410,7 @@ const AIImage = () => {
                 <div className='mb-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
                   {isOpenAIImageModel(fallbackImageModel) ? (
                     <label className='flex flex-col gap-2 md:col-span-2'>
-                      <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
+                      <span className='text-xs font-medium text-slate-500'>
                         {t('图片尺寸')}
                       </span>
                       <select
@@ -2408,7 +2418,7 @@ const AIImage = () => {
                         onChange={(event) =>
                           setOpenaiImageSize(event.target.value)
                         }
-                        className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                        className='h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-400'
                       >
                         {OPENAI_IMAGE_SIZE_OPTIONS.map((item) => (
                           <option key={item.value} value={item.value}>
@@ -2420,7 +2430,7 @@ const AIImage = () => {
                   ) : (
                     <>
                       <label className='flex flex-col gap-2'>
-                        <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
+                        <span className='text-xs font-medium text-slate-500'>
                           {t('分辨率')}
                         </span>
                         <select
@@ -2428,7 +2438,7 @@ const AIImage = () => {
                           onChange={(event) =>
                             setResolution(event.target.value)
                           }
-                          className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                          className='h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-400'
                         >
                           {RESOLUTION_OPTIONS.map((item) => (
                             <option key={item} value={item}>
@@ -2439,7 +2449,7 @@ const AIImage = () => {
                       </label>
 
                       <label className='flex flex-col gap-2'>
-                        <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
+                        <span className='text-xs font-medium text-slate-500'>
                           {t('图像比例')}
                         </span>
                         <select
@@ -2447,7 +2457,7 @@ const AIImage = () => {
                           onChange={(event) =>
                             setAspectRatio(event.target.value)
                           }
-                          className='h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                          className='h-10 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-400'
                         >
                           {ASPECT_RATIO_OPTIONS.map((item) => (
                             <option key={item} value={item}>
@@ -2460,7 +2470,7 @@ const AIImage = () => {
                   )}
 
                   <label className='flex flex-col gap-2'>
-                    <span className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>
+                    <span className='text-xs font-medium text-slate-500'>
                       {t('批量张数')}
                     </span>
                     <div className='flex items-center gap-3'>
@@ -2470,7 +2480,7 @@ const AIImage = () => {
                             key={item}
                             theme={batchCount === item ? 'solid' : 'light'}
                             type='primary'
-                            className='!rounded-full'
+                            className='!rounded-md'
                             onClick={() => setBatchCount(item)}
                           >
                             {item}
@@ -2529,7 +2539,7 @@ const AIImage = () => {
                       promptOptimizerModelRef.current = event.target.value;
                       setPromptOptimizerModel(event.target.value);
                     }}
-                    className='h-10 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400'
+                    className='h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-400'
                   >
                     <option value=''>{t('选择提示词优化模型')}</option>
                     {textModelOptions.map((option) => (
@@ -2541,14 +2551,14 @@ const AIImage = () => {
                 </div>
 
                 {optimizedPromptDraft && (
-                  <div className='mt-3 flex flex-wrap items-center gap-2 rounded-[18px] border border-emerald-100 bg-emerald-50/80 px-3 py-2'>
+                  <div className='mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2'>
                     <Typography.Text className='!text-sm !text-emerald-700'>
                       {t('已生成优化后的提示词，可恢复原文或确认采用')}
                     </Typography.Text>
                     <Button
                       theme='light'
                       type='tertiary'
-                      className='!rounded-full'
+                      className='!rounded-md'
                       onClick={handleRevertOptimizedPrompt}
                     >
                       {t('恢复原提示词')}
@@ -2557,7 +2567,7 @@ const AIImage = () => {
                       theme='solid'
                       type='primary'
                       icon={<Check size={16} />}
-                      className='!rounded-full'
+                      className='!rounded-md'
                       onClick={handleConfirmOptimizedPrompt}
                     >
                       {t('采用优化结果')}
@@ -2570,10 +2580,10 @@ const AIImage = () => {
                     {draftImages.map((image, index) => (
                       <div
                         key={image.id || `${index}-${image.previewUrl}`}
-                        className={`group relative overflow-hidden rounded-[18px] border bg-white shadow-sm transition ${
+                        className={`group relative overflow-hidden rounded-lg border bg-white transition ${
                           getImageAnnotationCount(image) > 0
-                            ? 'border-sky-300 ring-2 ring-sky-100'
-                            : 'border-white/70 hover:border-sky-200'
+                            ? 'border-blue-300 ring-2 ring-blue-100'
+                            : 'border-slate-200 hover:border-blue-200'
                         }`}
                       >
                         <img
@@ -2584,7 +2594,7 @@ const AIImage = () => {
                         <button
                           type='button'
                           onClick={() => openDraftAnnotation(index)}
-                          className='absolute inset-x-1.5 bottom-1.5 flex h-7 items-center justify-center gap-1 rounded-full bg-slate-950/80 px-2 text-[11px] font-semibold text-white shadow-lg transition hover:bg-sky-600'
+                          className='absolute inset-x-1.5 bottom-1.5 flex h-7 items-center justify-center gap-1 rounded-md bg-slate-950/80 px-2 text-[11px] font-semibold text-white transition hover:bg-blue-600'
                           title={t('圈选参考图局部并填写修改要求')}
                         >
                           <Brush size={12} />
@@ -2596,13 +2606,13 @@ const AIImage = () => {
                               : t('标注修改')}
                           </span>
                         </button>
-                        <span className='absolute left-1.5 top-1.5 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow'>
+                        <span className='absolute left-1.5 top-1.5 rounded bg-emerald-500 px-1.5 py-0.5 text-[10px] font-semibold text-white'>
                           {t('可编辑')}
                         </span>
                         <button
                           type='button'
                           onClick={() => handleRemoveDraftImage(index)}
-                          className='absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white'
+                          className='absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-md bg-black/70 text-white'
                         >
                           <X size={12} />
                         </button>
@@ -2612,8 +2622,8 @@ const AIImage = () => {
                 )}
 
                 {annotatedPromptCount > 0 && (
-                  <div className='mt-3 rounded-[18px] border border-sky-100 bg-sky-50/80 p-3'>
-                    <div className='mb-2 flex items-center gap-2 text-sm font-semibold text-sky-700'>
+                  <div className='mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3'>
+                    <div className='mb-2 flex items-center gap-2 text-sm font-semibold text-blue-700'>
                       <Brush size={15} />
                       <span>
                         {t('已添加 {{count}} 个局部修改要求', {
@@ -2631,7 +2641,7 @@ const AIImage = () => {
                           .map((annotation, annotationIndex) => (
                             <span
                               key={`${image.id}-${annotation.id}`}
-                              className='inline-flex max-w-full items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs text-slate-700 shadow-sm'
+                              className='inline-flex max-w-full items-center gap-1 rounded-md bg-white px-2.5 py-1 text-xs text-slate-700'
                               title={annotation.prompt}
                             >
                               <span
@@ -2656,7 +2666,7 @@ const AIImage = () => {
                 )}
 
                 <div className='mt-3 flex flex-wrap items-center gap-3'>
-                  <label className='inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm'>
+                  <label className='inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700'>
                     <ImagePlus size={16} />
                     <span>{t('上传参考图')}</span>
                     <input
@@ -2695,7 +2705,7 @@ const AIImage = () => {
                         ? handleBatchGenerate
                         : handleGenerate
                     }
-                    className='!rounded-full'
+                    className='!rounded-md'
                   >
                     {t('生成图片')}
                   </Button>
@@ -2713,7 +2723,7 @@ const AIImage = () => {
                     loading={isOptimizingPrompt}
                     disabled={isGenerating}
                     onClick={handleOptimizePrompt}
-                    className='!rounded-full'
+                    className='!rounded-md'
                   >
                     {t('优化提示词')}
                   </Button>
@@ -2722,7 +2732,7 @@ const AIImage = () => {
                     theme='solid'
                     type='tertiary'
                     icon={<Search size={15} />}
-                    className='!rounded-full !bg-slate-900 !text-white'
+                    className='!rounded-md'
                     onClick={openPromptFavorites}
                   >
                     {t('收藏夹')}
@@ -2738,13 +2748,13 @@ const AIImage = () => {
             </div>
 
             <div className='w-full min-w-0'>
-              <div className='xiaoyang-canvas-stage flex h-full min-h-[54vh] flex-col overflow-hidden rounded-[30px] border border-cyan-100 bg-white/82 shadow-[0_22px_70px_rgba(8,47,73,0.10)] backdrop-blur-xl'>
-                <div className='flex items-center justify-between gap-3 border-b border-cyan-100/75 px-4 py-3'>
-                  <Typography.Text className='!text-xs !font-black !uppercase !tracking-[0.22em] !text-cyan-700'>
+              <div className='xiaoyang-canvas-stage flex h-full min-h-[54vh] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white'>
+                <div className='flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3'>
+                  <Typography.Text className='!text-sm !font-semibold !text-slate-900'>
                     {t('当前结果')}
                   </Typography.Text>
-                  <span className='rounded-full border border-cyan-100 bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700'>
-                    Preview
+                  <span className='rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500'>
+                    {activeImages.length || 0}
                   </span>
                 </div>
                 <div className='flex flex-1 items-center justify-center p-4'>
@@ -2753,7 +2763,7 @@ const AIImage = () => {
                       <button
                         type='button'
                         onClick={() => openImageInNewTab(activeImage)}
-                        className='mx-auto flex h-[360px] w-full max-w-[560px] items-center justify-center overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.10)]'
+                        className='mx-auto flex h-[360px] w-full max-w-[560px] items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white'
                         title={t('点击查看大图')}
                       >
                         <img
@@ -2763,7 +2773,7 @@ const AIImage = () => {
                         />
                       </button>
                       {activeRecord?.prompt ? (
-                        <p className='mt-3 max-h-28 overflow-y-auto rounded-[20px] border border-slate-200 bg-white/80 px-4 py-3 text-sm leading-6 text-slate-600'>
+                        <p className='mt-3 max-h-28 overflow-y-auto rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-600'>
                           {activeRecord.prompt}
                         </p>
                       ) : null}
@@ -2774,9 +2784,9 @@ const AIImage = () => {
                               key={`${activeRecord.id}-${index}`}
                               type='button'
                               onClick={() => setActiveImageIndex(index)}
-                              className={`overflow-hidden rounded-2xl border transition ${
+                              className={`overflow-hidden rounded-lg border transition ${
                                 index === activeImageIndex
-                                  ? 'border-cyan-300 shadow-[0_10px_24px_rgba(34,211,238,0.22)]'
+                                  ? 'border-blue-300 ring-2 ring-blue-100'
                                   : 'border-slate-200 hover:border-slate-300'
                               }`}
                             >
@@ -2803,7 +2813,7 @@ const AIImage = () => {
                             )
                           }
                           loading={isPreparingAnnotation}
-                          className='!h-11 !rounded-full !bg-slate-950 !px-5 !text-white shadow-[0_14px_34px_rgba(15,23,42,0.18)]'
+                          className='!h-10 !rounded-md !px-4'
                           onClick={() =>
                             openRecordAnnotation(activeRecord, activeImageIndex)
                           }
@@ -2822,7 +2832,7 @@ const AIImage = () => {
                           theme='light'
                           type='primary'
                           icon={<Bookmark size={15} />}
-                          className='!rounded-full'
+                          className='!rounded-md'
                           onClick={() =>
                             createPromptFavorite(activeRecord?.prompt || '')
                           }
@@ -2833,7 +2843,7 @@ const AIImage = () => {
                         <Button
                           theme='light'
                           type='primary'
-                          className='!rounded-full'
+                          className='!rounded-md'
                           onClick={() => handleReuseImage(activeRecord)}
                         >
                           {t('引用为参考图')}
@@ -2842,7 +2852,7 @@ const AIImage = () => {
                     </div>
                   ) : (
                     <Empty
-                      image={<ImagePlus size={42} className='text-cyan-500' />}
+                      image={<ImagePlus size={42} className='text-blue-500' />}
                       className='xiaoyang-canvas-empty'
                       title={t('还没有生成图片')}
                       description={t('输入提示词后，生成结果会直接显示在这里')}
@@ -2854,29 +2864,27 @@ const AIImage = () => {
           </div>
         </section>
 
-        <section className='solo-workbench-panel rounded-[34px] border border-slate-900/10 bg-slate-950 p-4 text-white shadow-[0_24px_80px_rgba(15,23,42,0.16)] backdrop-blur-2xl sm:p-5'>
+        <section className='solo-workbench-panel rounded-lg border border-slate-200 bg-white p-4 sm:p-5'>
           <div className='mb-4 flex items-center justify-between gap-3'>
             <div>
-              <div className='mb-1 text-xs font-black uppercase tracking-[0.24em] text-cyan-300'>
-                FILM STRIP
-              </div>
-              <Typography.Title heading={6} className='!mb-0 !text-white'>
+              <div className='hidden'>FILM STRIP</div>
+              <Typography.Title heading={6} className='!mb-0 !text-slate-900'>
                 {t('最近生成')}
               </Typography.Title>
-              <Typography.Text className='!text-sm !font-medium !text-white/60'>
+              <Typography.Text className='!text-sm !text-slate-500'>
                 {t(
                   '点击下方缩略图即可切换查看历史结果，图片保留 7 天后自动清理',
                 )}
               </Typography.Text>
             </div>
             <div className='flex items-center gap-3'>
-              <Typography.Text className='!text-sm !text-white/60'>
+              <Typography.Text className='!text-sm !text-slate-500'>
                 {t('{{count}} 条记录', { count: records.length })}
               </Typography.Text>
               <Button
                 theme='light'
                 type='danger'
-                className='!rounded-full'
+                className='!rounded-md'
                 disabled={
                   localRecords.length === 0 && completedRemoteTasks.length === 0
                 }
@@ -2888,15 +2896,15 @@ const AIImage = () => {
           </div>
 
           {pendingRemoteTasks.length > 0 && (
-            <div className='mb-3 rounded-2xl border border-blue-100 bg-blue-50/80 p-3'>
-              <div className='mb-2 text-xs font-medium uppercase tracking-wider text-blue-500'>
+            <div className='mb-3 rounded-lg border border-blue-100 bg-blue-50 p-3'>
+              <div className='mb-2 text-xs font-medium text-blue-600'>
                 {t('排队 / 生成中')} ({pendingRemoteTasks.length})
               </div>
               <div className='flex flex-col gap-2'>
                 {pendingRemoteTasks.map((task) => (
                   <div
                     key={task.task_id}
-                    className='flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm'
+                    className='flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm'
                   >
                     <Loader2 size={14} className='animate-spin text-blue-500' />
                     <span
@@ -2926,11 +2934,11 @@ const AIImage = () => {
                 {records.map((record) => (
                   <div
                     key={record.id}
-                    className='w-[178px] shrink-0 space-y-2 rounded-[26px] border border-white/10 bg-white/10 p-3 shadow-[0_18px_44px_rgba(0,0,0,0.18)]'
+                    className='w-[178px] shrink-0 space-y-2 rounded-lg border border-slate-200 bg-white p-3'
                   >
                     {record.status === 'FAILED' ? (
                       <div
-                        className='flex h-24 w-24 items-center justify-center rounded-[22px] border border-red-300/40 bg-red-500/10 sm:h-28 sm:w-28'
+                        className='flex h-24 w-24 items-center justify-center rounded-lg border border-red-200 bg-red-50 sm:h-28 sm:w-28'
                         title={record.errorMessage || t('生成失败')}
                       >
                         <div className='px-2 text-center'>
@@ -2954,7 +2962,7 @@ const AIImage = () => {
                     <div className='w-full px-1'>
                       <button
                         type='button'
-                        className='h-12 w-full overflow-hidden rounded-xl px-1 py-1 text-left text-sm leading-5 text-white/70 transition hover:bg-white/10'
+                        className='h-12 w-full overflow-hidden rounded-md px-1 py-1 text-left text-sm leading-5 text-slate-600 transition hover:bg-slate-50'
                         onClick={() => handleCopyPrompt(record)}
                         title={record.prompt || t('未命名提示词')}
                       >
@@ -2968,7 +2976,7 @@ const AIImage = () => {
                           type='primary'
                           size='small'
                           icon={<Brush size={13} />}
-                          className='!col-span-2 !h-7 !rounded-full !bg-slate-950 !px-2 !text-xs !text-white'
+                          className='!col-span-2 !h-7 !rounded-md !px-2 !text-xs'
                           onClick={() => openRecordAnnotation(record, 0)}
                           disabled={
                             record.status === 'FAILED' || isPreparingAnnotation
@@ -2980,7 +2988,7 @@ const AIImage = () => {
                           theme='light'
                           type='primary'
                           size='small'
-                          className='!h-7 !rounded-full !px-2 !text-xs'
+                          className='!h-7 !rounded-md !px-2 !text-xs'
                           onClick={() =>
                             createPromptFavorite(record.prompt || '')
                           }
@@ -2992,7 +3000,7 @@ const AIImage = () => {
                           theme='light'
                           type='tertiary'
                           size='small'
-                          className='!h-7 !rounded-full !px-2 !text-xs'
+                          className='!h-7 !rounded-md !px-2 !text-xs'
                           onClick={() => handleDownloadImage(record)}
                           disabled={record.status === 'FAILED'}
                         >
@@ -3002,7 +3010,7 @@ const AIImage = () => {
                           theme='light'
                           type='primary'
                           size='small'
-                          className='!h-7 !rounded-full !px-2 !text-xs'
+                          className='!h-7 !rounded-md !px-2 !text-xs'
                           onClick={() => handleReuseImage(record)}
                           disabled={record.status === 'FAILED'}
                         >
@@ -3012,7 +3020,7 @@ const AIImage = () => {
                           theme='light'
                           type='danger'
                           size='small'
-                          className='!h-7 !rounded-full !px-2 !text-xs'
+                          className='!h-7 !rounded-md !px-2 !text-xs'
                           onClick={() => handleDeleteRecord(record)}
                         >
                           {t('删除')}

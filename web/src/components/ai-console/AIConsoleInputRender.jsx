@@ -49,7 +49,7 @@ const AIConsoleInputRender = ({
   const styledActionNode = (node, extraClassName, extraStyle = {}) =>
     node
       ? React.cloneElement(node, {
-          className: `!rounded-full flex-shrink-0 transition-all ${extraClassName} ${node.props.className || ''}`,
+          className: `!rounded-md flex-shrink-0 transition-all ${extraClassName} ${node.props.className || ''}`,
           onClick:
             node === clearContextNode ? handleRequestClear : node.props.onClick,
           style: {
@@ -68,18 +68,18 @@ const AIConsoleInputRender = ({
 
   const styledClearNode = styledActionNode(
     clearContextNode,
-    '!bg-white/75 hover:!bg-red-500 hover:!text-white !backdrop-blur-md',
+    '!bg-white hover:!bg-red-50 hover:!text-red-600',
     {
-      border: '1px solid rgba(255,255,255,0.6)',
-      boxShadow: '0 12px 32px rgba(15, 23, 42, 0.08)',
+      border: '1px solid var(--semi-color-border)',
+      boxShadow: 'none',
     },
   );
 
   const styledSendNode = styledActionNode(
     sendNode,
-    '!bg-slate-900 hover:!bg-black',
+    '!bg-blue-600 hover:!bg-blue-700',
     {
-      boxShadow: '0 18px 36px rgba(15, 23, 42, 0.18)',
+      boxShadow: 'none',
     },
   );
 
@@ -183,7 +183,7 @@ const AIConsoleInputRender = ({
           {draftImages.map((image, index) => (
             <div
               key={`${index}-${image.length}`}
-              className='group relative h-20 w-20 overflow-hidden rounded-2xl border border-white/70 bg-white/80 shadow-[0_18px_40px_rgba(15,23,42,0.10)] backdrop-blur-md'
+              className='group relative h-20 w-20 overflow-hidden rounded-lg border border-slate-200 bg-white'
             >
               <img
                 src={image}
@@ -196,7 +196,7 @@ const AIConsoleInputRender = ({
                   event.stopPropagation();
                   onRemoveImage?.(index);
                 }}
-                className='absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white opacity-100 transition md:opacity-0 md:group-hover:opacity-100'
+                className='absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-md bg-black/70 text-white opacity-100 transition md:opacity-0 md:group-hover:opacity-100'
                 aria-label={t('删除图片')}
               >
                 <X size={12} />
@@ -211,9 +211,9 @@ const AIConsoleInputRender = ({
           {draftFiles.map((file, index) => (
             <div
               key={file.id || `${index}-${file.filename}`}
-              className='group flex max-w-full items-center gap-2 rounded-2xl border border-white/70 bg-white/80 px-3 py-2 shadow-[0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-md'
+              className='group flex max-w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2'
             >
-              <div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600'>
+              <div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-600'>
                 <FileText size={16} />
               </div>
               <div className='min-w-0'>
@@ -232,7 +232,7 @@ const AIConsoleInputRender = ({
                   event.stopPropagation();
                   onRemoveFile?.(index);
                 }}
-                className='flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black/5 text-slate-500 transition hover:bg-rose-500 hover:text-white'
+                className='flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500 transition hover:bg-rose-50 hover:text-rose-600'
                 aria-label={t('删除文件')}
               >
                 <X size={12} />
@@ -249,7 +249,7 @@ const AIConsoleInputRender = ({
           </div>
         ) : null}
         <div
-          className='min-w-0 flex-1 rounded-[28px] border border-white/70 bg-white/75 p-2 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl transition-shadow hover:shadow-[0_28px_90px_rgba(15,23,42,0.12)]'
+          className='min-w-0 flex-1 rounded-lg border border-slate-200 bg-white p-2 transition-colors hover:border-slate-300'
           title={t('支持图片上传与粘贴')}
         >
           <div className='flex min-h-[46px] items-center gap-2'>
@@ -273,14 +273,14 @@ const AIConsoleInputRender = ({
               theme='borderless'
               type='tertiary'
               icon={<ImagePlus size={16} />}
-              className='!rounded-full !bg-white/75 hover:!bg-sky-50 hover:!text-sky-600'
+              className='!rounded-md !bg-white hover:!bg-blue-50 hover:!text-blue-600'
               style={{
                 width: 38,
                 height: 38,
                 minWidth: 38,
                 padding: 0,
-                border: '1px solid rgba(255,255,255,0.6)',
-                boxShadow: '0 12px 32px rgba(15, 23, 42, 0.08)',
+                border: '1px solid var(--semi-color-border)',
+                boxShadow: 'none',
               }}
               onClick={(event) => {
                 event.stopPropagation();
@@ -299,14 +299,14 @@ const AIConsoleInputRender = ({
                 )
               }
               loading={isParsingFile}
-              className='!rounded-full !bg-white/75 hover:!bg-emerald-50 hover:!text-emerald-600'
+              className='!rounded-md !bg-white hover:!bg-emerald-50 hover:!text-emerald-600'
               style={{
                 width: 38,
                 height: 38,
                 minWidth: 38,
                 padding: 0,
-                border: '1px solid rgba(255,255,255,0.6)',
-                boxShadow: '0 12px 32px rgba(15, 23, 42, 0.08)',
+                border: '1px solid var(--semi-color-border)',
+                boxShadow: 'none',
               }}
               onClick={(event) => {
                 event.stopPropagation();
@@ -314,7 +314,7 @@ const AIConsoleInputRender = ({
               }}
               aria-label={t('上传文件')}
             />
-            <div className='ai-console-input-node min-w-0 flex-1 overflow-hidden rounded-[22px] bg-transparent px-1'>
+            <div className='ai-console-input-node min-w-0 flex-1 overflow-hidden rounded-md bg-transparent px-1'>
               {inputNode}
             </div>
             {styledSendNode}

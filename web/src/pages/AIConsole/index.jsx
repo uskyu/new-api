@@ -65,14 +65,14 @@ const SessionItem = ({
   t,
 }) => (
   <div
-    className={`group relative overflow-hidden rounded-[20px] border px-3.5 py-3 text-left transition-all ${
+    className={`group relative overflow-hidden rounded-lg border px-3 py-2.5 text-left transition-all ${
       active
-        ? 'border-sky-200 bg-sky-50/85 shadow-[0_12px_30px_rgba(14,165,233,0.12)]'
-        : 'border-white/50 bg-white/50 hover:border-slate-200 hover:bg-white/80'
+        ? 'border-blue-200 bg-blue-50'
+        : 'border-transparent bg-transparent hover:border-slate-200 hover:bg-slate-50'
     }`}
   >
     {active ? (
-      <span className='absolute inset-y-3 left-0 w-1 rounded-r-full bg-sky-500' />
+      <span className='absolute inset-y-2 left-0 w-1 rounded-r bg-blue-500' />
     ) : null}
     {editing ? (
       <div className='space-y-2'>
@@ -86,14 +86,14 @@ const SessionItem = ({
           <button
             type='button'
             onClick={onRenameCancel}
-            className='flex h-7 w-7 items-center justify-center rounded-full bg-black/5 text-slate-500'
+            className='flex h-7 w-7 items-center justify-center rounded-md bg-slate-100 text-slate-500'
           >
             <X size={14} />
           </button>
           <button
             type='button'
             onClick={onRenameSave}
-            className='flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-white'
+            className='flex h-7 w-7 items-center justify-center rounded-md bg-blue-600 text-white'
           >
             <Check size={14} />
           </button>
@@ -116,7 +116,7 @@ const SessionItem = ({
         <button
           type='button'
           onClick={onStartRename}
-          className='mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-black/5 text-slate-500 opacity-100 transition hover:bg-slate-900 hover:text-white md:opacity-0 md:group-hover:opacity-100'
+          className='mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500 opacity-100 transition hover:bg-slate-200 md:opacity-0 md:group-hover:opacity-100'
           aria-label={t('编辑名称')}
         >
           <Pencil size={13} />
@@ -124,7 +124,7 @@ const SessionItem = ({
         <button
           type='button'
           onClick={onDelete}
-          className='mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-black/5 text-slate-500 opacity-100 transition hover:bg-rose-500 hover:text-white md:opacity-0 md:group-hover:opacity-100'
+          className='mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500 opacity-100 transition hover:bg-rose-50 hover:text-rose-600 md:opacity-0 md:group-hover:opacity-100'
           aria-label={t('删除会话')}
         >
           <Trash2 size={13} />
@@ -144,7 +144,7 @@ const NativeSelect = ({
   <select
     value={value}
     onChange={(event) => onChange(event.target.value)}
-    className={`h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-sky-400 ${className}`}
+    className={`h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-400 ${className}`}
   >
     {options.length === 0 ? <option value=''>{placeholder}</option> : null}
     {options.map((option) => (
@@ -516,14 +516,14 @@ const AIConsole = () => {
 
   const renderChatConfigControls = (compact = false) => (
     <div
-      className={`grid gap-2 rounded-[24px] border border-cyan-100/80 bg-white/80 p-2 shadow-[0_18px_46px_rgba(8,47,73,0.10)] backdrop-blur-xl ${
+      className={`grid gap-3 rounded-lg border border-slate-200 bg-white p-3 ${
         compact
           ? 'grid-cols-1'
           : 'w-full grid-cols-1 sm:grid-cols-3 xl:w-[780px]'
       }`}
     >
       <label className='min-w-0'>
-        <span className='mb-1 block px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400'>
+        <span className='mb-1 block text-xs font-medium text-slate-500'>
           {t('分组')}
         </span>
         <NativeSelect
@@ -531,12 +531,12 @@ const AIConsole = () => {
           options={groupOptions}
           onChange={setSelectedGroup}
           placeholder={t('选择分组')}
-          className='!h-10 !rounded-full !bg-white/90 !text-xs'
+          className='!h-10 !rounded-md !bg-white !text-sm'
         />
       </label>
 
       <label className='min-w-0'>
-        <span className='mb-1 block px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400'>
+        <span className='mb-1 block text-xs font-medium text-slate-500'>
           {t('模型')}
         </span>
         <NativeSelect
@@ -544,12 +544,12 @@ const AIConsole = () => {
           options={modelOptions}
           onChange={setSelectedModel}
           placeholder={t('选择模型')}
-          className='!h-10 !rounded-full !bg-white/90 !text-xs !font-bold'
+          className='!h-10 !rounded-md !bg-white !text-sm'
         />
       </label>
 
       <label className='min-w-0'>
-        <span className='mb-1 block px-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400'>
+        <span className='mb-1 block text-xs font-medium text-slate-500'>
           {t('思考深度')}
         </span>
         <NativeSelect
@@ -557,37 +557,37 @@ const AIConsole = () => {
           options={reasoningOptions}
           onChange={setReasoningEffort}
           placeholder={t('选择思考深度')}
-          className='!h-10 !rounded-full !bg-white/90 !text-xs'
+          className='!h-10 !rounded-md !bg-white !text-sm'
         />
       </label>
     </div>
   );
 
   const sidebarContent = (
-    <div className='solo-side-panel flex h-full flex-col overflow-hidden rounded-[34px] border border-cyan-100/70 bg-white/75 shadow-[0_24px_70px_rgba(8,47,73,0.12)] backdrop-blur-2xl'>
-      <div className='border-b border-cyan-100/70 p-4'>
+    <div className='solo-side-panel flex h-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white'>
+      <div className='border-b border-slate-200 p-4'>
         <div className='mb-4 flex items-center justify-between gap-3'>
           <img src={getLogo()} alt='AI' className='h-8 w-auto object-contain' />
-          <span className='rounded-full border border-teal-100 bg-teal-50 px-3 py-1 text-xs font-bold text-teal-700'>
-            Command
+          <span className='rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-500'>
+            AI
           </span>
         </div>
         <div className='mb-3 grid grid-cols-2 gap-2'>
-          <div className='rounded-[18px] border border-white/70 bg-white/60 px-3 py-2 shadow-sm'>
-            <div className='flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400'>
+          <div className='rounded-lg border border-slate-200 bg-slate-50 px-3 py-2'>
+            <div className='flex items-center gap-1.5 text-xs font-medium text-slate-500'>
               <Clock3 size={12} />
               {t('会话')}
             </div>
-            <div className='mt-1 text-lg font-black text-slate-900'>
+            <div className='mt-1 text-lg font-semibold text-slate-900'>
               {sessions.length}
             </div>
           </div>
-          <div className='rounded-[18px] border border-white/70 bg-white/60 px-3 py-2 shadow-sm'>
-            <div className='flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400'>
+          <div className='rounded-lg border border-slate-200 bg-slate-50 px-3 py-2'>
+            <div className='flex items-center gap-1.5 text-xs font-medium text-slate-500'>
               <Bot size={12} />
               {t('模型')}
             </div>
-            <div className='mt-1 truncate text-sm font-black text-slate-900'>
+            <div className='mt-1 truncate text-sm font-semibold text-slate-900'>
               {selectedModel || t('待选择')}
             </div>
           </div>
@@ -596,7 +596,7 @@ const AIConsole = () => {
           theme='solid'
           type='primary'
           icon={<MessageSquarePlus size={16} />}
-          className='!h-12 !w-full !rounded-[20px] !bg-[#0f172a] !text-white shadow-[0_18px_34px_rgba(15,23,42,0.20)]'
+          className='!h-10 !w-full !rounded-md'
           onClick={() => createSession()}
         >
           {t('新对话')}
@@ -606,15 +606,13 @@ const AIConsole = () => {
       <div className='min-h-0 flex-1 overflow-y-auto px-3 py-4'>
         <div className='mb-3 flex items-end justify-between gap-3 px-2'>
           <div>
-            <div className='text-xs font-bold uppercase tracking-[0.22em] text-teal-600'>
-              MEMORY
-            </div>
-            <div className='mt-1 text-sm font-bold text-slate-900'>
+            <div className='hidden'>MEMORY</div>
+            <div className='text-sm font-semibold text-slate-900'>
               {t('最近会话')}
             </div>
           </div>
-          <span className='rounded-full border border-white/70 bg-white/70 px-2.5 py-1 text-xs font-bold text-slate-500 shadow-sm'>
-            live
+          <span className='rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500'>
+            {sessions.length}
           </span>
         </div>
         <div className='space-y-2'>
@@ -640,7 +638,7 @@ const AIConsole = () => {
         </div>
       </div>
 
-      <div className='border-t border-white/60 px-4 py-4 lg:hidden'>
+      <div className='border-t border-slate-200 px-4 py-4 lg:hidden'>
         {renderChatConfigControls(true)}
       </div>
     </div>
@@ -665,12 +663,12 @@ const AIConsole = () => {
         <main className='flex min-w-0 flex-1 flex-col gap-3'>
           <div className='lg:hidden'>
             <div className='pointer-events-none absolute left-3 top-3 z-20 sm:left-4 sm:top-4'>
-              <div className='pointer-events-auto flex items-center gap-2 rounded-full border border-white/70 bg-white/80 p-2 shadow-[0_16px_36px_rgba(15,23,42,0.10)] backdrop-blur-xl'>
+              <div className='pointer-events-auto flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2'>
                 <Button
                   theme='borderless'
                   type='tertiary'
                   icon={<PanelLeftOpen size={18} />}
-                  className='!rounded-full !bg-black/5'
+                  className='!rounded-md'
                   onClick={() => setShowMobileSidebar((previous) => !previous)}
                 />
               </div>

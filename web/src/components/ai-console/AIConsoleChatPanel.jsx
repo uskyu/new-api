@@ -9,16 +9,16 @@ import { getLogo } from '../../helpers';
 const ActionButton = ({ label, tone = 'default', onClick }) => {
   const toneClass =
     tone === 'danger'
-      ? 'hover:bg-rose-500'
+      ? 'hover:bg-rose-50 hover:text-rose-600'
       : tone === 'primary'
-        ? 'hover:bg-sky-600'
-        : 'hover:bg-slate-900';
+        ? 'hover:bg-blue-50 hover:text-blue-600'
+        : 'hover:bg-slate-100';
 
   return (
     <button
       type='button'
       onClick={onClick}
-      className={`rounded-full bg-white/90 px-3 py-1.5 text-[11px] font-medium text-slate-600 shadow-sm transition hover:text-white ${toneClass}`}
+      className={`rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition ${toneClass}`}
     >
       {label}
     </button>
@@ -136,7 +136,7 @@ const AIConsoleChatPanel = ({
         <Empty
           className='solo-empty-hero'
           image={
-            <div className='flex h-20 min-w-48 items-center justify-center rounded-[28px] bg-white/80 px-6 shadow-[0_24px_60px_rgba(15,23,42,0.10)] backdrop-blur-xl'>
+            <div className='flex h-16 min-w-40 items-center justify-center rounded-lg border border-slate-200 bg-white px-5'>
               <img src={getLogo()} alt='AI' className='h-10 w-auto' />
             </div>
           }
@@ -151,16 +151,16 @@ const AIConsoleChatPanel = ({
               {featurePills.map((item) => (
                 <span
                   key={item.key || item.label}
-                  className={`inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-semibold shadow-sm ${
+                  className={`inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium ${
                     item.active
-                      ? 'border-sky-200 bg-sky-50 text-sky-700'
-                      : 'border-slate-200 bg-white/80 text-slate-600'
+                      ? 'border-blue-200 bg-blue-50 text-blue-700'
+                      : 'border-slate-200 bg-white text-slate-600'
                   }`}
                 >
                   {item.icon}
                   <span>{item.label}</span>
                   {item.badge ? (
-                    <span className='rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-400'>
+                    <span className='rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-400'>
                       {item.badge}
                     </span>
                   ) : null}
@@ -171,7 +171,7 @@ const AIConsoleChatPanel = ({
               {promptSuggestions.map((item) => (
                 <div
                   key={item}
-                  className='rounded-[18px] border border-slate-200 bg-white/75 px-4 py-3 text-left text-sm font-semibold leading-6 text-slate-700 shadow-sm backdrop-blur'
+                  className='rounded-lg border border-slate-200 bg-white px-4 py-3 text-left text-sm font-medium leading-6 text-slate-700'
                 >
                   {item}
                 </div>
@@ -184,7 +184,7 @@ const AIConsoleChatPanel = ({
             {modelBrands.map((brand) => (
               <span
                 key={brand}
-                className='rounded-full border border-slate-100 bg-white/60 px-3 py-1 text-xs font-bold text-slate-500 shadow-sm'
+                className='rounded-md border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-500'
               >
                 {brand}
               </span>
@@ -205,20 +205,17 @@ const AIConsoleChatPanel = ({
   );
 
   return (
-    <div className='solo-workbench-panel relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-[36px] border border-cyan-100/75 bg-white/75 shadow-[0_34px_110px_rgba(8,47,73,0.13)] backdrop-blur-2xl'>
+    <div className='solo-workbench-panel relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white'>
       <div className='solo-panel-overlay inset-x-0 top-0 h-28 bg-[linear-gradient(90deg,rgba(45,212,191,0.20),rgba(255,255,255,0.45),rgba(56,189,248,0.22))] blur-2xl' />
 
       {!hideHeader && (
-        <div className='relative border-b border-cyan-100/70 px-5 py-4 sm:px-6'>
+        <div className='relative border-b border-slate-200 px-5 py-4 sm:px-6'>
           <div className='flex flex-wrap items-center justify-between gap-4'>
             <div className='flex min-w-0 items-center gap-3'>
-              <div className='flex h-12 w-12 items-center justify-center rounded-[20px] bg-slate-950 text-white shadow-[0_18px_36px_rgba(15,23,42,0.20)] backdrop-blur-xl'>
+              <div className='flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600'>
                 {resolvedHeaderIcon}
               </div>
               <div className='min-w-0'>
-                <div className='mb-1 text-[11px] font-black uppercase tracking-[0.24em] text-teal-600'>
-                  COMMAND CENTER
-                </div>
                 <Typography.Title heading={5} className='!mb-0 !text-slate-900'>
                   {headerTitle || t('AI 控制台')}
                 </Typography.Title>
