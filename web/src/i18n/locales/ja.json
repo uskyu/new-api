@@ -3337,6 +3337,9 @@
     "详情段排队中": "Detail sections queued",
     "详情段生成中": "Generating detail sections",
     "生成成功": "Generated successfully",
-    "生成失败": "Generation failed"
+    "生成失败": "Generation failed",
+    "充值页额外通知": "チャージページの追加通知",
+    "请输入充值页额外通知内容，支持 HTML": "チャージページの追加通知内容を入力してください。HTMLに対応しています。",
+    "额外通知": "追加通知"
   }
 }

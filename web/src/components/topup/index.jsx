@@ -110,6 +110,7 @@ const TopUp = () => {
   const [topupInfo, setTopupInfo] = useState({
     amount_options: [],
     discount: {},
+    topup_notice_html: '',
   });
 
   const topUp = async () => {
@@ -425,6 +426,7 @@ const TopUp = () => {
         setTopupInfo({
           amount_options: data.amount_options || [],
           discount: data.discount || {},
+          topup_notice_html: data.topup_notice_html || '',
         });
 
         // 处理支付方式
@@ -834,6 +836,7 @@ const TopUp = () => {
           setOpenTransfer={setOpenTransfer}
           affLink={affLink}
           handleAffLinkClick={handleAffLinkClick}
+          topupNoticeHTML={topupInfo.topup_notice_html}
         />
       </div>
     </div>

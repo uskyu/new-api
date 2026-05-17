@@ -3905,6 +3905,9 @@
     "等待确认": "Awaiting confirmation",
     "母版生成失败": "Mother image failed",
     "详情段排队中": "Detail sections queued",
-    "详情段生成中": "Generating detail sections"
+    "详情段生成中": "Generating detail sections",
+    "充值页额外通知": "Additional notice on top-up page",
+    "请输入充值页额外通知内容，支持 HTML": "Enter additional notice content for the top-up page. HTML is supported.",
+    "额外通知": "Additional Notice"
   }
 }

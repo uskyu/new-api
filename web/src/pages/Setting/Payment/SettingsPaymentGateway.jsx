@@ -34,6 +34,7 @@ export default function SettingsPaymentGateway(props) {
   const [loading, setLoading] = useState(false);
   const [inputs, setInputs] = useState({
     PayAddress: '',
+    TopupNoticeHTML: '',
     EpayId: '',
     EpayKey: '',
     Price: 7.3,
@@ -51,6 +52,7 @@ export default function SettingsPaymentGateway(props) {
     if (props.options && formApiRef.current) {
       const currentInputs = {
         PayAddress: props.options.PayAddress || '',
+        TopupNoticeHTML: props.options.TopupNoticeHTML || '',
         EpayId: props.options.EpayId || '',
         EpayKey: props.options.EpayKey || '',
         Price:
@@ -156,6 +158,10 @@ export default function SettingsPaymentGateway(props) {
       if (inputs.MinTopUp !== '') {
         options.push({ key: 'MinTopUp', value: inputs.MinTopUp.toString() });
       }
+      options.push({
+        key: 'TopupNoticeHTML',
+        value: inputs.TopupNoticeHTML || '',
+      });
       if (inputs.CustomCallbackAddress !== '') {
         options.push({
           key: 'CustomCallbackAddress',
@@ -283,6 +289,13 @@ export default function SettingsPaymentGateway(props) {
             field='PayMethods'
             label={t('充值方式设置')}
             placeholder={t('为一个 JSON 文本')}
+            autosize
+          />
+
+          <Form.TextArea
+            field='TopupNoticeHTML'
+            label={t('充值页额外通知')}
+            placeholder={t('请输入充值页额外通知内容，支持 HTML')}
             autosize
           />
 

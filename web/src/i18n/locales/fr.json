@@ -3356,6 +3356,9 @@
     "详情段排队中": "Sections de detail en file d attente",
     "详情段生成中": "Generation des sections de detail",
     "生成成功": "Generation reussie",
-    "生成失败": "Echec de generation"
+    "生成失败": "Echec de generation",
+    "充值页额外通知": "Avis supplementaire de la page de recharge",
+    "请输入充值页额外通知内容，支持 HTML": "Saisissez le contenu de l'avis supplementaire de la page de recharge. HTML pris en charge.",
+    "额外通知": "Avis supplementaire"
   }
 }

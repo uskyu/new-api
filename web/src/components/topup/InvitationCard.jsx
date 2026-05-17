@@ -38,6 +38,7 @@ const InvitationCard = ({
   setOpenTransfer,
   affLink,
   handleAffLinkClick,
+  topupNoticeHTML,
 }) => {
   return (
     <Card className='!rounded-2xl shadow-sm border-0'>
@@ -221,6 +222,18 @@ const InvitationCard = ({
             </div>
           </div>
         </Card>
+
+        {topupNoticeHTML?.trim() && (
+          <Card
+            className='!rounded-xl w-full'
+            title={<Text type='tertiary'>{t('额外通知')}</Text>}
+          >
+            <div
+              className='text-sm text-semi-color-text-1 leading-6'
+              dangerouslySetInnerHTML={{ __html: topupNoticeHTML }}
+            />
+          </Card>
+        )}
       </Space>
     </Card>
   );

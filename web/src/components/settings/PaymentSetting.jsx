@@ -32,6 +32,7 @@ const PaymentSetting = () => {
   let [inputs, setInputs] = useState({
     ServerAddress: '',
     PayAddress: '',
+    TopupNoticeHTML: '',
     EpayId: '',
     EpayKey: '',
     Price: 7.3,
