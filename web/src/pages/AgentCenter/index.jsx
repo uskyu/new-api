@@ -24,6 +24,16 @@ import {
 
 const { Title, Text } = Typography;
 const DEFAULT_PAGE_SIZE = 10;
+const DAILY_METRIC_PAGE_SIZE = 10;
+
+function getLocalDateString(offsetDays = 0) {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 function formatAmount(amount) {
   return renderQuotaWithAmount(Number(amount || 0) / 100);
@@ -31,6 +41,24 @@ function formatAmount(amount) {
 
 function formatRate(rate) {
   return `${(Number(rate || 0) / 100).toFixed(2)}%`;
+}
+
+function MetricStat({ label, value }) {
+  return (
+    <div
+      style={{
+        border: '1px solid var(--semi-color-border)',
+        borderRadius: 6,
+        padding: 12,
+        background: 'var(--semi-color-bg-0)',
+      }}
+    >
+      <Text type='secondary'>{label}</Text>
+      <Title heading={4} style={{ marginTop: 6, marginBottom: 0 }}>
+        {value}
+      </Title>
+    </div>
+  );
 }
 
 function getRebateSourceTag(sourceType, t) {
@@ -77,6 +105,15 @@ export default function AgentCenter() {
   const { t } = useTranslation();
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [dailyMetrics, setDailyMetrics] = useState(null);
+  const [dailyMetricsLoading, setDailyMetricsLoading] = useState(false);
+  const [dailyMetricStartDate, setDailyMetricStartDate] = useState(() =>
+    getLocalDateString(-6),
+  );
+  const [dailyMetricEndDate, setDailyMetricEndDate] = useState(() =>
+    getLocalDateString(0),
+  );
+  const [dailyMetricPage, setDailyMetricPage] = useState(1);
   const [rebates, setRebates] = useState([]);
   const [rebatesTotal, setRebatesTotal] = useState(0);
   const [rebatesPage, setRebatesPage] = useState(1);
@@ -134,6 +171,32 @@ export default function AgentCenter() {
       setSummaryLoading(false);
     }
   }, [t]);
+
+  const loadDailyMetrics = useCallback(async () => {
+    if (!summary?.is_agent) {
+      setDailyMetrics(null);
+      return;
+    }
+    setDailyMetricsLoading(true);
+    setDailyMetricPage(1);
+    try {
+      const res = await API.get('/api/agent/self/daily-metrics', {
+        params: {
+          start_date: dailyMetricStartDate,
+          end_date: dailyMetricEndDate,
+        },
+      });
+      if (!res.data.success) {
+        showError(res.data.message);
+        return;
+      }
+      setDailyMetrics(res.data.data);
+    } catch (error) {
+      showError(error.message || t('获取每日数据失败'));
+    } finally {
+      setDailyMetricsLoading(false);
+    }
+  }, [dailyMetricEndDate, dailyMetricStartDate, summary?.is_agent, t]);
 
   const loadRebates = useCallback(
     async (page = rebatesPage) => {
@@ -301,6 +364,7 @@ export default function AgentCenter() {
 
   useEffect(() => {
     if (summary?.is_agent) {
+      loadDailyMetrics();
       loadRebates(1);
       loadAdjustments(1);
       loadPromoLinks();
@@ -313,6 +377,7 @@ export default function AgentCenter() {
   const refreshAll = useCallback(async () => {
     await loadSummary();
     if (summary?.is_agent) {
+      await loadDailyMetrics();
       await loadRebates(1);
       await loadAdjustments(1);
       await loadPromoLinks();
@@ -320,7 +385,7 @@ export default function AgentCenter() {
       await loadDownlines();
       await loadWithdrawRequests(1);
     }
-  }, [loadAdjustments, loadDownlines, loadPromoLinkStats, loadPromoLinks, loadRebates, loadSummary, loadWithdrawRequests, summary?.is_agent]);
+  }, [loadAdjustments, loadDailyMetrics, loadDownlines, loadPromoLinkStats, loadPromoLinks, loadRebates, loadSummary, loadWithdrawRequests, summary?.is_agent]);
 
   const handleCopyPromoLink = async (record) => {
     const landingPath = record.landing_page || '/';
@@ -441,6 +506,35 @@ export default function AgentCenter() {
       setWithdrawSubmitting(false);
     }
   };
+
+  const dailyMetricItems = dailyMetrics?.items || [];
+  const pagedDailyMetricItems = useMemo(
+    () =>
+      dailyMetricItems.slice(
+        (dailyMetricPage - 1) * DAILY_METRIC_PAGE_SIZE,
+        dailyMetricPage * DAILY_METRIC_PAGE_SIZE,
+      ),
+    [dailyMetricItems, dailyMetricPage],
+  );
+
+  const dailyMetricColumns = useMemo(
+    () => [
+      { title: t('日期'), dataIndex: 'date' },
+      { title: t('新增用户'), dataIndex: 'new_user_count' },
+      { title: t('充值笔数'), dataIndex: 'topup_count' },
+      {
+        title: t('充值金额'),
+        dataIndex: 'topup_amount',
+        render: (_, record) => formatAmount(record.topup_amount),
+      },
+      {
+        title: t('返利合计'),
+        dataIndex: 'total_rebate_amount',
+        render: (_, record) => formatAmount(record.total_rebate_amount),
+      },
+    ],
+    [t],
+  );
 
   const rebateColumns = useMemo(
     () => [
@@ -681,6 +775,63 @@ export default function AgentCenter() {
 
         {summary?.is_agent && (
           <>
+            <Card style={{ width: '100%' }} loading={dailyMetricsLoading}>
+              <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
+                <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
+                  <Title heading={5} style={{ margin: 0 }}>
+                    {t('每日邀请与充值')}
+                  </Title>
+                  <Space wrap>
+                    <Input
+                      placeholder={t('开始日期')}
+                      value={dailyMetricStartDate}
+                      onChange={setDailyMetricStartDate}
+                      style={{ width: 140 }}
+                    />
+                    <Input
+                      placeholder={t('结束日期')}
+                      value={dailyMetricEndDate}
+                      onChange={setDailyMetricEndDate}
+                      style={{ width: 140 }}
+                    />
+                    <Button onClick={loadDailyMetrics}>{t('查询')}</Button>
+                  </Space>
+                </div>
+                <div className='grid grid-cols-1 md:grid-cols-4 gap-4 w-full'>
+                  <MetricStat
+                    label={t('区间新增用户')}
+                    value={dailyMetrics?.summary?.new_user_count || 0}
+                  />
+                  <MetricStat
+                    label={t('区间充值笔数')}
+                    value={dailyMetrics?.summary?.topup_count || 0}
+                  />
+                  <MetricStat
+                    label={t('区间充值金额')}
+                    value={formatAmount(dailyMetrics?.summary?.topup_amount)}
+                  />
+                  <MetricStat
+                    label={t('区间返利合计')}
+                    value={formatAmount(dailyMetrics?.summary?.total_rebate_amount)}
+                  />
+                </div>
+                <Table
+                  rowKey={(record) => `${record.date}-${record.agent_user_id}`}
+                  columns={dailyMetricColumns}
+                  dataSource={pagedDailyMetricItems}
+                  pagination={false}
+                  empty={<Empty title={t('暂无每日数据')} />}
+                />
+                <Pagination
+                  currentPage={dailyMetricPage}
+                  pageSize={DAILY_METRIC_PAGE_SIZE}
+                  total={dailyMetricItems.length}
+                  onPageChange={setDailyMetricPage}
+                  showTotal
+                />
+              </Space>
+            </Card>
+
             <Card style={{ width: '100%' }}>
               <Space vertical align='start' style={{ width: '100%' }} spacing={12}>
                 <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>

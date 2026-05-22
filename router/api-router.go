@@ -278,6 +278,7 @@ func SetApiRouter(router *gin.Engine) {
 			agentRoute.GET("/daily-metrics", middleware.AdminAuth(), controller.GetAgentDailyMetrics)
 			agentRoute.POST("/init", middleware.RootAuth(), controller.InitializeAgentModule)
 			agentRoute.GET("/self", middleware.UserAuth(), controller.GetAgentSelfSummary)
+			agentRoute.GET("/self/daily-metrics", middleware.UserAuth(), controller.GetAgentSelfDailyMetrics)
 			agentRoute.GET("/self/downlines", middleware.UserAuth(), controller.GetAgentSelfDownlines)
 			agentRoute.POST("/self/upgrade-request", middleware.UserAuth(), controller.CreateAgentUpgradeRequest)
 			agentRoute.POST("/self/withdraw-request", middleware.UserAuth(), controller.CreateAgentWithdrawRequest)

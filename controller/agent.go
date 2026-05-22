@@ -293,6 +293,15 @@ func GetAgentSelfSummary(c *gin.Context) {
 	common.ApiSuccess(c, summary)
 }
 
+func GetAgentSelfDailyMetrics(c *gin.Context) {
+	metrics, err := model.GetAgentDailyMetrics(c.GetInt("id"), c.Query("start_date"), c.Query("end_date"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, metrics)
+}
+
 func GetAgentSelfRebateRecords(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	records, total, err := model.GetAgentRebateRecords(pageInfo, c.GetInt("id"))
