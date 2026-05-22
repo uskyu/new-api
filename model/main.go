@@ -324,6 +324,18 @@ type sqliteColumnDef struct {
 	DDL  string
 }
 
+func ensureUserCreatedAtColumn() error {
+	if !DB.Migrator().HasTable(&User{}) {
+		return nil
+	}
+	if !DB.Migrator().HasColumn(&User{}, "created_at") {
+		if err := DB.Migrator().AddColumn(&User{}, "CreatedAt"); err != nil {
+			return err
+		}
+	}
+	return DB.Model(&User{}).Where("created_at IS NULL OR created_at = 0").Update("created_at", common.GetTimestamp()).Error
+}
+
 func ensureSubscriptionPlanTableSQLite() error {
 	if !common.UsingSQLite {
 		return nil

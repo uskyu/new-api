@@ -275,6 +275,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			agentRoute.GET("/status", middleware.PermissionAuth(common.PermissionAgentDownlineAssign), controller.GetAgentBootstrapStatus)
 			agentRoute.GET("/overview", middleware.AdminAuth(), controller.GetAgentAdminOverview)
+			agentRoute.GET("/daily-metrics", middleware.AdminAuth(), controller.GetAgentDailyMetrics)
 			agentRoute.POST("/init", middleware.RootAuth(), controller.InitializeAgentModule)
 			agentRoute.GET("/self", middleware.UserAuth(), controller.GetAgentSelfSummary)
 			agentRoute.GET("/self/downlines", middleware.UserAuth(), controller.GetAgentSelfDownlines)

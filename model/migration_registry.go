@@ -106,6 +106,10 @@ func preSchemaCompatMigrations() []Migration {
 			name: "token_model_limits_to_text",
 			run:  migrateTokenModelLimitsToText,
 		},
+		namedMigration{
+			name: "users_created_at_column",
+			run:  ensureUserCreatedAtColumn,
+		},
 	}
 }
 

@@ -422,6 +422,33 @@ type AgentAdminOverview struct {
 	RebateTotalAmount   int64 `json:"rebate_total_amount"`
 }
 
+type AgentDailyMetric struct {
+	Date                   string `json:"date"`
+	AgentUserId            int    `json:"agent_user_id"`
+	Username               string `json:"username"`
+	DisplayName            string `json:"display_name"`
+	NewUserCount           int64  `json:"new_user_count"`
+	TopupCount             int64  `json:"topup_count"`
+	TopupAmount            int64  `json:"topup_amount"`
+	TopupRebateAmount      int64  `json:"topup_rebate_amount"`
+	RedemptionRebateAmount int64  `json:"redemption_rebate_amount"`
+	TotalRebateAmount      int64  `json:"total_rebate_amount"`
+}
+
+type AgentDailyMetricsSummary struct {
+	NewUserCount      int64 `json:"new_user_count"`
+	TopupCount        int64 `json:"topup_count"`
+	TopupAmount       int64 `json:"topup_amount"`
+	TotalRebateAmount int64 `json:"total_rebate_amount"`
+}
+
+type AgentDailyMetricsResult struct {
+	StartDate string                   `json:"start_date"`
+	EndDate   string                   `json:"end_date"`
+	Summary   AgentDailyMetricsSummary `json:"summary"`
+	Items     []*AgentDailyMetric      `json:"items"`
+}
+
 type AgentWithdrawRequestView struct {
 	Id                  int    `json:"id"`
 	AgentUserId         int    `json:"agent_user_id"`
@@ -1699,6 +1726,130 @@ func GetAgentAdminOverview() (*AgentAdminOverview, error) {
 		return nil, err
 	}
 	return overview, nil
+}
+
+func GetAgentDailyMetrics(agentUserId int, startDate string, endDate string) (*AgentDailyMetricsResult, error) {
+	startTs, endTs, ok := parseAgentDateRange(startDate, endDate)
+	if !ok {
+		end := time.Now()
+		start := end.AddDate(0, 0, -6)
+		startDate = start.Format("2006-01-02")
+		endDate = end.Format("2006-01-02")
+		startTs, endTs, _ = parseAgentDateRange(startDate, endDate)
+	} else {
+		startDate = time.Unix(startTs, 0).Local().Format("2006-01-02")
+		endDate = time.Unix(endTs-1, 0).Local().Format("2006-01-02")
+	}
+	metrics := make([]*AgentDailyMetric, 0)
+	for dayStart := startTs; dayStart < endTs; dayStart += int64(24 * time.Hour / time.Second) {
+		dayEnd := dayStart + int64(24*time.Hour/time.Second)
+		day := time.Unix(dayStart, 0).Format("2006-01-02")
+		rows, err := getAgentDailyMetricRows(agentUserId, day, dayStart, dayEnd)
+		if err != nil {
+			return nil, err
+		}
+		metrics = append(metrics, rows...)
+	}
+	result := &AgentDailyMetricsResult{
+		StartDate: startDate,
+		EndDate:   endDate,
+		Items:     metrics,
+	}
+	for _, item := range metrics {
+		result.Summary.NewUserCount += item.NewUserCount
+		result.Summary.TopupCount += item.TopupCount
+		result.Summary.TopupAmount += item.TopupAmount
+		result.Summary.TotalRebateAmount += item.TotalRebateAmount
+	}
+	return result, nil
+}
+
+func getAgentDailyMetricRows(agentUserId int, day string, startTs int64, endTs int64) ([]*AgentDailyMetric, error) {
+	type metricRow struct {
+		AgentUserId            int
+		Username               string
+		DisplayName            string
+		NewUserCount           int64
+		TopupCount             int64
+		TopupAmount            int64
+		TopupRebateAmount      int64
+		RedemptionRebateAmount int64
+	}
+	rows := make([]*metricRow, 0)
+	tx := DB.Table("agent_profiles AS ap").
+		Select(`ap.user_id AS agent_user_id,
+u.username,
+u.display_name,
+COALESCE(new_user_stats.new_user_count, 0) AS new_user_count,
+COALESCE(topup_stats.topup_count, 0) AS topup_count,
+COALESCE(topup_stats.topup_amount, 0) AS topup_amount,
+COALESCE(topup_stats.topup_rebate_amount, 0) AS topup_rebate_amount,
+COALESCE(redemption_stats.redemption_rebate_amount, 0) AS redemption_rebate_amount`).
+		Joins("LEFT JOIN users AS u ON u.id = ap.user_id").
+		Joins(`LEFT JOIN (
+			SELECT inviter_id AS agent_user_id, COUNT(*) AS new_user_count
+			FROM users
+			WHERE inviter_id > 0 AND deleted_at IS NULL AND created_at >= ? AND created_at < ?
+			GROUP BY inviter_id
+		) AS new_user_stats ON new_user_stats.agent_user_id = ap.user_id`, startTs, endTs).
+		Joins(`LEFT JOIN (
+			SELECT agent_user_id, COUNT(id) AS topup_count, COALESCE(SUM(pay_amount), 0) AS topup_amount, COALESCE(SUM(rebate_amount), 0) AS topup_rebate_amount
+			FROM agent_rebate_records
+			WHERE status = ? AND settled_at >= ? AND settled_at < ?
+			GROUP BY agent_user_id
+		) AS topup_stats ON topup_stats.agent_user_id = ap.user_id`, AgentRebateRecordSettled, startTs, endTs).
+		Joins(`LEFT JOIN (
+			SELECT agent_user_id, COALESCE(SUM(rebate_amount), 0) AS redemption_rebate_amount
+			FROM agent_redemption_rebate_records
+			WHERE status = ? AND settled_at >= ? AND settled_at < ?
+			GROUP BY agent_user_id
+		) AS redemption_stats ON redemption_stats.agent_user_id = ap.user_id`, AgentRebateRecordSettled, startTs, endTs)
+	if agentUserId > 0 {
+		tx = tx.Where("ap.user_id = ?", agentUserId)
+	}
+	if err := tx.Order("ap.user_id asc").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	metrics := make([]*AgentDailyMetric, 0, len(rows))
+	for _, row := range rows {
+		totalRebate := row.TopupRebateAmount + row.RedemptionRebateAmount
+		if row.NewUserCount == 0 && row.TopupCount == 0 && row.TopupAmount == 0 && totalRebate == 0 {
+			continue
+		}
+		metrics = append(metrics, &AgentDailyMetric{
+			Date:                   day,
+			AgentUserId:            row.AgentUserId,
+			Username:               row.Username,
+			DisplayName:            row.DisplayName,
+			NewUserCount:           row.NewUserCount,
+			TopupCount:             row.TopupCount,
+			TopupAmount:            row.TopupAmount,
+			TopupRebateAmount:      row.TopupRebateAmount,
+			RedemptionRebateAmount: row.RedemptionRebateAmount,
+			TotalRebateAmount:      totalRebate,
+		})
+	}
+	return metrics, nil
+}
+
+func parseAgentDateRange(startDate string, endDate string) (int64, int64, bool) {
+	startDate = strings.TrimSpace(startDate)
+	endDate = strings.TrimSpace(endDate)
+	if startDate == "" || endDate == "" {
+		return 0, 0, false
+	}
+	startTime, err := time.ParseInLocation("2006-01-02", startDate, time.Local)
+	if err != nil {
+		return 0, 0, false
+	}
+	endTime, err := time.ParseInLocation("2006-01-02", endDate, time.Local)
+	if err != nil || endTime.Before(startTime) {
+		return 0, 0, false
+	}
+	if endTime.Sub(startTime) > 90*24*time.Hour {
+		endTime = startTime.AddDate(0, 0, 90)
+	}
+	return startTime.Unix(), endTime.Add(24 * time.Hour).Unix(), true
 }
 
 func CreateAgentUpgradeRequest(sponsorAgentUserId int, targetUserId int, targetRate int, remark string) (*AgentUpgradeRequest, error) {

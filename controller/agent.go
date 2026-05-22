@@ -125,6 +125,16 @@ func GetAgentAdminOverview(c *gin.Context) {
 	common.ApiSuccess(c, overview)
 }
 
+func GetAgentDailyMetrics(c *gin.Context) {
+	agentUserId, _ := strconv.Atoi(c.Query("agent_user_id"))
+	metrics, err := model.GetAgentDailyMetrics(agentUserId, c.Query("start_date"), c.Query("end_date"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, metrics)
+}
+
 func InitializeAgentModule(c *gin.Context) {
 	var req InitializeAgentModuleRequest
 	if err := common.DecodeJson(c.Request.Body, &req); err != nil {

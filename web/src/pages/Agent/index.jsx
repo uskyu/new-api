@@ -23,6 +23,7 @@ import {
   TextArea,
   Typography,
 } from '@douyinfe/semi-ui';
+import { VChart } from '@visactor/react-vchart';
 import {
   API,
   can,
@@ -41,6 +42,25 @@ import { IconSearch } from '@douyinfe/semi-icons';
 const { Text, Title } = Typography;
 
 const DEFAULT_PAGE_SIZE = 10;
+const DAILY_METRIC_PAGE_SIZE = 10;
+const AGENT_PANEL_KEYS = {
+  OVERVIEW: 'overview',
+  DAILY_METRICS: 'dailyMetrics',
+  GROUPS: 'groups',
+  PROFILES: 'profiles',
+  ADJUSTMENTS: 'adjustments',
+  PROMO_LINKS: 'promoLinks',
+  WITHDRAW_REQUESTS: 'withdrawRequests',
+};
+const DEFAULT_AGENT_PANEL_VISIBILITY = {
+  [AGENT_PANEL_KEYS.OVERVIEW]: true,
+  [AGENT_PANEL_KEYS.DAILY_METRICS]: true,
+  [AGENT_PANEL_KEYS.GROUPS]: true,
+  [AGENT_PANEL_KEYS.PROFILES]: true,
+  [AGENT_PANEL_KEYS.ADJUSTMENTS]: true,
+  [AGENT_PANEL_KEYS.PROMO_LINKS]: true,
+  [AGENT_PANEL_KEYS.WITHDRAW_REQUESTS]: true,
+};
 
 function formatRate(rate) {
   return `${(Number(rate || 0) / 100).toFixed(2)}%`;
@@ -48,6 +68,116 @@ function formatRate(rate) {
 
 function formatAmount(amount) {
   return renderQuotaWithAmount(Number(amount || 0) / 100);
+}
+
+function MetricStat({ label, value }) {
+  return (
+    <div
+      style={{
+        border: '1px solid var(--semi-color-border)',
+        borderRadius: 6,
+        padding: 12,
+        background: 'var(--semi-color-bg-0)',
+      }}
+    >
+      <Text type='secondary'>{label}</Text>
+      <Title heading={4} style={{ marginTop: 6, marginBottom: 0 }}>
+        {value}
+      </Title>
+    </div>
+  );
+}
+
+function getLocalDateString(offsetDays = 0) {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function buildDailyMetricChartSpec(items = [], labels) {
+  const dailyTotals = new Map();
+  items.forEach((item) => {
+    const current = dailyTotals.get(item.date) || {
+      newUserCount: 0,
+      topupAmount: 0,
+      totalRebateAmount: 0,
+    };
+    current.newUserCount += Number(item.new_user_count || 0);
+    current.topupAmount += Number(item.topup_amount || 0);
+    current.totalRebateAmount += Number(item.total_rebate_amount || 0);
+    dailyTotals.set(item.date, current);
+  });
+  const chartData = [];
+  [...dailyTotals.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([date, item]) => {
+      chartData.push({
+        date,
+        metric: labels.newUsers,
+        value: item.newUserCount,
+      });
+      chartData.push({
+        date,
+        metric: labels.topupAmount,
+        value: item.topupAmount / 100,
+      });
+      chartData.push({
+        date,
+        metric: labels.rebateAmount,
+        value: item.totalRebateAmount / 100,
+      });
+    });
+  return {
+    type: 'line',
+    data: [{ id: 'agentDailyMetrics', values: chartData }],
+    xField: 'date',
+    yField: 'value',
+    seriesField: 'metric',
+    point: { visible: true },
+    legends: { visible: true, orient: 'top' },
+    axes: [
+      { orient: 'bottom', title: { visible: false } },
+      { orient: 'left', title: { visible: false } },
+    ],
+    tooltip: { visible: true },
+    padding: { top: 16, right: 24, bottom: 24, left: 48 },
+  };
+}
+
+function buildAgentMiniTrendSpec(items = [], labels) {
+  const values = items
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .flatMap((item) => [
+      {
+        date: item.date,
+        metric: labels.newUsers,
+        value: Number(item.new_user_count || 0),
+      },
+      {
+        date: item.date,
+        metric: labels.topupAmount,
+        value: Number(item.topup_amount || 0) / 100,
+      },
+    ]);
+  return {
+    type: 'line',
+    data: [{ id: 'agentMiniTrend', values }],
+    xField: 'date',
+    yField: 'value',
+    seriesField: 'metric',
+    point: { visible: false },
+    legends: { visible: false },
+    axes: [
+      { orient: 'bottom', visible: false },
+      { orient: 'left', visible: false },
+    ],
+    tooltip: { visible: true },
+    padding: { top: 6, right: 6, bottom: 6, left: 6 },
+  };
 }
 
 function getStatusTag(status, t) {
@@ -80,10 +210,27 @@ export default function Agent() {
   const canTransferDownlines =
     supportMode || can(PERMISSIONS.AGENT_DOWNLINE_TRANSFER);
   const canViewDownlines = canManageAgentAdmin || canTransferDownlines;
+  const [visibleAgentPanels, setVisibleAgentPanels] = useState(
+    DEFAULT_AGENT_PANEL_VISIBILITY,
+  );
   const [status, setStatus] = useState(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const [overview, setOverview] = useState(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
+  const [dailyMetrics, setDailyMetrics] = useState(null);
+  const [dailyMetricsLoading, setDailyMetricsLoading] = useState(false);
+  const [dailyMetricStartDate, setDailyMetricStartDate] = useState(() =>
+    getLocalDateString(-6),
+  );
+  const [dailyMetricEndDate, setDailyMetricEndDate] = useState(() =>
+    getLocalDateString(0),
+  );
+  const [dailyMetricAgentId, setDailyMetricAgentId] = useState('');
+  const [dailyMetricPage, setDailyMetricPage] = useState(1);
+  const [agentDetailMetrics, setAgentDetailMetrics] = useState(null);
+  const [agentDetailMetricsLoading, setAgentDetailMetricsLoading] =
+    useState(false);
+  const [agentDetailMetricPage, setAgentDetailMetricPage] = useState(1);
   const [groups, setGroups] = useState([]);
   const [groupModalVisible, setGroupModalVisible] = useState(false);
   const [groupSubmitting, setGroupSubmitting] = useState(false);
@@ -255,6 +402,82 @@ export default function Agent() {
       setOverviewLoading(false);
     }
   }, [status?.initialized, t]);
+
+  const loadDailyMetrics = useCallback(
+    async (
+      agentUserId = dailyMetricAgentId,
+      startDate = dailyMetricStartDate,
+      endDate = dailyMetricEndDate,
+    ) => {
+      if (!status?.initialized) {
+        setDailyMetrics(null);
+        return;
+      }
+      setDailyMetricsLoading(true);
+      setDailyMetricPage(1);
+      try {
+        const res = await API.get('/api/agent/daily-metrics', {
+          params: {
+            agent_user_id: agentUserId || undefined,
+            start_date: startDate,
+            end_date: endDate,
+          },
+        });
+        if (!res.data.success) {
+          showError(res.data.message);
+          return;
+        }
+        setDailyMetrics(res.data.data);
+      } catch (error) {
+        showError(error.message || t('获取代理每日指标失败'));
+      } finally {
+        setDailyMetricsLoading(false);
+      }
+    },
+    [
+      dailyMetricAgentId,
+      dailyMetricEndDate,
+      dailyMetricStartDate,
+      status?.initialized,
+      t,
+    ],
+  );
+
+  const loadAgentDetailMetrics = useCallback(
+    async (agentUserId = activeAgentScope?.userId || 0) => {
+      if (!status?.initialized || !agentUserId) {
+        setAgentDetailMetrics(null);
+        return;
+      }
+      setAgentDetailMetricsLoading(true);
+      setAgentDetailMetricPage(1);
+      try {
+        const res = await API.get('/api/agent/daily-metrics', {
+          params: {
+            agent_user_id: agentUserId,
+            start_date: dailyMetricStartDate,
+            end_date: dailyMetricEndDate,
+          },
+        });
+        if (!res.data.success) {
+          showError(res.data.message);
+          return;
+        }
+        setAgentDetailMetrics(res.data.data);
+      } catch (error) {
+        showError(error.message || t('获取代理每日指标失败'));
+      } finally {
+        setAgentDetailMetricsLoading(false);
+      }
+    },
+    [
+      activeAgentScope?.userId,
+      dailyMetricEndDate,
+      dailyMetricStartDate,
+      status?.initialized,
+      t,
+    ],
+  );
 
   const loadProfiles = useCallback(
     async (page = profilesPage, currentKeyword = keyword) => {
@@ -462,6 +685,7 @@ export default function Agent() {
     if (status?.initialized) {
       if (canManageAgentAdmin) {
         loadOverview();
+        loadDailyMetrics();
         loadAdjustments();
         loadPromoLinks(1);
         loadWithdrawRequests();
@@ -474,6 +698,7 @@ export default function Agent() {
     await loadStatus();
     if (canManageAgentAdmin) {
       await loadOverview();
+      await loadDailyMetrics();
       await loadGroups();
       await loadAdjustments();
       await loadPromoLinks(promoLinksPage);
@@ -642,6 +867,106 @@ export default function Agent() {
     [t, transferPromoLinks],
   );
 
+  const agentPanelOptions = useMemo(
+    () =>
+      [
+        canManageAgentAdmin && {
+          key: AGENT_PANEL_KEYS.OVERVIEW,
+          label: t('代理总览'),
+        },
+        canManageAgentAdmin && {
+          key: AGENT_PANEL_KEYS.DAILY_METRICS,
+          label: t('代理每日指标'),
+        },
+        canManageAgentAdmin && {
+          key: AGENT_PANEL_KEYS.GROUPS,
+          label: t('代理分组'),
+        },
+        { key: AGENT_PANEL_KEYS.PROFILES, label: t('代理资料') },
+        canManageAgentAdmin && {
+          key: AGENT_PANEL_KEYS.ADJUSTMENTS,
+          label: t('最近调账记录'),
+        },
+        canManageAgentAdmin && {
+          key: AGENT_PANEL_KEYS.PROMO_LINKS,
+          label: t('推广链接管理'),
+        },
+        canManageAgentAdmin && {
+          key: AGENT_PANEL_KEYS.WITHDRAW_REQUESTS,
+          label: t('提现申请列表'),
+        },
+      ].filter(Boolean),
+    [canManageAgentAdmin, t],
+  );
+
+  const toggleAgentPanelVisibility = (panelKey, checked) => {
+    setVisibleAgentPanels((prev) => ({ ...prev, [panelKey]: checked }));
+  };
+
+  const dailyMetricItems = dailyMetrics?.items || [];
+  const dailyMetricChartLabels = useMemo(
+    () => ({
+      newUsers: t('新增用户'),
+      topupAmount: t('充值金额'),
+      rebateAmount: t('返利合计'),
+    }),
+    [t],
+  );
+  const pagedDailyMetricItems = useMemo(
+    () =>
+      dailyMetricItems.slice(
+        (dailyMetricPage - 1) * DAILY_METRIC_PAGE_SIZE,
+        dailyMetricPage * DAILY_METRIC_PAGE_SIZE,
+      ),
+    [dailyMetricItems, dailyMetricPage],
+  );
+  const dailyMetricChartSpec = useMemo(
+    () => buildDailyMetricChartSpec(dailyMetricItems, dailyMetricChartLabels),
+    [dailyMetricChartLabels, dailyMetricItems],
+  );
+  const agentDetailMetricItems = agentDetailMetrics?.items || [];
+  const pagedAgentDetailMetricItems = useMemo(
+    () =>
+      agentDetailMetricItems.slice(
+        (agentDetailMetricPage - 1) * DAILY_METRIC_PAGE_SIZE,
+        agentDetailMetricPage * DAILY_METRIC_PAGE_SIZE,
+      ),
+    [agentDetailMetricItems, agentDetailMetricPage],
+  );
+  const agentDetailChartSpec = useMemo(
+    () =>
+      buildDailyMetricChartSpec(agentDetailMetricItems, dailyMetricChartLabels),
+    [agentDetailMetricItems, dailyMetricChartLabels],
+  );
+  const metricsByAgent = useMemo(() => {
+    const grouped = new Map();
+    dailyMetricItems.forEach((item) => {
+      const key = Number(item.agent_user_id || 0);
+      if (!grouped.has(key)) {
+        grouped.set(key, []);
+      }
+      grouped.get(key).push(item);
+    });
+    return grouped;
+  }, [dailyMetricItems]);
+  const renderAgentMiniTrend = useCallback(
+    (agentUserId) => {
+      const items = metricsByAgent.get(Number(agentUserId)) || [];
+      if (items.length === 0) {
+        return <Text type='secondary'>-</Text>;
+      }
+      return (
+        <div style={{ width: 180, height: 64 }}>
+          <VChart
+            spec={buildAgentMiniTrendSpec(items, dailyMetricChartLabels)}
+            option={{ mode: 'desktop-browser' }}
+          />
+        </div>
+      );
+    },
+    [dailyMetricChartLabels, metricsByAgent],
+  );
+
   const loadTransferAgents = useCallback(
     async (excludedUserIds = []) => {
       setTransferAgentsLoading(true);
@@ -737,6 +1062,7 @@ export default function Agent() {
     setDownlineKeywordInput('');
     if (canManageAgentAdmin) {
       await loadPromoLinkStats(scope.userId);
+      await loadAgentDetailMetrics(scope.userId);
     }
     await loadDownlines(scope.userId, 1, '');
   };
@@ -1063,6 +1389,17 @@ export default function Agent() {
     await loadWithdrawRequests(1);
   };
 
+  const handleSearchDailyMetrics = async () => {
+    await loadDailyMetrics(
+      dailyMetricAgentId,
+      dailyMetricStartDate,
+      dailyMetricEndDate,
+    );
+    if (activeAgentScope?.userId) {
+      await loadAgentDetailMetrics(activeAgentScope.userId);
+    }
+  };
+
   const profileColumns = [
     { title: t('用户ID'), dataIndex: 'user_id' },
     { title: t('用户名'), dataIndex: 'username' },
@@ -1107,6 +1444,11 @@ export default function Agent() {
     },
     ...(canManageAgentAdmin
       ? [
+          {
+            title: t('趋势'),
+            dataIndex: 'daily_trend',
+            render: (_, record) => renderAgentMiniTrend(record.user_id),
+          },
           {
             title: t('返利余额'),
             dataIndex: 'rebate_balance_amount',
@@ -1315,6 +1657,28 @@ export default function Agent() {
     { title: t('最近注册用户'), dataIndex: 'last_invitee_name' },
   ];
 
+  const dailyMetricColumns = [
+    { title: t('日期'), dataIndex: 'date' },
+    { title: t('代理用户ID'), dataIndex: 'agent_user_id' },
+    { title: t('用户名'), dataIndex: 'username' },
+    { title: t('新增用户'), dataIndex: 'new_user_count' },
+    { title: t('充值笔数'), dataIndex: 'topup_count' },
+    {
+      title: t('充值金额'),
+      dataIndex: 'topup_amount',
+      render: (_, record) => formatAmount(record.topup_amount),
+    },
+    {
+      title: t('返利合计'),
+      dataIndex: 'total_rebate_amount',
+      render: (_, record) => formatAmount(record.total_rebate_amount),
+    },
+  ];
+  const agentDetailMetricColumns = dailyMetricColumns.filter(
+    (column) =>
+      column.dataIndex !== 'agent_user_id' && column.dataIndex !== 'username',
+  );
+
   const downlineColumns = [
     { title: t('用户ID'), dataIndex: 'user_id' },
     { title: t('用户名'), dataIndex: 'username' },
@@ -1462,9 +1826,39 @@ export default function Agent() {
 
         {status?.initialized ? (
           <>
+            <Card style={{ width: '100%' }}>
+              <Space
+                vertical
+                align='start'
+                style={{ width: '100%' }}
+                spacing={10}
+              >
+                <Title heading={5} style={{ margin: 0 }}>
+                  {t('显示功能面板')}
+                </Title>
+                <Space wrap>
+                  {agentPanelOptions.map((option) => (
+                    <Checkbox
+                      key={option.key}
+                      checked={!!visibleAgentPanels[option.key]}
+                      onChange={(event) =>
+                        toggleAgentPanelVisibility(
+                          option.key,
+                          event.target.checked,
+                        )
+                      }
+                    >
+                      {option.label}
+                    </Checkbox>
+                  ))}
+                </Space>
+              </Space>
+            </Card>
+
             {canManageAgentAdmin && (
               <>
-                <Card style={{ width: '100%' }} loading={overviewLoading}>
+                {visibleAgentPanels[AGENT_PANEL_KEYS.OVERVIEW] && (
+                  <Card style={{ width: '100%' }} loading={overviewLoading}>
                   <Space
                     vertical
                     align='start'
@@ -1509,9 +1903,92 @@ export default function Agent() {
                       </Card>
                     </div>
                   </Space>
-                </Card>
+                  </Card>
+                )}
 
-                <Card style={{ width: '100%' }}>
+                {visibleAgentPanels[AGENT_PANEL_KEYS.DAILY_METRICS] && (
+                  <Card style={{ width: '100%' }} loading={dailyMetricsLoading}>
+                  <Space
+                    vertical
+                    align='start'
+                    style={{ width: '100%' }}
+                    spacing={12}
+                  >
+                    <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
+                      <Title heading={5} style={{ margin: 0 }}>
+                        {t('代理每日指标')}
+                      </Title>
+                      <Space wrap>
+                        <Input
+                          placeholder={t('代理用户ID')}
+                          value={dailyMetricAgentId}
+                          onChange={setDailyMetricAgentId}
+                          style={{ width: 140 }}
+                        />
+                        <Input
+                          placeholder={t('开始日期')}
+                          value={dailyMetricStartDate}
+                          onChange={setDailyMetricStartDate}
+                          style={{ width: 140 }}
+                        />
+                        <Input
+                          placeholder={t('结束日期')}
+                          value={dailyMetricEndDate}
+                          onChange={setDailyMetricEndDate}
+                          style={{ width: 140 }}
+                        />
+                        <Button onClick={handleSearchDailyMetrics}>
+                          {t('查询')}
+                        </Button>
+                      </Space>
+                    </div>
+                    <div className='grid grid-cols-1 md:grid-cols-4 gap-4 w-full'>
+                      <MetricStat
+                        label={t('区间新增用户')}
+                        value={dailyMetrics?.summary?.new_user_count || 0}
+                      />
+                      <MetricStat
+                        label={t('区间充值笔数')}
+                        value={dailyMetrics?.summary?.topup_count || 0}
+                      />
+                      <MetricStat
+                        label={t('区间充值金额')}
+                        value={formatAmount(dailyMetrics?.summary?.topup_amount)}
+                      />
+                      <MetricStat
+                        label={t('区间返利合计')}
+                        value={formatAmount(
+                          dailyMetrics?.summary?.total_rebate_amount,
+                        )}
+                      />
+                    </div>
+                    <div style={{ width: '100%', height: 320 }}>
+                      <VChart
+                        spec={dailyMetricChartSpec}
+                        option={{ mode: 'desktop-browser' }}
+                      />
+                    </div>
+                    <Table
+                      rowKey={(record) =>
+                        `${record.date}-${record.agent_user_id}`
+                      }
+                      columns={dailyMetricColumns}
+                      dataSource={pagedDailyMetricItems}
+                      pagination={false}
+                      empty={<Empty title={t('暂无代理每日指标')} />}
+                    />
+                    <Pagination
+                      total={dailyMetricItems.length}
+                      currentPage={dailyMetricPage}
+                      pageSize={DAILY_METRIC_PAGE_SIZE}
+                      onPageChange={setDailyMetricPage}
+                    />
+                  </Space>
+                  </Card>
+                )}
+
+                {visibleAgentPanels[AGENT_PANEL_KEYS.GROUPS] && (
+                  <Card style={{ width: '100%' }}>
                   <Space
                     vertical
                     align='start'
@@ -1534,11 +2011,13 @@ export default function Agent() {
                       empty={<Empty title={t('暂无代理分组')} />}
                     />
                   </Space>
-                </Card>
+                  </Card>
+                )}
               </>
             )}
 
-            <Card style={{ width: '100%' }}>
+            {visibleAgentPanels[AGENT_PANEL_KEYS.PROFILES] && (
+              <Card style={{ width: '100%' }}>
               <Space
                 vertical
                 align='start'
@@ -1603,11 +2082,13 @@ export default function Agent() {
                   }}
                 />
               </Space>
-            </Card>
+              </Card>
+            )}
 
             {canManageAgentAdmin && (
               <>
-                <Card style={{ width: '100%' }}>
+                {visibleAgentPanels[AGENT_PANEL_KEYS.ADJUSTMENTS] && (
+                  <Card style={{ width: '100%' }}>
                   <Space
                     vertical
                     align='start'
@@ -1631,9 +2112,11 @@ export default function Agent() {
                       }
                     />
                   </Space>
-                </Card>
+                  </Card>
+                )}
 
-                <Card style={{ width: '100%' }}>
+                {visibleAgentPanels[AGENT_PANEL_KEYS.PROMO_LINKS] && (
+                  <Card style={{ width: '100%' }}>
                   <Space
                     vertical
                     align='start'
@@ -1674,12 +2157,14 @@ export default function Agent() {
                       }}
                     />
                   </Space>
-                </Card>
+                  </Card>
+                )}
               </>
             )}
 
             {canManageAgentAdmin && (
-              <Card style={{ width: '100%' }}>
+              visibleAgentPanels[AGENT_PANEL_KEYS.WITHDRAW_REQUESTS] && (
+                <Card style={{ width: '100%' }}>
                 <Space
                   vertical
                   align='start'
@@ -1775,7 +2260,8 @@ export default function Agent() {
                     }}
                   />
                 </Space>
-              </Card>
+                </Card>
+              )
             )}
           </>
         ) : (
@@ -2045,6 +2531,75 @@ export default function Agent() {
         width={1200}
       >
         <Space vertical align='start' style={{ width: '100%' }} spacing={16}>
+          {canManageAgentAdmin && (
+            <Card style={{ width: '100%' }} loading={agentDetailMetricsLoading}>
+              <Space
+                vertical
+                align='start'
+                style={{ width: '100%' }}
+                spacing={12}
+              >
+                <div className='flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3'>
+                  <Title heading={5} style={{ margin: 0 }}>
+                    {t('每日指标')}
+                  </Title>
+                  <Space>
+                    <Text type='secondary'>
+                      {dailyMetricStartDate} - {dailyMetricEndDate}
+                    </Text>
+                    <Button
+                      size='small'
+                      onClick={() =>
+                        loadAgentDetailMetrics(activeAgentScope?.userId || 0)
+                      }
+                    >
+                      {t('刷新')}
+                    </Button>
+                  </Space>
+                </div>
+                <div className='grid grid-cols-1 md:grid-cols-4 gap-4 w-full'>
+                  <MetricStat
+                    label={t('新增用户')}
+                    value={agentDetailMetrics?.summary?.new_user_count || 0}
+                  />
+                  <MetricStat
+                    label={t('充值笔数')}
+                    value={agentDetailMetrics?.summary?.topup_count || 0}
+                  />
+                  <MetricStat
+                    label={t('充值金额')}
+                    value={formatAmount(agentDetailMetrics?.summary?.topup_amount)}
+                  />
+                  <MetricStat
+                    label={t('返利合计')}
+                    value={formatAmount(
+                      agentDetailMetrics?.summary?.total_rebate_amount,
+                    )}
+                  />
+                </div>
+                <div style={{ width: '100%', height: 280 }}>
+                  <VChart
+                    spec={agentDetailChartSpec}
+                    option={{ mode: 'desktop-browser' }}
+                  />
+                </div>
+                <Table
+                  rowKey={(record) => `${record.date}-${record.agent_user_id}`}
+                  columns={agentDetailMetricColumns}
+                  dataSource={pagedAgentDetailMetricItems}
+                  pagination={false}
+                  empty={<Empty title={t('暂无每日指标')} />}
+                />
+                <Pagination
+                  total={agentDetailMetricItems.length}
+                  currentPage={agentDetailMetricPage}
+                  pageSize={DAILY_METRIC_PAGE_SIZE}
+                  onPageChange={setAgentDetailMetricPage}
+                />
+              </Space>
+            </Card>
+          )}
+
           {canManageAgentAdmin && (
             <Card style={{ width: '100%' }}>
               <Space
