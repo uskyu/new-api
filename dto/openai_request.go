@@ -159,44 +159,24 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 			}
 			arrayContent := message.ParseContent()
 			for _, m := range arrayContent {
-				if m.Type == ContentTypeImageURL {
-					imageUrl := m.GetImageMedia()
-					if imageUrl != nil && imageUrl.Url != "" {
-						source := createFileSource(imageUrl.Url)
-						fileMeta = append(fileMeta, &types.FileMeta{
-							FileType: types.FileTypeImage,
-							Source:   source,
-							Detail:   imageUrl.Detail,
-						})
+				source := m.ToFileSource()
+				if source != nil {
+					meta := &types.FileMeta{Source: source}
+					switch m.Type {
+					case ContentTypeImageURL:
+						meta.FileType = types.FileTypeImage
+						if img := m.GetImageMedia(); img != nil {
+							meta.Detail = img.Detail
+						}
+					case ContentTypeInputAudio:
+						meta.FileType = types.FileTypeAudio
+					case ContentTypeFile:
+						meta.FileType = types.FileTypeFile
+					case ContentTypeVideoUrl:
+						meta.FileType = types.FileTypeVideo
 					}
-				} else if m.Type == ContentTypeInputAudio {
-					inputAudio := m.GetInputAudio()
-					if inputAudio != nil && inputAudio.Data != "" {
-						source := createFileSource(inputAudio.Data)
-						fileMeta = append(fileMeta, &types.FileMeta{
-							FileType: types.FileTypeAudio,
-							Source:   source,
-						})
-					}
-				} else if m.Type == ContentTypeFile {
-					file := m.GetFile()
-					if file != nil && file.FileData != "" {
-						source := createFileSource(file.FileData)
-						fileMeta = append(fileMeta, &types.FileMeta{
-							FileType: types.FileTypeFile,
-							Source:   source,
-						})
-					}
-				} else if m.Type == ContentTypeVideoUrl {
-					videoUrl := m.GetVideoUrl()
-					if videoUrl != nil && videoUrl.Url != "" {
-						source := createFileSource(videoUrl.Url)
-						fileMeta = append(fileMeta, &types.FileMeta{
-							FileType: types.FileTypeVideo,
-							Source:   source,
-						})
-					}
-				} else {
+					fileMeta = append(fileMeta, meta)
+				} else if m.Type == ContentTypeText {
 					texts = append(texts, m.Text)
 				}
 			}
@@ -241,12 +221,22 @@ func (r *GeneralOpenAIRequest) ToMap() map[string]any {
 	return result
 }
 
+func IsOpenAIReasoningOModel(modelName string) bool {
+	return strings.HasPrefix(modelName, "o1") ||
+		strings.HasPrefix(modelName, "o3") ||
+		strings.HasPrefix(modelName, "o4")
+}
+
+func IsOpenAIGPT5Model(modelName string) bool {
+	return strings.HasPrefix(modelName, "gpt-5")
+}
+
 func (r *GeneralOpenAIRequest) GetSystemRoleName() string {
-	if strings.HasPrefix(r.Model, "o") {
+	if IsOpenAIReasoningOModel(r.Model) {
 		if !strings.HasPrefix(r.Model, "o1-mini") && !strings.HasPrefix(r.Model, "o1-preview") {
 			return "developer"
 		}
-	} else if strings.HasPrefix(r.Model, "gpt-5") {
+	} else if IsOpenAIGPT5Model(r.Model) {
 		return "developer"
 	}
 	return "system"
@@ -307,8 +297,8 @@ type Message struct {
 	Content          any             `json:"content"`
 	Name             *string         `json:"name,omitempty"`
 	Prefix           *bool           `json:"prefix,omitempty"`
-	ReasoningContent string          `json:"reasoning_content,omitempty"`
-	Reasoning        string          `json:"reasoning,omitempty"`
+	ReasoningContent *string         `json:"reasoning_content,omitempty"`
+	Reasoning        *string         `json:"reasoning,omitempty"`
 	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
 	ToolCallId       string          `json:"tool_call_id,omitempty"`
 	parsedContent    []MediaContent
@@ -391,6 +381,49 @@ func (m *MediaContent) GetVideoUrl() *MessageVideoUrl {
 	return nil
 }
 
+func (m *MediaContent) ToFileSource() *types.FileSource {
+	switch m.Type {
+	case ContentTypeImageURL:
+		img := m.GetImageMedia()
+		if img == nil || img.Url == "" {
+			return nil
+		}
+		return createFileSourceWithMimeType(img.Url, img.MimeType)
+	case ContentTypeInputAudio:
+		audio := m.GetInputAudio()
+		if audio == nil || audio.Data == "" {
+			return nil
+		}
+		mimeType := ""
+		if audio.Format != "" {
+			mimeType = "audio/" + audio.Format
+		}
+		return createFileSourceWithMimeType(audio.Data, mimeType)
+	case ContentTypeFile:
+		file := m.GetFile()
+		if file == nil || file.FileData == "" {
+			return nil
+		}
+		return createFileSourceWithMimeType(file.FileData, "")
+	case ContentTypeVideoUrl:
+		video := m.GetVideoUrl()
+		if video == nil || video.Url == "" {
+			return nil
+		}
+		return createFileSourceWithMimeType(video.Url, "")
+	}
+	return nil
+}
+
+func createFileSourceWithMimeType(data string, mimeType string) *types.FileSource {
+	if strings.HasPrefix(data, "http://") || strings.HasPrefix(data, "https://") {
+		source := types.NewURLFileSource(data)
+		source.MimeType = mimeType
+		return source
+	}
+	return types.NewBase64FileSource(data, mimeType)
+}
+
 type MessageImageUrl struct {
 	Url      string `json:"url"`
 	Detail   string `json:"detail,omitempty"`
@@ -425,6 +458,16 @@ const (
 	ContentTypeVideoUrl   = "video_url" // 阿里百炼视频识别
 	//ContentTypeAudioUrl   = "audio_url"
 )
+
+func (m *Message) GetReasoningContent() string {
+	if m.ReasoningContent == nil && m.Reasoning == nil {
+		return ""
+	}
+	if m.ReasoningContent != nil {
+		return *m.ReasoningContent
+	}
+	return *m.Reasoning
+}
 
 func (m *Message) GetPrefix() bool {
 	if m.Prefix == nil {
