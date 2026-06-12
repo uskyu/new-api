@@ -448,6 +448,11 @@ func GetCompletionRatio(name string) float64 {
 			return ratio
 		}
 	}
+	if isGPTCompletionRatioConfigurable(name) {
+		if ratio, ok := completionRatioMap.Get(name); ok {
+			return ratio
+		}
+	}
 	hardCodedRatio, contain := getHardcodedCompletionModelRatio(name)
 	if contain {
 		return hardCodedRatio
@@ -475,7 +480,22 @@ func GetCompletionRatioInfo(name string) CompletionRatioInfo {
 		}
 	}
 
+	if isGPTCompletionRatioConfigurable(name) {
+		if ratio, ok := completionRatioMap.Get(name); ok {
+			return CompletionRatioInfo{
+				Ratio:  ratio,
+				Locked: false,
+			}
+		}
+	}
+
 	hardCodedRatio, locked := getHardcodedCompletionModelRatio(name)
+	if locked && isGPTCompletionRatioConfigurable(name) {
+		return CompletionRatioInfo{
+			Ratio:  hardCodedRatio,
+			Locked: false,
+		}
+	}
 	if locked {
 		return CompletionRatioInfo{
 			Ratio:  hardCodedRatio,
@@ -494,6 +514,10 @@ func GetCompletionRatioInfo(name string) CompletionRatioInfo {
 		Ratio:  hardCodedRatio,
 		Locked: false,
 	}
+}
+
+func isGPTCompletionRatioConfigurable(name string) bool {
+	return strings.HasPrefix(name, "gpt-") || strings.HasPrefix(name, "chatgpt-")
 }
 
 func getHardcodedCompletionModelRatio(name string) (float64, bool) {
