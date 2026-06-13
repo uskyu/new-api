@@ -49,6 +49,8 @@ const routerMap = {
   deployment: '/console/deployment',
   playground: '/console/playground',
   personal: '/console/personal',
+  self_service: '/console/self-service',
+  self_service_admin: '/console/self-service-admin',
 };
 
 const SiderBar = ({ onNavigate = () => {} }) => {
@@ -134,6 +136,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         itemKey: 'personal',
         to: '/personal',
       },
+      {
+        text: t('自助平台'),
+        itemKey: 'self_service',
+        to: '/self-service',
+      },
     ];
 
     // 根据配置过滤项目
@@ -188,6 +195,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         itemKey: 'setting',
         to: '/setting',
         className: isRoot() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('自助平台管理'),
+        itemKey: 'self_service_admin',
+        to: '/self-service-admin',
+        className: isAdmin() ? '' : 'tableHiddle',
       },
     ];
 

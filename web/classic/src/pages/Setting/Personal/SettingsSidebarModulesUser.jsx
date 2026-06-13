@@ -95,6 +95,7 @@ export default function SettingsSidebarModulesUser() {
         enabled: true,
         topup: isSidebarModuleAllowed('personal', 'topup'),
         personal: isSidebarModuleAllowed('personal', 'personal'),
+        self_service: isSidebarModuleAllowed('personal', 'self_service'),
       };
     }
 
@@ -107,7 +108,12 @@ export default function SettingsSidebarModulesUser() {
         deployment: isSidebarModuleAllowed('admin', 'deployment'),
         redemption: isSidebarModuleAllowed('admin', 'redemption'),
         user: isSidebarModuleAllowed('admin', 'user'),
+        subscription: isSidebarModuleAllowed('admin', 'subscription'),
         setting: isSidebarModuleAllowed('admin', 'setting'),
+        self_service_admin: isSidebarModuleAllowed(
+          'admin',
+          'self_service_admin',
+        ),
       };
     }
 
@@ -330,6 +336,11 @@ export default function SettingsSidebarModulesUser() {
           title: t('个人设置'),
           description: t('个人信息设置'),
         },
+        {
+          key: 'self_service',
+          title: t('自助平台'),
+          description: t('空单检测和自助升级'),
+        },
       ],
     },
     {
@@ -354,6 +365,11 @@ export default function SettingsSidebarModulesUser() {
           key: 'setting',
           title: t('系统设置'),
           description: t('系统参数配置'),
+        },
+        {
+          key: 'self_service_admin',
+          title: t('自助平台管理'),
+          description: t('空单检测和升级规则管理'),
         },
       ],
     },

@@ -281,6 +281,10 @@ func migrateDB() error {
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
+		&SelfServiceRefundHistory{},
+		&SelfServiceClaimAttempt{},
+		&SelfServiceUpgradeRule{},
+		&SelfServiceUpgradeHistory{},
 	)
 	if err != nil {
 		return err
@@ -293,6 +297,9 @@ func migrateDB() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	if err := migrateSelfServiceSidebarModules(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -330,6 +337,10 @@ func migrateDBFast() error {
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
 		{&PerfMetric{}, "PerfMetric"},
+		{&SelfServiceRefundHistory{}, "SelfServiceRefundHistory"},
+		{&SelfServiceClaimAttempt{}, "SelfServiceClaimAttempt"},
+		{&SelfServiceUpgradeRule{}, "SelfServiceUpgradeRule"},
+		{&SelfServiceUpgradeHistory{}, "SelfServiceUpgradeHistory"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
@@ -363,8 +374,54 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := migrateSelfServiceSidebarModules(); err != nil {
+		return err
+	}
 	common.SysLog("database migrated")
 	return nil
+}
+
+func migrateSelfServiceSidebarModules() error {
+	var option Option
+	if err := DB.Where(commonKeyCol+" = ?", "SidebarModulesAdmin").First(&option).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil
+		}
+		return err
+	}
+	if strings.TrimSpace(option.Value) == "" {
+		return nil
+	}
+
+	var config map[string]map[string]bool
+	if err := common.Unmarshal([]byte(option.Value), &config); err != nil {
+		return nil
+	}
+
+	changed := ensureSelfServiceSidebarModule(config, "personal", "self_service")
+	changed = ensureSelfServiceSidebarModule(config, "admin", "self_service") || changed
+	changed = ensureSelfServiceSidebarModule(config, "admin", "self_service_admin") || changed
+	if !changed {
+		return nil
+	}
+
+	bytes, err := common.Marshal(config)
+	if err != nil {
+		return err
+	}
+	option.Value = string(bytes)
+	return DB.Save(&option).Error
+}
+
+func ensureSelfServiceSidebarModule(config map[string]map[string]bool, section string, module string) bool {
+	if config[section] == nil {
+		config[section] = map[string]bool{"enabled": true}
+	}
+	if _, exists := config[section][module]; exists {
+		return false
+	}
+	config[section][module] = true
+	return true
 }
 
 func migrateLOGDB() error {

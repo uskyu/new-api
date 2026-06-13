@@ -53,6 +53,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     enabled: true,
     topup: true,
     personal: true,
+    self_service: true,
   },
   admin: {
     enabled: true,
@@ -62,6 +63,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     user: true,
     setting: true,
     subscription: true,
+    self_service_admin: true,
   },
 }
 
@@ -106,6 +108,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/usage-logs/task': { section: 'console', module: 'task' },
   '/wallet': { section: 'personal', module: 'topup' },
   '/profile': { section: 'personal', module: 'personal' },
+  '/self-service': { section: 'personal', module: 'self_service' },
   '/channels': { section: 'admin', module: 'channel' },
   '/models': { section: 'admin', module: 'models' },
   '/models/metadata': { section: 'admin', module: 'models' },
@@ -113,6 +116,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/users': { section: 'admin', module: 'user' },
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
+  '/self-service-admin': { section: 'admin', module: 'self_service_admin' },
   '/system-settings': { section: 'admin', module: 'setting' },
   '/system-settings/site': { section: 'admin', module: 'setting' },
 }
@@ -188,6 +192,31 @@ function isModuleEnabled(
   if (!userSection) return true
   if (userSection.enabled === false) return false
   return userSection[module] !== false
+}
+
+export function useSidebarUrlVisible(url: string): boolean {
+  const { status } = useStatus()
+  const { auth } = useAuthStore()
+
+  const adminConfig = useMemo(
+    () =>
+      parseSidebarConfig(
+        status?.SidebarModulesAdmin as string | null | undefined
+      ),
+    [status?.SidebarModulesAdmin]
+  )
+
+  const userConfig = useMemo(() => {
+    if (auth?.user?.permissions?.sidebar_settings === false) {
+      return null
+    }
+    return parseUserSidebarConfig(auth?.user?.sidebar_modules)
+  }, [auth?.user?.permissions?.sidebar_settings, auth?.user?.sidebar_modules])
+
+  return useMemo(
+    () => isModuleEnabled(url, adminConfig, userConfig),
+    [url, adminConfig, userConfig]
+  )
 }
 
 /**

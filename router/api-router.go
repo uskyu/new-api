@@ -181,6 +181,28 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)
 		apiRouter.GET("/subscription/epay/return", controller.SubscriptionEpayReturn)
 		apiRouter.POST("/subscription/epay/return", anonymousRequestBodyLimit, controller.SubscriptionEpayReturn)
+
+		selfServiceRoute := apiRouter.Group("/self-service")
+		{
+			selfServiceSelfRoute := selfServiceRoute.Group("/self")
+			selfServiceSelfRoute.Use(middleware.UserAuth())
+			{
+				selfServiceSelfRoute.GET("/", controller.GetSelfServiceSelf)
+				selfServiceSelfRoute.POST("/check", middleware.CriticalRateLimit(), controller.CheckSelfService)
+				selfServiceSelfRoute.POST("/upgrade", middleware.CriticalRateLimit(), controller.UpgradeSelfServiceGroup)
+			}
+			selfServiceAdminRoute := selfServiceRoute.Group("/admin")
+			selfServiceAdminRoute.Use(middleware.AdminAuth())
+			{
+				selfServiceAdminRoute.GET("/config", controller.GetSelfServiceAdminConfig)
+				selfServiceAdminRoute.PUT("/config", controller.UpdateSelfServiceAdminConfig)
+				selfServiceAdminRoute.PUT("/upgrade-rules", controller.UpdateSelfServiceUpgradeRules)
+				selfServiceAdminRoute.GET("/claim-attempts", controller.GetSelfServiceClaimAttempts)
+				selfServiceAdminRoute.GET("/refund-histories", controller.GetSelfServiceRefundHistories)
+				selfServiceAdminRoute.GET("/upgrade-histories", controller.GetSelfServiceUpgradeHistories)
+			}
+		}
+
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{

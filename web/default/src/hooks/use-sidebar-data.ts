@@ -32,6 +32,7 @@ import {
   User,
   Users,
   Wallet,
+  Wrench,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { type SidebarData } from '@/components/layout/types'
@@ -110,6 +111,11 @@ export function useSidebarData(): SidebarData {
             url: '/profile',
             icon: User,
           },
+          {
+            title: t('Self-Service Platform'),
+            url: '/self-service',
+            icon: Wrench,
+          },
         ],
       },
       {
@@ -140,6 +146,11 @@ export function useSidebarData(): SidebarData {
             title: t('Subscription Management'),
             url: '/subscriptions',
             icon: CreditCard,
+          },
+          {
+            title: t('Self-Service Management'),
+            url: '/self-service-admin',
+            icon: Wrench,
           },
           {
             title: t('System Settings'),

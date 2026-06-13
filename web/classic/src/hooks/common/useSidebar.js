@@ -43,6 +43,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     enabled: true,
     topup: true,
     personal: true,
+    self_service: true,
   },
   admin: {
     enabled: true,
@@ -53,6 +54,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     user: true,
     subscription: true,
     setting: true,
+    self_service_admin: true,
   },
 };
 

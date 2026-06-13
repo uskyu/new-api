@@ -124,6 +124,10 @@ export function SidebarModulesSection({
         title: t('Profile'),
         description: t('Personal settings and profile management.'),
       },
+      self_service: {
+        title: t('Self-Service Platform'),
+        description: t('Empty output refunds and self-service upgrades.'),
+      },
     },
     admin: {
       channel: {
@@ -149,6 +153,10 @@ export function SidebarModulesSection({
       subscription: {
         title: t('Subscription Management'),
         description: t('Manage subscription plans and pricing.'),
+      },
+      self_service_admin: {
+        title: t('Self-Service Management'),
+        description: t('Manage empty output refunds and upgrade rules.'),
       },
     },
   }

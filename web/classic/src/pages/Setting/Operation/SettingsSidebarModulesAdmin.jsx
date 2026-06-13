@@ -57,6 +57,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       enabled: true,
       topup: true,
       personal: true,
+      self_service: true,
     },
     admin: {
       enabled: true,
@@ -67,6 +68,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       user: true,
       subscription: true,
       setting: true,
+      self_service_admin: true,
     },
   });
 
@@ -118,6 +120,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         enabled: true,
         topup: true,
         personal: true,
+        self_service: true,
       },
       admin: {
         enabled: true,
@@ -128,6 +131,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         user: true,
         subscription: true,
         setting: true,
+        self_service_admin: true,
       },
     };
     setSidebarModulesAdmin(defaultModules);
@@ -187,7 +191,12 @@ export default function SettingsSidebarModulesAdmin(props) {
             midjourney: true,
             task: true,
           },
-          personal: { enabled: true, topup: true, personal: true },
+          personal: {
+            enabled: true,
+            topup: true,
+            personal: true,
+            self_service: true,
+          },
           admin: {
             enabled: true,
             channel: true,
@@ -197,6 +206,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             user: true,
             subscription: true,
             setting: true,
+            self_service_admin: true,
           },
         };
         setSidebarModulesAdmin(defaultModules);
@@ -246,6 +256,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           title: t('个人设置'),
           description: t('个人信息设置'),
         },
+        {
+          key: 'self_service',
+          title: t('自助平台'),
+          description: t('空单检测和自助升级'),
+        },
       ],
     },
     {
@@ -275,6 +290,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           key: 'setting',
           title: t('系统设置'),
           description: t('系统参数配置'),
+        },
+        {
+          key: 'self_service_admin',
+          title: t('自助平台管理'),
+          description: t('空单检测和升级规则管理'),
         },
       ],
     },

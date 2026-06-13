@@ -45,6 +45,8 @@ import ModelPage from './pages/Model';
 import ModelDeploymentPage from './pages/ModelDeployment';
 import Playground from './pages/Playground';
 import Subscription from './pages/Subscription';
+import SelfService from './pages/SelfService';
+import SelfServiceAdmin from './pages/SelfServiceAdmin';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
@@ -129,6 +131,22 @@ function App() {
             <AdminRoute>
               <Subscription />
             </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/self-service-admin'
+          element={
+            <AdminRoute>
+              <SelfServiceAdmin />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/self-service'
+          element={
+            <PrivateRoute>
+              <SelfService />
+            </PrivateRoute>
           }
         />
         <Route
