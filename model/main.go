@@ -397,6 +397,9 @@ func migrateSelfServiceSidebarModules() error {
 	if err := common.Unmarshal([]byte(option.Value), &config); err != nil {
 		return nil
 	}
+	if config == nil {
+		config = make(map[string]map[string]bool)
+	}
 
 	changed := ensureSelfServiceSidebarModule(config, "personal", "self_service")
 	changed = ensureSelfServiceSidebarModule(config, "admin", "self_service") || changed
