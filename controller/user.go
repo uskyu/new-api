@@ -304,6 +304,13 @@ type SupportDecreaseUserQuotaRequest struct {
 	Reason string `json:"reason"`
 }
 
+type SupportAdjustUserQuotaRequest struct {
+	Quota      int    `json:"quota"`
+	QuotaDelta int    `json:"quota_delta"`
+	Action     string `json:"action"`
+	Reason     string `json:"reason"`
+}
+
 func SupportDecreaseUserQuota(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -316,6 +323,45 @@ func SupportDecreaseUserQuota(c *gin.Context) {
 		return
 	}
 	result, err := model.DecreaseUserQuotaBySupport(c.GetInt("id"), c.GetInt("role"), id, req.Quota, req.Reason)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    result,
+	})
+}
+
+func SupportAdjustUserQuota(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var req SupportAdjustUserQuotaRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	quotaDelta := req.QuotaDelta
+	if quotaDelta == 0 {
+		if req.Quota <= 0 {
+			common.ApiErrorMsg(c, "quota must be greater than 0")
+			return
+		}
+		switch strings.ToLower(strings.TrimSpace(req.Action)) {
+		case "increase", "add", "+":
+			quotaDelta = req.Quota
+		case "decrease", "subtract", "-":
+			quotaDelta = -req.Quota
+		default:
+			common.ApiErrorMsg(c, "invalid quota adjustment action")
+			return
+		}
+	}
+	result, err := model.AdjustUserQuotaBySupport(c.GetInt("id"), c.GetInt("role"), id, quotaDelta, req.Reason)
 	if err != nil {
 		common.ApiError(c, err)
 		return

@@ -650,6 +650,77 @@ func TestTransferAgentDownlineUserValidatesOwnershipAndTargetLink(t *testing.T) 
 	require.Equal(t, AgentPromoLinkEnabled, autoPromo.Status)
 }
 
+func TestChangeAgentDownlineUserAssignsOrTransfers(t *testing.T) {
+	setupAgentTestDB(t, TestDBDialectSQLite)
+	common.AgentEnabled = true
+	common.AgentInitialized = true
+	t.Cleanup(func() {
+		common.AgentEnabled = false
+		common.AgentInitialized = false
+	})
+
+	operator := createAgentTestUser(t, "admin_change_downline", "AFF_CHANGE_ADMIN")
+	sourceAgent := createAgentTestUser(t, "change_source_agent", "AFF_CHANGE_SOURCE")
+	targetAgent := createAgentTestUser(t, "change_target_agent", "AFF_CHANGE_TARGET")
+	unassigned := createAgentTestUser(t, "change_unassigned_user", "AFF_CHANGE_UNASSIGNED")
+	assigned := createAgentTestUser(t, "change_assigned_user", "AFF_CHANGE_ASSIGNED")
+	group := &AgentRebateGroup{Name: "change-group", RebateRate: 3000, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: sourceAgent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: targetAgent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	sourcePromo := &AgentPromoLink{AgentUserId: sourceAgent.Id, Name: "source", Code: "CHANGESOURCE", Status: AgentPromoLinkEnabled}
+	targetPromo := &AgentPromoLink{AgentUserId: targetAgent.Id, Name: "target", Code: "CHANGETARGET", Status: AgentPromoLinkEnabled}
+	require.NoError(t, DB.Create(sourcePromo).Error)
+	require.NoError(t, DB.Create(targetPromo).Error)
+	require.NoError(t, DB.Model(assigned).Updates(map[string]interface{}{"inviter_id": sourceAgent.Id, "promo_link_id": sourcePromo.Id}).Error)
+
+	err := ChangeAgentDownlineUser(operator.Id, targetAgent.Id, unassigned.Id, targetPromo.Id, "assign from user table")
+	require.NoError(t, err)
+	var updatedUnassigned User
+	require.NoError(t, DB.Select("id", "inviter_id", "promo_link_id").First(&updatedUnassigned, unassigned.Id).Error)
+	require.Equal(t, targetAgent.Id, updatedUnassigned.InviterId)
+	require.Equal(t, targetPromo.Id, updatedUnassigned.PromoLinkId)
+
+	err = ChangeAgentDownlineUser(operator.Id, targetAgent.Id, assigned.Id, targetPromo.Id, "transfer from user table")
+	require.NoError(t, err)
+	var updatedAssigned User
+	require.NoError(t, DB.Select("id", "inviter_id", "promo_link_id").First(&updatedAssigned, assigned.Id).Error)
+	require.Equal(t, targetAgent.Id, updatedAssigned.InviterId)
+	require.Equal(t, targetPromo.Id, updatedAssigned.PromoLinkId)
+}
+
+func TestChangeAgentDownlineUserCanMoveChildAgentParent(t *testing.T) {
+	setupAgentTestDB(t, TestDBDialectSQLite)
+	common.AgentEnabled = true
+	common.AgentInitialized = true
+	t.Cleanup(func() {
+		common.AgentEnabled = false
+		common.AgentInitialized = false
+	})
+
+	operator := createAgentTestUser(t, "admin_change_child_agent", "AFF_CHANGE_CHILD_ADMIN")
+	sourceAgent := createAgentTestUser(t, "child_source_agent", "AFF_CHANGE_CHILD_SOURCE")
+	targetAgent := createAgentTestUser(t, "child_target_agent", "AFF_CHANGE_CHILD_TARGET")
+	childAgent := createAgentTestUser(t, "child_agent_to_move", "AFF_CHANGE_CHILD_AGENT")
+	group := &AgentRebateGroup{Name: "change-child-group", RebateRate: 3000, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: sourceAgent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: targetAgent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: childAgent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	require.NoError(t, DB.Create(&AgentRelationship{
+		ParentAgentUserId: sourceAgent.Id,
+		ChildAgentUserId:  childAgent.Id,
+		Status:            AgentStatusEnabled,
+	}).Error)
+
+	err := ChangeAgentDownlineUser(operator.Id, targetAgent.Id, childAgent.Id, 0, "move child agent parent")
+	require.NoError(t, err)
+
+	relation, err := getAgentRelationshipByChildTx(DB, childAgent.Id)
+	require.NoError(t, err)
+	require.Equal(t, targetAgent.Id, relation.ParentAgentUserId)
+}
+
 func TestAgentWithdrawWorkflow(t *testing.T) {
 	setupAgentTestDB(t, TestDBDialectSQLite)
 	agent := createAgentTestUser(t, "agent_withdraw", "AFF16")

@@ -84,6 +84,13 @@ type AssignAgentDownlineUserRequest struct {
 	Remark            string `json:"remark"`
 }
 
+type ChangeAgentDownlineUserRequest struct {
+	TargetAgentUserId int    `json:"target_agent_user_id"`
+	DownlineUserId    int    `json:"downline_user_id"`
+	PromoLinkId       int    `json:"promo_link_id"`
+	Remark            string `json:"remark"`
+}
+
 type SupportAgentProfileView struct {
 	Id          int    `json:"id"`
 	UserId      int    `json:"user_id"`
@@ -648,6 +655,19 @@ func AssignAgentDownlineUser(c *gin.Context) {
 		return
 	}
 	if err := model.AssignAgentDownlineUser(c.GetInt("id"), req.TargetAgentUserId, req.DownlineUserId, req.PromoLinkId, req.Remark); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, true)
+}
+
+func ChangeAgentDownlineUser(c *gin.Context) {
+	var req ChangeAgentDownlineUserRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiErrorMsg(c, "invalid request body")
+		return
+	}
+	if err := model.ChangeAgentDownlineUser(c.GetInt("id"), req.TargetAgentUserId, req.DownlineUserId, req.PromoLinkId, req.Remark); err != nil {
 		common.ApiError(c, err)
 		return
 	}

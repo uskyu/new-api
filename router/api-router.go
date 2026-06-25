@@ -304,6 +304,7 @@ func SetApiRouter(router *gin.Engine) {
 			agentRoute.POST("/adjust", middleware.AdminAuth(), controller.AdjustAgentBalance)
 			agentRoute.POST("/downline/assign", middleware.PermissionAuth(common.PermissionAgentDownlineAssign), controller.AssignAgentDownlineUser)
 			agentRoute.POST("/downline/transfer", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.TransferAgentDownlineUser)
+			agentRoute.POST("/downline/change", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.ChangeAgentDownlineUser)
 			agentRoute.POST("/upgrade-request/:id/review", middleware.AdminAuth(), controller.ReviewAgentUpgradeRequest)
 			agentRoute.DELETE("/group/:id", middleware.AdminAuth(), controller.DeleteAgentRebateGroup)
 			agentRoute.DELETE("/promo-link/:id", middleware.AdminAuth(), controller.DeleteAgentPromoLink)
@@ -326,6 +327,7 @@ func SetApiRouter(router *gin.Engine) {
 			supportRoute.GET("/users", controller.GetSupportUsers)
 			supportRoute.GET("/users/search", controller.SearchSupportUsers)
 			supportRoute.GET("/users/:id", controller.GetSupportUser)
+			supportRoute.POST("/users/:id/quota/adjust", controller.SupportAdjustUserQuota)
 			supportRoute.POST("/users/:id/quota/decrease", controller.SupportDecreaseUserQuota)
 		}
 		logRoute := apiRouter.Group("/log")

@@ -19,7 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Input, InputNumber, Modal, Space, Typography } from '@douyinfe/semi-ui';
+import {
+  Input,
+  InputNumber,
+  Modal,
+  RadioGroup,
+  Radio,
+  Space,
+  Typography,
+} from '@douyinfe/semi-ui';
 import {
   API,
   getCurrencyConfig,
@@ -35,26 +43,29 @@ import {
 const { Text } = Typography;
 
 const text = {
-  emptyQuota: '\u8bf7\u8f93\u5165\u8981\u51cf\u5c11\u7684\u989d\u5ea6',
+  emptyQuota: '\u8bf7\u8f93\u5165\u8981\u8c03\u6574\u7684\u989d\u5ea6',
   quotaTooLarge:
     '\u51cf\u5c11\u989d\u5ea6\u4e0d\u80fd\u8d85\u8fc7\u5f53\u524d\u5269\u4f59\u989d\u5ea6',
-  success: '\u989d\u5ea6\u5df2\u51cf\u5c11',
+  success: '\u989d\u5ea6\u5df2\u8c03\u6574',
   failed: '\u64cd\u4f5c\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5',
-  title: '\u51cf\u5c11\u7528\u6237\u989d\u5ea6',
-  ok: '\u786e\u8ba4\u51cf\u5c11',
+  title: '\u8c03\u6574\u7528\u6237\u4f59\u989d',
+  ok: '\u786e\u8ba4\u8c03\u6574',
   cancel: '\u53d6\u6d88',
   user: '\u7528\u6237',
   currentQuota: '\u5f53\u524d\u989d\u5ea6',
-  amountPlaceholder: '\u8f93\u5165\u51cf\u5c11\u91d1\u989d',
-  quotaPlaceholder: '\u8f93\u5165\u51cf\u5c11\u989d\u5ea6',
-  afterQuota: '\u51cf\u5c11\u540e\u989d\u5ea6',
+  amountPlaceholder: '\u8f93\u5165\u8c03\u6574\u91d1\u989d',
+  quotaPlaceholder: '\u8f93\u5165\u8c03\u6574\u989d\u5ea6',
+  afterQuota: '\u8c03\u6574\u540e\u989d\u5ea6',
   reasonPlaceholder: '\u5907\u6ce8\u539f\u56e0',
+  increase: '\u589e\u52a0\u4f59\u989d',
+  decrease: '\u51cf\u5c11\u4f59\u989d',
 };
 
 const DecreaseQuotaModal = ({ visible, user, onCancel, refresh }) => {
   const { t } = useTranslation();
   const [amount, setAmount] = useState('');
   const [quota, setQuota] = useState('');
+  const [action, setAction] = useState('increase');
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -62,13 +73,15 @@ const DecreaseQuotaModal = ({ visible, user, onCancel, refresh }) => {
     if (visible) {
       setAmount('');
       setQuota('');
+      setAction('increase');
       setReason('');
     }
   }, [visible]);
 
   const quotaValue = Number(quota || 0);
   const currentQuota = Number(user?.quota || 0);
-  const afterQuota = Math.max(currentQuota - quotaValue, 0);
+  const quotaDelta = action === 'increase' ? quotaValue : -quotaValue;
+  const afterQuota = Math.max(currentQuota + quotaDelta, 0);
 
   const submit = async () => {
     if (!user?.id) return;
@@ -76,13 +89,14 @@ const DecreaseQuotaModal = ({ visible, user, onCancel, refresh }) => {
       showError(t(text.emptyQuota));
       return;
     }
-    if (quotaValue > currentQuota) {
+    if (action === 'decrease' && quotaValue > currentQuota) {
       showError(t(text.quotaTooLarge));
       return;
     }
     setLoading(true);
     try {
-      const res = await API.post(`/api/support/users/${user.id}/quota/decrease`, {
+      const res = await API.post(`/api/support/users/${user.id}/quota/adjust`, {
+        action,
         quota: quotaValue,
         reason,
       });
@@ -119,6 +133,15 @@ const DecreaseQuotaModal = ({ visible, user, onCancel, refresh }) => {
         <Text>
           {t(text.currentQuota)}: {renderQuota(currentQuota)}
         </Text>
+        <RadioGroup
+          type='button'
+          buttonSize='middle'
+          value={action}
+          onChange={(e) => setAction(e.target.value)}
+        >
+          <Radio value='increase'>{t(text.increase)}</Radio>
+          <Radio value='decrease'>{t(text.decrease)}</Radio>
+        </RadioGroup>
         <InputNumber
           prefix={getCurrencyConfig().symbol}
           placeholder={t(text.amountPlaceholder)}

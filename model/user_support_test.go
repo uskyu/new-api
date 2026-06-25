@@ -27,6 +27,32 @@ func TestDecreaseUserQuotaBySupport(t *testing.T) {
 	require.Equal(t, 700, updated.Quota)
 }
 
+func TestAdjustUserQuotaBySupportCanIncreaseAndDecrease(t *testing.T) {
+	setupAgentTestDB(t, TestDBDialectSQLite)
+
+	support := createAgentTestUser(t, "support_adjust", "SUPPORT4")
+	require.NoError(t, DB.Model(support).Update("role", common.RoleSupportUser).Error)
+	user := createAgentTestUser(t, "common_adjust", "COMMON4")
+	require.NoError(t, DB.Model(user).Update("quota", 1000).Error)
+
+	result, err := AdjustUserQuotaBySupport(support.Id, common.RoleSupportUser, user.Id, 500, "compensation")
+	require.NoError(t, err)
+	require.Equal(t, user.Id, result.UserId)
+	require.Equal(t, 500, result.QuotaDelta)
+	require.Equal(t, 1000, result.QuotaBefore)
+	require.Equal(t, 1500, result.QuotaAfter)
+
+	result, err = AdjustUserQuotaBySupport(support.Id, common.RoleSupportUser, user.Id, -300, "correction")
+	require.NoError(t, err)
+	require.Equal(t, -300, result.QuotaDelta)
+	require.Equal(t, 1500, result.QuotaBefore)
+	require.Equal(t, 1200, result.QuotaAfter)
+
+	var updated User
+	require.NoError(t, DB.First(&updated, user.Id).Error)
+	require.Equal(t, 1200, updated.Quota)
+}
+
 func TestDecreaseUserQuotaBySupportRejectsNonCommonUser(t *testing.T) {
 	setupAgentTestDB(t, TestDBDialectSQLite)
 

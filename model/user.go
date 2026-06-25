@@ -1034,6 +1034,68 @@ type UserQuotaDecreaseResult struct {
 	QuotaAfter  int `json:"quota_after"`
 }
 
+type UserQuotaAdjustResult = UserQuotaDecreaseResult
+
+func AdjustUserQuotaBySupport(operatorUserId int, operatorRole int, targetUserId int, quotaDelta int, reason string) (*UserQuotaAdjustResult, error) {
+	if operatorUserId <= 0 || targetUserId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	if quotaDelta == 0 {
+		return nil, errors.New("quota delta must not be zero")
+	}
+	if !common.RoleHasPermission(operatorRole, common.PermissionUserQuotaDecrease) {
+		return nil, errors.New("no permission to adjust quota")
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "manual adjustment"
+	}
+	result := &UserQuotaAdjustResult{
+		UserId:     targetUserId,
+		QuotaDelta: quotaDelta,
+	}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var target User
+		if err := tx.Where("id = ?", targetUserId).First(&target).Error; err != nil {
+			return err
+		}
+		if target.Role != common.RoleCommonUser {
+			return errors.New("support user can only adjust common user quota")
+		}
+		if operatorRole != common.RoleRootUser && operatorRole <= target.Role {
+			return errors.New("no permission to manage this user")
+		}
+		quotaAfter := target.Quota + quotaDelta
+		if quotaAfter < 0 {
+			return errors.New("quota is insufficient")
+		}
+		update := tx.Model(&User{}).
+			Where("id = ? AND role = ?", targetUserId, common.RoleCommonUser).
+			Update("quota", quotaAfter)
+		if update.Error != nil {
+			return update.Error
+		}
+		if update.RowsAffected == 0 {
+			return errors.New("user quota update failed")
+		}
+		result.QuotaBefore = target.Quota
+		result.QuotaAfter = quotaAfter
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := updateUserQuotaCache(targetUserId, result.QuotaAfter); err != nil {
+		common.SysLog("failed to update user quota cache: " + err.Error())
+	}
+	action := "increase"
+	if quotaDelta < 0 {
+		action = "decrease"
+	}
+	RecordLog(targetUserId, LogTypeManage, fmt.Sprintf("support operator %d adjusted user quota, action: %s, before: %s, after: %s, delta: %s, reason: %s", operatorUserId, action, logger.LogQuota(result.QuotaBefore), logger.LogQuota(result.QuotaAfter), logger.LogQuota(quotaDelta), reason))
+	return result, nil
+}
+
 func DecreaseUserQuotaBySupport(operatorUserId int, operatorRole int, targetUserId int, quota int, reason string) (*UserQuotaDecreaseResult, error) {
 	if operatorUserId <= 0 || targetUserId <= 0 {
 		return nil, errors.New("invalid user id")

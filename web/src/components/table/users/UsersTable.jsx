@@ -33,6 +33,7 @@ import ResetPasskeyModal from './modals/ResetPasskeyModal';
 import ResetTwoFAModal from './modals/ResetTwoFAModal';
 import UserSubscriptionsModal from './modals/UserSubscriptionsModal';
 import DecreaseQuotaModal from './modals/DecreaseQuotaModal';
+import ChangeAgentModal from './modals/ChangeAgentModal';
 import { isRoot } from '../../../helpers';
 
 const UsersTable = (usersData) => {
@@ -69,6 +70,7 @@ const UsersTable = (usersData) => {
   const [showUserSubscriptionsModal, setShowUserSubscriptionsModal] =
     useState(false);
   const [showDecreaseQuotaModal, setShowDecreaseQuotaModal] = useState(false);
+  const [showChangeAgentModal, setShowChangeAgentModal] = useState(false);
 
   // Modal handlers
   const showPromoteUserModal = (user) => {
@@ -112,6 +114,11 @@ const UsersTable = (usersData) => {
     setShowDecreaseQuotaModal(true);
   };
 
+  const showChangeAgentUserModal = (user) => {
+    setModalUser(user);
+    setShowChangeAgentModal(true);
+  };
+
   // Modal confirm handlers
   const handlePromoteConfirm = (action) => {
     manageUser(modalUser.id, action || 'promote', modalUser);
@@ -152,6 +159,7 @@ const UsersTable = (usersData) => {
       showResetTwoFAModal: showResetTwoFAUserModal,
       showUserSubscriptionsModal: showUserSubscriptionsUserModal,
       showDecreaseQuotaModal: showDecreaseQuotaUserModal,
+      showChangeAgentModal: showChangeAgentUserModal,
       supportMode,
     });
   }, [
@@ -166,6 +174,7 @@ const UsersTable = (usersData) => {
     showResetTwoFAUserModal,
     showUserSubscriptionsUserModal,
     showDecreaseQuotaUserModal,
+    showChangeAgentUserModal,
     supportMode,
   ]);
 
@@ -303,6 +312,13 @@ const UsersTable = (usersData) => {
         visible={showDecreaseQuotaModal}
         user={modalUser}
         onCancel={() => setShowDecreaseQuotaModal(false)}
+        refresh={refresh}
+      />
+
+      <ChangeAgentModal
+        visible={showChangeAgentModal}
+        user={modalUser}
+        onCancel={() => setShowChangeAgentModal(false)}
         refresh={refresh}
       />
     </>

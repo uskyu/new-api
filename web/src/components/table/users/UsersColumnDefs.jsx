@@ -227,6 +227,7 @@ const renderOperations = (
     showResetTwoFAModal,
     showUserSubscriptionsModal,
     showDecreaseQuotaModal,
+    showChangeAgentModal,
     supportMode,
     t,
   },
@@ -242,7 +243,7 @@ const renderOperations = (
         size='small'
         onClick={() => showDecreaseQuotaModal(record)}
       >
-        {t('减少额度')}
+        {t('\u8c03\u6574\u4f59\u989d')}
       </Button>
     );
   }
@@ -340,6 +341,7 @@ export const getUsersColumns = ({
   showResetTwoFAModal,
   showUserSubscriptionsModal,
   showDecreaseQuotaModal,
+  showChangeAgentModal,
   supportMode,
 }) => {
   const columns = [
@@ -366,7 +368,20 @@ export const getUsersColumns = ({
     {
       title: t('上级代理'),
       key: 'support_inviter',
-      render: (text, record) => renderSupportInviter(record, t),
+      render: (text, record) => (
+        <Space spacing={4}>
+          {renderSupportInviter(record, t)}
+          {(record.role === undefined || record.role === 1) && (
+            <Button
+              type='tertiary'
+              size='small'
+              onClick={() => showChangeAgentModal(record)}
+            >
+              {t('\u66f4\u6539')}
+            </Button>
+          )}
+        </Space>
+      ),
     },
     {
       title: t('分组'),
@@ -404,6 +419,7 @@ export const getUsersColumns = ({
           showResetTwoFAModal,
           showUserSubscriptionsModal,
           showDecreaseQuotaModal,
+          showChangeAgentModal,
           supportMode,
           t,
         }),
@@ -412,9 +428,13 @@ export const getUsersColumns = ({
 
   if (supportMode) {
     return columns.filter((column) =>
-      ['id', 'username', 'support_inviter', 'quota_usage', 'operate'].includes(
-        column.dataIndex || column.key,
-      ),
+      [
+        'id',
+        'username',
+        'support_inviter',
+        'quota_usage',
+        'operate',
+      ].includes(column.dataIndex || column.key),
     );
   }
 

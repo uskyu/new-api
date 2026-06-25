@@ -2168,6 +2168,77 @@ func AssignAgentDownlineUser(operatorUserId int, targetAgentUserId int, downline
 	return nil
 }
 
+func ChangeAgentDownlineUser(operatorUserId int, targetAgentUserId int, downlineUserId int, promoLinkId int, remark string) error {
+	if operatorUserId <= 0 || targetAgentUserId <= 0 || downlineUserId <= 0 {
+		return errors.New("invalid user id")
+	}
+	remark = strings.TrimSpace(remark)
+	return DB.Transaction(func(tx *gorm.DB) error {
+		targetProfile, err := getAgentProfileByUserIdTx(tx, targetAgentUserId)
+		if err != nil {
+			return err
+		}
+		if targetProfile.Status != AgentStatusEnabled {
+			return errors.New("target agent is disabled")
+		}
+		var downline User
+		if err := tx.Select("id", "role", "inviter_id").First(&downline, downlineUserId).Error; err != nil {
+			return err
+		}
+		childProfile, err := getAgentProfileByUserIdTx(tx, downlineUserId)
+		if err == nil {
+			if childProfile.Status != AgentStatusEnabled {
+				return errors.New("child agent is disabled")
+			}
+			if downlineUserId == targetAgentUserId {
+				return errors.New("parent agent cannot equal child agent")
+			}
+			var relation AgentRelationship
+			err = tx.Where("child_agent_user_id = ?", downlineUserId).First(&relation).Error
+			if err != nil {
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+				relation = AgentRelationship{
+					ParentAgentUserId: targetAgentUserId,
+					ChildAgentUserId:  downlineUserId,
+					Status:            AgentStatusEnabled,
+				}
+				return tx.Create(&relation).Error
+			}
+			if relation.ParentAgentUserId == targetAgentUserId && relation.Status == AgentStatusEnabled {
+				return errors.New("target agent cannot equal current agent")
+			}
+			relation.ParentAgentUserId = targetAgentUserId
+			relation.Status = AgentStatusEnabled
+			return tx.Save(&relation).Error
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if downline.Role != common.RoleCommonUser {
+			return errors.New("only common users can be assigned as agent downlines")
+		}
+		if downline.InviterId == targetAgentUserId {
+			return errors.New("target agent cannot equal current agent")
+		}
+		linkId, err := resolveTransferPromoLinkIdTx(tx, targetAgentUserId, promoLinkId)
+		if err != nil {
+			return err
+		}
+		update := tx.Model(&User{}).Where("id = ?", downlineUserId).Updates(map[string]interface{}{
+			"inviter_id":    targetAgentUserId,
+			"promo_link_id": linkId,
+		})
+		if update.Error != nil {
+			return update.Error
+		}
+		if update.RowsAffected == 0 {
+			return errors.New("downline user ownership changed, please refresh and retry")
+		}
+		return nil
+	})
+}
+
 func resolveTransferPromoLinkIdTx(tx *gorm.DB, targetAgentUserId int, promoLinkId int) (int, error) {
 	if promoLinkId > 0 {
 		var promoLink AgentPromoLink
