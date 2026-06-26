@@ -283,6 +283,36 @@ func TestAdjustAgentRebateBalance(t *testing.T) {
 	require.Len(t, adjustments, 2)
 }
 
+func TestSupportCanAdjustAgentRebateBalance(t *testing.T) {
+	setupAgentTestDB(t, TestDBDialectSQLite)
+
+	agent := createAgentTestUser(t, "agent_support_adjust", "AFF_SUPPORT_AGENT")
+	support := createAgentTestUser(t, "support_agent_adjust", "AFF_SUPPORT_OPERATOR")
+	require.NoError(t, DB.Model(support).Update("role", common.RoleSupportUser).Error)
+	group := &AgentRebateGroup{Name: "support-adjust-group", RebateRate: 2000, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+	require.NoError(t, DB.Create(&AgentProfile{
+		UserId:              agent.Id,
+		Status:              AgentStatusEnabled,
+		RebateGroupId:       group.Id,
+		RebateBalanceAmount: 500,
+		RebateTotalAmount:   500,
+	}).Error)
+
+	require.True(t, common.RoleHasPermission(common.RoleSupportUser, common.PermissionAgentBalanceAdjust))
+	adjustment, err := AdjustAgentRebateBalance(agent.Id, support.Id, 250, "support bonus")
+	require.NoError(t, err)
+	require.Equal(t, support.Id, adjustment.OperatorUserId)
+	require.Equal(t, int64(250), adjustment.DeltaAmount)
+	require.Equal(t, int64(500), adjustment.BalanceBefore)
+	require.Equal(t, int64(750), adjustment.BalanceAfter)
+
+	var profile AgentProfile
+	require.NoError(t, DB.Where("user_id = ?", agent.Id).First(&profile).Error)
+	require.Equal(t, int64(750), profile.RebateBalanceAmount)
+	require.Equal(t, int64(750), profile.RebateTotalAmount)
+}
+
 func TestUpsertAndDeleteAgentPromoLink(t *testing.T) {
 	setupAgentTestDB(t, TestDBDialectSQLite)
 	agent := createAgentTestUser(t, "agent_promo", "AFF6")

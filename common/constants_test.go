@@ -27,6 +27,9 @@ func TestSupportRolePermissions(t *testing.T) {
 	if !RoleHasPermission(RoleSupportUser, PermissionAgentDownlineTransfer) {
 		t.Fatalf("support role should transfer agent downline users")
 	}
+	if !RoleHasPermission(RoleSupportUser, PermissionAgentBalanceAdjust) {
+		t.Fatalf("support role should adjust agent rebate balance")
+	}
 	if RoleHasPermission(RoleSupportUser, "admin.full_access") {
 		t.Fatalf("support role should not receive unknown permissions")
 	}

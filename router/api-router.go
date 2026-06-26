@@ -301,14 +301,14 @@ func SetApiRouter(router *gin.Engine) {
 			agentRoute.GET("/profiles", middleware.PermissionAuth(common.PermissionAgentDownlineAssign), controller.GetAgentProfiles)
 			agentRoute.POST("/promo-link", middleware.AdminAuth(), controller.UpsertAgentPromoLink)
 			agentRoute.POST("/profile", middleware.AdminAuth(), controller.UpsertAgentProfile)
-			agentRoute.POST("/adjust", middleware.AdminAuth(), controller.AdjustAgentBalance)
+			agentRoute.POST("/adjust", middleware.PermissionAuth(common.PermissionAgentBalanceAdjust), controller.AdjustAgentBalance)
 			agentRoute.POST("/downline/assign", middleware.PermissionAuth(common.PermissionAgentDownlineAssign), controller.AssignAgentDownlineUser)
 			agentRoute.POST("/downline/transfer", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.TransferAgentDownlineUser)
 			agentRoute.POST("/downline/change", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.ChangeAgentDownlineUser)
 			agentRoute.POST("/upgrade-request/:id/review", middleware.AdminAuth(), controller.ReviewAgentUpgradeRequest)
 			agentRoute.DELETE("/group/:id", middleware.AdminAuth(), controller.DeleteAgentRebateGroup)
 			agentRoute.DELETE("/promo-link/:id", middleware.AdminAuth(), controller.DeleteAgentPromoLink)
-			agentRoute.GET("/adjustments", middleware.AdminAuth(), controller.GetAgentAdjustments)
+			agentRoute.GET("/adjustments", middleware.PermissionAuth(common.PermissionAgentBalanceAdjust), controller.GetAgentAdjustments)
 		}
 
 		redemptionRoute := apiRouter.Group("/redemption")

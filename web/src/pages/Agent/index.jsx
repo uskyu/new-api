@@ -205,6 +205,8 @@ export default function Agent() {
   const { t } = useTranslation();
   const supportMode = isSupportConsole();
   const canManageAgentAdmin = isAdmin() && !supportMode;
+  const canAdjustAgentBalance =
+    canManageAgentAdmin || supportMode || can(PERMISSIONS.AGENT_BALANCE_ADJUST);
   const canAssignDownlines =
     supportMode || can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN);
   const canTransferDownlines =
@@ -686,13 +688,20 @@ export default function Agent() {
       if (canManageAgentAdmin) {
         loadOverview();
         loadDailyMetrics();
-        loadAdjustments();
         loadPromoLinks(1);
         loadWithdrawRequests();
       }
+      if (canAdjustAgentBalance) {
+        loadAdjustments();
+      }
       loadProfiles(1, keyword);
     }
-  }, [canManageAgentAdmin, status?.migration_ready, status?.initialized]);
+  }, [
+    canAdjustAgentBalance,
+    canManageAgentAdmin,
+    status?.migration_ready,
+    status?.initialized,
+  ]);
 
   const refreshAll = async () => {
     await loadStatus();
@@ -700,10 +709,12 @@ export default function Agent() {
       await loadOverview();
       await loadDailyMetrics();
       await loadGroups();
-      await loadAdjustments();
       await loadPromoLinks(promoLinksPage);
       await loadWithdrawRequests();
       await loadPromoLinkStats(activeAgentScope?.userId || 0);
+    }
+    if (canAdjustAgentBalance) {
+      await loadAdjustments();
     }
     await loadDownlines(
       activeAgentScope?.userId || 0,
@@ -1461,6 +1472,15 @@ export default function Agent() {
           },
         ]
       : []),
+    ...(!canManageAgentAdmin && canAdjustAgentBalance
+      ? [
+          {
+            title: t('返利余额'),
+            dataIndex: 'rebate_balance_amount',
+            render: (_, record) => formatAmount(record.rebate_balance_amount),
+          },
+        ]
+      : []),
     {
       title: t('操作'),
       dataIndex: 'operate',
@@ -1475,7 +1495,7 @@ export default function Agent() {
               {t('编辑')}
             </Button>
           )}
-          {canManageAgentAdmin && (
+          {canAdjustAgentBalance && (
             <Button
               size='small'
               type='secondary'

@@ -353,13 +353,18 @@ func SupportAdjustUserQuota(c *gin.Context) {
 		}
 		switch strings.ToLower(strings.TrimSpace(req.Action)) {
 		case "increase", "add", "+":
-			quotaDelta = req.Quota
+			common.ApiErrorMsg(c, "support user can only decrease common user quota")
+			return
 		case "decrease", "subtract", "-":
 			quotaDelta = -req.Quota
 		default:
 			common.ApiErrorMsg(c, "invalid quota adjustment action")
 			return
 		}
+	}
+	if quotaDelta > 0 {
+		common.ApiErrorMsg(c, "support user can only decrease common user quota")
+		return
 	}
 	result, err := model.AdjustUserQuotaBySupport(c.GetInt("id"), c.GetInt("role"), id, quotaDelta, req.Reason)
 	if err != nil {

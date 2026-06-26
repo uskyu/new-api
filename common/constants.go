@@ -161,6 +161,7 @@ const (
 	PermissionUserQuotaDecrease     = "user.quota.decrease"
 	PermissionAgentDownlineAssign   = "agent.downline.assign"
 	PermissionAgentDownlineTransfer = "agent.downline.transfer"
+	PermissionAgentBalanceAdjust    = "agent.balance.adjust"
 )
 
 var RolePermissions = map[int]map[string]bool{
@@ -171,6 +172,7 @@ var RolePermissions = map[int]map[string]bool{
 		PermissionUserQuotaDecrease:     true,
 		PermissionAgentDownlineAssign:   true,
 		PermissionAgentDownlineTransfer: true,
+		PermissionAgentBalanceAdjust:    true,
 	},
 	RoleAdminUser: {
 		PermissionRedemptionRead:        true,
@@ -180,6 +182,7 @@ var RolePermissions = map[int]map[string]bool{
 		PermissionUserQuotaDecrease:     true,
 		PermissionAgentDownlineAssign:   true,
 		PermissionAgentDownlineTransfer: true,
+		PermissionAgentBalanceAdjust:    true,
 	},
 	RoleRootUser: {
 		PermissionRedemptionRead:        true,
@@ -189,6 +192,7 @@ var RolePermissions = map[int]map[string]bool{
 		PermissionUserQuotaDecrease:     true,
 		PermissionAgentDownlineAssign:   true,
 		PermissionAgentDownlineTransfer: true,
+		PermissionAgentBalanceAdjust:    true,
 	},
 }
 

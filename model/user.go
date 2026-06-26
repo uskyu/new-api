@@ -1043,6 +1043,9 @@ func AdjustUserQuotaBySupport(operatorUserId int, operatorRole int, targetUserId
 	if quotaDelta == 0 {
 		return nil, errors.New("quota delta must not be zero")
 	}
+	if quotaDelta > 0 {
+		return nil, errors.New("support user can only decrease common user quota")
+	}
 	if !common.RoleHasPermission(operatorRole, common.PermissionUserQuotaDecrease) {
 		return nil, errors.New("no permission to adjust quota")
 	}

@@ -44,6 +44,7 @@ export const PERMISSIONS = {
   USER_QUOTA_DECREASE: 'user.quota.decrease',
   AGENT_DOWNLINE_ASSIGN: 'agent.downline.assign',
   AGENT_DOWNLINE_TRANSFER: 'agent.downline.transfer',
+  AGENT_BALANCE_ADJUST: 'agent.balance.adjust',
 };
 
 const rolePermissions = {
@@ -54,6 +55,7 @@ const rolePermissions = {
     [PERMISSIONS.USER_QUOTA_DECREASE]: true,
     [PERMISSIONS.AGENT_DOWNLINE_ASSIGN]: true,
     [PERMISSIONS.AGENT_DOWNLINE_TRANSFER]: true,
+    [PERMISSIONS.AGENT_BALANCE_ADJUST]: true,
   },
   [USER_ROLES.ADMIN]: {
     [PERMISSIONS.REDEMPTION_READ]: true,
@@ -63,6 +65,7 @@ const rolePermissions = {
     [PERMISSIONS.USER_QUOTA_DECREASE]: true,
     [PERMISSIONS.AGENT_DOWNLINE_ASSIGN]: true,
     [PERMISSIONS.AGENT_DOWNLINE_TRANSFER]: true,
+    [PERMISSIONS.AGENT_BALANCE_ADJUST]: true,
   },
   [USER_ROLES.ROOT]: {
     [PERMISSIONS.REDEMPTION_READ]: true,
@@ -72,6 +75,7 @@ const rolePermissions = {
     [PERMISSIONS.USER_QUOTA_DECREASE]: true,
     [PERMISSIONS.AGENT_DOWNLINE_ASSIGN]: true,
     [PERMISSIONS.AGENT_DOWNLINE_TRANSFER]: true,
+    [PERMISSIONS.AGENT_BALANCE_ADJUST]: true,
   },
 };
 
