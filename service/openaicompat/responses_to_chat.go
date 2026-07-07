@@ -4,8 +4,81 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 )
+
+const (
+	responsesOutputTypeFunctionCall    = "function_call"
+	responsesOutputTypeCustomToolCall  = "custom_tool_call"
+	responsesOutputTypeMessage         = "message"
+	responsesOutputTypeReasoning       = "reasoning"
+	responsesIncompleteContentFilter   = "content_filter"
+	responsesIncompleteMaxOutputTokens = "max_output_tokens"
+)
+
+func responseStatusString(resp *dto.OpenAIResponsesResponse) string {
+	if resp == nil {
+		return ""
+	}
+	return strings.TrimSpace(common.JsonRawMessageToString(resp.Status))
+}
+
+func isResponsesToolOutputType(outputType string) bool {
+	switch outputType {
+	case responsesOutputTypeFunctionCall, responsesOutputTypeCustomToolCall:
+		return true
+	default:
+		return false
+	}
+}
+
+func ResponsesFinishReasonFromStatus(resp *dto.OpenAIResponsesResponse) (string, bool) {
+	if resp == nil || responseStatusString(resp) != "incomplete" {
+		return "", false
+	}
+	reason := ""
+	if resp.IncompleteDetails != nil {
+		reason = strings.TrimSpace(resp.IncompleteDetails.Reason)
+	}
+	switch reason {
+	case responsesIncompleteContentFilter:
+		return "content_filter", true
+	case responsesIncompleteMaxOutputTokens, "":
+		return "length", true
+	default:
+		return "length", true
+	}
+}
+
+func UsageFromResponsesUsage(src *dto.Usage) *dto.Usage {
+	usage := &dto.Usage{}
+	if src == nil {
+		return usage
+	}
+	if src.InputTokens != 0 {
+		usage.PromptTokens = src.InputTokens
+		usage.InputTokens = src.InputTokens
+	}
+	if src.OutputTokens != 0 {
+		usage.CompletionTokens = src.OutputTokens
+		usage.OutputTokens = src.OutputTokens
+	}
+	if src.TotalTokens != 0 {
+		usage.TotalTokens = src.TotalTokens
+	} else {
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
+	if src.InputTokensDetails != nil {
+		usage.PromptTokensDetails.CachedTokens = src.InputTokensDetails.CachedTokens
+		usage.PromptTokensDetails.ImageTokens = src.InputTokensDetails.ImageTokens
+		usage.PromptTokensDetails.AudioTokens = src.InputTokensDetails.AudioTokens
+	}
+	if src.CompletionTokenDetails.ReasoningTokens != 0 {
+		usage.CompletionTokenDetails.ReasoningTokens = src.CompletionTokenDetails.ReasoningTokens
+	}
+	return usage
+}
 
 func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesResponse, id string) (*dto.OpenAITextResponse, *dto.Usage, error) {
 	if resp == nil {
@@ -13,38 +86,16 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 	}
 
 	text := ExtractOutputTextFromResponses(resp)
+	reasoning := ExtractReasoningTextFromResponses(resp)
 
-	usage := &dto.Usage{}
-	if resp.Usage != nil {
-		if resp.Usage.InputTokens != 0 {
-			usage.PromptTokens = resp.Usage.InputTokens
-			usage.InputTokens = resp.Usage.InputTokens
-		}
-		if resp.Usage.OutputTokens != 0 {
-			usage.CompletionTokens = resp.Usage.OutputTokens
-			usage.OutputTokens = resp.Usage.OutputTokens
-		}
-		if resp.Usage.TotalTokens != 0 {
-			usage.TotalTokens = resp.Usage.TotalTokens
-		} else {
-			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
-		}
-		if resp.Usage.InputTokensDetails != nil {
-			usage.PromptTokensDetails.CachedTokens = resp.Usage.InputTokensDetails.CachedTokens
-			usage.PromptTokensDetails.ImageTokens = resp.Usage.InputTokensDetails.ImageTokens
-			usage.PromptTokensDetails.AudioTokens = resp.Usage.InputTokensDetails.AudioTokens
-		}
-		if resp.Usage.CompletionTokenDetails.ReasoningTokens != 0 {
-			usage.CompletionTokenDetails.ReasoningTokens = resp.Usage.CompletionTokenDetails.ReasoningTokens
-		}
-	}
+	usage := UsageFromResponsesUsage(resp.Usage)
 
 	created := resp.CreatedAt
 
 	var toolCalls []dto.ToolCallResponse
-	if text == "" && len(resp.Output) > 0 {
+	if len(resp.Output) > 0 {
 		for _, out := range resp.Output {
-			if out.Type != "function_call" {
+			if !isResponsesToolOutputType(out.Type) {
 				continue
 			}
 			name := strings.TrimSpace(out.Name)
@@ -67,7 +118,9 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 	}
 
 	finishReason := "stop"
-	if len(toolCalls) > 0 {
+	if mappedReason, ok := ResponsesFinishReasonFromStatus(resp); ok {
+		finishReason = mappedReason
+	} else if len(toolCalls) > 0 {
 		finishReason = "tool_calls"
 	}
 
@@ -75,9 +128,11 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 		Role:    "assistant",
 		Content: text,
 	}
+	if reasoning != "" {
+		msg.ReasoningContent = &reasoning
+	}
 	if len(toolCalls) > 0 {
 		msg.SetToolCalls(toolCalls)
-		msg.Content = ""
 	}
 
 	out := &dto.OpenAITextResponse{
@@ -107,7 +162,7 @@ func ExtractOutputTextFromResponses(resp *dto.OpenAIResponsesResponse) string {
 
 	// Prefer assistant message outputs.
 	for _, out := range resp.Output {
-		if out.Type != "message" {
+		if out.Type != responsesOutputTypeMessage {
 			continue
 		}
 		if out.Role != "" && out.Role != "assistant" {
@@ -123,6 +178,25 @@ func ExtractOutputTextFromResponses(resp *dto.OpenAIResponsesResponse) string {
 		return sb.String()
 	}
 	for _, out := range resp.Output {
+		for _, c := range out.Content {
+			if c.Text != "" {
+				sb.WriteString(c.Text)
+			}
+		}
+	}
+	return sb.String()
+}
+
+func ExtractReasoningTextFromResponses(resp *dto.OpenAIResponsesResponse) string {
+	if resp == nil || len(resp.Output) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, out := range resp.Output {
+		if out.Type != responsesOutputTypeReasoning {
+			continue
+		}
 		for _, c := range out.Content {
 			if c.Text != "" {
 				sb.WriteString(c.Text)

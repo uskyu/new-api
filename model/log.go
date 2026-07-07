@@ -56,6 +56,13 @@ type Log struct {
 	Other             string `json:"other"`
 }
 
+type UsageLogCleanupResult struct {
+	DeletedCount int64 `json:"deleted_count"`
+	Cutoff       int64 `json:"cutoff_timestamp"`
+	BatchSize    int   `json:"batch_size"`
+	Batches      int   `json:"batches"`
+}
+
 // don't use iota, avoid change log type value
 const (
 	LogTypeUnknown = 0
@@ -491,4 +498,47 @@ func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64,
 	}
 
 	return total, nil
+}
+
+func DeleteOldConsumeLogs(ctx context.Context, targetTimestamp int64, batchSize int) (UsageLogCleanupResult, error) {
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+	result := UsageLogCleanupResult{
+		Cutoff:    targetTimestamp,
+		BatchSize: batchSize,
+	}
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+
+		var ids []int
+		err := LOG_DB.WithContext(ctx).
+			Model(&Log{}).
+			Where("type = ? AND created_at < ?", LogTypeConsume, targetTimestamp).
+			Order("created_at asc, id asc").
+			Limit(batchSize).
+			Pluck("id", &ids).Error
+		if err != nil {
+			return result, err
+		}
+		if len(ids) == 0 {
+			break
+		}
+
+		deleteResult := LOG_DB.WithContext(ctx).Where("id IN ?", ids).Delete(&Log{})
+		if deleteResult.Error != nil {
+			return result, deleteResult.Error
+		}
+		result.DeletedCount += deleteResult.RowsAffected
+		result.Batches++
+
+		if len(ids) < batchSize || deleteResult.RowsAffected == 0 {
+			break
+		}
+	}
+
+	return result, nil
 }

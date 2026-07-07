@@ -13,6 +13,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 )
 
@@ -349,6 +350,40 @@ func CleanupLogFiles(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data":    result,
+	})
+}
+
+// CleanupUsageLogs 清理过期数据库使用记录
+func CleanupUsageLogs(c *gin.Context) {
+	retentionDays, err := strconv.Atoi(c.Query("retention_days"))
+	if err != nil {
+		common.ApiErrorMsg(c, "invalid retention_days")
+		return
+	}
+	if retentionDays != 7 && retentionDays != 30 && retentionDays != 60 {
+		common.ApiErrorMsg(c, "retention_days must be one of 7, 30, 60")
+		return
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -retentionDays).Unix()
+	result, err := model.DeleteOldConsumeLogs(c.Request.Context(), cutoff, 1000)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	model.RecordLog(
+		c.GetInt("id"),
+		model.LogTypeManage,
+		fmt.Sprintf("清理使用记录：保留%d天，删除%d条，截止时间戳%d", retentionDays, result.DeletedCount, cutoff),
+	)
+
+	common.ApiSuccess(c, gin.H{
+		"deleted_count":    result.DeletedCount,
+		"retention_days":   retentionDays,
+		"cutoff_timestamp": result.Cutoff,
+		"batch_size":       result.BatchSize,
+		"batches":          result.Batches,
 	})
 }
 

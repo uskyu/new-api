@@ -79,6 +79,8 @@ export default function SettingsPerformance(props) {
   const [logCleanupMode, setLogCleanupMode] = useState('by_count');
   const [logCleanupValue, setLogCleanupValue] = useState(10);
   const [logCleanupLoading, setLogCleanupLoading] = useState(false);
+  const [usageLogRetentionDays, setUsageLogRetentionDays] = useState(30);
+  const [usageLogCleanupLoading, setUsageLogCleanupLoading] = useState(false);
 
   function handleFieldChange(fieldName) {
     return (value) => {
@@ -211,6 +213,28 @@ export default function SettingsPerformance(props) {
       showError(t('清理失败'));
     } finally {
       setLogCleanupLoading(false);
+    }
+  }
+
+  async function cleanupUsageLogs() {
+    setUsageLogCleanupLoading(true);
+    try {
+      const res = await API.delete(
+        `/api/performance/usage_logs?retention_days=${usageLogRetentionDays}`,
+      );
+      if (res.data.success) {
+        showSuccess(
+          t('已清理 {{count}} 条使用记录', {
+            count: res.data.data?.deleted_count ?? 0,
+          }),
+        );
+      } else {
+        showError(res.data.message || t('清理失败'));
+      }
+    } catch (error) {
+      showError(t('清理失败'));
+    } finally {
+      setUsageLogCleanupLoading(false);
     }
   }
 
@@ -398,6 +422,69 @@ export default function SettingsPerformance(props) {
           </Form.Section>
         </Form>
       </Spin>
+
+      <Form.Section text={t('数据库使用记录清理')}>
+        <Banner
+          type='warning'
+          description={t(
+            '清理数据库 logs 表中的 API 消费使用记录。仅删除使用记录，不删除充值、管理、错误等审计日志；删除后空间通常会变为数据库可复用空间，MySQL 文件不一定立即缩小。',
+          )}
+          style={{ marginBottom: 16 }}
+        />
+        <Row gutter={16} style={{ marginBottom: 16 }}>
+          <Col xs={24} sm={12} md={8}>
+            <div style={{ marginBottom: 12 }}>
+              <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                {t('保留期限')}
+              </Text>
+              <RadioGroup
+                value={usageLogRetentionDays}
+                onChange={(e) => setUsageLogRetentionDays(e.target.value)}
+              >
+                <Radio value={7}>{t('保留 7 天')}</Radio>
+                <Radio value={30}>{t('保留 30 天')}</Radio>
+                <Radio value={60}>{t('保留 60 天')}</Radio>
+              </RadioGroup>
+            </div>
+          </Col>
+          <Col xs={24} sm={12} md={8}>
+            <div style={{ marginBottom: 12 }}>
+              <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                {t('清理范围')}
+              </Text>
+              <Text type='tertiary'>
+                {t('只清理 API 消费使用记录，历史明细查询会减少，余额和充值记录不受影响。')}
+              </Text>
+            </div>
+          </Col>
+          <Col xs={24} sm={12} md={8}>
+            <div style={{ marginBottom: 12 }}>
+              <Text
+                strong
+                style={{
+                  display: 'block',
+                  marginBottom: 8,
+                  visibility: 'hidden',
+                }}
+              >
+                &nbsp;
+              </Text>
+              <Popconfirm
+                title={t('确认清理使用记录？')}
+                content={t(
+                  '将删除 {{days}} 天前的 API 消费使用记录。该操作不可恢复，请确认已经备份或不再需要这些历史明细。',
+                  { days: usageLogRetentionDays },
+                )}
+                onConfirm={cleanupUsageLogs}
+              >
+                <Button type='danger' loading={usageLogCleanupLoading}>
+                  {t('清理使用记录')}
+                </Button>
+              </Popconfirm>
+            </div>
+          </Col>
+        </Row>
+      </Form.Section>
 
       {/* 服务器日志管理 */}
       <Form.Section text={t('服务器日志管理')}>
