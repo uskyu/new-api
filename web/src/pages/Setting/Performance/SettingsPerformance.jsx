@@ -81,6 +81,7 @@ export default function SettingsPerformance(props) {
   const [logCleanupLoading, setLogCleanupLoading] = useState(false);
   const [usageLogRetentionDays, setUsageLogRetentionDays] = useState(30);
   const [usageLogCleanupLoading, setUsageLogCleanupLoading] = useState(false);
+  const [usageLogCleanupStatus, setUsageLogCleanupStatus] = useState(null);
 
   function handleFieldChange(fieldName) {
     return (value) => {
@@ -216,6 +217,17 @@ export default function SettingsPerformance(props) {
     }
   }
 
+  async function fetchUsageLogCleanupStatus() {
+    try {
+      const res = await API.get('/api/performance/usage_logs');
+      if (res.data.success) {
+        setUsageLogCleanupStatus(res.data.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch usage log cleanup status:', error);
+    }
+  }
+
   async function cleanupUsageLogs() {
     setUsageLogCleanupLoading(true);
     try {
@@ -223,12 +235,12 @@ export default function SettingsPerformance(props) {
         `/api/performance/usage_logs?retention_days=${usageLogRetentionDays}`,
       );
       if (res.data.success) {
-        showSuccess(
-          t('已清理 {{count}} 条使用记录', {
-            count: res.data.data?.deleted_count ?? 0,
-          }),
-        );
+        setUsageLogCleanupStatus(res.data.data);
+        showSuccess(t('清理任务已启动'));
       } else {
+        if (res.data.data) {
+          setUsageLogCleanupStatus(res.data.data);
+        }
         showError(res.data.message || t('清理失败'));
       }
     } catch (error) {
@@ -259,7 +271,16 @@ export default function SettingsPerformance(props) {
     }
     fetchStats();
     fetchLogInfo();
+    fetchUsageLogCleanupStatus();
   }, [props.options]);
+
+  useEffect(() => {
+    if (!usageLogCleanupStatus?.running) {
+      return;
+    }
+    const timer = setInterval(fetchUsageLogCleanupStatus, 3000);
+    return () => clearInterval(timer);
+  }, [usageLogCleanupStatus?.running]);
 
   const diskCacheUsagePercent =
     stats?.cache_stats?.disk_cache_max_bytes > 0
@@ -423,11 +444,11 @@ export default function SettingsPerformance(props) {
         </Form>
       </Spin>
 
-      <Form.Section text={t('数据库使用记录清理')}>
+      <Form.Section text={t('数据库 API 调用记录清理')}>
         <Banner
           type='warning'
           description={t(
-            '清理数据库 logs 表中的 API 消费使用记录。仅删除使用记录，不删除充值、管理、错误等审计日志；删除后空间通常会变为数据库可复用空间，MySQL 文件不一定立即缩小。',
+            '清理数据库 logs 表中的 API 调用记录，包括成功消费记录和报错调用记录。不删除充值、管理、系统、退款等审计日志；删除后空间通常会变为数据库可复用空间，MySQL 文件不一定立即缩小。',
           )}
           style={{ marginBottom: 16 }}
         />
@@ -453,8 +474,30 @@ export default function SettingsPerformance(props) {
                 {t('清理范围')}
               </Text>
               <Text type='tertiary'>
-                {t('只清理 API 消费使用记录，历史明细查询会减少，余额和充值记录不受影响。')}
+                {t('只清理 API 成功调用和报错调用记录，历史明细查询会减少，余额、充值和管理记录不受影响。')}
               </Text>
+              {usageLogCleanupStatus && (
+                <div style={{ marginTop: 8 }}>
+                  <Text type={usageLogCleanupStatus.error ? 'danger' : 'tertiary'}>
+                    {usageLogCleanupStatus.running
+                      ? t('清理中：已删除 {{count}} 条，{{batches}} 批', {
+                          count: usageLogCleanupStatus.deleted_count || 0,
+                          batches: usageLogCleanupStatus.batches || 0,
+                        })
+                      : usageLogCleanupStatus.finished_at
+                        ? usageLogCleanupStatus.error
+                          ? t('上次清理失败：已删除 {{count}} 条，错误：{{error}}', {
+                              count: usageLogCleanupStatus.deleted_count || 0,
+                              error: usageLogCleanupStatus.error,
+                            })
+                          : t('上次清理完成：已删除 {{count}} 条，{{batches}} 批', {
+                              count: usageLogCleanupStatus.deleted_count || 0,
+                              batches: usageLogCleanupStatus.batches || 0,
+                            })
+                        : t('暂无清理任务')}
+                  </Text>
+                </div>
+              )}
             </div>
           </Col>
           <Col xs={24} sm={12} md={8}>
@@ -470,15 +513,21 @@ export default function SettingsPerformance(props) {
                 &nbsp;
               </Text>
               <Popconfirm
-                title={t('确认清理使用记录？')}
+                title={t('确认清理 API 调用记录？')}
                 content={t(
-                  '将删除 {{days}} 天前的 API 消费使用记录。该操作不可恢复，请确认已经备份或不再需要这些历史明细。',
+                  '将后台删除 {{days}} 天前的 API 成功调用和报错调用记录。任务启动后可刷新页面查看进度，但该操作不可恢复。',
                   { days: usageLogRetentionDays },
                 )}
                 onConfirm={cleanupUsageLogs}
               >
-                <Button type='danger' loading={usageLogCleanupLoading}>
-                  {t('清理使用记录')}
+                <Button
+                  type='danger'
+                  loading={usageLogCleanupLoading}
+                  disabled={usageLogCleanupStatus?.running}
+                >
+                  {usageLogCleanupStatus?.running
+                    ? t('清理中')
+                    : t('启动清理任务')}
                 </Button>
               </Popconfirm>
             </div>

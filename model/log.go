@@ -500,7 +500,11 @@ func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64,
 	return total, nil
 }
 
-func DeleteOldConsumeLogs(ctx context.Context, targetTimestamp int64, batchSize int) (UsageLogCleanupResult, error) {
+func DeleteOldUsageLogs(ctx context.Context, targetTimestamp int64, batchSize int) (UsageLogCleanupResult, error) {
+	return DeleteOldUsageLogsWithProgress(ctx, targetTimestamp, batchSize, nil)
+}
+
+func DeleteOldUsageLogsWithProgress(ctx context.Context, targetTimestamp int64, batchSize int, progress func(UsageLogCleanupResult)) (UsageLogCleanupResult, error) {
 	if batchSize <= 0 {
 		batchSize = 1000
 	}
@@ -517,7 +521,7 @@ func DeleteOldConsumeLogs(ctx context.Context, targetTimestamp int64, batchSize 
 		var ids []int
 		err := LOG_DB.WithContext(ctx).
 			Model(&Log{}).
-			Where("type = ? AND created_at < ?", LogTypeConsume, targetTimestamp).
+			Where("type IN ? AND created_at < ?", []int{LogTypeConsume, LogTypeError}, targetTimestamp).
 			Order("created_at asc, id asc").
 			Limit(batchSize).
 			Pluck("id", &ids).Error
@@ -529,13 +533,16 @@ func DeleteOldConsumeLogs(ctx context.Context, targetTimestamp int64, batchSize 
 		}
 
 		deleteResult := LOG_DB.WithContext(ctx).
-			Where("type = ? AND created_at < ? AND id IN ?", LogTypeConsume, targetTimestamp, ids).
+			Where("type IN ? AND created_at < ? AND id IN ?", []int{LogTypeConsume, LogTypeError}, targetTimestamp, ids).
 			Delete(&Log{})
 		if deleteResult.Error != nil {
 			return result, deleteResult.Error
 		}
 		result.DeletedCount += deleteResult.RowsAffected
 		result.Batches++
+		if progress != nil {
+			progress(result)
+		}
 
 		if len(ids) < batchSize || deleteResult.RowsAffected == 0 {
 			break

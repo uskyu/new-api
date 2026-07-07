@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -194,6 +196,29 @@ type LogFilesResponse struct {
 	Files      []LogFileInfo `json:"files"`
 }
 
+type UsageLogCleanupStatus struct {
+	Running         bool   `json:"running"`
+	RetentionDays   int    `json:"retention_days"`
+	CutoffTimestamp int64  `json:"cutoff_timestamp"`
+	DeletedCount    int64  `json:"deleted_count"`
+	BatchSize       int    `json:"batch_size"`
+	Batches         int    `json:"batches"`
+	StartedAt       int64  `json:"started_at"`
+	FinishedAt      int64  `json:"finished_at"`
+	Error           string `json:"error"`
+}
+
+var usageLogCleanupState = struct {
+	sync.Mutex
+	Status UsageLogCleanupStatus
+}{}
+
+func getUsageLogCleanupStatusSnapshot() UsageLogCleanupStatus {
+	usageLogCleanupState.Lock()
+	defer usageLogCleanupState.Unlock()
+	return usageLogCleanupState.Status
+}
+
 // getLogFiles 读取日志目录中的日志文件列表
 func getLogFiles() ([]LogFileInfo, error) {
 	if *common.LogDir == "" {
@@ -366,25 +391,72 @@ func CleanupUsageLogs(c *gin.Context) {
 	}
 
 	cutoff := time.Now().AddDate(0, 0, -retentionDays).Unix()
-	result, err := model.DeleteOldConsumeLogs(c.Request.Context(), cutoff, 1000)
-	if err != nil {
-		common.ApiError(c, err)
+	operatorId := c.GetInt("id")
+	startedAt := time.Now().Unix()
+
+	usageLogCleanupState.Lock()
+	if usageLogCleanupState.Status.Running {
+		status := usageLogCleanupState.Status
+		usageLogCleanupState.Unlock()
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "usage log cleanup is already running",
+			"data":    status,
+		})
 		return
 	}
+	usageLogCleanupState.Status = UsageLogCleanupStatus{
+		Running:         true,
+		RetentionDays:   retentionDays,
+		CutoffTimestamp: cutoff,
+		BatchSize:       1000,
+		StartedAt:       startedAt,
+	}
+	status := usageLogCleanupState.Status
+	usageLogCleanupState.Unlock()
 
-	model.RecordLog(
-		c.GetInt("id"),
-		model.LogTypeManage,
-		fmt.Sprintf("清理使用记录：保留%d天，删除%d条，截止时间戳%d", retentionDays, result.DeletedCount, cutoff),
-	)
+	go func() {
+		result, err := model.DeleteOldUsageLogsWithProgress(context.Background(), cutoff, 1000, func(progress model.UsageLogCleanupResult) {
+			usageLogCleanupState.Lock()
+			usageLogCleanupState.Status.DeletedCount = progress.DeletedCount
+			usageLogCleanupState.Status.BatchSize = progress.BatchSize
+			usageLogCleanupState.Status.Batches = progress.Batches
+			usageLogCleanupState.Unlock()
+		})
 
-	common.ApiSuccess(c, gin.H{
-		"deleted_count":    result.DeletedCount,
-		"retention_days":   retentionDays,
-		"cutoff_timestamp": result.Cutoff,
-		"batch_size":       result.BatchSize,
-		"batches":          result.Batches,
-	})
+		usageLogCleanupState.Lock()
+		usageLogCleanupState.Status.Running = false
+		usageLogCleanupState.Status.DeletedCount = result.DeletedCount
+		usageLogCleanupState.Status.BatchSize = result.BatchSize
+		usageLogCleanupState.Status.Batches = result.Batches
+		usageLogCleanupState.Status.FinishedAt = time.Now().Unix()
+		if err != nil {
+			usageLogCleanupState.Status.Error = err.Error()
+		} else {
+			usageLogCleanupState.Status.Error = ""
+		}
+		usageLogCleanupState.Unlock()
+
+		if err != nil {
+			model.RecordLog(
+				operatorId,
+				model.LogTypeManage,
+				fmt.Sprintf("清理API调用记录失败：保留%d天，已删除%d条，截止时间戳%d，错误：%s", retentionDays, result.DeletedCount, cutoff, err.Error()),
+			)
+			return
+		}
+		model.RecordLog(
+			operatorId,
+			model.LogTypeManage,
+			fmt.Sprintf("清理API调用记录完成：保留%d天，删除%d条，截止时间戳%d", retentionDays, result.DeletedCount, cutoff),
+		)
+	}()
+
+	common.ApiSuccess(c, status)
+}
+
+func GetUsageLogCleanupStatus(c *gin.Context) {
+	common.ApiSuccess(c, getUsageLogCleanupStatusSnapshot())
 }
 
 // getDiskCacheInfo 获取磁盘缓存目录信息
