@@ -256,7 +256,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		if !ratio.IsZero() && quotaCalculateDecimal.LessThanOrEqual(decimal.Zero) {
 			quotaCalculateDecimal = decimal.NewFromInt(1)
 		}
-		summary.Quota = int(quotaCalculateDecimal.Round(0).IntPart())
+		summary.Quota = common.QuotaFromDecimal(quotaCalculateDecimal)
 	} else {
 		quotaCalculateDecimal := dModelPrice.Mul(dQuotaPerUnit).Mul(dGroupRatio)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(dWebSearchQuota)
@@ -269,7 +269,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 				quotaCalculateDecimal = quotaCalculateDecimal.Mul(decimal.NewFromFloat(otherRatio))
 			}
 		}
-		summary.Quota = int(quotaCalculateDecimal.Round(0).IntPart())
+		summary.Quota = common.QuotaFromDecimal(quotaCalculateDecimal)
 	}
 
 	if summary.TotalTokens == 0 {

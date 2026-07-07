@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"strings"
 	"time"
 
@@ -54,7 +53,7 @@ func calculateAudioQuota(info QuotaInfo) int {
 		groupRatio := decimal.NewFromFloat(info.GroupRatio)
 
 		quota := modelPrice.Mul(quotaPerUnit).Mul(groupRatio)
-		return int(quota.IntPart())
+		return common.QuotaFromDecimal(quota)
 	}
 
 	completionRatio := decimal.NewFromFloat(ratio_setting.GetCompletionRatio(info.ModelName))
@@ -83,7 +82,7 @@ func calculateAudioQuota(info QuotaInfo) int {
 		quota = decimal.NewFromInt(1)
 	}
 
-	return int(quota.Round(0).IntPart())
+	return common.QuotaFromDecimal(quota)
 }
 
 func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage) error {
@@ -249,11 +248,11 @@ func CalcOpenRouterCacheCreateTokens(usage dto.Usage, priceData types.PriceData)
 	completionTokens := float64(usage.CompletionTokens)
 	promptCacheReadTokens := float64(usage.PromptTokensDetails.CachedTokens)
 
-	return int(math.Round((cost -
+	return common.QuotaRound((cost -
 		totalPromptTokens*quotaPrice +
 		promptCacheReadTokens*(quotaPrice-promptCacheReadPrice) -
 		completionTokens*completionPrice) /
-		(promptCacheCreatePrice - quotaPrice)))
+		(promptCacheCreatePrice - quotaPrice))
 }
 
 func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent string) {

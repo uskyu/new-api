@@ -14,6 +14,8 @@ import (
 	"github.com/samber/lo"
 )
 
+const MaxTaskDurationSeconds = 3600
+
 type HasPrompt interface {
 	GetPrompt() string
 }
@@ -74,6 +76,17 @@ func GetTaskRequest(c *gin.Context) (TaskSubmitReq, error) {
 func validatePrompt(prompt string) *dto.TaskError {
 	if strings.TrimSpace(prompt) == "" {
 		return createTaskError(fmt.Errorf("prompt is required"), "invalid_request", http.StatusBadRequest, true)
+	}
+	return nil
+}
+
+func validateTaskDurationBounds(req TaskSubmitReq) *dto.TaskError {
+	seconds := req.Duration
+	if seconds == 0 && req.Seconds != "" {
+		seconds, _ = strconv.Atoi(req.Seconds)
+	}
+	if seconds < 0 || seconds > MaxTaskDurationSeconds {
+		return createTaskError(fmt.Errorf("seconds must be between 1 and %d", MaxTaskDurationSeconds), "invalid_seconds", http.StatusBadRequest, true)
 	}
 	return nil
 }
@@ -147,6 +160,9 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 	if taskErr := validatePrompt(prompt); taskErr != nil {
 		return taskErr
 	}
+	if taskErr := validateTaskDurationBounds(req); taskErr != nil {
+		return taskErr
+	}
 
 	action := constant.TaskActionGenerate
 	if strings.HasPrefix(model, "sora-2") {
@@ -202,6 +218,9 @@ func ValidateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string) *d
 	}
 
 	if taskErr := validatePrompt(req.Prompt); taskErr != nil {
+		return taskErr
+	}
+	if taskErr := validateTaskDurationBounds(req); taskErr != nil {
 		return taskErr
 	}
 

@@ -118,6 +118,17 @@ func GetAndValidateEmbeddingRequest(c *gin.Context, relayMode int) (*dto.Embeddi
 	return embeddingRequest, nil
 }
 
+const maxTokensLimit = math.MaxInt32 / 2
+
+func exceedsMaxTokensLimit(values ...*uint) bool {
+	for _, v := range values {
+		if lo.FromPtrOr(v, uint(0)) > maxTokensLimit {
+			return true
+		}
+	}
+	return false
+}
+
 func GetAndValidateResponsesRequest(c *gin.Context) (*dto.OpenAIResponsesRequest, error) {
 	request := &dto.OpenAIResponsesRequest{}
 	err := common.UnmarshalBodyReusable(c, request)
@@ -129,6 +140,9 @@ func GetAndValidateResponsesRequest(c *gin.Context) (*dto.OpenAIResponsesRequest
 	}
 	if request.Input == nil {
 		return nil, errors.New("input is required")
+	}
+	if exceedsMaxTokensLimit(request.MaxOutputTokens) {
+		return nil, errors.New("max_output_tokens is invalid")
 	}
 	return request, nil
 }
@@ -159,7 +173,13 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			c.Request.PostForm = formData
 			imageRequest.Prompt = formData.Get("prompt")
 			imageRequest.Model = formData.Get("model")
-			imageRequest.N = common.GetPointer(uint(common.String2Int(formData.Get("n"))))
+			if nValue := strings.TrimSpace(formData.Get("n")); nValue != "" {
+				n, err := strconv.Atoi(nValue)
+				if err != nil || n < 0 || n > dto.MaxImageN {
+					return nil, fmt.Errorf("n must be an integer between 1 and %d", dto.MaxImageN)
+				}
+				imageRequest.N = common.GetPointer(uint(n))
+			}
 			imageRequest.Quality = formData.Get("quality")
 			imageRequest.Size = formData.Get("size")
 			if streamValue := strings.TrimSpace(formData.Get("stream")); streamValue != "" {
@@ -233,6 +253,9 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 		//	return nil, errors.New("prompt is required")
 		//}
 
+		if imageRequest.N != nil && *imageRequest.N > dto.MaxImageN {
+			return nil, fmt.Errorf("n must be an integer between 1 and %d", dto.MaxImageN)
+		}
 		if imageRequest.N == nil || *imageRequest.N == 0 {
 			imageRequest.N = common.GetPointer(uint(1))
 		}
@@ -252,6 +275,9 @@ func GetAndValidateClaudeRequest(c *gin.Context) (textRequest *dto.ClaudeRequest
 	}
 	if textRequest.Model == "" {
 		return nil, errors.New("field model is required")
+	}
+	if exceedsMaxTokensLimit(textRequest.MaxTokens, textRequest.MaxTokensToSample) {
+		return nil, errors.New("max_tokens is invalid")
 	}
 
 	//if textRequest.Stream {
@@ -281,7 +307,7 @@ func GetAndValidateTextRequest(c *gin.Context, relayMode int) (*dto.GeneralOpenA
 		textRequest.Model = c.Param("model")
 	}
 
-	if lo.FromPtrOr(textRequest.MaxTokens, uint(0)) > math.MaxInt32/2 {
+	if exceedsMaxTokensLimit(textRequest.MaxTokens, textRequest.MaxCompletionTokens) {
 		return nil, errors.New("max_tokens is invalid")
 	}
 	if textRequest.Model == "" {
@@ -470,6 +496,9 @@ func GetAndValidateGeminiRequest(c *gin.Context) (*dto.GeminiChatRequest, error)
 	}
 	if len(request.Contents) == 0 && len(request.Requests) == 0 {
 		return nil, errors.New("contents is required")
+	}
+	if exceedsMaxTokensLimit(request.GenerationConfig.MaxOutputTokens) {
+		return nil, errors.New("maxOutputTokens is invalid")
 	}
 
 	//if c.Query("alt") == "sse" {
