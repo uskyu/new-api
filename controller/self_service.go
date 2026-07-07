@@ -310,7 +310,7 @@ func CheckSelfService(c *gin.Context) {
 	selectedLogIds := make(map[int]int, len(selected))
 	refundedQuota := 0
 	for index, item := range selected {
-		quota := int(math.Floor(float64(item.Quota) * float64(config.RefundPercent) / 100))
+		quota := common.QuotaFromFloat(float64(item.Quota) * float64(config.RefundPercent) / 100)
 		if quota > 0 {
 			refundedQuota += quota
 		}
@@ -320,6 +320,12 @@ func CheckSelfService(c *gin.Context) {
 	refundedCount := 0
 	if refundedQuota > 0 || len(selected) > 0 {
 		err = model.DB.Transaction(func(tx *gorm.DB) error {
+			// 锁住用户行，防止与支付回写入款并发导致余额丢失
+			var lockedUser model.User
+			if err := model.LockForUpdate(tx).Where("id = ?", user.Id).First(&lockedUser).Error; err != nil {
+				return err
+			}
+
 			currentDailyCount, err := model.CountSelfServiceRefundsSinceTx(tx, user.Id, model.TodayStartTimestamp())
 			if err != nil {
 				return err
@@ -333,7 +339,7 @@ func CheckSelfService(c *gin.Context) {
 				}
 			}
 			for _, item := range selected {
-				itemRefundQuota := int(math.Floor(float64(item.Quota) * float64(config.RefundPercent) / 100))
+				itemRefundQuota := common.QuotaFromFloat(float64(item.Quota) * float64(config.RefundPercent) / 100)
 				history := &model.SelfServiceRefundHistory{
 					UserId:        user.Id,
 					Username:      user.Username,
@@ -369,7 +375,7 @@ func CheckSelfService(c *gin.Context) {
 		for i, record := range records {
 			if selectedIndex, ok := selectedLogIds[record.LogId]; ok {
 				records[i].Status = "fixed"
-				records[i].RefundedQuota = int(math.Floor(float64(selected[selectedIndex].Quota) * float64(config.RefundPercent) / 100))
+				records[i].RefundedQuota = common.QuotaFromFloat(float64(selected[selectedIndex].Quota) * float64(config.RefundPercent) / 100)
 			}
 		}
 		model.RecordLog(user.Id, model.LogTypeManage, fmt.Sprintf("自助平台返还空回额度 %s", logger.LogQuota(refundedQuota)))
