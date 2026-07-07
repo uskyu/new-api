@@ -6,21 +6,59 @@ const (
 	DatabaseTypeMySQL      DatabaseType = "mysql"
 	DatabaseTypeSQLite     DatabaseType = "sqlite"
 	DatabaseTypePostgreSQL DatabaseType = "postgres"
+	DatabaseTypeClickHouse DatabaseType = "clickhouse"
 )
 
-// Legacy boolean flags — kept for backward compatibility.
+var mainDatabaseType = DatabaseTypeSQLite
+var logDatabaseType = DatabaseTypeSQLite
+
+// Legacy boolean flags kept for backward compatibility with older migrations.
 var UsingSQLite = false
 var UsingPostgreSQL = false
-var LogSqlType = DatabaseTypeSQLite // Default to SQLite for logging SQL queries
+var LogSqlType = DatabaseTypeSQLite
 var UsingMySQL = false
 var UsingClickHouse = false
 
 var SQLitePath = "one-api.db?_busy_timeout=30000"
 
-// UsingMainDatabase reports whether the main (business) database is the given type.
-// Prefer this over the legacy boolean flags; it is safe to call before InitDB.
+func MainDatabaseType() DatabaseType {
+	if UsingMySQL {
+		return DatabaseTypeMySQL
+	}
+	if UsingPostgreSQL {
+		return DatabaseTypePostgreSQL
+	}
+	if UsingSQLite {
+		return DatabaseTypeSQLite
+	}
+	return mainDatabaseType
+}
+
+func LogDatabaseType() DatabaseType {
+	return logDatabaseType
+}
+
+func SetMainDatabaseType(databaseType DatabaseType) {
+	mainDatabaseType = databaseType
+	UsingMySQL = databaseType == DatabaseTypeMySQL
+	UsingPostgreSQL = databaseType == DatabaseTypePostgreSQL
+	UsingSQLite = databaseType == DatabaseTypeSQLite
+}
+
+func SetLogDatabaseType(databaseType DatabaseType) {
+	logDatabaseType = databaseType
+	LogSqlType = databaseType
+}
+
+func SetDatabaseTypes(mainType DatabaseType, logType DatabaseType) {
+	SetMainDatabaseType(mainType)
+	SetLogDatabaseType(logType)
+}
+
 func UsingMainDatabase(databaseType DatabaseType) bool {
-	return UsingSQLite && databaseType == DatabaseTypeSQLite ||
-		UsingPostgreSQL && databaseType == DatabaseTypePostgreSQL ||
-		UsingMySQL && databaseType == DatabaseTypeMySQL
+	return MainDatabaseType() == databaseType
+}
+
+func UsingLogDatabase(databaseType DatabaseType) bool {
+	return LogDatabaseType() == databaseType
 }

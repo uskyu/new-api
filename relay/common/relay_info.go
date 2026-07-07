@@ -163,6 +163,10 @@ type RelayInfo struct {
 
 	PriceData types.PriceData
 
+	// QuotaClamp is set when quota conversion saturates or falls back from NaN.
+	// It is surfaced on admin-only log metadata for later audit.
+	QuotaClamp *common.QuotaClamp
+
 	// TieredBillingSnapshot is a frozen snapshot of tiered billing rules
 	// captured at pre-consume time. Non-nil only when billing mode is "tiered_expr".
 	TieredBillingSnapshot *billingexpr.BillingSnapshot

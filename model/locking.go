@@ -23,3 +23,7 @@ func LockForUpdate(tx *gorm.DB) *gorm.DB {
 	}
 	return tx.Clauses(clause.Locking{Strength: "UPDATE"})
 }
+
+func lockForUpdate(tx *gorm.DB) *gorm.DB {
+	return LockForUpdate(tx)
+}
