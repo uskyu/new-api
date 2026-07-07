@@ -528,7 +528,9 @@ func DeleteOldConsumeLogs(ctx context.Context, targetTimestamp int64, batchSize 
 			break
 		}
 
-		deleteResult := LOG_DB.WithContext(ctx).Where("id IN ?", ids).Delete(&Log{})
+		deleteResult := LOG_DB.WithContext(ctx).
+			Where("type = ? AND created_at < ? AND id IN ?", LogTypeConsume, targetTimestamp, ids).
+			Delete(&Log{})
 		if deleteResult.Error != nil {
 			return result, deleteResult.Error
 		}
