@@ -42,6 +42,7 @@ const PaymentSetting = () => {
     PayMethods: '',
     AmountOptions: '',
     AmountDiscount: '',
+    UserBillVisibleDays: 30,
 
     StripeApiSecret: '',
     StripeWebhookSecret: '',
@@ -92,6 +93,9 @@ const PaymentSetting = () => {
             } catch (error) {
               newInputs['AmountDiscount'] = item.value;
             }
+            break;
+          case 'payment_setting.user_bill_visible_days':
+            newInputs['UserBillVisibleDays'] = parseInt(item.value) || 30;
             break;
           case 'Price':
           case 'MinTopUp':

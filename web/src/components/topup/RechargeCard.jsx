@@ -41,7 +41,6 @@ import {
   Coins,
   Wallet,
   BarChart2,
-  TrendingUp,
   Receipt,
   Sparkles,
 } from 'lucide-react';
@@ -142,7 +141,7 @@ const RechargeCard = ({
               </div>
 
               {/* 统计数据 */}
-              <div className='grid grid-cols-3 gap-6 mt-4'>
+              <div className='grid grid-cols-2 gap-6 mt-4'>
                 {/* 当前余额 */}
                 <div className='text-center'>
                   <div
@@ -164,31 +163,6 @@ const RechargeCard = ({
                       }}
                     >
                       {t('当前余额')}
-                    </Text>
-                  </div>
-                </div>
-
-                {/* 历史消耗 */}
-                <div className='text-center'>
-                  <div
-                    className='text-base sm:text-2xl font-bold mb-2'
-                    style={{ color: 'white' }}
-                  >
-                    {renderQuota(userState?.user?.used_quota)}
-                  </div>
-                  <div className='flex items-center justify-center text-sm'>
-                    <TrendingUp
-                      size={14}
-                      className='mr-1'
-                      style={{ color: 'rgba(255,255,255,0.8)' }}
-                    />
-                    <Text
-                      style={{
-                        color: 'rgba(255,255,255,0.8)',
-                        fontSize: '12px',
-                      }}
-                    >
-                      {t('历史消耗')}
                     </Text>
                   </div>
                 </div>

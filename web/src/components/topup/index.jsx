@@ -38,7 +38,9 @@ import RechargeCard from './RechargeCard';
 import InvitationCard from './InvitationCard';
 import TransferModal from './modals/TransferModal';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
-import TopupHistoryModal from './modals/TopupHistoryModal';
+import TopupHistoryModal, {
+  TOPUP_HISTORY_SCOPE,
+} from './modals/TopupHistoryModal';
 
 const TopUp = () => {
   const { t } = useTranslation();
@@ -751,6 +753,7 @@ const TopUp = () => {
         visible={openHistory}
         onCancel={handleHistoryCancel}
         t={t}
+        scope={TOPUP_HISTORY_SCOPE.SELF}
       />
 
       {/* Creem 充值确认模态框 */}

@@ -44,6 +44,7 @@ export default function SettingsPaymentGateway(props) {
     PayMethods: '',
     AmountOptions: '',
     AmountDiscount: '',
+    UserBillVisibleDays: 30,
   });
   const [originInputs, setOriginInputs] = useState({});
   const formApiRef = useRef(null);
@@ -68,6 +69,8 @@ export default function SettingsPaymentGateway(props) {
         PayMethods: props.options.PayMethods || '',
         AmountOptions: props.options.AmountOptions || '',
         AmountDiscount: props.options.AmountDiscount || '',
+        UserBillVisibleDays:
+          parseInt(props.options.UserBillVisibleDays) || 30,
       };
 
       // 美化 JSON 展示
@@ -140,6 +143,16 @@ export default function SettingsPaymentGateway(props) {
       }
     }
 
+    const userBillVisibleDays = Number(inputs.UserBillVisibleDays);
+    if (
+      !Number.isInteger(userBillVisibleDays) ||
+      userBillVisibleDays < 1 ||
+      userBillVisibleDays > 3650
+    ) {
+      showError(t('用户账单可见天数必须为 1 到 3650 之间的整数'));
+      return;
+    }
+
     setLoading(true);
     try {
       const options = [
@@ -184,6 +197,14 @@ export default function SettingsPaymentGateway(props) {
         options.push({
           key: 'payment_setting.amount_discount',
           value: inputs.AmountDiscount,
+        });
+      }
+      if (
+        originInputs['UserBillVisibleDays'] !== inputs.UserBillVisibleDays
+      ) {
+        options.push({
+          key: 'payment_setting.user_bill_visible_days',
+          value: userBillVisibleDays.toString(),
         });
       }
 
@@ -298,6 +319,23 @@ export default function SettingsPaymentGateway(props) {
             placeholder={t('请输入充值页额外通知内容，支持 HTML')}
             autosize
           />
+
+          <Row
+            gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+            style={{ marginTop: 16 }}
+          >
+            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+              <Form.InputNumber
+                field='UserBillVisibleDays'
+                min={1}
+                max={3650}
+                precision={0}
+                label={t('用户账单可见天数')}
+                placeholder='30'
+                style={{ width: '100%' }}
+              />
+            </Col>
+          </Row>
 
           <Row
             gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}

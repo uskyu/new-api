@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -257,6 +258,15 @@ func UpdateOption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": err.Error(),
+			})
+			return
+		}
+	case "payment_setting.user_bill_visible_days":
+		days, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil || days < operation_setting.MinUserBillVisibleDays || days > operation_setting.MaxUserBillVisibleDays {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": fmt.Sprintf("用户账单可见天数必须为 %d 到 %d 之间的整数", operation_setting.MinUserBillVisibleDays, operation_setting.MaxUserBillVisibleDays),
 			})
 			return
 		}

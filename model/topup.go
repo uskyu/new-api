@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -113,12 +114,10 @@ func Recharge(referenceId string, customerId string) (err error) {
 	return nil
 }
 
-// topUpQueryWindowSeconds 限制充值记录查询的时间窗口（秒）。
-const topUpQueryWindowSeconds int64 = 30 * 24 * 60 * 60
-
 // topUpQueryCutoff 返回允许查询的最早 create_time（秒级 Unix 时间戳）。
 func topUpQueryCutoff() int64 {
-	return common.GetTimestamp() - topUpQueryWindowSeconds
+	days := operation_setting.GetUserBillVisibleDays()
+	return common.GetTimestamp() - int64(days)*24*60*60
 }
 
 func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
@@ -224,6 +223,70 @@ func SearchUserTopUps(userId int, keyword string, pageInfo *common.PageInfo) (to
 		return nil, 0, errors.New("搜索充值记录失败")
 	}
 
+	if err = tx.Commit().Error; err != nil {
+		return nil, 0, err
+	}
+	return topups, total, nil
+}
+
+// GetAllTopUpsByUser returns one user's complete top-up history for administrators.
+func GetAllTopUpsByUser(userId int, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return nil, 0, tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	query := tx.Model(&TopUp{}).Where("user_id = ?", userId)
+	if err = query.Count(&total).Error; err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err = query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error; err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err = tx.Commit().Error; err != nil {
+		return nil, 0, err
+	}
+	return topups, total, nil
+}
+
+// SearchAllTopUpsByUser searches one user's complete top-up history for administrators.
+func SearchAllTopUpsByUser(userId int, keyword string, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return nil, 0, tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	query := tx.Model(&TopUp{}).Where("user_id = ?", userId)
+	if keyword != "" {
+		pattern, perr := sanitizeLikePattern(keyword)
+		if perr != nil {
+			tx.Rollback()
+			return nil, 0, perr
+		}
+		query = query.Where("trade_no LIKE ? ESCAPE '!'", pattern)
+	}
+	if err = query.Limit(searchTopUpCountHardLimit).Count(&total).Error; err != nil {
+		tx.Rollback()
+		common.SysError("failed to count admin user topups: " + err.Error())
+		return nil, 0, errors.New("搜索充值记录失败")
+	}
+	if err = query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error; err != nil {
+		tx.Rollback()
+		common.SysError("failed to search admin user topups: " + err.Error())
+		return nil, 0, errors.New("搜索充值记录失败")
+	}
 	if err = tx.Commit().Error; err != nil {
 		return nil, 0, err
 	}

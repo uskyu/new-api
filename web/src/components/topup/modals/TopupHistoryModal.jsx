@@ -35,9 +35,14 @@ import {
 import { Coins } from 'lucide-react';
 import { IconSearch } from '@douyinfe/semi-icons';
 import { API, timestamp2string } from '../../../helpers';
-import { isAdmin } from '../../../helpers/utils';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 const { Text } = Typography;
+
+export const TOPUP_HISTORY_SCOPE = Object.freeze({
+  SELF: 'self',
+  USER: 'user',
+  ALL: 'all',
+});
 
 // 状态映射配置
 const STATUS_CONFIG = {
@@ -56,7 +61,13 @@ const PAYMENT_METHOD_MAP = {
   wxpay: '微信',
 };
 
-const TopupHistoryModal = ({ visible, onCancel, t }) => {
+const TopupHistoryModal = ({
+  visible,
+  onCancel,
+  t,
+  scope = TOPUP_HISTORY_SCOPE.SELF,
+  userId,
+}) => {
   const [loading, setLoading] = useState(false);
   const [topups, setTopups] = useState([]);
   const [total, setTotal] = useState(0);
@@ -66,9 +77,19 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
   const isMobile = useIsMobile();
 
   const loadTopups = async (currentPage, currentPageSize) => {
+    if (scope === TOPUP_HISTORY_SCOPE.USER && !userId) {
+      setTopups([]);
+      setTotal(0);
+      return;
+    }
     setLoading(true);
     try {
-      const base = isAdmin() ? '/api/user/topup' : '/api/user/topup/self';
+      const base =
+        scope === TOPUP_HISTORY_SCOPE.ALL
+          ? '/api/user/topup'
+          : scope === TOPUP_HISTORY_SCOPE.USER
+            ? `/api/user/${userId}/topups`
+            : '/api/user/topup/self';
       const qs =
         `p=${currentPage}&page_size=${currentPageSize}` +
         (keyword ? `&keyword=${encodeURIComponent(keyword)}` : '');
@@ -92,7 +113,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     if (visible) {
       loadTopups(page, pageSize);
     }
-  }, [visible, page, pageSize, keyword]);
+  }, [visible, page, pageSize, keyword, scope, userId]);
 
   const handlePageChange = (currentPage) => {
     setPage(currentPage);
@@ -156,12 +177,12 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     return Number(record?.amount || 0) === 0 && tradeNo.startsWith('sub');
   };
 
-  // 检查是否为管理员
-  const userIsAdmin = useMemo(() => isAdmin(), []);
+  const showUserId = scope === TOPUP_HISTORY_SCOPE.ALL;
+  const allowAdminActions = scope === TOPUP_HISTORY_SCOPE.ALL;
 
   const columns = useMemo(() => {
     const baseColumns = [
-      ...(userIsAdmin
+      ...(showUserId
         ? [
             {
               title: t('用户ID'),
@@ -218,7 +239,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     ];
 
     // 管理员才显示操作列
-    if (userIsAdmin) {
+    if (allowAdminActions) {
       baseColumns.push({
         title: t('操作'),
         key: 'action',
@@ -250,7 +271,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     });
 
     return baseColumns;
-  }, [t, userIsAdmin]);
+  }, [t, showUserId, allowAdminActions]);
 
   return (
     <Modal

@@ -55,7 +55,11 @@ import {
   IconUserGroup,
   IconPlus,
 } from '@douyinfe/semi-icons';
+import { Receipt } from 'lucide-react';
 import UserBindingManagementModal from './UserBindingManagementModal';
+import TopupHistoryModal, {
+  TOPUP_HISTORY_SCOPE,
+} from '../../../topup/modals/TopupHistoryModal';
 
 const { Text, Title } = Typography;
 
@@ -69,6 +73,7 @@ const EditUserModal = (props) => {
   const isMobile = useIsMobile();
   const [groupOptions, setGroupOptions] = useState([]);
   const [bindingModalVisible, setBindingModalVisible] = useState(false);
+  const [billModalVisible, setBillModalVisible] = useState(false);
   const formApiRef = useRef(null);
 
   const isEdit = Boolean(userId);
@@ -118,6 +123,7 @@ const EditUserModal = (props) => {
     loadUser();
     if (userId) fetchGroups();
     setBindingModalVisible(false);
+    setBillModalVisible(false);
   }, [props.editingUser.id]);
 
   const openBindingModal = () => {
@@ -316,11 +322,21 @@ const EditUserModal = (props) => {
                       </Col>
 
                       <Col span={14}>
-                        <Form.Slot label={t('添加额度')}>
-                          <Button
-                            icon={<IconPlus />}
-                            onClick={() => setIsModalOpen(true)}
-                          />
+                        <Form.Slot label={t('额度操作')}>
+                          <Space>
+                            <Button
+                              icon={<IconPlus />}
+                              onClick={() => setIsModalOpen(true)}
+                            >
+                              {t('添加额度')}
+                            </Button>
+                            <Button
+                              icon={<Receipt size={16} />}
+                              onClick={() => setBillModalVisible(true)}
+                            >
+                              {t('账单')}
+                            </Button>
+                          </Space>
                         </Form.Slot>
                       </Col>
                     </Row>
@@ -370,6 +386,14 @@ const EditUserModal = (props) => {
         userId={userId}
         isMobile={isMobile}
         formApiRef={formApiRef}
+      />
+
+      <TopupHistoryModal
+        visible={billModalVisible}
+        onCancel={() => setBillModalVisible(false)}
+        t={t}
+        scope={TOPUP_HISTORY_SCOPE.USER}
+        userId={userId}
       />
 
       {/* 添加额度模态框 */}
