@@ -27,6 +27,7 @@ import {
   Button,
   Input,
   Tag,
+  Tabs,
 } from '@douyinfe/semi-ui';
 import {
   IllustrationNoResult,
@@ -34,7 +35,7 @@ import {
 } from '@douyinfe/semi-illustrations';
 import { Coins } from 'lucide-react';
 import { IconSearch } from '@douyinfe/semi-icons';
-import { API, timestamp2string } from '../../../helpers';
+import { API, renderQuota, timestamp2string } from '../../../helpers';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 const { Text } = Typography;
 
@@ -42,6 +43,11 @@ export const TOPUP_HISTORY_SCOPE = Object.freeze({
   SELF: 'self',
   USER: 'user',
   ALL: 'all',
+});
+
+const BILL_TYPE = Object.freeze({
+  ONLINE: 'online',
+  REDEMPTION: 'redemption',
 });
 
 // 状态映射配置
@@ -69,23 +75,30 @@ const TopupHistoryModal = ({
   userId,
 }) => {
   const [loading, setLoading] = useState(false);
-  const [topups, setTopups] = useState([]);
+  const [records, setRecords] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [keyword, setKeyword] = useState('');
+  const [billType, setBillType] = useState(BILL_TYPE.ONLINE);
   const isMobile = useIsMobile();
 
-  const loadTopups = async (currentPage, currentPageSize) => {
+  const loadBills = async (currentPage, currentPageSize) => {
     if (scope === TOPUP_HISTORY_SCOPE.USER && !userId) {
-      setTopups([]);
+      setRecords([]);
       setTotal(0);
       return;
     }
     setLoading(true);
     try {
-      const base =
-        scope === TOPUP_HISTORY_SCOPE.ALL
+      const isRedemption = billType === BILL_TYPE.REDEMPTION;
+      const base = isRedemption
+        ? scope === TOPUP_HISTORY_SCOPE.ALL
+          ? '/api/user/redemption'
+          : scope === TOPUP_HISTORY_SCOPE.USER
+            ? `/api/user/${userId}/redemptions`
+            : '/api/user/redemption/self'
+        : scope === TOPUP_HISTORY_SCOPE.ALL
           ? '/api/user/topup'
           : scope === TOPUP_HISTORY_SCOPE.USER
             ? `/api/user/${userId}/topups`
@@ -97,7 +110,7 @@ const TopupHistoryModal = ({
       const res = await API.get(endpoint);
       const { success, message, data } = res.data;
       if (success) {
-        setTopups(data.items || []);
+        setRecords(data.items || []);
         setTotal(data.total || 0);
       } else {
         Toast.error({ content: message || t('加载失败') });
@@ -111,9 +124,9 @@ const TopupHistoryModal = ({
 
   useEffect(() => {
     if (visible) {
-      loadTopups(page, pageSize);
+      loadBills(page, pageSize);
     }
-  }, [visible, page, pageSize, keyword, scope, userId]);
+  }, [visible, page, pageSize, keyword, scope, userId, billType]);
 
   const handlePageChange = (currentPage) => {
     setPage(currentPage);
@@ -129,6 +142,14 @@ const TopupHistoryModal = ({
     setPage(1);
   };
 
+  const handleBillTypeChange = (nextBillType) => {
+    setBillType(nextBillType);
+    setKeyword('');
+    setPage(1);
+    setRecords([]);
+    setTotal(0);
+  };
+
   // 管理员补单
   const handleAdminComplete = async (tradeNo) => {
     try {
@@ -138,7 +159,7 @@ const TopupHistoryModal = ({
       const { success, message } = res.data;
       if (success) {
         Toast.success({ content: t('补单成功') });
-        await loadTopups(page, pageSize);
+        await loadBills(page, pageSize);
       } else {
         Toast.error({ content: message || t('补单失败') });
       }
@@ -180,7 +201,7 @@ const TopupHistoryModal = ({
   const showUserId = scope === TOPUP_HISTORY_SCOPE.ALL;
   const allowAdminActions = scope === TOPUP_HISTORY_SCOPE.ALL;
 
-  const columns = useMemo(() => {
+  const onlineColumns = useMemo(() => {
     const baseColumns = [
       ...(showUserId
         ? [
@@ -273,6 +294,67 @@ const TopupHistoryModal = ({
     return baseColumns;
   }, [t, showUserId, allowAdminActions]);
 
+  const redemptionColumns = useMemo(
+    () => [
+      ...(showUserId
+        ? [
+            {
+              title: t('用户ID'),
+              dataIndex: 'user_id',
+              key: 'user_id',
+              render: (recordUserId) => <Text>{recordUserId ?? '-'}</Text>,
+            },
+          ]
+        : []),
+      {
+        title: t('ID'),
+        dataIndex: 'id',
+        key: 'id',
+        render: (id) => <Text>{id}</Text>,
+      },
+      {
+        title: t('名称'),
+        dataIndex: 'name',
+        key: 'name',
+        render: (name) => <Text>{name || '-'}</Text>,
+      },
+      {
+        title: t('兑换码'),
+        dataIndex: 'code',
+        key: 'code',
+        render: (code) => <Text>{code || '-'}</Text>,
+      },
+      {
+        title: t('兑换额度'),
+        dataIndex: 'quota',
+        key: 'quota',
+        render: (quota) => <Text>{renderQuota(Number(quota) || 0)}</Text>,
+      },
+      {
+        title: t('状态'),
+        key: 'status',
+        render: () => (
+          <span className='flex items-center gap-2'>
+            <Badge dot type='success' />
+            <span>{t('成功')}</span>
+          </span>
+        ),
+      },
+      {
+        title: t('兑换时间'),
+        dataIndex: 'redeemed_time',
+        key: 'redeemed_time',
+        render: (time) => timestamp2string(time),
+      },
+    ],
+    [t, showUserId],
+  );
+
+  const columns =
+    billType === BILL_TYPE.REDEMPTION
+      ? redemptionColumns
+      : onlineColumns;
+
   return (
     <Modal
       title={t('充值账单')}
@@ -281,10 +363,23 @@ const TopupHistoryModal = ({
       footer={null}
       size={isMobile ? 'full-width' : 'large'}
     >
+      <Tabs
+        activeKey={billType}
+        onChange={handleBillTypeChange}
+        type='button'
+        className='mb-3'
+      >
+        <Tabs.TabPane tab={t('在线充值')} itemKey={BILL_TYPE.ONLINE} />
+        <Tabs.TabPane tab={t('卡密充值')} itemKey={BILL_TYPE.REDEMPTION} />
+      </Tabs>
       <div className='mb-3'>
         <Input
           prefix={<IconSearch />}
-          placeholder={t('订单号')}
+          placeholder={
+            billType === BILL_TYPE.REDEMPTION
+              ? t('关键字(ID、名称或兑换码)')
+              : t('订单号')
+          }
           value={keyword}
           onChange={handleKeywordChange}
           showClear
@@ -292,7 +387,7 @@ const TopupHistoryModal = ({
       </div>
       <Table
         columns={columns}
-        dataSource={topups}
+        dataSource={records}
         loading={loading}
         rowKey='id'
         pagination={{
