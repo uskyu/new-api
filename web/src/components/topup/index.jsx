@@ -33,6 +33,7 @@ import { Modal, Toast } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
+import { isAdmin } from '../../helpers/utils';
 
 import RechargeCard from './RechargeCard';
 import InvitationCard from './InvitationCard';
@@ -753,7 +754,11 @@ const TopUp = () => {
         visible={openHistory}
         onCancel={handleHistoryCancel}
         t={t}
-        scope={TOPUP_HISTORY_SCOPE.SELF}
+        scope={
+          isAdmin()
+            ? TOPUP_HISTORY_SCOPE.ALL
+            : TOPUP_HISTORY_SCOPE.SELF
+        }
       />
 
       {/* Creem 充值确认模态框 */}
