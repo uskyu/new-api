@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"sync"
@@ -8,18 +9,42 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
 // notifyLimitStore is used for in-memory rate limiting when Redis is disabled
 var (
 	notifyLimitStore sync.Map
+	notifyLimitMu    sync.Mutex
 	cleanupOnce      sync.Once
 )
 
 type limitCount struct {
 	Count     int
 	Timestamp time.Time
+	Duration  time.Duration
+}
+
+type notificationLimitRule struct {
+	Key      string
+	Limit    int
+	Duration time.Duration
+}
+
+func getNotificationLimitRule(userId int, notifyType string, now time.Time) notificationLimitRule {
+	if notifyType == dto.NotifyTypeQuotaExceed {
+		return notificationLimitRule{
+			Key:      fmt.Sprintf("%d:%s", userId, notifyType),
+			Limit:    1,
+			Duration: 24 * time.Hour,
+		}
+	}
+	return notificationLimitRule{
+		Key:      fmt.Sprintf("%d:%s:%s", userId, notifyType, now.Format("2006010215")),
+		Limit:    constant.NotifyLimitCount,
+		Duration: getDuration(),
+	}
 }
 
 func getDuration() time.Duration {
@@ -32,15 +57,17 @@ func startCleanupTask() {
 	gopool.Go(func() {
 		for {
 			time.Sleep(time.Hour)
+			notifyLimitMu.Lock()
 			now := time.Now()
 			notifyLimitStore.Range(func(key, value interface{}) bool {
 				if limit, ok := value.(limitCount); ok {
-					if now.Sub(limit.Timestamp) >= getDuration() {
+					if now.Sub(limit.Timestamp) >= limit.Duration {
 						notifyLimitStore.Delete(key)
 					}
 				}
 				return true
 			})
+			notifyLimitMu.Unlock()
 		}
 	})
 }
@@ -55,7 +82,16 @@ func CheckNotificationLimit(userId int, notifyType string) (bool, error) {
 }
 
 func checkRedisLimit(userId int, notifyType string) (bool, error) {
-	key := fmt.Sprintf("notify_limit:%d:%s:%s", userId, notifyType, time.Now().Format("2006010215"))
+	rule := getNotificationLimitRule(userId, notifyType, time.Now())
+	key := "notify_limit:" + rule.Key
+
+	if notifyType == dto.NotifyTypeQuotaExceed {
+		acquired, err := common.RDB.SetNX(context.Background(), key, "1", rule.Duration).Result()
+		if err != nil {
+			return false, fmt.Errorf("failed to reserve notification limit: %w", err)
+		}
+		return acquired, nil
+	}
 
 	// Get current count
 	count, err := common.RedisGet(key)
@@ -65,15 +101,14 @@ func checkRedisLimit(userId int, notifyType string) (bool, error) {
 
 	// If key doesn't exist, initialize it
 	if count == "" {
-		err = common.RedisSet(key, "1", getDuration())
+		err = common.RedisSet(key, "1", rule.Duration)
 		return true, err
 	}
 
 	currentCount, _ := strconv.Atoi(count)
-	limit := constant.NotifyLimitCount
 
 	// Check if limit is already reached
-	if currentCount >= limit {
+	if currentCount >= rule.Limit {
 		return false, nil
 	}
 
@@ -90,29 +125,30 @@ func checkMemoryLimit(userId int, notifyType string) (bool, error) {
 	// Ensure cleanup task is started
 	cleanupOnce.Do(startCleanupTask)
 
-	key := fmt.Sprintf("%d:%s:%s", userId, notifyType, time.Now().Format("2006010215"))
+	notifyLimitMu.Lock()
+	defer notifyLimitMu.Unlock()
+
 	now := time.Now()
+	rule := getNotificationLimitRule(userId, notifyType, now)
+	key := rule.Key
 
 	// Get current limit count or initialize new one
 	var currentLimit limitCount
 	if value, ok := notifyLimitStore.Load(key); ok {
 		currentLimit = value.(limitCount)
 		// Check if the entry has expired
-		if now.Sub(currentLimit.Timestamp) >= getDuration() {
-			currentLimit = limitCount{Count: 0, Timestamp: now}
+		if now.Sub(currentLimit.Timestamp) >= rule.Duration {
+			currentLimit = limitCount{Count: 0, Timestamp: now, Duration: rule.Duration}
 		}
 	} else {
-		currentLimit = limitCount{Count: 0, Timestamp: now}
+		currentLimit = limitCount{Count: 0, Timestamp: now, Duration: rule.Duration}
 	}
 
 	// Increment count
 	currentLimit.Count++
 
-	// Check against limits
-	limit := constant.NotifyLimitCount
-
 	// Store updated count
 	notifyLimitStore.Store(key, currentLimit)
 
-	return currentLimit.Count <= limit, nil
+	return currentLimit.Count <= rule.Limit, nil
 }
