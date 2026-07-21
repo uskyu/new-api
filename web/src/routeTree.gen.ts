@@ -36,6 +36,7 @@ import { Route as SetupIndexRouteImport } from './routes/setup/index'
 import { Route as authUserResetRouteImport } from './routes/(auth)/user/reset'
 import { Route as AuthenticatedAgentCenterIndexRouteImport } from './routes/_authenticated/agent-center/index'
 import { Route as AuthenticatedAgentsIndexRouteImport } from './routes/_authenticated/agents/index'
+import { Route as AuthenticatedAiConsoleIndexRouteImport } from './routes/_authenticated/ai-console/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedChatChatIdRouteImport } from './routes/_authenticated/chat/$chatId'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
@@ -204,6 +205,12 @@ const AuthenticatedAgentsIndexRoute =
   AuthenticatedAgentsIndexRouteImport.update({
     id: '/agents/',
     path: '/agents/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAiConsoleIndexRoute =
+  AuthenticatedAiConsoleIndexRouteImport.update({
+    id: '/ai-console/',
+    path: '/ai-console/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedChannelsIndexRoute =
@@ -432,6 +439,7 @@ export interface FileRoutesByFullPath {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/agent-center/': typeof AuthenticatedAgentCenterIndexRoute
   '/agents/': typeof AuthenticatedAgentsIndexRoute
+  '/ai-console/': typeof AuthenticatedAiConsoleIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
@@ -491,6 +499,7 @@ export interface FileRoutesByTo {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/agent-center': typeof AuthenticatedAgentCenterIndexRoute
   '/agents': typeof AuthenticatedAgentsIndexRoute
+  '/ai-console': typeof AuthenticatedAiConsoleIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
@@ -554,6 +563,7 @@ export interface FileRoutesById {
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/agent-center/': typeof AuthenticatedAgentCenterIndexRoute
   '/_authenticated/agents/': typeof AuthenticatedAgentsIndexRoute
+  '/_authenticated/ai-console/': typeof AuthenticatedAiConsoleIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
@@ -616,6 +626,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/agent-center/'
     | '/agents/'
+    | '/ai-console/'
     | '/channels/'
     | '/dashboard/'
     | '/keys/'
@@ -675,6 +686,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/agent-center'
     | '/agents'
+    | '/ai-console'
     | '/channels'
     | '/dashboard'
     | '/keys'
@@ -737,6 +749,7 @@ export interface FileRouteTypes {
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/agent-center/'
     | '/_authenticated/agents/'
+    | '/_authenticated/ai-console/'
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/keys/'
@@ -975,6 +988,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents/'
       preLoaderRoute: typeof AuthenticatedAgentsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/ai-console/': {
+      id: '/_authenticated/ai-console/'
+      path: '/ai-console'
+      fullPath: '/ai-console/'
+      preLoaderRoute: typeof AuthenticatedAiConsoleIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/channels/': {
@@ -1304,6 +1324,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedAgentCenterIndexRoute: typeof AuthenticatedAgentCenterIndexRoute
   AuthenticatedAgentsIndexRoute: typeof AuthenticatedAgentsIndexRoute
+  AuthenticatedAiConsoleIndexRoute: typeof AuthenticatedAiConsoleIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
@@ -1329,6 +1350,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedAgentCenterIndexRoute: AuthenticatedAgentCenterIndexRoute,
   AuthenticatedAgentsIndexRoute: AuthenticatedAgentsIndexRoute,
+  AuthenticatedAiConsoleIndexRoute: AuthenticatedAiConsoleIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,

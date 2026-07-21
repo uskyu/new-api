@@ -65,4 +65,10 @@ func registerExtensionApiRoutes(apiRouter *gin.RouterGroup) {
 	apiRouter.GET("/user/redemption", middleware.AdminAuth(), controller.GetAllRedemptionBills)
 	apiRouter.GET("/user/:id/redemptions", middleware.AdminAuth(), controller.GetUserRedemptionBillsByAdmin)
 	apiRouter.GET("/user/:id/topups", middleware.AdminAuth(), controller.GetUserTopUpsByAdmin)
+
+	aiConsoleFileRoute := apiRouter.Group("/ai-console/files")
+	aiConsoleFileRoute.Use(middleware.UserAuth(), middleware.AIConsoleUploadCleanup())
+	{
+		aiConsoleFileRoute.POST("/parse", controller.ParseAIConsoleFile)
+	}
 }

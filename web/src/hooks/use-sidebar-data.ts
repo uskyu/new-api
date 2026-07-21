@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   Activity,
   BadgePercent,
+  Bot,
   Box,
   CreditCard,
   FileText,
@@ -60,6 +61,11 @@ export function useSidebarData(): SidebarData {
             title: t('Playground'),
             url: '/playground',
             icon: FlaskConical,
+          },
+          {
+            title: t('Personal AI Console'),
+            url: '/ai-console',
+            icon: Bot,
           },
           {
             title: t('Chat'),

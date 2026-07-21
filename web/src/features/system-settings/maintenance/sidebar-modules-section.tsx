@@ -92,6 +92,10 @@ export function SidebarModulesSection({
         title: t('Playground'),
         description: t('Experiment with prompts and models in real time.'),
       },
+      ai_console: {
+        title: t('Personal AI Console'),
+        description: t('Use persistent AI conversations and attachments.'),
+      },
       chat: {
         title: t('Chat'),
         description: t('Access previous conversations and start new ones.'),
