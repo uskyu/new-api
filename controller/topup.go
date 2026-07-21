@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -451,6 +452,49 @@ func GetUserTopUps(c *gin.Context) {
 		topups, total, err = model.SearchUserTopUps(userId, keyword, pageInfo)
 	} else {
 		topups, total, err = model.GetUserTopUps(userId, pageInfo)
+	}
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(topups)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func GetUserTopUpsByAdmin(c *gin.Context) {
+	if c.GetInt("role") < common.RoleAdminUser {
+		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
+		return
+	}
+
+	userId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || userId <= 0 {
+		common.ApiErrorMsg(c, "无效的用户 ID")
+		return
+	}
+
+	user, err := model.GetUserById(userId, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !canManageTargetRole(c.GetInt("role"), user.Role) {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
+		return
+	}
+
+	pageInfo := common.GetPageQuery(c)
+	keyword := c.Query("keyword")
+	var (
+		topups []*model.TopUp
+		total  int64
+	)
+	if keyword != "" {
+		topups, total, err = model.SearchAllTopUpsByUser(userId, keyword, pageInfo)
+	} else {
+		topups, total, err = model.GetAllTopUpsByUser(userId, pageInfo)
 	}
 	if err != nil {
 		common.ApiError(c, err)

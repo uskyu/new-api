@@ -224,6 +224,34 @@ func TestResponsesRequestToChatCompletionsRequestCustomToolCallPreservesRawShape
 	assert.Equal(t, "patch body", gjson.GetBytes(toolCalls[0].Custom, "input").String())
 }
 
+func TestResponsesRequestToChatCompletionsRequestCustomToolOutputPreservesPairing(t *testing.T) {
+	got, err := ResponsesRequestToChatCompletionsRequest(&dto.OpenAIResponsesRequest{
+		Model: "gpt-test",
+		Input: mustRawMessage(t, []map[string]any{
+			{
+				"type":    "custom_tool_call",
+				"call_id": "call_custom",
+				"name":    "apply_patch",
+				"input":   "patch body",
+			},
+			{
+				"type":    "custom_tool_call_output",
+				"call_id": "call_custom",
+				"output":  "done",
+			},
+		}),
+	})
+	require.NoError(t, err)
+
+	require.Len(t, got.Messages, 2)
+	toolCalls := got.Messages[0].ParseToolCalls()
+	require.Len(t, toolCalls, 1)
+	assert.Equal(t, "call_custom", toolCalls[0].ID)
+	assert.Equal(t, "tool", got.Messages[1].Role)
+	assert.Equal(t, "call_custom", got.Messages[1].ToolCallId)
+	assert.Equal(t, "done", got.Messages[1].StringContent())
+}
+
 func TestResponsesRequestToChatCompletionsRequestRejectsStatefulFields(t *testing.T) {
 	tests := []struct {
 		name string

@@ -16,149 +16,127 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import i18next from 'i18next'
-import { useState, useEffect, useCallback } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { useIsAdmin } from '@/hooks/use-admin'
 
 import {
-  getUserBillingHistory,
-  getAllBillingHistory,
   completeOrder,
+  getAllBillingHistory,
+  getRedemptionBillingHistory,
+  getUserBillingHistory,
+  getUserBillingHistoryByAdmin,
   isApiSuccess,
 } from '../api'
-import type { TopupRecord } from '../types'
-
-// ============================================================================
-// Billing History Hook
-// ============================================================================
+import type { BillingHistoryScope, BillingRecordType } from '../types'
 
 interface UseBillingHistoryOptions {
-  /** Initial page number */
-  initialPage?: number
-  /** Initial page size */
+  scope?: BillingHistoryScope
+  userId?: number
+  enabled?: boolean
   initialPageSize?: number
 }
 
 export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
-  const { initialPage = 1, initialPageSize = 10 } = options
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const isAdmin = useIsAdmin()
-
-  const [records, setRecords] = useState<TopupRecord[]>([])
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(initialPage)
-  const [pageSize, setPageSize] = useState(initialPageSize)
+  const scope = options.scope ?? (isAdmin ? 'all' : 'self')
+  const [recordType, setRecordType] = useState<BillingRecordType>('online')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(options.initialPageSize ?? 10)
   const [keyword, setKeyword] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [completing, setCompleting] = useState(false)
-
-  /**
-   * Fetch billing history
-   */
-  const fetchBillingHistory = useCallback(async () => {
-    setLoading(true)
-    try {
-      const response = isAdmin
-        ? await getAllBillingHistory(page, pageSize, keyword)
-        : await getUserBillingHistory(page, pageSize, keyword)
-
-      if (isApiSuccess(response) && response.data) {
-        setRecords(response.data.items || [])
-        setTotal(response.data.total || 0)
-      } else {
-        toast.error(
-          response.message || i18next.t('Failed to load billing history')
-        )
-        setRecords([])
-        setTotal(0)
-      }
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to fetch billing history:', error)
-      toast.error(i18next.t('Failed to load billing history'))
-      setRecords([])
-      setTotal(0)
-    } finally {
-      setLoading(false)
-    }
-  }, [isAdmin, page, pageSize, keyword])
-
-  /**
-   * Complete a pending order (admin only)
-   */
-  const handleCompleteOrder = useCallback(
-    async (tradeNo: string) => {
-      if (!isAdmin) {
-        toast.error(i18next.t('Admin access required'))
-        return false
-      }
-
-      setCompleting(true)
-      try {
-        const response = await completeOrder({ trade_no: tradeNo })
-        if (isApiSuccess(response)) {
-          toast.success(i18next.t('Order completed successfully'))
-          // Refresh the list
-          await fetchBillingHistory()
-          return true
-        } else {
-          toast.error(response.message || i18next.t('Failed to complete order'))
-          return false
-        }
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to complete order:', error)
-        toast.error(i18next.t('Failed to complete order'))
-        return false
-      } finally {
-        setCompleting(false)
-      }
-    },
-    [isAdmin, fetchBillingHistory]
-  )
-
-  /**
-   * Change page
-   */
-  const handlePageChange = useCallback((newPage: number) => {
-    setPage(newPage)
-  }, [])
-
-  /**
-   * Change page size
-   */
-  const handlePageSizeChange = useCallback((newPageSize: number) => {
-    setPageSize(newPageSize)
-    setPage(1) // Reset to first page when changing page size
-  }, [])
-
-  /**
-   * Search by keyword
-   */
-  const handleSearch = useCallback((newKeyword: string) => {
-    setKeyword(newKeyword)
-    setPage(1) // Reset to first page when searching
-  }, [])
-
-  // Fetch data when dependencies change
-  useEffect(() => {
-    fetchBillingHistory()
-  }, [fetchBillingHistory])
-
-  return {
-    records,
-    total,
+  const queryKey = [
+    'billing-history',
+    scope,
+    options.userId,
+    recordType,
     page,
     pageSize,
     keyword,
-    loading,
-    completing,
+  ]
+
+  const history = useQuery({
+    queryKey,
+    enabled:
+      (options.enabled ?? true) &&
+      (scope !== 'user' || (options.userId ?? 0) > 0),
+    queryFn: async () => {
+      if (recordType === 'redemption') {
+        return getRedemptionBillingHistory(
+          scope,
+          page,
+          pageSize,
+          keyword,
+          options.userId
+        )
+      }
+      if (scope === 'all') {
+        return getAllBillingHistory(page, pageSize, keyword)
+      }
+      if (scope === 'user' && options.userId) {
+        return getUserBillingHistoryByAdmin(
+          options.userId,
+          page,
+          pageSize,
+          keyword
+        )
+      }
+      return getUserBillingHistory(page, pageSize, keyword)
+    },
+  })
+
+  const completion = useMutation({
+    mutationFn: completeOrder,
+    onSuccess: async (response) => {
+      if (!isApiSuccess(response)) {
+        toast.error(response.message || t('Failed to complete order'))
+        return
+      }
+      toast.success(t('Order completed successfully'))
+      await queryClient.invalidateQueries({
+        queryKey: ['billing-history'],
+      })
+    },
+    onError: () => toast.error(t('Failed to complete order')),
+  })
+
+  const handleRecordTypeChange = (value: BillingRecordType) => {
+    setRecordType(value)
+    setPage(1)
+    setKeyword('')
+  }
+
+  const handlePageSizeChange = (value: number) => {
+    setPageSize(value)
+    setPage(1)
+  }
+
+  const handleSearch = (value: string) => {
+    setKeyword(value)
+    setPage(1)
+  }
+
+  return {
+    response: history.data,
+    loading: history.isLoading,
+    recordType,
+    page,
+    pageSize,
+    keyword,
+    scope,
     isAdmin,
-    handlePageChange,
+    completing: completion.isPending,
+    handleRecordTypeChange,
+    handlePageChange: setPage,
     handlePageSizeChange,
     handleSearch,
-    handleCompleteOrder,
-    refresh: fetchBillingHistory,
+    handleCompleteOrder: async (tradeNo: string) => {
+      const response = await completion.mutateAsync({ trade_no: tradeNo })
+      return isApiSuccess(response)
+    },
   }
 }

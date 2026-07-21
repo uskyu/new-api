@@ -43,6 +43,12 @@ func validUserInfo(username string, role int) bool {
 }
 
 func authHelper(c *gin.Context, minRole int) {
+	dashboardAuthHelper(c, func(role int) bool {
+		return role >= minRole
+	}, minRole >= common.RoleAdminUser)
+}
+
+func dashboardAuthHelper(c *gin.Context, roleAllowed func(int) bool, auditAdmin bool) {
 	user, identity, useAccessToken, err := authenticateDashboardRequest(c)
 	if err != nil {
 		writeDashboardAuthError(c, err)
@@ -52,7 +58,7 @@ func authHelper(c *gin.Context, minRole int) {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"success": false, "code": "AUTH_USER_DISABLED", "message": common.TranslateMessage(c, i18n.MsgAuthUserBanned)})
 		return
 	}
-	if user.Role < minRole {
+	if !roleAllowed(user.Role) {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "code": "AUTH_INSUFFICIENT_PRIVILEGE", "message": common.TranslateMessage(c, i18n.MsgAuthInsufficientPrivilege)})
 		return
 	}
@@ -66,7 +72,7 @@ func authHelper(c *gin.Context, minRole int) {
 	// 的写接口都会自动留痕（无需在路由上单独挂审计中间件，避免漏挂）。
 	// handler 内手动埋点者会设置 ContextKeyAuditLogged，finishAdminAudit 据此跳过。
 	var auditWriter *auditResponseWriter
-	if minRole >= common.RoleAdminUser {
+	if auditAdmin && user.Role >= common.RoleAdminUser {
 		auditWriter = beginAdminAudit(c)
 	}
 
@@ -104,6 +110,17 @@ func AdminAuth() func(c *gin.Context) {
 func RootAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		authHelper(c, common.RoleRootUser)
+	}
+}
+
+// PermissionAuth authenticates with the official stateless dashboard token
+// path, then applies the narrow legacy capability required by agent routes.
+// A support user never satisfies AdminAuth merely by having this permission.
+func PermissionAuth(permission string) func(c *gin.Context) {
+	return func(c *gin.Context) {
+		dashboardAuthHelper(c, func(role int) bool {
+			return common.RoleHasPermission(role, permission)
+		}, true)
 	}
 }
 

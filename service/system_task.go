@@ -169,6 +169,9 @@ func StartLogCleanupTask(targetTimestamp int64) (*model.SystemTask, error) {
 	if targetTimestamp <= 0 {
 		return nil, errors.New("target timestamp is required")
 	}
+	if targetTimestamp >= common.GetTimestamp() {
+		return nil, errors.New("target timestamp must be in the past")
+	}
 
 	activeTask, err := model.GetActiveSystemTask(model.SystemTaskTypeLogCleanup)
 	if err != nil {
@@ -343,6 +346,10 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 	}
 	if payload.TargetTimestamp <= 0 {
 		failSystemTask(task, runnerID, errors.New("target timestamp is required"))
+		return
+	}
+	if payload.TargetTimestamp >= common.GetTimestamp() {
+		failSystemTask(task, runnerID, errors.New("target timestamp must be in the past"))
 		return
 	}
 	if payload.BatchSize <= 0 {

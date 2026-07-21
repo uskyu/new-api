@@ -33,6 +33,8 @@ import type {
   AffiliateTransferResponse,
   BillingHistoryResponse,
   CompleteOrderRequest,
+  BillingHistoryScope,
+  RedemptionBillingHistoryResponse,
   CreemPaymentRequest,
   CreemPaymentResponse,
   WaffoPaymentRequest,
@@ -234,6 +236,42 @@ export async function getAllBillingHistory(
     params.append('keyword', keyword)
   }
   const res = await api.get(`/api/user/topup?${params.toString()}`)
+  return res.data
+}
+
+export async function getUserBillingHistoryByAdmin(
+  userId: number,
+  page: number,
+  pageSize: number,
+  keyword?: string
+): Promise<ApiResponse<BillingHistoryResponse>> {
+  const params = new URLSearchParams({
+    p: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  if (keyword) params.append('keyword', keyword)
+  const res = await api.get(`/api/user/${userId}/topups?${params.toString()}`)
+  return res.data
+}
+
+export async function getRedemptionBillingHistory(
+  scope: BillingHistoryScope,
+  page: number,
+  pageSize: number,
+  keyword?: string,
+  userId?: number
+): Promise<ApiResponse<RedemptionBillingHistoryResponse>> {
+  const params = new URLSearchParams({
+    p: page.toString(),
+    page_size: pageSize.toString(),
+  })
+  if (keyword) params.append('keyword', keyword)
+
+  let endpoint = '/api/user/redemption/self'
+  if (scope === 'all') endpoint = '/api/user/redemption'
+  if (scope === 'user' && userId) endpoint = `/api/user/${userId}/redemptions`
+
+  const res = await api.get(`${endpoint}?${params.toString()}`)
   return res.data
 }
 

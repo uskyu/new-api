@@ -16,8 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Search, Copy, Check, ChevronLeft, ChevronRight } from 'lucide-react'
-import { useState } from 'react'
+import { Check, ChevronLeft, ChevronRight, Copy, Search } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
@@ -43,169 +43,176 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatCurrencyFromUSD } from '@/lib/currency'
-import { formatNumber } from '@/lib/format'
+import { formatNumber, formatQuota } from '@/lib/format'
 
 import { useBillingHistory } from '../../hooks/use-billing-history'
 import {
-  getStatusConfig,
-  getPaymentMethodName,
   formatTimestamp,
+  getPaymentMethodName,
+  getStatusConfig,
 } from '../../lib/billing'
+import type {
+  BillingHistoryScope,
+  BillingRecordType,
+  RedemptionBillingRecord,
+  TopupRecord,
+} from '../../types'
 
 interface BillingHistoryDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  scope?: BillingHistoryScope
+  userId?: number
+  subjectName?: string
 }
 
-export function BillingHistoryDialog({
-  open,
-  onOpenChange,
-}: BillingHistoryDialogProps) {
+export function BillingHistoryDialog(props: BillingHistoryDialogProps) {
   const { t } = useTranslation()
-  const {
-    records,
-    total,
-    page,
-    pageSize,
-    keyword,
-    loading,
-    completing,
-    isAdmin,
-    handlePageChange,
-    handlePageSizeChange,
-    handleSearch,
-    handleCompleteOrder,
-  } = useBillingHistory()
-
+  const history = useBillingHistory({
+    scope: props.scope,
+    userId: props.userId,
+    enabled: props.open,
+  })
+  const [searchInput, setSearchInput] = useState('')
   const [confirmTradeNo, setConfirmTradeNo] = useState<string | null>(null)
   const { copyToClipboard, copiedText } = useCopyToClipboard({ notify: false })
+  const items = history.response?.data?.items ?? []
+  const total = history.response?.data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / history.pageSize))
+  const showUserId = history.scope === 'all'
+  const allowCompleteOrder = history.scope === 'all' && history.isAdmin
 
-  const totalPages = Math.ceil(total / pageSize)
+  const handleSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    history.handleSearch(searchInput.trim())
+  }
+
+  const handleTypeChange = (value: BillingRecordType) => {
+    setSearchInput('')
+    history.handleRecordTypeChange(value)
+  }
 
   const handleConfirmComplete = async () => {
-    if (confirmTradeNo) {
-      const success = await handleCompleteOrder(confirmTradeNo)
-      if (success) {
-        setConfirmTradeNo(null)
-      }
-    }
+    if (!confirmTradeNo) return
+    const success = await history.handleCompleteOrder(confirmTradeNo)
+    if (success) setConfirmTradeNo(null)
   }
 
   return (
     <>
       <Dialog
-        open={open}
-        onOpenChange={onOpenChange}
+        open={props.open}
+        onOpenChange={props.onOpenChange}
         title={t('Billing History')}
-        description={t(
-          'View your topup transaction records and payment history'
-        )}
+        description={
+          props.subjectName
+            ? t('View all billing records for {{name}}', {
+                name: props.subjectName,
+              })
+            : t('View online and redemption top-up records')
+        }
         contentClassName='flex max-h-[calc(100dvh-2rem)] flex-col max-sm:w-screen max-sm:max-w-none max-sm:rounded-none max-sm:p-4 sm:max-w-4xl'
         contentHeight='auto'
-        bodyClassName='space-y-3'
+        bodyClassName='flex min-h-0 flex-col gap-3'
       >
-        <div className='min-h-0 space-y-3'>
-          {/* Search and Filter Bar */}
-          <div className='flex items-center gap-2'>
-            <div className='relative flex-1'>
-              <Search className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
-              <Input
-                placeholder={t('Search by order number...')}
-                value={keyword}
-                onChange={(e) => handleSearch(e.target.value)}
-                className='h-9 pl-10'
-              />
-            </div>
-            <Select
-              items={[
-                { value: '10', label: t('10 / page') },
-                { value: '20', label: t('20 / page') },
-                { value: '50', label: t('50 / page') },
-                { value: '100', label: t('100 / page') },
-              ]}
-              value={pageSize.toString()}
-              onValueChange={(value) =>
-                value !== null && handlePageSizeChange(parseInt(value))
-              }
-            >
-              <SelectTrigger className='h-9 w-[92px] sm:w-32'>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent alignItemWithTrigger={false}>
-                <SelectGroup>
-                  <SelectItem value='10'>{t('10 / page')}</SelectItem>
-                  <SelectItem value='20'>{t('20 / page')}</SelectItem>
-                  <SelectItem value='50'>{t('50 / page')}</SelectItem>
-                  <SelectItem value='100'>{t('100 / page')}</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
+        <Tabs value={history.recordType} onValueChange={handleTypeChange}>
+          <TabsList>
+            <TabsTrigger value='online'>{t('Online top-ups')}</TabsTrigger>
+            <TabsTrigger value='redemption'>
+              {t('Redemption top-ups')}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
-          {/* Records List */}
-          <div className='max-h-[min(54vh,520px)] overflow-y-auto pr-1'>
-            {loading ? (
-              <div className='space-y-3'>
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className='rounded-lg border p-3 sm:p-4'>
-                    <div className='flex items-start justify-between'>
-                      <div className='flex-1 space-y-2'>
-                        <Skeleton className='h-4 w-48' />
-                        <Skeleton className='h-3 w-32' />
-                      </div>
-                      <Skeleton className='h-5 w-16' />
-                    </div>
-                    <div className='mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4'>
-                      <Skeleton className='h-3 w-full' />
-                      <Skeleton className='h-3 w-full' />
-                      <Skeleton className='h-3 w-full' />
-                    </div>
-                  </div>
+        <form className='flex items-center gap-2' onSubmit={handleSearchSubmit}>
+          <div className='relative flex-1'>
+            <Search
+              aria-hidden='true'
+              className='text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2'
+            />
+            <Input
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder={
+                history.recordType === 'online'
+                  ? t('Search by order number...')
+                  : t('Search by ID, name, or redemption code...')
+              }
+              className='pl-9'
+            />
+          </div>
+          <Button type='submit' size='icon' aria-label={t('Search')}>
+            <Search />
+          </Button>
+          <Select
+            value={String(history.pageSize)}
+            onValueChange={(value) =>
+              value !== null && history.handlePageSizeChange(Number(value))
+            }
+          >
+            <SelectTrigger className='w-28'>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                {[10, 20, 50, 100].map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {t('{{count}} / page', { count: size })}
+                  </SelectItem>
                 ))}
-              </div>
-            ) : records.length === 0 ? (
-              <div className='text-muted-foreground flex min-h-40 flex-col items-center justify-center py-10 text-center'>
-                <p className='text-sm font-medium'>
-                  {t('No billing records found')}
-                </p>
-                <p className='mt-1 text-xs'>
-                  {keyword
-                    ? t('Try adjusting your search')
-                    : t('Your transaction history will appear here')}
-                </p>
-              </div>
-            ) : (
-              <div className='space-y-3'>
-                {records.map((record) => {
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </form>
+
+        <div className='max-h-[min(54vh,520px)] min-h-40 overflow-y-auto pr-1'>
+          {history.loading && (
+            <div className='flex flex-col gap-3'>
+              {Array.from({ length: 4 }, (_, index) => (
+                <Skeleton key={index} className='h-28 w-full' />
+              ))}
+            </div>
+          )}
+          {!history.loading && items.length === 0 && (
+            <div className='text-muted-foreground flex min-h-40 items-center justify-center text-sm'>
+              {t('No billing records found')}
+            </div>
+          )}
+          {!history.loading &&
+            items.length > 0 &&
+            history.recordType === 'online' && (
+              <div className='flex flex-col gap-3'>
+                {(items as TopupRecord[]).map((record) => {
                   const statusConfig = getStatusConfig(record.status)
                   return (
                     <div
                       key={record.id}
                       className='rounded-lg border p-3 sm:p-4'
                     >
-                      {/* Header Row */}
                       <div className='flex items-start justify-between gap-2'>
-                        <div className='flex-1 space-y-1'>
-                          <div className='flex min-w-0 items-center gap-2'>
-                            <code className='text-foreground truncate font-mono text-sm'>
+                        <div className='flex min-w-0 flex-col gap-1'>
+                          <div className='flex min-w-0 items-center gap-1'>
+                            <code className='truncate font-mono text-sm'>
                               {record.trade_no}
                             </code>
                             <Button
                               variant='ghost'
-                              size='sm'
-                              className='h-5 w-5 p-0'
+                              size='icon-xs'
+                              aria-label={t('Copy order number')}
                               onClick={() => copyToClipboard(record.trade_no)}
                             >
                               {copiedText === record.trade_no ? (
-                                <Check className='h-3 w-3' />
+                                <Check />
                               ) : (
-                                <Copy className='h-3 w-3' />
+                                <Copy />
                               )}
                             </Button>
-                            {isAdmin && record.user_id != null && (
+                            {showUserId && (
                               <StatusBadge
                                 label={`${t('User ID')}: ${record.user_id}`}
                                 variant='neutral'
@@ -214,9 +221,9 @@ export function BillingHistoryDialog({
                               />
                             )}
                           </div>
-                          <div className='text-muted-foreground text-xs'>
+                          <span className='text-muted-foreground text-xs'>
                             {formatTimestamp(record.create_time)}
-                          </div>
+                          </span>
                         </div>
                         <StatusBadge
                           label={statusConfig.label}
@@ -225,47 +232,31 @@ export function BillingHistoryDialog({
                           copyable={false}
                         />
                       </div>
-
-                      {/* Details Grid */}
-                      <div className='mt-3 grid grid-cols-2 gap-3 sm:mt-4 sm:grid-cols-3 sm:gap-4'>
-                        <div className='space-y-1'>
-                          <Label className='text-muted-foreground text-xs'>
-                            {t('Payment Method')}
-                          </Label>
-                          <div className='text-sm font-medium'>
-                            {getPaymentMethodName(record.payment_method, t)}
-                          </div>
-                        </div>
-                        <div className='space-y-1'>
-                          <Label className='text-muted-foreground text-xs'>
-                            {t('Amount')}
-                          </Label>
-                          <div className='text-sm font-semibold'>
-                            {formatCurrencyFromUSD(record.amount, {
-                              digitsLarge: 2,
-                              digitsSmall: 2,
-                              abbreviate: false,
-                            })}
-                          </div>
-                        </div>
-                        <div className='space-y-1'>
-                          <Label className='text-muted-foreground text-xs'>
-                            {t('Payment')}
-                          </Label>
-                          <div className='text-sm font-semibold text-red-600'>
-                            {formatNumber(record.money)}
-                          </div>
-                        </div>
+                      <div className='mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3'>
+                        <BillField
+                          label={t('Payment Method')}
+                          value={getPaymentMethodName(record.payment_method, t)}
+                        />
+                        <BillField
+                          label={t('Amount')}
+                          value={formatCurrencyFromUSD(record.amount, {
+                            digitsLarge: 2,
+                            digitsSmall: 2,
+                            abbreviate: false,
+                          })}
+                        />
+                        <BillField
+                          label={t('Payment')}
+                          value={formatNumber(record.money)}
+                        />
                       </div>
-
-                      {/* Admin Actions */}
-                      {isAdmin && record.status === 'pending' && (
-                        <div className='mt-4 flex justify-end'>
+                      {allowCompleteOrder && record.status === 'pending' && (
+                        <div className='mt-3 flex justify-end'>
                           <Button
                             size='sm'
                             variant='outline'
                             onClick={() => setConfirmTradeNo(record.trade_no)}
-                            disabled={completing}
+                            disabled={history.completing}
                           >
                             {t('Complete Order')}
                           </Button>
@@ -276,48 +267,91 @@ export function BillingHistoryDialog({
                 })}
               </div>
             )}
-          </div>
-
-          {/* Pagination */}
-          {!loading && records.length > 0 && (
-            <div className='flex flex-col items-center gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between'>
-              <div className='text-muted-foreground text-xs sm:text-sm'>
-                {t('Showing')} {(page - 1) * pageSize + 1}-
-                {Math.min(page * pageSize, total)} {t('of')} {total}
+          {!history.loading &&
+            items.length > 0 &&
+            history.recordType === 'redemption' && (
+              <div className='flex flex-col gap-3'>
+                {(items as RedemptionBillingRecord[]).map((record) => (
+                  <div key={record.id} className='rounded-lg border p-3 sm:p-4'>
+                    <div className='flex items-start justify-between gap-2'>
+                      <div className='flex min-w-0 flex-col gap-1'>
+                        <span className='truncate font-medium'>
+                          {record.name || '-'}
+                        </span>
+                        <span className='text-muted-foreground text-xs'>
+                          {formatTimestamp(record.redeemed_time)}
+                        </span>
+                      </div>
+                      {showUserId && (
+                        <StatusBadge
+                          label={`${t('User ID')}: ${record.user_id}`}
+                          variant='neutral'
+                          size='sm'
+                          copyText={String(record.user_id)}
+                        />
+                      )}
+                    </div>
+                    <div className='mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3'>
+                      <BillField
+                        label={t('Record ID')}
+                        value={`#${record.id}`}
+                      />
+                      <BillField
+                        label={t('Redemption code')}
+                        value={record.code}
+                      />
+                      <BillField
+                        label={t('Credited quota')}
+                        value={formatQuota(record.quota)}
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
+            )}
+        </div>
+
+        {!history.loading && items.length > 0 && (
+          <>
+            <Separator />
+            <div className='flex items-center justify-between gap-3'>
+              <span className='text-muted-foreground text-sm'>
+                {t('Showing {{start}}-{{end}} of {{total}}', {
+                  start: (history.page - 1) * history.pageSize + 1,
+                  end: Math.min(history.page * history.pageSize, total),
+                  total,
+                })}
+              </span>
               <div className='flex items-center gap-2'>
                 <Button
                   variant='outline'
-                  size='sm'
-                  onClick={() => handlePageChange(page - 1)}
-                  disabled={page <= 1}
-                  className='h-8 w-8 p-0'
+                  size='icon-sm'
+                  aria-label={t('Go to previous page')}
+                  disabled={history.page <= 1}
+                  onClick={() => history.handlePageChange(history.page - 1)}
                 >
-                  <ChevronLeft className='h-4 w-4' />
+                  <ChevronLeft />
                 </Button>
-                <div className='text-muted-foreground flex items-center gap-1 text-sm'>
-                  <span className='font-medium'>{page}</span>
-                  <span>/</span>
-                  <span>{totalPages}</span>
-                </div>
+                <span className='min-w-14 text-center text-sm tabular-nums'>
+                  {history.page} / {totalPages}
+                </span>
                 <Button
                   variant='outline'
-                  size='sm'
-                  onClick={() => handlePageChange(page + 1)}
-                  disabled={page >= totalPages}
-                  className='h-8 w-8 p-0'
+                  size='icon-sm'
+                  aria-label={t('Go to next page')}
+                  disabled={history.page >= totalPages}
+                  onClick={() => history.handlePageChange(history.page + 1)}
                 >
-                  <ChevronRight className='h-4 w-4' />
+                  <ChevronRight />
                 </Button>
               </div>
             </div>
-          )}
-        </div>
+          </>
+        )}
       </Dialog>
 
-      {/* Confirm Complete Order Dialog */}
       <AlertDialog
-        open={!!confirmTradeNo}
+        open={confirmTradeNo !== null}
         onOpenChange={(open) => !open && setConfirmTradeNo(null)}
       >
         <AlertDialogContent>
@@ -330,18 +364,32 @@ export function BillingHistoryDialog({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={completing}>
+            <AlertDialogCancel disabled={history.completing}>
               {t('Cancel')}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmComplete}
-              disabled={completing}
+              disabled={history.completing}
             >
-              {completing ? t('Processing...') : t('Confirm')}
+              {history.completing ? t('Processing...') : t('Confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </>
+  )
+}
+
+interface BillFieldProps {
+  label: string
+  value: string
+}
+
+function BillField(props: BillFieldProps) {
+  return (
+    <div className='flex min-w-0 flex-col gap-1'>
+      <Label className='text-muted-foreground text-xs'>{props.label}</Label>
+      <span className='truncate text-sm font-medium'>{props.value}</span>
+    </div>
   )
 }

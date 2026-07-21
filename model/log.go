@@ -694,7 +694,9 @@ func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelNa
 
 func CountOldLog(ctx context.Context, targetTimestamp int64) (int64, error) {
 	var total int64
-	if err := LOG_DB.WithContext(ctx).Model(&Log{}).Where("created_at < ?", targetTimestamp).Count(&total).Error; err != nil {
+	if err := LOG_DB.WithContext(ctx).Model(&Log{}).
+		Where("type IN ? AND created_at < ?", []int{LogTypeConsume, LogTypeError}, targetTimestamp).
+		Count(&total).Error; err != nil {
 		return 0, err
 	}
 	return total, nil
@@ -721,15 +723,29 @@ func DeleteOldLogBatch(ctx context.Context, targetTimestamp int64, limit int) (i
 			return 0, nil
 		}
 		if err := LOG_DB.WithContext(ctx).Exec(
-			"ALTER TABLE logs DELETE WHERE created_at < ? SETTINGS mutations_sync = 1",
-			targetTimestamp,
+			"ALTER TABLE logs DELETE WHERE type IN (?, ?) AND created_at < ? SETTINGS mutations_sync = 1",
+			LogTypeConsume, LogTypeError, targetTimestamp,
 		).Error; err != nil {
 			return 0, err
 		}
 		return total, nil
 	}
 
-	result := LOG_DB.WithContext(ctx).Where("created_at < ?", targetTimestamp).Limit(limit).Delete(&Log{})
+	var ids []int
+	if err := LOG_DB.WithContext(ctx).Model(&Log{}).
+		Where("type IN ? AND created_at < ?", []int{LogTypeConsume, LogTypeError}, targetTimestamp).
+		Order("created_at asc, id asc").
+		Limit(limit).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	result := LOG_DB.WithContext(ctx).
+		Where("id IN ? AND type IN ? AND created_at < ?", ids, []int{LogTypeConsume, LogTypeError}, targetTimestamp).
+		Delete(&Log{})
 	if nil != result.Error {
 		return 0, result.Error
 	}

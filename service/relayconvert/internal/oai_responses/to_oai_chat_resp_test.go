@@ -48,6 +48,50 @@ func TestResponsesResponseToChatCompletionsPreservesTextAndToolCalls(t *testing.
 	assert.Equal(t, 7, usage.TotalTokens)
 }
 
+func TestResponsesResponseToChatCompletionsPreservesCustomToolInput(t *testing.T) {
+	resp := &dto.OpenAIResponsesResponse{
+		Output: []dto.ResponsesOutput{
+			{
+				Type:   responsesOutputTypeCustomToolCall,
+				CallId: "call_custom",
+				Name:   "apply_patch",
+				Input:  []byte(`"patch body"`),
+			},
+		},
+	}
+
+	chat, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_1")
+	require.NoError(t, err)
+
+	toolCalls := chat.Choices[0].Message.ParseToolCalls()
+	require.Len(t, toolCalls, 1)
+	assert.Equal(t, "call_custom", toolCalls[0].ID)
+	assert.Equal(t, "apply_patch", toolCalls[0].Function.Name)
+	assert.Equal(t, "patch body", toolCalls[0].Function.Arguments)
+}
+
+func TestResponsesStreamTerminalOutputPreservesCustomToolInput(t *testing.T) {
+	state := newTestResponsesStreamState()
+	chunks := mustStreamChunks(t, state, &dto.ResponsesStreamResponse{
+		Type: responsesEventDone,
+		Response: &dto.OpenAIResponsesResponse{
+			Status: []byte(`"completed"`),
+			Output: []dto.ResponsesOutput{{
+				Type:   responsesOutputTypeCustomToolCall,
+				CallId: "call_custom",
+				Name:   "apply_patch",
+				Input:  []byte(`"patch body"`),
+			}},
+		},
+	})
+
+	require.Len(t, chunks, 3)
+	tool := chunks[1].Choices[0].Delta.ToolCalls[0]
+	assert.Equal(t, "call_custom", tool.ID)
+	assert.Equal(t, "apply_patch", tool.Function.Name)
+	assert.Equal(t, "patch body", tool.Function.Arguments)
+}
+
 func TestResponsesResponseToChatCompletionsPreservesReasoningSummary(t *testing.T) {
 	resp := &dto.OpenAIResponsesResponse{
 		ID:     "resp_1",

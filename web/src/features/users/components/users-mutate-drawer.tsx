@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
-import { Pencil } from 'lucide-react'
+import { Pencil, ReceiptText, Repeat2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -62,6 +62,8 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
+import { ChangeAgentDialog } from '@/features/agents/components/change-agent-dialog'
+import { BillingHistoryDialog } from '@/features/wallet/components/dialogs/billing-history-dialog'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
@@ -89,7 +91,7 @@ import {
   transformFormDataToPayload,
   transformUserToFormDefaults,
 } from '../lib'
-import { type User } from '../types'
+import type { User } from '../types'
 import { UserQuotaDialog } from './user-quota-dialog'
 import { useUsers } from './users-provider'
 
@@ -110,6 +112,8 @@ export function UsersMutateDrawer({
   const currentUser = useAuthStore((s) => s.auth.user)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [quotaDialogOpen, setQuotaDialogOpen] = useState(false)
+  const [billingDialogOpen, setBillingDialogOpen] = useState(false)
+  const [agentDialogOpen, setAgentDialogOpen] = useState(false)
 
   // Fetch groups
   const { data: groupsData } = useQuery({
@@ -136,16 +140,18 @@ export function UsersMutateDrawer({
   useEffect(() => {
     if (open && isUpdate && currentRow) {
       // For update, fetch fresh data
-      getUser(currentRow.id).then((result) => {
-        if (result.success && result.data) {
-          form.reset(transformUserToFormDefaults(result.data))
-        }
-      })
+      getUser(currentRow.id)
+        .then((result) => {
+          if (result.success && result.data) {
+            form.reset(transformUserToFormDefaults(result.data))
+          }
+        })
+        .catch(() => toast.error(t(ERROR_MESSAGES.UPDATE_FAILED)))
     } else if (open && !isUpdate) {
       // For create, reset to defaults
       form.reset(USER_FORM_DEFAULT_VALUES)
     }
-  }, [open, isUpdate, currentRow, form])
+  }, [open, isUpdate, currentRow, form, t])
 
   const { meta: currencyMeta } = getCurrencyDisplay()
   const currencyLabel = getCurrencyLabel()
@@ -195,7 +201,7 @@ export function UsersMutateDrawer({
               : t(ERROR_MESSAGES.CREATE_FAILED))
         )
       }
-    } catch (_error) {
+    } catch {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setIsSubmitting(false)
@@ -278,7 +284,8 @@ export function UsersMutateDrawer({
                             { value: '10', label: t('Admin') },
                           ]}
                           onValueChange={(value) =>
-                            value !== null && field.onChange(parseInt(value))
+                            value !== null &&
+                            field.onChange(Number.parseInt(value))
                           }
                           value={String(field.value)}
                         >
@@ -360,12 +367,10 @@ export function UsersMutateDrawer({
                       <FormItem>
                         <FormLabel>{t('Group')}</FormLabel>
                         <Select
-                          items={[
-                            ...groups.map((group) => ({
-                              value: group,
-                              label: group,
-                            })),
-                          ]}
+                          items={groups.map((group) => ({
+                            value: group,
+                            label: group,
+                          }))}
                           onValueChange={field.onChange}
                           value={field.value}
                         >
@@ -399,7 +404,7 @@ export function UsersMutateDrawer({
                             currency: currencyLabel,
                           })}
                         </FormLabel>
-                        <div className='flex gap-2'>
+                        <div className='flex flex-wrap gap-2'>
                           <FormControl>
                             <Input
                               value={
@@ -416,8 +421,16 @@ export function UsersMutateDrawer({
                             variant='outline'
                             onClick={() => setQuotaDialogOpen(true)}
                           >
-                            <Pencil className='mr-1 h-4 w-4' />
+                            <Pencil data-icon='inline-start' />
                             {t('Adjust Quota')}
+                          </Button>
+                          <Button
+                            type='button'
+                            variant='outline'
+                            onClick={() => setBillingDialogOpen(true)}
+                          >
+                            <ReceiptText data-icon='inline-start' />
+                            {t('Billing History')}
                           </Button>
                         </div>
                         <FormDescription>
@@ -427,6 +440,33 @@ export function UsersMutateDrawer({
                       </FormItem>
                     )}
                   />
+
+                  {currentRow && (
+                    <div className='flex flex-col gap-1.5'>
+                      <Label htmlFor='user-upstream-agent'>
+                        {t('Upstream Agent')}
+                      </Label>
+                      <div className='flex gap-2'>
+                        <Input
+                          id='user-upstream-agent'
+                          value={
+                            currentRow.inviter_id
+                              ? `${t('Agent')} #${currentRow.inviter_id}`
+                              : t('No upstream agent')
+                          }
+                          readOnly
+                        />
+                        <Button
+                          type='button'
+                          variant='outline'
+                          onClick={() => setAgentDialogOpen(true)}
+                        >
+                          <Repeat2 data-icon='inline-start' />
+                          {t('Change')}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
 
                   <FormField
                     control={form.control}
@@ -586,13 +626,28 @@ export function UsersMutateDrawer({
 
       {/* Adjust Quota Dialog */}
       {currentRow && (
-        <UserQuotaDialog
-          open={quotaDialogOpen}
-          onOpenChange={setQuotaDialogOpen}
-          userId={currentRow.id}
-          currentQuota={parseQuotaFromDollars(currentQuotaRaw || 0)}
-          onSuccess={refreshUserData}
-        />
+        <>
+          <UserQuotaDialog
+            open={quotaDialogOpen}
+            onOpenChange={setQuotaDialogOpen}
+            userId={currentRow.id}
+            currentQuota={parseQuotaFromDollars(currentQuotaRaw || 0)}
+            onSuccess={refreshUserData}
+          />
+          <BillingHistoryDialog
+            open={billingDialogOpen}
+            onOpenChange={setBillingDialogOpen}
+            scope='user'
+            userId={currentRow.id}
+            subjectName={currentRow.display_name || currentRow.username}
+          />
+          <ChangeAgentDialog
+            open={agentDialogOpen}
+            onOpenChange={setAgentDialogOpen}
+            user={currentRow}
+            onSuccess={refreshUserData}
+          />
+        </>
       )}
     </>
   )

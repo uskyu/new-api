@@ -193,7 +193,7 @@ func responsesInputContentToClaudeMediaMessages(c *gin.Context, content any) ([]
 					Text: common.GetPointer(text),
 				})
 			}
-		case "input_image", "input_file", "input_audio", "input_video":
+		case "input_image", "input_file":
 			source := ContentPartToFileSource(contentPart)
 			if source == nil {
 				continue
@@ -202,19 +202,19 @@ func responsesInputContentToClaudeMediaMessages(c *gin.Context, content any) ([]
 			if err != nil {
 				return nil, fmt.Errorf("get file data failed: %s", err.Error())
 			}
-			claudePart := dto.ClaudeMediaMessage{
-				Source: &dto.ClaudeMessageSource{
-					Type:      "base64",
-					MediaType: mimeType,
-					Data:      base64Data,
-				},
+			filename := strings.TrimSpace(common.Interface2String(contentPart["filename"]))
+			if filename == "" {
+				if file, ok := contentPart["file"].(map[string]any); ok {
+					filename = strings.TrimSpace(common.Interface2String(file["filename"]))
+				}
 			}
-			if strings.HasPrefix(mimeType, "application/pdf") {
-				claudePart.Type = "document"
-			} else {
-				claudePart.Type = "image"
+			claudePart, err := sharedclaude.BuildBase64MediaMessage(partType, base64Data, mimeType, filename)
+			if err != nil {
+				return nil, err
 			}
-			parts = append(parts, claudePart)
+			if claudePart != nil {
+				parts = append(parts, *claudePart)
+			}
 		}
 	}
 	return parts, nil

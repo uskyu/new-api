@@ -141,6 +141,7 @@ const paymentSchema = z.object({
       })
     }
   }),
+  UserBillVisibleDays: z.coerce.number().int().min(1).max(3650),
   StripeApiSecret: z.string(),
   StripeWebhookSecret: z.string(),
   StripePriceId: z.string(),
@@ -427,6 +428,7 @@ export function PaymentSettingsSection({
       PayMethods: values.PayMethods.trim(),
       AmountOptions: values.AmountOptions.trim(),
       AmountDiscount: values.AmountDiscount.trim(),
+      UserBillVisibleDays: values.UserBillVisibleDays,
       StripeApiSecret: values.StripeApiSecret.trim(),
       StripeWebhookSecret: values.StripeWebhookSecret.trim(),
       StripePriceId: values.StripePriceId.trim(),
@@ -471,6 +473,7 @@ export function PaymentSettingsSection({
       PayMethods: initialRef.current.PayMethods.trim(),
       AmountOptions: initialRef.current.AmountOptions.trim(),
       AmountDiscount: initialRef.current.AmountDiscount.trim(),
+      UserBillVisibleDays: initialRef.current.UserBillVisibleDays,
       StripeApiSecret: initialRef.current.StripeApiSecret.trim(),
       StripeWebhookSecret: initialRef.current.StripeWebhookSecret.trim(),
       StripePriceId: initialRef.current.StripePriceId.trim(),
@@ -559,6 +562,13 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'payment_setting.amount_discount',
         value: sanitized.AmountDiscount,
+      })
+    }
+
+    if (sanitized.UserBillVisibleDays !== initial.UserBillVisibleDays) {
+      updates.push({
+        key: 'payment_setting.user_bill_visible_days',
+        value: sanitized.UserBillVisibleDays,
       })
     }
 
@@ -898,7 +908,7 @@ export function PaymentSettingsSection({
                   </p>
                 </div>
 
-                <div className='grid gap-6 md:grid-cols-2'>
+                <div className='grid gap-6 md:grid-cols-3'>
                   <FormField
                     control={form.control}
                     name='Price'
@@ -941,6 +951,33 @@ export function PaymentSettingsSection({
                         </FormControl>
                         <FormDescription>
                           {t('Smallest USD amount users can recharge (Epay)')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='UserBillVisibleDays'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          {t('User billing history visibility')}
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            step={1}
+                            min={1}
+                            max={3650}
+                            {...safeNumberFieldProps(field)}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Number of recent days users can view in billing history'
+                          )}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>

@@ -281,6 +281,23 @@ export interface BillingHistoryResponse {
   total: number
 }
 
+export type BillingHistoryScope = 'self' | 'all' | 'user'
+export type BillingRecordType = 'online' | 'redemption'
+
+export interface RedemptionBillingRecord {
+  id: number
+  user_id: number
+  name: string
+  code: string
+  quota: number
+  redeemed_time: number
+}
+
+export interface RedemptionBillingHistoryResponse {
+  items: RedemptionBillingRecord[]
+  total: number
+}
+
 /**
  * Complete order request (admin only)
  */

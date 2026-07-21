@@ -343,7 +343,7 @@ func OpenAIChatRequestToClaudeMessages(c *gin.Context, textRequest dto.GeneralOp
 							Text: common.GetPointer[string](mediaMessage.Text),
 						})
 					}
-				default:
+				case dto.ContentTypeImageURL, dto.ContentTypeFile:
 					source := mediaMessage.ToFileSource()
 					if source == nil {
 						continue
@@ -352,21 +352,22 @@ func OpenAIChatRequestToClaudeMessages(c *gin.Context, textRequest dto.GeneralOp
 					if err != nil {
 						return nil, fmt.Errorf("get file data failed: %s", err.Error())
 					}
-					claudeMediaMessage := dto.ClaudeMediaMessage{
-						Source: &dto.ClaudeMessageSource{
-							Type: "base64",
-						},
+					filename := ""
+					if file := mediaMessage.GetFile(); file != nil {
+						filename = file.FileName
 					}
-					if strings.HasPrefix(mimeType, "application/pdf") {
-						claudeMediaMessage.Type = "document"
-					} else {
-						claudeMediaMessage.Type = "image"
+					if filename == "" {
+						if file, ok := mediaMessage.File.(map[string]any); ok {
+							filename = common.Interface2String(file["filename"])
+						}
 					}
-
-					claudeMediaMessage.Source.MediaType = mimeType
-					claudeMediaMessage.Source.Data = base64Data
-					claudeMediaMessages = append(claudeMediaMessages, claudeMediaMessage)
-					continue
+					claudeMediaMessage, err := sharedclaude.BuildBase64MediaMessage(mediaMessage.Type, base64Data, mimeType, filename)
+					if err != nil {
+						return nil, err
+					}
+					if claudeMediaMessage != nil {
+						claudeMediaMessages = append(claudeMediaMessages, *claudeMediaMessage)
+					}
 				}
 			}
 

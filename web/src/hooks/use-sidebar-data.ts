@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Activity,
+  BadgePercent,
   Box,
   CreditCard,
   FileText,
@@ -32,11 +33,12 @@ import {
   Ticket,
   User,
   Users,
+  UserRoundCog,
   Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { type SidebarData } from '@/components/layout/types'
+import type { SidebarData } from '@/components/layout/types'
 import { ROLE } from '@/lib/roles'
 
 /**
@@ -109,6 +111,11 @@ export function useSidebarData(): SidebarData {
             icon: Wallet,
           },
           {
+            title: t('Agent Center'),
+            url: '/agent-center',
+            icon: BadgePercent,
+          },
+          {
             title: t('Profile'),
             url: '/profile',
             icon: User,
@@ -123,26 +130,37 @@ export function useSidebarData(): SidebarData {
             title: t('Channels'),
             url: '/channels',
             icon: Radio,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Models'),
             url: '/models/metadata',
             icon: Box,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Users'),
             url: '/users',
             icon: Users,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Redemption Codes'),
             url: '/redemption-codes',
             icon: Ticket,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Subscriptions'),
             url: '/subscriptions',
             icon: CreditCard,
+            requiredRole: ROLE.ADMIN,
+          },
+          {
+            title: t('Agent Management'),
+            url: '/agents',
+            icon: UserRoundCog,
+            requiredRole: ROLE.SUPPORT,
           },
           {
             title: t('System Info'),
@@ -155,6 +173,7 @@ export function useSidebarData(): SidebarData {
             url: '/system-settings/site',
             activeUrls: ['/system-settings'],
             icon: Settings,
+            requiredRole: ROLE.ADMIN,
           },
         ],
       },

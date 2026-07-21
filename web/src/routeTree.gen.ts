@@ -34,6 +34,8 @@ import { Route as PricingIndexRouteImport } from './routes/pricing/index'
 import { Route as RankingsIndexRouteImport } from './routes/rankings/index'
 import { Route as SetupIndexRouteImport } from './routes/setup/index'
 import { Route as authUserResetRouteImport } from './routes/(auth)/user/reset'
+import { Route as AuthenticatedAgentCenterIndexRouteImport } from './routes/_authenticated/agent-center/index'
+import { Route as AuthenticatedAgentsIndexRouteImport } from './routes/_authenticated/agents/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedChatChatIdRouteImport } from './routes/_authenticated/chat/$chatId'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
@@ -192,6 +194,18 @@ const authUserResetRoute = authUserResetRouteImport.update({
   path: '/user/reset',
   getParentRoute: () => authRouteRoute,
 } as any)
+const AuthenticatedAgentCenterIndexRoute =
+  AuthenticatedAgentCenterIndexRouteImport.update({
+    id: '/agent-center/',
+    path: '/agent-center/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAgentsIndexRoute =
+  AuthenticatedAgentsIndexRouteImport.update({
+    id: '/agents/',
+    path: '/agents/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedChannelsIndexRoute =
   AuthenticatedChannelsIndexRouteImport.update({
     id: '/channels/',
@@ -416,6 +430,8 @@ export interface FileRoutesByFullPath {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/agent-center/': typeof AuthenticatedAgentCenterIndexRoute
+  '/agents/': typeof AuthenticatedAgentsIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
@@ -473,6 +489,8 @@ export interface FileRoutesByTo {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/agent-center': typeof AuthenticatedAgentCenterIndexRoute
+  '/agents': typeof AuthenticatedAgentsIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
@@ -534,6 +552,8 @@ export interface FileRoutesById {
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/_authenticated/agent-center/': typeof AuthenticatedAgentCenterIndexRoute
+  '/_authenticated/agents/': typeof AuthenticatedAgentsIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
@@ -594,6 +614,8 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/models/$section'
     | '/usage-logs/$section'
+    | '/agent-center/'
+    | '/agents/'
     | '/channels/'
     | '/dashboard/'
     | '/keys/'
@@ -651,6 +673,8 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/models/$section'
     | '/usage-logs/$section'
+    | '/agent-center'
+    | '/agents'
     | '/channels'
     | '/dashboard'
     | '/keys'
@@ -711,6 +735,8 @@ export interface FileRouteTypes {
     | '/_authenticated/errors/$error'
     | '/_authenticated/models/$section'
     | '/_authenticated/usage-logs/$section'
+    | '/_authenticated/agent-center/'
+    | '/_authenticated/agents/'
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/keys/'
@@ -936,6 +962,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/user/reset'
       preLoaderRoute: typeof authUserResetRouteImport
       parentRoute: typeof authRouteRoute
+    }
+    '/_authenticated/agent-center/': {
+      id: '/_authenticated/agent-center/'
+      path: '/agent-center'
+      fullPath: '/agent-center/'
+      preLoaderRoute: typeof AuthenticatedAgentCenterIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/agents/': {
+      id: '/_authenticated/agents/'
+      path: '/agents'
+      fullPath: '/agents/'
+      preLoaderRoute: typeof AuthenticatedAgentsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/channels/': {
       id: '/_authenticated/channels/'
@@ -1262,6 +1302,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
+  AuthenticatedAgentCenterIndexRoute: typeof AuthenticatedAgentCenterIndexRoute
+  AuthenticatedAgentsIndexRoute: typeof AuthenticatedAgentsIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
@@ -1285,6 +1327,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
+  AuthenticatedAgentCenterIndexRoute: AuthenticatedAgentCenterIndexRoute,
+  AuthenticatedAgentsIndexRoute: AuthenticatedAgentsIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
