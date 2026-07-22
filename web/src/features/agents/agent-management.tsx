@@ -96,7 +96,7 @@ export function AgentManagement() {
     page: profilePage,
     pageSize: PAGE_SIZE,
     keyword: profileKeyword,
-    enabled: ready,
+    enabled: isAdmin && ready,
   })
   const metrics = useAgentDailyMetrics({
     agentUserId: metricAgentId,
@@ -147,7 +147,9 @@ export function AgentManagement() {
 
   return (
     <SectionPageLayout>
-      <SectionPageLayout.Title>{t('Agent Management')}</SectionPageLayout.Title>
+      <SectionPageLayout.Title>
+        {isAdmin ? t('Agent Management') : t('User Management')}
+      </SectionPageLayout.Title>
       <SectionPageLayout.Content>
         {status.isLoading && (
           <div className='bg-muted h-32 animate-pulse rounded-lg' />
@@ -174,20 +176,20 @@ export function AgentManagement() {
         )}
         {!status.isLoading && ready && (
           <Tabs defaultValue={isAdmin ? 'overview' : 'assignments'}>
-            <TabsList className='max-w-full overflow-x-auto'>
-              {isAdmin && (
+            {isAdmin && (
+              <TabsList className='max-w-full overflow-x-auto'>
                 <TabsTrigger value='overview'>{t('Overview')}</TabsTrigger>
-              )}
-              <TabsTrigger value='assignments'>
-                {t('User assignments')}
-              </TabsTrigger>
-              <TabsTrigger value='balances'>{t('Agent balances')}</TabsTrigger>
-              {isAdmin && (
+                <TabsTrigger value='assignments'>
+                  {t('User assignments')}
+                </TabsTrigger>
+                <TabsTrigger value='balances'>
+                  {t('Agent balances')}
+                </TabsTrigger>
                 <TabsTrigger value='withdrawals'>
                   {t('Withdrawal receipts')}
                 </TabsTrigger>
-              )}
-            </TabsList>
+              </TabsList>
+            )}
 
             {isAdmin && (
               <TabsContent value='overview' className='flex flex-col gap-4'>
@@ -349,49 +351,53 @@ export function AgentManagement() {
               </Card>
             </TabsContent>
 
-            <TabsContent value='balances'>
-              <Card>
-                <CardHeader className='flex flex-row items-center justify-between gap-3'>
-                  <CardTitle>{t('Agent balances')}</CardTitle>
-                  {isAdmin && (
-                    <Button size='sm' onClick={openNewAgent}>
-                      <UserPlus />
-                      {t('Add agent')}
-                    </Button>
-                  )}
-                </CardHeader>
-                <CardContent className='flex flex-col gap-4'>
-                  <form className='flex gap-2' onSubmit={handleProfileSearch}>
-                    <Input
-                      value={profileInput}
-                      onChange={(event) => setProfileInput(event.target.value)}
-                      placeholder={t('Search agents by ID or name')}
-                      aria-label={t('Search agents')}
+            {isAdmin && (
+              <TabsContent value='balances'>
+                <Card>
+                  <CardHeader className='flex flex-row items-center justify-between gap-3'>
+                    <CardTitle>{t('Agent balances')}</CardTitle>
+                    {isAdmin && (
+                      <Button size='sm' onClick={openNewAgent}>
+                        <UserPlus />
+                        {t('Add agent')}
+                      </Button>
+                    )}
+                  </CardHeader>
+                  <CardContent className='flex flex-col gap-4'>
+                    <form className='flex gap-2' onSubmit={handleProfileSearch}>
+                      <Input
+                        value={profileInput}
+                        onChange={(event) =>
+                          setProfileInput(event.target.value)
+                        }
+                        placeholder={t('Search agents by ID or name')}
+                        aria-label={t('Search agents')}
+                      />
+                      <Button type='submit'>
+                        <Search data-icon='inline-start' />
+                        {t('Search')}
+                      </Button>
+                    </form>
+                    <AgentProfilesTable
+                      profiles={profileData?.items ?? []}
+                      loading={profiles.isLoading}
+                      allowBalanceAdjustment
+                      allowProfileEditing={isAdmin}
+                      showFinancialDetails={isAdmin}
+                      onEditProfile={openEditAgent}
+                      onViewDownlines={setDownlineProfile}
+                      onAssignDownline={setAssignProfile}
                     />
-                    <Button type='submit'>
-                      <Search data-icon='inline-start' />
-                      {t('Search')}
-                    </Button>
-                  </form>
-                  <AgentProfilesTable
-                    profiles={profileData?.items ?? []}
-                    loading={profiles.isLoading}
-                    allowBalanceAdjustment
-                    allowProfileEditing={isAdmin}
-                    showFinancialDetails={isAdmin}
-                    onEditProfile={openEditAgent}
-                    onViewDownlines={setDownlineProfile}
-                    onAssignDownline={setAssignProfile}
-                  />
-                  <AgentPagination
-                    page={profilePage}
-                    pageSize={PAGE_SIZE}
-                    total={profileData?.total ?? 0}
-                    onPageChange={setProfilePage}
-                  />
-                </CardContent>
-              </Card>
-            </TabsContent>
+                    <AgentPagination
+                      page={profilePage}
+                      pageSize={PAGE_SIZE}
+                      total={profileData?.total ?? 0}
+                      onPageChange={setProfilePage}
+                    />
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            )}
 
             {isAdmin && (
               <TabsContent value='withdrawals'>

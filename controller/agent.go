@@ -262,10 +262,6 @@ func AdjustAgentBalance(c *gin.Context) {
 		common.ApiErrorMsg(c, "invalid request body")
 		return
 	}
-	if c.GetInt("role") == common.RoleSupportUser && req.AgentUserId == c.GetInt("id") {
-		common.ApiErrorMsg(c, "support users cannot adjust their own agent balance")
-		return
-	}
 	reason := strings.TrimSpace(req.Reason)
 	if reason == "" {
 		common.ApiErrorMsg(c, "adjustment reason is required")
@@ -678,10 +674,6 @@ func AssignAgentDownlineUser(c *gin.Context) {
 	var req AssignAgentDownlineUserRequest
 	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
 		common.ApiErrorMsg(c, "invalid request body")
-		return
-	}
-	if c.GetInt("role") == common.RoleSupportUser && req.TargetAgentUserId == c.GetInt("id") {
-		common.ApiErrorMsg(c, "support users cannot assign downlines to their own agent account")
 		return
 	}
 	if err := model.AssignAgentDownlineUser(c.GetInt("id"), req.TargetAgentUserId, req.DownlineUserId, req.PromoLinkId, req.Remark); err != nil {

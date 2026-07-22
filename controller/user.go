@@ -618,7 +618,7 @@ func generateDefaultSidebarConfig(userRole int) string {
 			"enabled":      true,
 			"channel":      false,
 			"models":       false,
-			"redemption":   true,
+			"redemption":   false,
 			"user":         false,
 			"setting":      false,
 			"subscription": false,

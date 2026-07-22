@@ -1,7 +1,6 @@
 package router
 
 import (
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
 
@@ -259,14 +258,15 @@ func SetApiRouter(router *gin.Engine) {
 		}
 
 		redemptionRoute := apiRouter.Group("/redemption")
+		redemptionRoute.Use(middleware.AdminAuth())
 		{
-			redemptionRoute.GET("/", middleware.PermissionAuth(common.PermissionRedemptionRead), controller.GetAllRedemptions)
-			redemptionRoute.GET("/search", middleware.PermissionAuth(common.PermissionRedemptionRead), controller.SearchRedemptions)
-			redemptionRoute.GET("/:id", middleware.PermissionAuth(common.PermissionRedemptionRead), controller.GetRedemption)
-			redemptionRoute.POST("/", middleware.PermissionAuth(common.PermissionRedemptionManage), controller.AddRedemption)
-			redemptionRoute.PUT("/", middleware.PermissionAuth(common.PermissionRedemptionDisable), controller.UpdateRedemption)
-			redemptionRoute.DELETE("/invalid", middleware.PermissionAuth(common.PermissionRedemptionManage), controller.DeleteInvalidRedemption)
-			redemptionRoute.DELETE("/:id", middleware.PermissionAuth(common.PermissionRedemptionDelete), controller.DeleteRedemption)
+			redemptionRoute.GET("/", controller.GetAllRedemptions)
+			redemptionRoute.GET("/search", controller.SearchRedemptions)
+			redemptionRoute.GET("/:id", controller.GetRedemption)
+			redemptionRoute.POST("/", controller.AddRedemption)
+			redemptionRoute.PUT("/", controller.UpdateRedemption)
+			redemptionRoute.DELETE("/invalid", controller.DeleteInvalidRedemption)
+			redemptionRoute.DELETE("/:id", controller.DeleteRedemption)
 		}
 		logRoute := apiRouter.Group("/log")
 		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)

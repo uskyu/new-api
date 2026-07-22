@@ -110,16 +110,14 @@ export function SupportUsersTable(props: SupportUsersTableProps) {
                   <Repeat2 />
                   {t('Change')}
                 </Button>
-                {!user.is_agent && (
-                  <Button
-                    size='sm'
-                    variant='outline'
-                    onClick={() => setQuotaUser(user)}
-                  >
-                    <CircleMinus />
-                    {t('Decrease balance')}
-                  </Button>
-                )}
+                <Button
+                  size='sm'
+                  variant='outline'
+                  onClick={() => setQuotaUser(user)}
+                >
+                  <CircleMinus />
+                  {t('Decrease balance')}
+                </Button>
               </div>
             ),
           },

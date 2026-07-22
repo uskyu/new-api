@@ -41,6 +41,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
 import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 /**
  * Root navigation groups for the application sidebar.
@@ -50,6 +51,7 @@ import { ROLE } from '@/lib/roles'
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
+  const role = useAuthStore((state) => state.auth.user?.role ?? ROLE.GUEST)
 
   return {
     navGroups: [
@@ -154,7 +156,7 @@ export function useSidebarData(): SidebarData {
             title: t('Redemption Codes'),
             url: '/redemption-codes',
             icon: Ticket,
-            requiredRole: ROLE.SUPPORT,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Subscriptions'),
@@ -163,7 +165,10 @@ export function useSidebarData(): SidebarData {
             requiredRole: ROLE.ADMIN,
           },
           {
-            title: t('Agent Management'),
+            title:
+              role === ROLE.SUPPORT
+                ? t('User Management')
+                : t('Agent Management'),
             url: '/agents',
             icon: UserRoundCog,
             requiredRole: ROLE.SUPPORT,

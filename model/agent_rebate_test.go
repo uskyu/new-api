@@ -250,6 +250,196 @@ func TestAgentRebateRateAndBalanceBounds(t *testing.T) {
 	assert.Contains(t, err.Error(), "supported range")
 }
 
+func TestSuccessfulTopUpsSettleAgentRebateAcrossProviders(t *testing.T) {
+	testCases := []struct {
+		name       string
+		provider   string
+		sourceType string
+		amount     int64
+		complete   func(*TopUp) error
+	}{
+		{
+			name:       "epay",
+			provider:   PaymentProviderEpay,
+			sourceType: AgentRebateSourceEPay,
+			amount:     100,
+			complete: func(topUp *TopUp) error {
+				_, err := RechargeEpay(topUp.TradeNo, "alipay")
+				return err
+			},
+		},
+		{
+			name:       "stripe",
+			provider:   PaymentProviderStripe,
+			sourceType: AgentRebateSourceStripe,
+			amount:     100,
+			complete: func(topUp *TopUp) error {
+				return Recharge(topUp.TradeNo, "cus_agent_rebate", "127.0.0.1")
+			},
+		},
+		{
+			name:       "creem",
+			provider:   PaymentProviderCreem,
+			sourceType: AgentRebateSourceCreem,
+			amount:     10000,
+			complete: func(topUp *TopUp) error {
+				return RechargeCreem(topUp.TradeNo, "", "", "127.0.0.1")
+			},
+		},
+		{
+			name:       "waffo",
+			provider:   PaymentProviderWaffo,
+			sourceType: AgentRebateSourceWaffo,
+			amount:     100,
+			complete: func(topUp *TopUp) error {
+				return RechargeWaffo(topUp.TradeNo, "127.0.0.1")
+			},
+		},
+		{
+			name:       "waffo pancake",
+			provider:   PaymentProviderWaffoPancake,
+			sourceType: AgentRebateSourceWaffoPancake,
+			amount:     100,
+			complete: func(topUp *TopUp) error {
+				return RechargeWaffoPancake(topUp.TradeNo)
+			},
+		},
+		{
+			name:       "manual completion",
+			provider:   PaymentProviderEpay,
+			sourceType: AgentRebateSourceManual,
+			amount:     100,
+			complete: func(topUp *TopUp) error {
+				return ManualCompleteTopUp(topUp.TradeNo, "127.0.0.1")
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			setupAgentBackendTest(t)
+			previousQuotaPerUnit := common.QuotaPerUnit
+			common.QuotaPerUnit = 100
+			t.Cleanup(func() { common.QuotaPerUnit = previousQuotaPerUnit })
+
+			agent := createAgentBackendTestUser(t, "topup-agent")
+			invitee := createAgentBackendTestUser(t, "topup-invitee")
+			group := &AgentRebateGroup{Name: "topup-group", RebateRate: 1000, Status: AgentStatusEnabled}
+			require.NoError(t, DB.Create(group).Error)
+			require.NoError(t, DB.Create(&AgentProfile{UserId: agent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+			require.NoError(t, DB.Model(invitee).Update("inviter_id", agent.Id).Error)
+
+			topUp := &TopUp{
+				UserId:          invitee.Id,
+				Amount:          testCase.amount,
+				Money:           100,
+				TradeNo:         "topup-" + strings.ReplaceAll(testCase.name, " ", "-"),
+				PaymentMethod:   testCase.provider,
+				PaymentProvider: testCase.provider,
+				CreateTime:      common.GetTimestamp(),
+				Status:          common.TopUpStatusPending,
+			}
+			require.NoError(t, DB.Create(topUp).Error)
+
+			require.NoError(t, testCase.complete(topUp))
+			require.NoError(t, testCase.complete(topUp))
+
+			var record AgentRebateRecord
+			require.NoError(t, DB.Where("top_up_id = ?", topUp.Id).First(&record).Error)
+			assert.Equal(t, testCase.sourceType, record.SourceType)
+			assert.Equal(t, int64(1000), record.RebateAmount)
+
+			var recordCount int64
+			require.NoError(t, DB.Model(&AgentRebateRecord{}).Where("top_up_id = ?", topUp.Id).Count(&recordCount).Error)
+			assert.Equal(t, int64(1), recordCount)
+
+			profile, err := GetAgentProfileByUserId(agent.Id)
+			require.NoError(t, err)
+			assert.Equal(t, int64(1000), profile.RebateBalanceAmount)
+			assert.Equal(t, int64(1000), profile.RebateTotalAmount)
+		})
+	}
+}
+
+func TestEpayRechargeRollsBackWhenAgentSettlementFails(t *testing.T) {
+	setupAgentBackendTest(t)
+	previousQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 100
+	t.Cleanup(func() { common.QuotaPerUnit = previousQuotaPerUnit })
+
+	agent := createAgentBackendTestUser(t, "rollback-agent")
+	invitee := createAgentBackendTestUser(t, "rollback-invitee")
+	group := &AgentRebateGroup{Name: "rollback-group", RebateRate: 1000, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: agent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	require.NoError(t, DB.Model(invitee).Update("inviter_id", agent.Id).Error)
+	require.NoError(t, DB.Model(group).UpdateColumn("rebate_rate", AgentMaxRebateRate+1).Error)
+
+	topUp := &TopUp{
+		UserId:          invitee.Id,
+		Amount:          100,
+		Money:           100,
+		TradeNo:         "topup-agent-rollback",
+		PaymentMethod:   "alipay",
+		PaymentProvider: PaymentProviderEpay,
+		CreateTime:      common.GetTimestamp(),
+		Status:          common.TopUpStatusPending,
+	}
+	require.NoError(t, DB.Create(topUp).Error)
+
+	_, err := RechargeEpay(topUp.TradeNo, "alipay")
+	require.Error(t, err)
+
+	var savedTopUp TopUp
+	require.NoError(t, DB.First(&savedTopUp, topUp.Id).Error)
+	assert.Equal(t, common.TopUpStatusPending, savedTopUp.Status)
+	var savedInvitee User
+	require.NoError(t, DB.First(&savedInvitee, invitee.Id).Error)
+	assert.Zero(t, savedInvitee.Quota)
+	var recordCount int64
+	require.NoError(t, DB.Model(&AgentRebateRecord{}).Count(&recordCount).Error)
+	assert.Zero(t, recordCount)
+}
+
+func TestEpayRechargeReconcilesMissingRebateWithoutCreditingQuotaAgain(t *testing.T) {
+	setupAgentBackendTest(t)
+	agent := createAgentBackendTestUser(t, "reconcile-agent")
+	invitee := createAgentBackendTestUser(t, "reconcile-invitee")
+	group := &AgentRebateGroup{Name: "reconcile-group", RebateRate: 1000, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: agent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	require.NoError(t, DB.Model(invitee).Updates(map[string]interface{}{
+		"inviter_id": agent.Id,
+		"quota":      500,
+	}).Error)
+
+	topUp := &TopUp{
+		UserId:          invitee.Id,
+		Amount:          100,
+		Money:           100,
+		TradeNo:         "topup-agent-reconcile",
+		PaymentMethod:   "alipay",
+		PaymentProvider: PaymentProviderEpay,
+		CreateTime:      common.GetTimestamp(),
+		CompleteTime:    common.GetTimestamp(),
+		Status:          common.TopUpStatusSuccess,
+	}
+	require.NoError(t, DB.Create(topUp).Error)
+
+	result, err := RechargeEpay(topUp.TradeNo, "alipay")
+	require.NoError(t, err)
+	assert.False(t, result.Completed)
+	assert.Zero(t, result.QuotaAdded)
+
+	var savedInvitee User
+	require.NoError(t, DB.Select("quota").First(&savedInvitee, invitee.Id).Error)
+	assert.Equal(t, 500, savedInvitee.Quota)
+	var record AgentRebateRecord
+	require.NoError(t, DB.Where("top_up_id = ?", topUp.Id).First(&record).Error)
+	assert.Equal(t, agent.Id, record.AgentUserId)
+	assert.Equal(t, int64(1000), record.RebateAmount)
+}
+
 func TestAgentBalanceAdjustmentDoesNotInflateEarnedRebate(t *testing.T) {
 	setupAgentBackendTest(t)
 	operator := createAgentBackendTestUser(t, "adjustment-operator")

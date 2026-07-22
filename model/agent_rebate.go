@@ -32,9 +32,13 @@ const (
 	AgentRebateRecordCanceled = "canceled"
 	AgentRebateRecordRolled   = "rolled_back"
 
-	AgentRebateSourceEPay       = "epay"
-	AgentRebateSourceManual     = "manual"
-	AgentRebateSourceRedemption = "redemption"
+	AgentRebateSourceEPay         = "epay"
+	AgentRebateSourceStripe       = "stripe"
+	AgentRebateSourceCreem        = "creem"
+	AgentRebateSourceWaffo        = "waffo"
+	AgentRebateSourceWaffoPancake = "waffo_pancake"
+	AgentRebateSourceManual       = "manual"
+	AgentRebateSourceRedemption   = "redemption"
 
 	AgentAdjustmentTypeIncrease   = "increase"
 	AgentAdjustmentTypeDecrease   = "decrease"

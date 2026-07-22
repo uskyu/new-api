@@ -13,7 +13,7 @@ import (
 func registerExtensionApiRoutes(apiRouter *gin.RouterGroup) {
 	agentRoute := apiRouter.Group("/agent")
 	{
-		agentRoute.GET("/status", middleware.PermissionAuth(common.PermissionAgentDownlineAssign), controller.GetAgentBootstrapStatus)
+		agentRoute.GET("/status", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.GetAgentBootstrapStatus)
 		agentRoute.GET("/overview", middleware.AdminAuth(), controller.GetAgentAdminOverview)
 		agentRoute.GET("/daily-metrics", middleware.AdminAuth(), controller.GetAgentDailyMetrics)
 		agentRoute.POST("/init", middleware.RootAuth(), controller.InitializeAgentModule)
@@ -45,8 +45,8 @@ func registerExtensionApiRoutes(apiRouter *gin.RouterGroup) {
 		agentRoute.GET("/upgrade-requests", middleware.AdminAuth(), controller.GetAgentUpgradeRequests)
 		agentRoute.POST("/upgrade-request/:id/review", middleware.AdminAuth(), controller.ReviewAgentUpgradeRequest)
 
-		agentRoute.GET("/profiles", middleware.PermissionAuth(common.PermissionAgentDownlineAssign), controller.GetAgentProfiles)
-		agentRoute.GET("/downlines", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.GetAgentDownlineUsers)
+		agentRoute.GET("/profiles", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.GetAgentProfiles)
+		agentRoute.GET("/downlines", middleware.AdminAuth(), controller.GetAgentDownlineUsers)
 		agentRoute.POST("/downline/assign", middleware.PermissionAuth(common.PermissionAgentDownlineAssign), controller.AssignAgentDownlineUser)
 		agentRoute.POST("/downline/transfer", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.TransferAgentDownlineUser)
 		agentRoute.POST("/downline/change", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.ChangeAgentDownlineUser)

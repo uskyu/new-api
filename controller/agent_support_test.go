@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSupportAgentOperationsRejectSelfBenefit(t *testing.T) {
+func TestSupportTransfersRejectSelfBenefit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
 		name    string
@@ -20,22 +20,16 @@ func TestSupportAgentOperationsRejectSelfBenefit(t *testing.T) {
 		message string
 	}{
 		{
-			name:    "balance adjustment",
-			body:    `{"agent_user_id":7,"amount":"1.00","reason":"self adjustment"}`,
-			handler: AdjustAgentBalance,
-			message: "cannot adjust their own agent balance",
-		},
-		{
-			name:    "downline assignment",
-			body:    `{"target_agent_user_id":7,"downline_user_id":8,"remark":"self assignment"}`,
-			handler: AssignAgentDownlineUser,
-			message: "cannot assign downlines to their own agent account",
-		},
-		{
 			name:    "downline transfer",
 			body:    `{"source_agent_user_id":9,"target_agent_user_id":7,"downline_user_id":8,"remark":"self transfer"}`,
 			handler: TransferAgentDownlineUser,
 			message: "cannot transfer downlines to or from their own agent account",
+		},
+		{
+			name:    "upstream change",
+			body:    `{"target_agent_user_id":7,"downline_user_id":8,"remark":"self change"}`,
+			handler: ChangeAgentDownlineUser,
+			message: "cannot assign downlines to their own agent account",
 		},
 	}
 

@@ -43,6 +43,12 @@ func TestSupportPermissionUsesStatelessSessionWithoutGrantingAdmin(t *testing.T)
 		assert.Equal(t, user.AuthVersion, c.GetInt64("auth_version"))
 		c.Status(http.StatusNoContent)
 	})
+	router.GET("/agent/assign", PermissionAuth(common.PermissionAgentDownlineAssign), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	router.GET("/agent/adjust", PermissionAuth(common.PermissionAgentBalanceAdjust), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
 	router.GET("/admin", AdminAuth(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
 
 	request := httptest.NewRequest(http.MethodGet, "/agent", nil)
@@ -56,6 +62,14 @@ func TestSupportPermissionUsesStatelessSessionWithoutGrantingAdmin(t *testing.T)
 	response = httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	assert.Equal(t, http.StatusForbidden, response.Code)
+
+	for _, path := range []string{"/agent/assign", "/agent/adjust"} {
+		request = httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		response = httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		assert.Equal(t, http.StatusForbidden, response.Code, path)
+	}
 
 	_, err = model.BumpUserAuthVersion(user.Id)
 	require.NoError(t, err)

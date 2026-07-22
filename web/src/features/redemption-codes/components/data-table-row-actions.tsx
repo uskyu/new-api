@@ -33,8 +33,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { ROLE } from '@/lib/roles'
-import { useAuthStore } from '@/stores/auth-store'
 
 import { updateRedemptionStatus } from '../api'
 import { REDEMPTION_STATUS, SUCCESS_MESSAGES } from '../constants'
@@ -51,9 +49,6 @@ export function DataTableRowActions<TData>({
 }: DataTableRowActionsProps<TData>) {
   const { t } = useTranslation()
   const redemption = redemptionSchema.parse(row.original)
-  const canManage = useAuthStore(
-    (state) => (state.auth.user?.role ?? ROLE.GUEST) >= ROLE.ADMIN
-  )
   const { setOpen, setCurrentRow, triggerRefresh } = useRedemptions()
   const isEnabled = redemption.status === REDEMPTION_STATUS.ENABLED
   const isUsed = redemption.status === REDEMPTION_STATUS.USED
@@ -77,32 +72,30 @@ export function DataTableRowActions<TData>({
     }
   }
 
-  const canEdit = canManage && isEnabled && !isExpired
-  const canToggle = !isUsed && !isExpired && (canManage || isEnabled)
+  const canEdit = isEnabled && !isExpired
+  const canToggle = !isUsed && !isExpired
 
   return (
     <div className='-ml-1.5 flex items-center gap-1'>
-      {canManage && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant='ghost'
-                size='icon-sm'
-                onClick={() => {
-                  setCurrentRow(redemption)
-                  setOpen('update')
-                }}
-                disabled={!canEdit}
-                aria-label={t('Edit')}
-              />
-            }
-          >
-            <Edit />
-          </TooltipTrigger>
-          <TooltipContent>{t('Edit')}</TooltipContent>
-        </Tooltip>
-      )}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant='ghost'
+              size='icon-sm'
+              onClick={() => {
+                setCurrentRow(redemption)
+                setOpen('update')
+              }}
+              disabled={!canEdit}
+              aria-label={t('Edit')}
+            />
+          }
+        >
+          <Edit />
+        </TooltipTrigger>
+        <TooltipContent>{t('Edit')}</TooltipContent>
+      </Tooltip>
 
       <DataTableRowActionMenu ariaLabel={t('Open menu')} modal={false}>
         {canToggle && (
