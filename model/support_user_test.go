@@ -41,3 +41,35 @@ func TestSupportUserSearchRequiresKeywordAndReturnsInviter(t *testing.T) {
 	_, err = GetSupportManagedUserById(admin.Id)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 }
+
+func TestSupportUserSearchMarksEnabledAgents(t *testing.T) {
+	setupAgentBackendTest(t)
+	agent := createAgentBackendTestUser(t, "support-search-agent")
+	require.NoError(t, DB.Create(&AgentProfile{UserId: agent.Id, Status: AgentStatusEnabled}).Error)
+
+	users, total, err := SearchSupportManagedUsers(agent.Username, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	assert.Equal(t, int64(1), total)
+	assert.True(t, users[0].IsAgent)
+}
+
+func TestSupportQuotaDecreaseIsAtomicAndCannotOverdraw(t *testing.T) {
+	setupAgentBackendTest(t)
+	support := createAgentBackendTestUser(t, "quota-support")
+	require.NoError(t, DB.Model(support).Update("role", common.RoleSupportUser).Error)
+	target := createAgentBackendTestUser(t, "quota-target")
+	require.NoError(t, DB.Model(target).Update("quota", 1000).Error)
+
+	result, err := DecreaseUserQuotaBySupport(support.Id, common.RoleSupportUser, target.Id, 300, "service correction")
+	require.NoError(t, err)
+	assert.Equal(t, -300, result.QuotaDelta)
+	assert.Equal(t, 1000, result.QuotaBefore)
+	assert.Equal(t, 700, result.QuotaAfter)
+
+	_, err = DecreaseUserQuotaBySupport(support.Id, common.RoleSupportUser, target.Id, 701, "invalid overdraw")
+	require.Error(t, err)
+	var updated User
+	require.NoError(t, DB.First(&updated, target.Id).Error)
+	assert.Equal(t, 700, updated.Quota)
+}

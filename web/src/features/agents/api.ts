@@ -26,8 +26,13 @@ import type {
   AgentDailyMetrics,
   AgentDownlineUser,
   AgentProfile,
+  AgentPromoLink,
+  AgentRebateGroup,
   AgentRebateRecord,
   AgentSelfSummary,
+  AgentWithdrawImportResult,
+  AgentWithdrawRequest,
+  AgentWithdrawStatus,
   PagedAgentData,
   SupportManagedUser,
 } from './types'
@@ -35,6 +40,40 @@ import type {
 export async function getAgentStatus() {
   const response =
     await api.get<AgentApiResponse<AgentBootstrapStatus>>('/api/agent/status')
+  return response.data
+}
+
+export async function initializeAgentModule(defaultRebateRate: number) {
+  const response = await api.post<AgentApiResponse<AgentBootstrapStatus>>(
+    '/api/agent/init',
+    { default_rebate_rate: defaultRebateRate }
+  )
+  return response.data
+}
+
+export async function getAgentRebateGroups() {
+  const response =
+    await api.get<AgentApiResponse<AgentRebateGroup[]>>('/api/agent/groups')
+  return response.data
+}
+
+export async function upsertAgentProfile(payload: {
+  userId: number
+  status: number
+  rebateGroupId: number
+  customRate: number
+  remark: string
+}) {
+  const response = await api.post<AgentApiResponse<AgentProfile>>(
+    '/api/agent/profile',
+    {
+      user_id: payload.userId,
+      status: payload.status,
+      rebate_group_id: payload.rebateGroupId,
+      custom_rate: payload.customRate,
+      remark: payload.remark,
+    }
+  )
   return response.data
 }
 
@@ -96,6 +135,106 @@ export async function adjustAgentBalance(payload: {
   return response.data
 }
 
+export async function getAgentDownlines(params: {
+  agentUserId: number
+  page: number
+  pageSize: number
+  keyword?: string
+}) {
+  const response = await api.get<
+    AgentApiResponse<PagedAgentData<AgentDownlineUser>>
+  >('/api/agent/downlines', {
+    params: {
+      agent_user_id: params.agentUserId,
+      p: params.page,
+      page_size: params.pageSize,
+      keyword: params.keyword || undefined,
+    },
+  })
+  return response.data
+}
+
+export async function assignAgentDownline(payload: {
+  targetAgentUserId: number
+  downlineUserId: number
+  remark: string
+}) {
+  const response = await api.post<AgentApiResponse<unknown>>(
+    '/api/agent/downline/assign',
+    {
+      target_agent_user_id: payload.targetAgentUserId,
+      downline_user_id: payload.downlineUserId,
+      remark: payload.remark,
+    }
+  )
+  return response.data
+}
+
+export async function transferAgentDownline(payload: {
+  sourceAgentUserId: number
+  targetAgentUserId: number
+  downlineUserId: number
+  remark: string
+}) {
+  const response = await api.post<AgentApiResponse<unknown>>(
+    '/api/agent/downline/transfer',
+    {
+      source_agent_user_id: payload.sourceAgentUserId,
+      target_agent_user_id: payload.targetAgentUserId,
+      downline_user_id: payload.downlineUserId,
+      remark: payload.remark,
+    }
+  )
+  return response.data
+}
+
+export async function getAgentWithdrawRequests(params: {
+  page: number
+  pageSize: number
+  status?: AgentWithdrawStatus | ''
+  startDate?: string
+  endDate?: string
+}) {
+  const response = await api.get<
+    AgentApiResponse<PagedAgentData<AgentWithdrawRequest>>
+  >('/api/agent/withdraw-requests', {
+    params: {
+      p: params.page,
+      page_size: params.pageSize,
+      status: params.status || undefined,
+      start_date: params.startDate || undefined,
+      end_date: params.endDate || undefined,
+    },
+  })
+  return response.data
+}
+
+export async function exportAgentWithdrawRequests(params: {
+  status?: AgentWithdrawStatus | ''
+  startDate?: string
+  endDate?: string
+}) {
+  const response = await api.get<Blob>('/api/agent/withdraw-requests/export', {
+    params: {
+      status: params.status || undefined,
+      start_date: params.startDate || undefined,
+      end_date: params.endDate || undefined,
+    },
+    responseType: 'blob',
+  })
+  return response.data
+}
+
+export async function importAgentWithdrawResults(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await api.post<AgentApiResponse<AgentWithdrawImportResult>>(
+    '/api/agent/withdraw-requests/import',
+    formData
+  )
+  return response.data
+}
+
 export async function searchSupportUsers(params: {
   page: number
   pageSize: number
@@ -126,6 +265,25 @@ export async function changeUserAgent(payload: {
       remark: payload.remark,
     }
   )
+  return response.data
+}
+
+export async function decreaseSupportUserQuota(payload: {
+  userId: number
+  quota: number
+  reason: string
+}) {
+  const response = await api.post<
+    AgentApiResponse<{
+      user_id: number
+      quota_delta: number
+      quota_before: number
+      quota_after: number
+    }>
+  >(`/api/support/users/${payload.userId}/quota/decrease`, {
+    quota: payload.quota,
+    reason: payload.reason,
+  })
   return response.data
 }
 
@@ -177,6 +335,18 @@ export async function getAgentSelfAdjustments(params: {
   const response = await api.get<
     AgentApiResponse<PagedAgentData<AgentAdjustment>>
   >('/api/agent/self/adjustments', {
+    params: { p: params.page, page_size: params.pageSize },
+  })
+  return response.data
+}
+
+export async function getAgentSelfPromoLinks(params: {
+  page: number
+  pageSize: number
+}) {
+  const response = await api.get<
+    AgentApiResponse<PagedAgentData<AgentPromoLink>>
+  >('/api/agent/self/promo-links', {
     params: { p: params.page, page_size: params.pageSize },
   })
   return response.data

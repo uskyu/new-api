@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -79,6 +80,66 @@ func createAgentBackendTestUser(t *testing.T, username string) *User {
 	}
 	require.NoError(t, DB.Create(user).Error)
 	return user
+}
+
+func TestResolveRegistrationAttributionSupportsAgentAndLegacyLinks(t *testing.T) {
+	setupAgentBackendTest(t)
+	agent := createAgentBackendTestUser(t, "registration-agent")
+	legacyInviter := createAgentBackendTestUser(t, "registration-legacy")
+	require.NoError(t, DB.Create(&AgentProfile{UserId: agent.Id, Status: AgentStatusEnabled}).Error)
+	promoLink := &AgentPromoLink{
+		AgentUserId: agent.Id,
+		Name:        "campaign",
+		Code:        "AGENTLINK",
+		Status:      AgentPromoLinkEnabled,
+	}
+	require.NoError(t, DB.Create(promoLink).Error)
+
+	inviterId, promoLinkId, err := ResolveRegistrationAttribution(promoLink.Code)
+	require.NoError(t, err)
+	assert.Equal(t, agent.Id, inviterId)
+	assert.Equal(t, promoLink.Id, promoLinkId)
+
+	inviterId, promoLinkId, err = ResolveRegistrationAttribution(legacyInviter.AffCode)
+	require.NoError(t, err)
+	assert.Equal(t, legacyInviter.Id, inviterId)
+	assert.Zero(t, promoLinkId)
+
+	require.NoError(t, DB.Model(&AgentProfile{}).Where("user_id = ?", agent.Id).Update("status", AgentStatusDisabled).Error)
+	inviterId, promoLinkId, err = ResolveRegistrationAttribution(promoLink.Code)
+	require.NoError(t, err)
+	assert.Zero(t, inviterId)
+	assert.Zero(t, promoLinkId)
+}
+
+func TestUpsertAgentProfileCreatesPromoLinkWithoutInvitationCodeCollision(t *testing.T) {
+	setupAgentBackendTest(t)
+	operator := createAgentBackendTestUser(t, "profile-operator")
+	agent := createAgentBackendTestUser(t, "profile-agent")
+	group := &AgentRebateGroup{Name: "profile-group", RebateRate: 1000, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+
+	profile, err := UpsertAgentProfile(operator.Id, &AgentProfile{
+		UserId:        agent.Id,
+		Status:        AgentStatusEnabled,
+		RebateGroupId: group.Id,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, agent.Id, profile.UserId)
+
+	var promoLink AgentPromoLink
+	require.NoError(t, DB.Where("agent_user_id = ?", agent.Id).First(&promoLink).Error)
+	assert.NotEmpty(t, promoLink.Code)
+	assert.NotEqual(t, agent.AffCode, promoLink.Code)
+
+	_, err = UpsertAgentPromoLink(operator.Id, &AgentPromoLink{
+		AgentUserId: agent.Id,
+		Name:        "conflicting",
+		Code:        operator.AffCode,
+		Status:      AgentPromoLinkEnabled,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invitation code")
 }
 
 func TestChangeAgentParentRejectsCyclesAndOnlyChangesFutureRebates(t *testing.T) {
@@ -187,6 +248,85 @@ func TestAgentRebateRateAndBalanceBounds(t *testing.T) {
 	_, err = AdjustAgentRebateBalance(agent.Id, operator.Id, 1, "overflow attempt")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "supported range")
+}
+
+func TestAgentBalanceAdjustmentDoesNotInflateEarnedRebate(t *testing.T) {
+	setupAgentBackendTest(t)
+	operator := createAgentBackendTestUser(t, "adjustment-operator")
+	agent := createAgentBackendTestUser(t, "adjustment-agent")
+	require.NoError(t, DB.Create(&AgentProfile{
+		UserId:              agent.Id,
+		Status:              AgentStatusEnabled,
+		RebateBalanceAmount: 100,
+		RebateTotalAmount:   500,
+	}).Error)
+
+	adjustment, err := AdjustAgentRebateBalance(agent.Id, operator.Id, 25, "manual payable balance")
+	require.NoError(t, err)
+	assert.Equal(t, int64(125), adjustment.BalanceAfter)
+
+	var profile AgentProfile
+	require.NoError(t, DB.Where("user_id = ?", agent.Id).First(&profile).Error)
+	assert.Equal(t, int64(125), profile.RebateBalanceAmount)
+	assert.Equal(t, int64(500), profile.RebateTotalAmount)
+}
+
+func TestAgentWithdrawReceiptRequiresExportAndSettlesFrozenBalance(t *testing.T) {
+	setupAgentBackendTest(t)
+	agent := createAgentBackendTestUser(t, "withdraw-agent")
+	require.NoError(t, DB.Create(&AgentProfile{
+		UserId:              agent.Id,
+		Status:              AgentStatusEnabled,
+		RebateBalanceAmount: 500,
+		RebateFrozenAmount:  200,
+		RebateTotalAmount:   900,
+	}).Error)
+	request := &AgentWithdrawRequest{
+		AgentUserId:         agent.Id,
+		Amount:              200,
+		Status:              AgentWithdrawStatusPending,
+		AccountNameSnapshot: "Test Agent",
+		AccountNoSnapshot:   "account-1",
+	}
+	require.NoError(t, DB.Create(request).Error)
+
+	content, batchNo, err := ExportAgentWithdrawRequests(AgentWithdrawStatusPending, "", "")
+	require.NoError(t, err)
+	assert.NotEmpty(t, batchNo)
+	assert.Contains(t, string(content), "exported")
+
+	var exported AgentWithdrawRequest
+	require.NoError(t, DB.First(&exported, request.Id).Error)
+	assert.Equal(t, AgentWithdrawStatusExported, exported.Status)
+	assert.Equal(t, batchNo, exported.ExportBatchNo)
+
+	receipt := fmt.Sprintf("request_id,username,email,account_name,account_no,amount,status,external_order_no\n%d,,,,,2.00,exported,BANK-ORDER-1\n", request.Id)
+	result, err := ImportAgentWithdrawResults(strings.NewReader(receipt))
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Processed)
+	assert.Equal(t, []int{request.Id}, result.RequestIds)
+
+	var profile AgentProfile
+	require.NoError(t, DB.Where("user_id = ?", agent.Id).First(&profile).Error)
+	assert.Equal(t, int64(500), profile.RebateBalanceAmount)
+	assert.Zero(t, profile.RebateFrozenAmount)
+	assert.Equal(t, int64(900), profile.RebateTotalAmount)
+	require.NoError(t, DB.First(&exported, request.Id).Error)
+	assert.Equal(t, AgentWithdrawStatusPaid, exported.Status)
+	assert.Equal(t, "BANK-ORDER-1", exported.ExternalOrderNo)
+
+	pending := &AgentWithdrawRequest{
+		AgentUserId:         agent.Id,
+		Amount:              100,
+		Status:              AgentWithdrawStatusPending,
+		AccountNameSnapshot: "Test Agent",
+		AccountNoSnapshot:   "account-1",
+	}
+	require.NoError(t, DB.Create(pending).Error)
+	pendingReceipt := fmt.Sprintf("request_id,external_order_no\n%d,BANK-ORDER-2\n", pending.Id)
+	_, err = ImportAgentWithdrawResults(strings.NewReader(pendingReceipt))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not exported")
 }
 
 func TestMigrateAgentSchemaIsAdditiveAndIdempotent(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service/authz"
 
@@ -33,6 +34,7 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 	model.DB, model.LOG_DB = db, db
 	require.NoError(t, db.AutoMigrate(
 		&model.User{}, &model.UserSession{}, &model.Log{}, &model.CasbinRule{}, &model.AuthzRole{},
+		&model.AgentProfile{},
 	))
 
 	t.Cleanup(func() {
@@ -48,17 +50,81 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 }
 
 func performManageUserRequest(t *testing.T, body string) *httptest.ResponseRecorder {
+	return performManageUserRequestAs(t, body, 9999, common.RoleRootUser)
+}
+
+func performManageUserRequestAs(t *testing.T, body string, operatorId int, operatorRole int) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/user/manage", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	c.Set("id", 9999)
-	c.Set("role", common.RoleRootUser)
+	c.Set("id", operatorId)
+	c.Set("role", operatorRole)
 	c.Set("username", "root-operator")
 	ManageUser(c)
 	return recorder
+}
+
+func TestManageUserCanAssignSupportWithoutChangingInvitationAttribution(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	previousMaster := common.IsMasterNode
+	common.IsMasterNode = false
+	t.Cleanup(func() { common.IsMasterNode = previousMaster })
+	require.NoError(t, authz.Init(db))
+
+	inviter := model.User{
+		Username: "support-inviter", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, AffCode: "support-inviter-aff",
+	}
+	require.NoError(t, db.Create(&inviter).Error)
+	user := model.User{
+		Username: "support-target", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1,
+		AffCode: "support-target-aff", InviterId: inviter.Id, PromoLinkId: 42,
+	}
+	require.NoError(t, db.Create(&user).Error)
+
+	recorder := performManageUserRequestAs(
+		t,
+		fmt.Sprintf(`{"id":%d,"action":"change_role","target_role":%d}`, user.Id, common.RoleSupportUser),
+		7000,
+		common.RoleAdminUser,
+	)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+
+	var updated model.User
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	assert.Equal(t, common.RoleSupportUser, updated.Role)
+	assert.Equal(t, inviter.Id, updated.InviterId)
+	assert.Equal(t, 42, updated.PromoLinkId)
+	var settings dto.UserSetting
+	require.NoError(t, common.UnmarshalJsonStr(updated.Setting, &settings))
+	var sidebarModules map[string]map[string]bool
+	require.NoError(t, common.UnmarshalJsonStr(settings.SidebarModules, &sidebarModules))
+	assert.True(t, sidebarModules["admin"]["agent"])
+}
+
+func TestManageUserRejectsSupportRoleForActiveAgent(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	user := model.User{
+		Username: "active-agent-target", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, AffCode: "active-agent-aff",
+	}
+	require.NoError(t, db.Create(&user).Error)
+	require.NoError(t, db.Create(&model.AgentProfile{UserId: user.Id, Status: model.AgentStatusEnabled}).Error)
+
+	recorder := performManageUserRequest(
+		t,
+		fmt.Sprintf(`{"id":%d,"action":"promote_support"}`, user.Id),
+	)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	assert.Contains(t, recorder.Body.String(), "active agent")
+
+	require.NoError(t, db.First(&user, user.Id).Error)
+	assert.Equal(t, common.RoleCommonUser, user.Role)
 }
 
 func TestManageUserDisableAdvancesAuthVersionOnceAndRevokesSession(t *testing.T) {

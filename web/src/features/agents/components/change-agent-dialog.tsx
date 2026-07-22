@@ -29,7 +29,11 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
-import { useAgentProfiles, useChangeUserAgent } from '../hooks/use-agent-data'
+import {
+  useAgentProfiles,
+  useChangeUserAgent,
+  useTransferAgentDownline,
+} from '../hooks/use-agent-data'
 import type { ChangeableAgentUser } from '../types'
 
 interface ChangeAgentDialogProps {
@@ -37,6 +41,8 @@ interface ChangeAgentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess?: () => void
+  sourceAgentUserId?: number
+  userIsAgent?: boolean
 }
 
 export function ChangeAgentDialog(props: ChangeAgentDialogProps) {
@@ -51,7 +57,12 @@ export function ChangeAgentDialog(props: ChangeAgentDialogProps) {
     enabled: props.open,
   })
   const mutation = useChangeUserAgent()
-  const items = profiles.data?.data?.items ?? []
+  const transferMutation = useTransferAgentDownline()
+  const items = (profiles.data?.data?.items ?? []).filter(
+    (profile) =>
+      profile.user_id !== props.user.id &&
+      profile.user_id !== props.sourceAgentUserId
+  )
   const currentAgentName =
     props.user.inviter_display_name || props.user.inviter_username
   let agentListContent: ReactNode
@@ -102,11 +113,19 @@ export function ChangeAgentDialog(props: ChangeAgentDialogProps) {
     if (!selectedAgentId || selectedAgentId === props.user.inviter_id) return
 
     try {
-      const response = await mutation.mutateAsync({
-        downlineUserId: props.user.id,
-        targetAgentUserId: selectedAgentId,
-        remark: remark.trim(),
-      })
+      const response =
+        props.sourceAgentUserId && !props.userIsAgent
+          ? await transferMutation.mutateAsync({
+              sourceAgentUserId: props.sourceAgentUserId,
+              downlineUserId: props.user.id,
+              targetAgentUserId: selectedAgentId,
+              remark: remark.trim(),
+            })
+          : await mutation.mutateAsync({
+              downlineUserId: props.user.id,
+              targetAgentUserId: selectedAgentId,
+              remark: remark.trim(),
+            })
       if (!response.success) {
         toast.error(response.message || t('Failed to change upstream agent'))
         return
@@ -123,7 +142,11 @@ export function ChangeAgentDialog(props: ChangeAgentDialogProps) {
     <Dialog
       open={props.open}
       onOpenChange={handleOpenChange}
-      title={t('Change upstream agent')}
+      title={
+        props.userIsAgent
+          ? t('Change agent parent')
+          : t('Change upstream agent')
+      }
       description={`${props.user.display_name || props.user.username} (#${props.user.id})`}
       contentClassName='sm:max-w-xl'
       footer={
@@ -135,11 +158,14 @@ export function ChangeAgentDialog(props: ChangeAgentDialogProps) {
             onClick={handleSubmit}
             disabled={
               mutation.isPending ||
+              transferMutation.isPending ||
               !selectedAgentId ||
               selectedAgentId === props.user.inviter_id
             }
           >
-            {mutation.isPending ? t('Processing...') : t('Confirm change')}
+            {mutation.isPending || transferMutation.isPending
+              ? t('Processing...')
+              : t('Confirm change')}
           </Button>
         </>
       }

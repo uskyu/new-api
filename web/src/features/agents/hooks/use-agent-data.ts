@@ -20,23 +20,68 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   adjustAgentBalance,
+  assignAgentDownline,
   changeUserAgent,
+  decreaseSupportUserQuota,
+  getAgentDownlines,
   getAgentDailyMetrics,
   getAgentOverview,
   getAgentProfiles,
+  getAgentRebateGroups,
   getAgentSelfAdjustments,
   getAgentSelfDailyMetrics,
   getAgentSelfDownlines,
   getAgentSelfRebates,
   getAgentSelfSummary,
   getAgentStatus,
+  getAgentSelfPromoLinks,
+  getAgentWithdrawRequests,
+  initializeAgentModule,
   searchSupportUsers,
+  transferAgentDownline,
+  upsertAgentProfile,
 } from '../api'
 
 export function useAgentStatus() {
   return useQuery({
     queryKey: ['agents', 'status'],
     queryFn: getAgentStatus,
+  })
+}
+
+export function useInitializeAgentModule() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: initializeAgentModule,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['agents', 'status'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents', 'overview'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents', 'groups'] }),
+      ])
+    },
+  })
+}
+
+export function useAgentRebateGroups(enabled: boolean) {
+  return useQuery({
+    queryKey: ['agents', 'groups'],
+    queryFn: getAgentRebateGroups,
+    enabled,
+  })
+}
+
+export function useUpsertAgentProfile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: upsertAgentProfile,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['agents', 'profiles'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents', 'overview'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents', 'self'] }),
+      ])
+    },
   })
 }
 
@@ -70,6 +115,67 @@ export function useAgentDailyMetrics(params: {
   return useQuery({
     queryKey: ['agents', 'daily-metrics', params],
     queryFn: () => getAgentDailyMetrics(params),
+    enabled: params.enabled,
+  })
+}
+
+export function useAgentDownlines(params: {
+  agentUserId: number
+  page: number
+  pageSize: number
+  keyword?: string
+  enabled: boolean
+}) {
+  return useQuery({
+    queryKey: ['agents', 'downlines', params],
+    queryFn: () => getAgentDownlines(params),
+    enabled: params.enabled && params.agentUserId > 0,
+  })
+}
+
+export function useAssignAgentDownline() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: assignAgentDownline,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['agents', 'downlines'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents', 'overview'] }),
+        queryClient.invalidateQueries({
+          queryKey: ['agents', 'support-users'],
+        }),
+      ])
+    },
+  })
+}
+
+export function useTransferAgentDownline() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: transferAgentDownline,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['agents', 'downlines'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents', 'profiles'] }),
+        queryClient.invalidateQueries({
+          queryKey: ['agents', 'support-users'],
+        }),
+      ])
+    },
+  })
+}
+
+export function useAgentWithdrawRequests(params: {
+  page: number
+  pageSize: number
+  status?: '' | 'pending' | 'exported' | 'paid'
+  startDate?: string
+  endDate?: string
+  enabled: boolean
+}) {
+  return useQuery({
+    queryKey: ['agents', 'withdraw-requests', params],
+    queryFn: () => getAgentWithdrawRequests(params),
     enabled: params.enabled,
   })
 }
@@ -112,7 +218,20 @@ export function useChangeUserAgent() {
         }),
         queryClient.invalidateQueries({ queryKey: ['users'] }),
         queryClient.invalidateQueries({ queryKey: ['agents', 'profiles'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents', 'downlines'] }),
       ])
+    },
+  })
+}
+
+export function useDecreaseSupportUserQuota() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: decreaseSupportUserQuota,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ['agents', 'support-users'],
+      })
     },
   })
 }
@@ -123,6 +242,7 @@ export function useAgentCenterQueries(params: {
   downlinePage: number
   rebatePage: number
   adjustmentPage: number
+  promoLinkPage: number
   pageSize: number
 }) {
   const summary = useQuery({
@@ -182,5 +302,21 @@ export function useAgentCenterQueries(params: {
     enabled,
   })
 
-  return { summary, metrics, downlines, rebates, adjustments }
+  const promoLinks = useQuery({
+    queryKey: [
+      'agents',
+      'self',
+      'promo-links',
+      params.promoLinkPage,
+      params.pageSize,
+    ],
+    queryFn: () =>
+      getAgentSelfPromoLinks({
+        page: params.promoLinkPage,
+        pageSize: params.pageSize,
+      }),
+    enabled,
+  })
+
+  return { summary, metrics, downlines, rebates, adjustments, promoLinks }
 }

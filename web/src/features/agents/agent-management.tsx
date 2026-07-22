@@ -19,7 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import dayjs from 'dayjs'
 import {
   CircleDollarSign,
+  Database,
+  ReceiptText,
   Search,
+  UserPlus,
   UserRoundPlus,
   UsersRound,
   WalletCards,
@@ -39,9 +42,14 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { AgentDailyChart } from './components/agent-daily-chart'
 import { AgentDailyMetricsTable } from './components/agent-daily-metrics-table'
+import { AgentDownlinesDialog } from './components/agent-downlines-dialog'
+import { AgentInitializeDialog } from './components/agent-initialize-dialog'
 import { AgentMetricCards } from './components/agent-metric-cards'
 import { AgentPagination } from './components/agent-pagination'
+import { AgentProfileDialog } from './components/agent-profile-dialog'
 import { AgentProfilesTable } from './components/agent-profiles-table'
+import { AgentWithdrawalsPanel } from './components/agent-withdrawals-panel'
+import { AssignDownlineDialog } from './components/assign-downline-dialog'
 import { SupportUsersTable } from './components/support-users-table'
 import {
   useAgentDailyMetrics,
@@ -51,6 +59,7 @@ import {
   useSupportUsers,
 } from './hooks/use-agent-data'
 import { formatAgentAmount } from './lib/format'
+import type { AgentProfile } from './types'
 
 const PAGE_SIZE = 10
 
@@ -58,6 +67,12 @@ export function AgentManagement() {
   const { t } = useTranslation()
   const role = useAuthStore((state) => state.auth.user?.role ?? ROLE.GUEST)
   const isAdmin = role >= ROLE.ADMIN
+  const isRoot = role === ROLE.SUPER_ADMIN
+  const [initializeOpen, setInitializeOpen] = useState(false)
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false)
+  const [editingProfile, setEditingProfile] = useState<AgentProfile>()
+  const [downlineProfile, setDownlineProfile] = useState<AgentProfile>()
+  const [assignProfile, setAssignProfile] = useState<AgentProfile>()
   const [profilePage, setProfilePage] = useState(1)
   const [profileInput, setProfileInput] = useState('')
   const [profileKeyword, setProfileKeyword] = useState('')
@@ -118,19 +133,46 @@ export function AgentManagement() {
   const metricSummary = metrics.data?.data?.summary
   const profileData = profiles.data?.data
   const userData = users.data?.data
+  const bootstrapStatus = status.data?.data
+
+  const openNewAgent = () => {
+    setEditingProfile(undefined)
+    setProfileDialogOpen(true)
+  }
+
+  const openEditAgent = (profile: AgentProfile) => {
+    setEditingProfile(profile)
+    setProfileDialogOpen(true)
+  }
 
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Agent Management')}</SectionPageLayout.Title>
       <SectionPageLayout.Content>
-        {!status.isLoading && !ready ? (
+        {status.isLoading && (
+          <div className='bg-muted h-32 animate-pulse rounded-lg' />
+        )}
+        {!status.isLoading && !ready && (
           <Alert>
             <AlertTitle>{t('Agent module is not ready')}</AlertTitle>
-            <AlertDescription>
-              {t('Ask a super administrator to initialize the agent module.')}
+            <AlertDescription className='flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between'>
+              <span>
+                {isRoot
+                  ? t('Initialize the module before managing agents.')
+                  : t(
+                      'Ask a super administrator to initialize the agent module.'
+                    )}
+              </span>
+              {isRoot && (
+                <Button size='sm' onClick={() => setInitializeOpen(true)}>
+                  <Database />
+                  {t('Initialize')}
+                </Button>
+              )}
             </AlertDescription>
           </Alert>
-        ) : (
+        )}
+        {!status.isLoading && ready && (
           <Tabs defaultValue={isAdmin ? 'overview' : 'assignments'}>
             <TabsList className='max-w-full overflow-x-auto'>
               {isAdmin && (
@@ -140,6 +182,11 @@ export function AgentManagement() {
                 {t('User assignments')}
               </TabsTrigger>
               <TabsTrigger value='balances'>{t('Agent balances')}</TabsTrigger>
+              {isAdmin && (
+                <TabsTrigger value='withdrawals'>
+                  {t('Withdrawal receipts')}
+                </TabsTrigger>
+              )}
             </TabsList>
 
             {isAdmin && (
@@ -304,8 +351,14 @@ export function AgentManagement() {
 
             <TabsContent value='balances'>
               <Card>
-                <CardHeader>
+                <CardHeader className='flex flex-row items-center justify-between gap-3'>
                   <CardTitle>{t('Agent balances')}</CardTitle>
+                  {isAdmin && (
+                    <Button size='sm' onClick={openNewAgent}>
+                      <UserPlus />
+                      {t('Add agent')}
+                    </Button>
+                  )}
                 </CardHeader>
                 <CardContent className='flex flex-col gap-4'>
                   <form className='flex gap-2' onSubmit={handleProfileSearch}>
@@ -324,6 +377,11 @@ export function AgentManagement() {
                     profiles={profileData?.items ?? []}
                     loading={profiles.isLoading}
                     allowBalanceAdjustment
+                    allowProfileEditing={isAdmin}
+                    showFinancialDetails={isAdmin}
+                    onEditProfile={openEditAgent}
+                    onViewDownlines={setDownlineProfile}
+                    onAssignDownline={setAssignProfile}
                   />
                   <AgentPagination
                     page={profilePage}
@@ -334,7 +392,49 @@ export function AgentManagement() {
                 </CardContent>
               </Card>
             </TabsContent>
+
+            {isAdmin && (
+              <TabsContent value='withdrawals'>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className='flex items-center gap-2'>
+                      <ReceiptText className='size-5' />
+                      {t('Withdrawal receipts')}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <AgentWithdrawalsPanel enabled={ready} />
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            )}
           </Tabs>
+        )}
+        <AgentInitializeDialog
+          open={initializeOpen}
+          defaultRate={bootstrapStatus?.default_rate ?? 1000}
+          onOpenChange={setInitializeOpen}
+        />
+        <AgentProfileDialog
+          open={profileDialogOpen}
+          profile={editingProfile}
+          defaultGroupId={bootstrapStatus?.default_group_id ?? 0}
+          onOpenChange={setProfileDialogOpen}
+        />
+        {downlineProfile && (
+          <AgentDownlinesDialog
+            profile={downlineProfile}
+            isAdmin={isAdmin}
+            open
+            onOpenChange={(open) => !open && setDownlineProfile(undefined)}
+          />
+        )}
+        {assignProfile && (
+          <AssignDownlineDialog
+            profile={assignProfile}
+            open
+            onOpenChange={(open) => !open && setAssignProfile(undefined)}
+          />
         )}
       </SectionPageLayout.Content>
     </SectionPageLayout>

@@ -281,7 +281,10 @@ export function UsersMutateDrawer({
                         <Select
                           items={[
                             { value: '1', label: t('Common User') },
-                            { value: '10', label: t('Admin') },
+                            { value: '5', label: t('Support') },
+                            ...(currentUser?.role === ROLE.SUPER_ADMIN
+                              ? [{ value: '10', label: t('Admin') }]
+                              : []),
                           ]}
                           onValueChange={(value) =>
                             value !== null &&
@@ -299,7 +302,10 @@ export function UsersMutateDrawer({
                               <SelectItem value='1'>
                                 {t('Common User')}
                               </SelectItem>
-                              <SelectItem value='10'>{t('Admin')}</SelectItem>
+                              <SelectItem value='5'>{t('Support')}</SelectItem>
+                              {currentUser?.role === ROLE.SUPER_ADMIN && (
+                                <SelectItem value='10'>{t('Admin')}</SelectItem>
+                              )}
                             </SelectGroup>
                           </SelectContent>
                         </Select>

@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -13,6 +14,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const maxAgentWithdrawImportFileSize int64 = 5 << 20
 
 type InitializeAgentModuleRequest struct {
 	DefaultRebateRate int `json:"default_rebate_rate"`
@@ -259,6 +262,10 @@ func AdjustAgentBalance(c *gin.Context) {
 		common.ApiErrorMsg(c, "invalid request body")
 		return
 	}
+	if c.GetInt("role") == common.RoleSupportUser && req.AgentUserId == c.GetInt("id") {
+		common.ApiErrorMsg(c, "support users cannot adjust their own agent balance")
+		return
+	}
 	reason := strings.TrimSpace(req.Reason)
 	if reason == "" {
 		common.ApiErrorMsg(c, "adjustment reason is required")
@@ -490,12 +497,22 @@ func ExportAgentWithdrawRequests(c *gin.Context) {
 }
 
 func ImportAgentWithdrawResults(c *gin.Context) {
-	file, _, err := c.Request.FormFile("file")
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAgentWithdrawImportFileSize+(1<<20))
+	file, header, err := c.Request.FormFile("file")
 	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			common.ApiErrorMsg(c, "import file is too large")
+			return
+		}
 		common.ApiErrorMsg(c, "an import file is required")
 		return
 	}
 	defer file.Close()
+	if header.Size > maxAgentWithdrawImportFileSize {
+		common.ApiErrorMsg(c, "import file is too large")
+		return
+	}
 	result, err := model.ImportAgentWithdrawResults(file)
 	if err != nil {
 		common.ApiError(c, err)
@@ -646,6 +663,10 @@ func TransferAgentDownlineUser(c *gin.Context) {
 		common.ApiErrorMsg(c, "invalid request body")
 		return
 	}
+	if c.GetInt("role") == common.RoleSupportUser && (req.SourceAgentUserId == c.GetInt("id") || req.TargetAgentUserId == c.GetInt("id")) {
+		common.ApiErrorMsg(c, "support users cannot transfer downlines to or from their own agent account")
+		return
+	}
 	if err := model.TransferAgentDownlineUser(c.GetInt("id"), req.SourceAgentUserId, req.TargetAgentUserId, req.DownlineUserId, req.PromoLinkId, req.Remark); err != nil {
 		common.ApiError(c, err)
 		return
@@ -659,6 +680,10 @@ func AssignAgentDownlineUser(c *gin.Context) {
 		common.ApiErrorMsg(c, "invalid request body")
 		return
 	}
+	if c.GetInt("role") == common.RoleSupportUser && req.TargetAgentUserId == c.GetInt("id") {
+		common.ApiErrorMsg(c, "support users cannot assign downlines to their own agent account")
+		return
+	}
 	if err := model.AssignAgentDownlineUser(c.GetInt("id"), req.TargetAgentUserId, req.DownlineUserId, req.PromoLinkId, req.Remark); err != nil {
 		common.ApiError(c, err)
 		return
@@ -670,6 +695,10 @@ func ChangeAgentDownlineUser(c *gin.Context) {
 	var req ChangeAgentDownlineUserRequest
 	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
 		common.ApiErrorMsg(c, "invalid request body")
+		return
+	}
+	if c.GetInt("role") == common.RoleSupportUser && req.TargetAgentUserId == c.GetInt("id") {
+		common.ApiErrorMsg(c, "support users cannot assign downlines to their own agent account")
 		return
 	}
 	if err := model.ChangeAgentDownlineUser(c.GetInt("id"), req.TargetAgentUserId, req.DownlineUserId, req.PromoLinkId, req.Remark); err != nil {

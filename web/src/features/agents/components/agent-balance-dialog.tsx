@@ -41,6 +41,10 @@ export function AgentBalanceDialog(props: AgentBalanceDialogProps) {
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
   const mutation = useAdjustAgentBalance()
+  const currentBalance =
+    props.profile.rebate_balance_amount === undefined
+      ? ''
+      : ` / ${formatAgentAmount(props.profile.rebate_balance_amount)}`
 
   const handleSubmit = async () => {
     if (!amount.trim() || Number(amount) === 0 || !reason.trim()) return
@@ -69,7 +73,7 @@ export function AgentBalanceDialog(props: AgentBalanceDialogProps) {
       open={props.open}
       onOpenChange={props.onOpenChange}
       title={t('Adjust agent balance')}
-      description={`${props.profile.display_name || props.profile.username} (#${props.profile.user_id}) · ${formatAgentAmount(props.profile.rebate_balance_amount)}`}
+      description={`${props.profile.display_name || props.profile.username} (#${props.profile.user_id})${currentBalance}`}
       footer={
         <>
           <Button variant='outline' onClick={() => props.onOpenChange(false)}>

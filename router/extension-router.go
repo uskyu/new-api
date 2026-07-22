@@ -55,10 +55,11 @@ func registerExtensionApiRoutes(apiRouter *gin.RouterGroup) {
 	}
 
 	supportRoute := apiRouter.Group("/support")
-	supportRoute.Use(middleware.PermissionAuth(common.PermissionAgentDownlineTransfer))
+	supportRoute.Use(middleware.PermissionAuth(common.PermissionUserQuotaDecrease))
 	{
 		supportRoute.GET("/users/search", controller.SearchSupportUsers)
 		supportRoute.GET("/users/:id", controller.GetSupportUser)
+		supportRoute.POST("/users/:id/quota/decrease", controller.SupportDecreaseUserQuota)
 	}
 
 	apiRouter.GET("/user/redemption/self", middleware.UserAuth(), controller.GetUserRedemptionBills)

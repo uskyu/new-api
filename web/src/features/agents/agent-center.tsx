@@ -36,6 +36,7 @@ import {
 } from './components/agent-center-tables'
 import { AgentDailyChart } from './components/agent-daily-chart'
 import { AgentMetricCards } from './components/agent-metric-cards'
+import { AgentPromoLinksTable } from './components/agent-promo-links-table'
 import { useAgentCenterQueries } from './hooks/use-agent-data'
 import { formatAgentAmount, formatAgentRate } from './lib/format'
 
@@ -50,12 +51,14 @@ export function AgentCenter() {
   const [downlinePage, setDownlinePage] = useState(1)
   const [rebatePage, setRebatePage] = useState(1)
   const [adjustmentPage, setAdjustmentPage] = useState(1)
+  const [promoLinkPage, setPromoLinkPage] = useState(1)
   const queries = useAgentCenterQueries({
     startDate,
     endDate,
     downlinePage,
     rebatePage,
     adjustmentPage,
+    promoLinkPage,
     pageSize: PAGE_SIZE,
   })
 
@@ -124,6 +127,22 @@ export function AgentCenter() {
                 },
               ]}
             />
+
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('My promotion links')}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <AgentPromoLinksTable
+                  items={queries.promoLinks.data?.data?.items ?? []}
+                  total={queries.promoLinks.data?.data?.total ?? 0}
+                  page={promoLinkPage}
+                  pageSize={PAGE_SIZE}
+                  loading={queries.promoLinks.isLoading}
+                  onPageChange={setPromoLinkPage}
+                />
+              </CardContent>
+            </Card>
 
             <Card>
               <CardHeader>

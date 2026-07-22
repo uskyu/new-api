@@ -16,17 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Repeat2 } from 'lucide-react'
+import { CircleMinus, Repeat2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { StaticDataTable } from '@/components/data-table'
+import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatQuota } from '@/lib/format'
 
 import type { SupportManagedUser } from '../types'
 import { ChangeAgentDialog } from './change-agent-dialog'
+import { SupportQuotaDialog } from './support-quota-dialog'
 
 interface SupportUsersTableProps {
   users: SupportManagedUser[]
@@ -37,6 +39,7 @@ interface SupportUsersTableProps {
 export function SupportUsersTable(props: SupportUsersTableProps) {
   const { t } = useTranslation()
   const [activeUser, setActiveUser] = useState<SupportManagedUser>()
+  const [quotaUser, setQuotaUser] = useState<SupportManagedUser>()
 
   if (props.loading) {
     return <Skeleton className='h-64 w-full' />
@@ -58,10 +61,28 @@ export function SupportUsersTable(props: SupportUsersTableProps) {
                   {user.display_name || user.username}
                 </span>
                 <span className='text-muted-foreground text-xs'>
-                  #{user.id} · {user.username}
+                  #{user.id} / {user.username}
                 </span>
               </div>
             ),
+          },
+          {
+            id: 'identity',
+            header: t('Identity'),
+            cell: (user) =>
+              user.is_agent ? (
+                <StatusBadge
+                  label={t('Agent')}
+                  variant='info'
+                  copyable={false}
+                />
+              ) : (
+                <StatusBadge
+                  label={t('User')}
+                  variant='neutral'
+                  copyable={false}
+                />
+              ),
           },
           {
             id: 'quota',
@@ -80,14 +101,26 @@ export function SupportUsersTable(props: SupportUsersTableProps) {
             id: 'actions',
             header: t('Actions'),
             cell: (user) => (
-              <Button
-                size='sm'
-                variant='outline'
-                onClick={() => setActiveUser(user)}
-              >
-                <Repeat2 />
-                {t('Change')}
-              </Button>
+              <div className='flex items-center gap-2'>
+                <Button
+                  size='sm'
+                  variant='outline'
+                  onClick={() => setActiveUser(user)}
+                >
+                  <Repeat2 />
+                  {t('Change')}
+                </Button>
+                {!user.is_agent && (
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={() => setQuotaUser(user)}
+                  >
+                    <CircleMinus />
+                    {t('Decrease balance')}
+                  </Button>
+                )}
+              </div>
             ),
           },
         ]}
@@ -98,6 +131,14 @@ export function SupportUsersTable(props: SupportUsersTableProps) {
           user={activeUser}
           open
           onOpenChange={(open) => !open && setActiveUser(undefined)}
+        />
+      )}
+
+      {quotaUser && (
+        <SupportQuotaDialog
+          user={quotaUser}
+          open
+          onOpenChange={(open) => !open && setQuotaUser(undefined)}
         />
       )}
     </>

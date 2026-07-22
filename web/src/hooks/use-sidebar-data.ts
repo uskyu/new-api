@@ -154,7 +154,7 @@ export function useSidebarData(): SidebarData {
             title: t('Redemption Codes'),
             url: '/redemption-codes',
             icon: Ticket,
-            requiredRole: ROLE.ADMIN,
+            requiredRole: ROLE.SUPPORT,
           },
           {
             title: t('Subscriptions'),

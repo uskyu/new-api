@@ -191,6 +191,11 @@ func IsValidateRole(role int) bool {
 }
 
 const (
+	PermissionRedemptionRead        = "redemption.read"
+	PermissionRedemptionDisable     = "redemption.disable"
+	PermissionRedemptionDelete      = "redemption.delete"
+	PermissionRedemptionManage      = "redemption.manage"
+	PermissionUserQuotaDecrease     = "user.quota.decrease"
 	PermissionAgentDownlineAssign   = "agent.downline.assign"
 	PermissionAgentDownlineTransfer = "agent.downline.transfer"
 	PermissionAgentBalanceAdjust    = "agent.balance.adjust"
@@ -198,16 +203,30 @@ const (
 
 var RolePermissions = map[int]map[string]bool{
 	RoleSupportUser: {
+		PermissionRedemptionRead:        true,
+		PermissionRedemptionDisable:     true,
+		PermissionRedemptionDelete:      true,
+		PermissionUserQuotaDecrease:     true,
 		PermissionAgentDownlineAssign:   true,
 		PermissionAgentDownlineTransfer: true,
 		PermissionAgentBalanceAdjust:    true,
 	},
 	RoleAdminUser: {
+		PermissionRedemptionRead:        true,
+		PermissionRedemptionDisable:     true,
+		PermissionRedemptionDelete:      true,
+		PermissionRedemptionManage:      true,
+		PermissionUserQuotaDecrease:     true,
 		PermissionAgentDownlineAssign:   true,
 		PermissionAgentDownlineTransfer: true,
 		PermissionAgentBalanceAdjust:    true,
 	},
 	RoleRootUser: {
+		PermissionRedemptionRead:        true,
+		PermissionRedemptionDisable:     true,
+		PermissionRedemptionDelete:      true,
+		PermissionRedemptionManage:      true,
+		PermissionUserQuotaDecrease:     true,
 		PermissionAgentDownlineAssign:   true,
 		PermissionAgentDownlineTransfer: true,
 		PermissionAgentBalanceAdjust:    true,

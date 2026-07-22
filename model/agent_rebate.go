@@ -57,6 +57,7 @@ const (
 	AgentWithdrawChannelAlipay = "alipay"
 
 	DefaultAgentRebateGroupName = "default"
+	maxAgentWithdrawImportRows  = 10000
 )
 
 func validateAgentRebateRate(rate int) error {
@@ -630,6 +631,12 @@ func GenerateUniqueAgentPromoCodeTx(tx *gorm.DB) (string, error) {
 		if err := tx.Model(&AgentPromoLink{}).Where("code = ?", code).Count(&count).Error; err != nil {
 			return "", err
 		}
+		if count > 0 {
+			continue
+		}
+		if err := tx.Model(&User{}).Where("LOWER(aff_code) = ?", strings.ToLower(code)).Count(&count).Error; err != nil {
+			return "", err
+		}
 		if count == 0 {
 			return code, nil
 		}
@@ -657,7 +664,13 @@ func ResolveRegistrationAttribution(code string) (inviterId int, promoLinkId int
 	if DB != nil && DB.Migrator().HasTable(&AgentPromoLink{}) {
 		promoLink, promoErr := GetAgentPromoLinkByCode(code)
 		if promoErr == nil && promoLink.Status == AgentPromoLinkEnabled {
-			return promoLink.AgentUserId, promoLink.Id, nil
+			enabled, profileErr := IsEnabledAgentUser(promoLink.AgentUserId)
+			if profileErr != nil {
+				return 0, 0, profileErr
+			}
+			if enabled {
+				return promoLink.AgentUserId, promoLink.Id, nil
+			}
 		}
 		if promoErr != nil && !errors.Is(promoErr, gorm.ErrRecordNotFound) {
 			return 0, 0, promoErr
@@ -671,6 +684,17 @@ func ResolveRegistrationAttribution(code string) (inviterId int, promoLinkId int
 		return 0, 0, err
 	}
 	return inviterId, 0, nil
+}
+
+func IsEnabledAgentUser(userId int) (bool, error) {
+	if userId <= 0 || DB == nil || !DB.Migrator().HasTable(&AgentProfile{}) {
+		return false, nil
+	}
+	var count int64
+	err := DB.Model(&AgentProfile{}).
+		Where("user_id = ? AND status = ?", userId, AgentStatusEnabled).
+		Count(&count).Error
+	return count > 0, err
 }
 
 func SettleAgentRebateTx(tx *gorm.DB, topUp *TopUp, sourceType string) error {
@@ -1149,9 +1173,13 @@ func CreateAgentWithdrawRequest(agentUserId int, accountName string, accountNo s
 }
 
 func GetAgentWithdrawRequests(pageInfo *common.PageInfo, agentUserId int, status string, startDate string, endDate string) ([]*AgentWithdrawRequestView, int64, error) {
+	return getAgentWithdrawRequests(DB, pageInfo, agentUserId, status, startDate, endDate)
+}
+
+func getAgentWithdrawRequests(db *gorm.DB, pageInfo *common.PageInfo, agentUserId int, status string, startDate string, endDate string) ([]*AgentWithdrawRequestView, int64, error) {
 	var requests []*AgentWithdrawRequestView
 	var total int64
-	tx := DB.Table("agent_withdraw_requests AS awr").
+	tx := db.Table("agent_withdraw_requests AS awr").
 		Select("awr.id, awr.agent_user_id, u.username, u.display_name, u.email, awr.amount, awr.status, awr.account_no_snapshot, awr.account_name_snapshot, awr.export_batch_no, awr.external_order_no, awr.remark, awr.created_at, awr.processed_at").
 		Joins("LEFT JOIN users AS u ON u.id = awr.agent_user_id")
 	if agentUserId > 0 {
@@ -1179,11 +1207,11 @@ func parseWithdrawDateRange(startDate string, endDate string) (int64, int64, boo
 	if startDate == "" || endDate == "" {
 		return 0, 0, false
 	}
-	startTime, err := time.Parse("2006-01-02", startDate)
+	startTime, err := time.ParseInLocation("2006-01-02", startDate, time.Local)
 	if err != nil {
 		return 0, 0, false
 	}
-	endTime, err := time.Parse("2006-01-02", endDate)
+	endTime, err := time.ParseInLocation("2006-01-02", endDate, time.Local)
 	if err != nil {
 		return 0, 0, false
 	}
@@ -1192,45 +1220,71 @@ func parseWithdrawDateRange(startDate string, endDate string) (int64, int64, boo
 
 func ExportAgentWithdrawRequests(status string, startDate string, endDate string) ([]byte, string, error) {
 	batchNo := fmt.Sprintf("WD-%d", common.GetTimestamp())
-	buffer := &bytes.Buffer{}
-	writer := csv.NewWriter(buffer)
-	if err := writer.Write([]string{"request_id", "username", "email", "account_name", "account_no", "amount", "status", "external_order_no"}); err != nil {
-		return nil, "", err
-	}
-	pageInfo := &common.PageInfo{Page: 1, PageSize: 100000}
-	requests, _, err := GetAgentWithdrawRequests(pageInfo, 0, status, startDate, endDate)
+	var content []byte
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		pageInfo := &common.PageInfo{Page: 1, PageSize: maxAgentWithdrawImportRows}
+		requests, total, err := getAgentWithdrawRequests(tx, pageInfo, 0, status, startDate, endDate)
+		if err != nil {
+			return err
+		}
+		if total > maxAgentWithdrawImportRows {
+			return fmt.Errorf("export contains more than %d requests; narrow the date range and retry", maxAgentWithdrawImportRows)
+		}
+		pendingIds := make([]int, 0)
+		for _, request := range requests {
+			if request.Status == AgentWithdrawStatusPending {
+				pendingIds = append(pendingIds, request.Id)
+			}
+		}
+		if len(pendingIds) > 0 {
+			update := tx.Model(&AgentWithdrawRequest{}).
+				Where("id IN ? AND status = ?", pendingIds, AgentWithdrawStatusPending).
+				Updates(map[string]interface{}{
+					"status":          AgentWithdrawStatusExported,
+					"export_batch_no": batchNo,
+				})
+			if update.Error != nil {
+				return update.Error
+			}
+			if update.RowsAffected != int64(len(pendingIds)) {
+				return errors.New("withdraw request status changed, please retry export")
+			}
+		}
+
+		buffer := &bytes.Buffer{}
+		writer := csv.NewWriter(buffer)
+		if err := writer.Write([]string{"request_id", "username", "email", "account_name", "account_no", "amount", "status", "external_order_no"}); err != nil {
+			return err
+		}
+		for _, request := range requests {
+			if request.Status == AgentWithdrawStatusPending {
+				request.Status = AgentWithdrawStatusExported
+				request.ExportBatchNo = batchNo
+			}
+			if err := writer.Write([]string{
+				strconv.Itoa(request.Id),
+				request.Username,
+				request.Email,
+				request.AccountNameSnapshot,
+				request.AccountNoSnapshot,
+				decimal.NewFromInt(request.Amount).Div(decimal.NewFromInt(100)).StringFixed(2),
+				request.Status,
+				request.ExternalOrderNo,
+			}); err != nil {
+				return err
+			}
+		}
+		writer.Flush()
+		if err := writer.Error(); err != nil {
+			return err
+		}
+		content = buffer.Bytes()
+		return nil
+	})
 	if err != nil {
 		return nil, "", err
 	}
-	for _, request := range requests {
-		if request.Status == AgentWithdrawStatusPending {
-			if err := DB.Model(&AgentWithdrawRequest{}).Where("id = ?", request.Id).Updates(map[string]interface{}{
-				"status":          AgentWithdrawStatusExported,
-				"export_batch_no": batchNo,
-			}).Error; err != nil {
-				return nil, "", err
-			}
-			request.Status = AgentWithdrawStatusExported
-			request.ExportBatchNo = batchNo
-		}
-		if err := writer.Write([]string{
-			strconv.Itoa(request.Id),
-			request.Username,
-			request.Email,
-			request.AccountNameSnapshot,
-			request.AccountNoSnapshot,
-			decimal.NewFromInt(request.Amount).Div(decimal.NewFromInt(100)).StringFixed(2),
-			request.Status,
-			request.ExternalOrderNo,
-		}); err != nil {
-			return nil, "", err
-		}
-	}
-	writer.Flush()
-	if err := writer.Error(); err != nil {
-		return nil, "", err
-	}
-	return buffer.Bytes(), batchNo, nil
+	return content, batchNo, nil
 }
 
 func ImportAgentWithdrawResults(reader io.Reader) (*AgentWithdrawImportResult, error) {
@@ -1238,36 +1292,77 @@ func ImportAgentWithdrawResults(reader io.Reader) (*AgentWithdrawImportResult, e
 		return nil, errors.New("import file is required")
 	}
 	csvReader := csv.NewReader(reader)
-	records, err := csvReader.ReadAll()
+	header, err := csvReader.Read()
 	if err != nil {
 		return nil, err
 	}
+	columns := make(map[string]int, len(header))
+	for index, name := range header {
+		columns[strings.ToLower(strings.TrimSpace(name))] = index
+	}
+	requestIdColumn, hasRequestId := columns["request_id"]
+	externalOrderColumn, hasExternalOrder := columns["external_order_no"]
+	if !hasRequestId || !hasExternalOrder {
+		return nil, errors.New("import file must contain request_id and external_order_no columns")
+	}
+	type withdrawImportRow struct {
+		requestId       int
+		externalOrderNo string
+	}
+	rows := make([]withdrawImportRow, 0)
+	seenRequestIds := make(map[int]struct{})
+	for rowNumber := 2; ; rowNumber++ {
+		row, readErr := csvReader.Read()
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("invalid CSV row %d: %w", rowNumber, readErr)
+		}
+		if rowNumber-1 > maxAgentWithdrawImportRows {
+			return nil, fmt.Errorf("import file exceeds %d data rows", maxAgentWithdrawImportRows)
+		}
+		if requestIdColumn >= len(row) || externalOrderColumn >= len(row) {
+			return nil, fmt.Errorf("CSV row %d is missing required columns", rowNumber)
+		}
+		externalOrderNo := strings.TrimSpace(row[externalOrderColumn])
+		if externalOrderNo == "" {
+			continue
+		}
+		requestId, parseErr := strconv.Atoi(strings.TrimSpace(row[requestIdColumn]))
+		if parseErr != nil || requestId <= 0 {
+			return nil, fmt.Errorf("CSV row %d has an invalid request_id", rowNumber)
+		}
+		if _, exists := seenRequestIds[requestId]; exists {
+			return nil, fmt.Errorf("CSV contains duplicate request_id %d", requestId)
+		}
+		seenRequestIds[requestId] = struct{}{}
+		rows = append(rows, withdrawImportRow{requestId: requestId, externalOrderNo: externalOrderNo})
+	}
 	result := &AgentWithdrawImportResult{Processed: 0, RequestIds: make([]int, 0)}
-	if len(records) <= 1 {
+	if len(rows) == 0 {
 		return result, nil
 	}
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		for idx, row := range records {
-			if idx == 0 {
-				continue
-			}
-			if len(row) < 8 {
-				continue
-			}
-			requestId, parseErr := strconv.Atoi(strings.TrimSpace(row[0]))
-			if parseErr != nil || requestId <= 0 {
-				continue
-			}
-			externalOrderNo := strings.TrimSpace(row[7])
-			if externalOrderNo == "" {
-				continue
-			}
+		for _, row := range rows {
 			withdrawRequest := &AgentWithdrawRequest{}
-			if err := lockForUpdate(tx).First(withdrawRequest, requestId).Error; err != nil {
+			if err := lockForUpdate(tx).First(withdrawRequest, row.requestId).Error; err != nil {
 				return err
 			}
 			if withdrawRequest.Status == AgentWithdrawStatusPaid {
 				continue
+			}
+			if withdrawRequest.Status != AgentWithdrawStatusExported {
+				return fmt.Errorf("withdraw request %d is not exported", withdrawRequest.Id)
+			}
+			var duplicateOrderCount int64
+			if err := tx.Model(&AgentWithdrawRequest{}).
+				Where("external_order_no = ? AND id <> ?", row.externalOrderNo, withdrawRequest.Id).
+				Count(&duplicateOrderCount).Error; err != nil {
+				return err
+			}
+			if duplicateOrderCount > 0 {
+				return fmt.Errorf("external order number %s is already used", row.externalOrderNo)
 			}
 			profile := &AgentProfile{}
 			if err := lockForUpdate(tx).Where("user_id = ?", withdrawRequest.AgentUserId).First(profile).Error; err != nil {
@@ -1285,7 +1380,7 @@ func ImportAgentWithdrawResults(reader io.Reader) (*AgentWithdrawImportResult, e
 				return err
 			}
 			withdrawRequest.Status = AgentWithdrawStatusPaid
-			withdrawRequest.ExternalOrderNo = externalOrderNo
+			withdrawRequest.ExternalOrderNo = row.externalOrderNo
 			withdrawRequest.ProcessedAt = common.GetTimestamp()
 			if err := tx.Save(withdrawRequest).Error; err != nil {
 				return err
@@ -1300,7 +1395,7 @@ func ImportAgentWithdrawResults(reader io.Reader) (*AgentWithdrawImportResult, e
 				FrozenAfter:   frozenAfter,
 				ReferenceType: "withdraw_request",
 				ReferenceId:   withdrawRequest.Id,
-				Remark:        externalOrderNo,
+				Remark:        row.externalOrderNo,
 			}); err != nil {
 				return err
 			}
@@ -1497,9 +1592,6 @@ func AdjustAgentRebateBalance(agentUserId int, operatorUserId int, deltaAmount i
 		}
 		updates := map[string]interface{}{
 			"rebate_balance_amount": balanceAfter,
-		}
-		if deltaAmount > 0 {
-			updates["rebate_total_amount"] = gorm.Expr("rebate_total_amount + ?", deltaAmount)
 		}
 		if err := tx.Model(profile).Updates(updates).Error; err != nil {
 			return err
@@ -2610,6 +2702,13 @@ func UpsertAgentPromoLink(operatorUserId int, promoLink *AgentPromoLink) (*Agent
 		var profile AgentProfile
 		if err := tx.Where("user_id = ?", promoLink.AgentUserId).First(&profile).Error; err != nil {
 			return err
+		}
+		var userCodeCount int64
+		if err := tx.Model(&User{}).Where("LOWER(aff_code) = ?", strings.ToLower(promoLink.Code)).Count(&userCodeCount).Error; err != nil {
+			return err
+		}
+		if userCodeCount > 0 {
+			return errors.New("promo code conflicts with an existing invitation code")
 		}
 		var existingByCode AgentPromoLink
 		if err := tx.Where("code = ?", promoLink.Code).First(&existingByCode).Error; err == nil {

@@ -204,7 +204,21 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 	}
 
 	// 管理员区域 - 根据角色决定
-	if userRole == common.RoleAdminUser {
+	if userRole == common.RoleSupportUser {
+		delete(defaultConfig, "chat")
+		delete(defaultConfig, "console")
+		delete(defaultConfig, "personal")
+		defaultConfig["admin"] = map[string]interface{}{
+			"enabled":      true,
+			"channel":      false,
+			"models":       false,
+			"redemption":   true,
+			"user":         false,
+			"setting":      false,
+			"subscription": false,
+			"agent":        true,
+		}
+	} else if userRole == common.RoleAdminUser {
 		// 管理员可以访问管理员区域，但不能访问系统设置
 		defaultConfig["admin"] = map[string]interface{}{
 			"enabled":    true,

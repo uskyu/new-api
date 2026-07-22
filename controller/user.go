@@ -261,12 +261,17 @@ func Register(c *gin.Context) {
 		return
 	}
 	affCode := user.AffCode // this code is the inviter's code, not the user's own code
-	inviterId, _ := model.GetUserIdByAffCode(affCode)
+	inviterId, promoLinkId, err := model.ResolveRegistrationAttribution(affCode)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	cleanUser := model.User{
 		Username:    user.Username,
 		Password:    user.Password,
 		DisplayName: user.Username,
 		InviterId:   inviterId,
+		PromoLinkId: promoLinkId,
 		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
 	}
 	if common.EmailVerificationEnabled {
@@ -554,6 +559,9 @@ func calculateUserPermissions(userRole int) map[string]interface{} {
 		// 超级管理员不需要边栏设置功能
 		permissions["sidebar_settings"] = false
 		permissions["sidebar_modules"] = map[string]interface{}{}
+	} else if userRole == common.RoleSupportUser {
+		permissions["sidebar_settings"] = false
+		permissions["sidebar_modules"] = map[string]interface{}{}
 	} else if userRole == common.RoleAdminUser {
 		// 管理员可以设置边栏，但不包含系统设置功能
 		permissions["sidebar_settings"] = true
@@ -602,7 +610,21 @@ func generateDefaultSidebarConfig(userRole int) string {
 	}
 
 	// 管理员区域 - 根据角色决定
-	if userRole == common.RoleAdminUser {
+	if userRole == common.RoleSupportUser {
+		delete(defaultConfig, "chat")
+		delete(defaultConfig, "console")
+		delete(defaultConfig, "personal")
+		defaultConfig["admin"] = map[string]interface{}{
+			"enabled":      true,
+			"channel":      false,
+			"models":       false,
+			"redemption":   true,
+			"user":         false,
+			"setting":      false,
+			"subscription": false,
+			"agent":        true,
+		}
+	} else if userRole == common.RoleAdminUser {
 		// 管理员可以访问管理员区域，但不能访问系统设置
 		defaultConfig["admin"] = map[string]interface{}{
 			"enabled":    true,
@@ -1082,10 +1104,11 @@ func updateAdminPermissionsForUserInTx(c *gin.Context, tx *gorm.DB, userID int, 
 }
 
 type ManageRequest struct {
-	Id     int    `json:"id"`
-	Action string `json:"action"`
-	Value  int    `json:"value"`
-	Mode   string `json:"mode"`
+	Id         int    `json:"id"`
+	Action     string `json:"action"`
+	TargetRole int    `json:"target_role"`
+	Value      int    `json:"value"`
+	Mode       string `json:"mode"`
 }
 
 // ManageUser Only admin user can do this
@@ -1111,6 +1134,8 @@ func ManageUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
 		return
 	}
+	oldRole := user.Role
+	roleChanged := false
 	switch req.Action {
 	case "disable":
 		user.Status = common.UserStatusDisabled
@@ -1148,15 +1173,21 @@ func ManageUser(c *gin.Context) {
 		})
 		return
 	case "promote":
-		if myRole != common.RoleRootUser {
-			common.ApiErrorI18n(c, i18n.MsgUserAdminCannotPromote)
-			return
-		}
 		if user.Role >= common.RoleAdminUser {
 			common.ApiErrorI18n(c, i18n.MsgUserAlreadyAdmin)
 			return
 		}
-		user.Role = common.RoleAdminUser
+		req.TargetRole = common.RoleAdminUser
+		roleChanged = true
+	case "promote_support":
+		if user.Role != common.RoleCommonUser {
+			common.ApiErrorI18n(c, i18n.MsgUserCannotCreateHigherLevel)
+			return
+		}
+		req.TargetRole = common.RoleSupportUser
+		roleChanged = true
+	case "change_role":
+		roleChanged = true
 	case "demote":
 		if user.Role == common.RoleRootUser {
 			common.ApiErrorI18n(c, i18n.MsgUserCannotDemoteRootUser)
@@ -1166,7 +1197,8 @@ func ManageUser(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgUserAlreadyCommon)
 			return
 		}
-		user.Role = common.RoleCommonUser
+		req.TargetRole = common.RoleCommonUser
+		roleChanged = true
 	case "add_quota":
 		switch req.Mode {
 		case "add":
@@ -1217,33 +1249,85 @@ func ManageUser(c *gin.Context) {
 		return
 	}
 
-	if req.Action == "demote" {
+	if roleChanged {
+		if req.TargetRole != common.RoleCommonUser && req.TargetRole != common.RoleSupportUser && req.TargetRole != common.RoleAdminUser {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+		if req.TargetRole >= myRole || req.TargetRole == oldRole {
+			common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
+			return
+		}
+		if req.TargetRole == common.RoleSupportUser {
+			enabledAgent, err := model.IsEnabledAgentUser(user.Id)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			if enabledAgent {
+				common.ApiErrorMsg(c, "an active agent account cannot be assigned the support role")
+				return
+			}
+		}
+
+		user.Role = req.TargetRole
+		currentSetting := user.GetSetting()
+		currentSetting.SidebarModules = generateDefaultSidebarConfig(user.Role)
+		user.SetSetting(currentSetting)
+		clearAuthorization := user.Role < common.RoleAdminUser
 		if err := model.DB.Transaction(func(tx *gorm.DB) error {
 			if err := user.UpdateWithTx(tx, false); err != nil {
 				return err
 			}
-			return authz.ClearUserAuthorizationInTx(tx, user.Id)
+			if clearAuthorization {
+				return authz.ClearUserAuthorizationInTx(tx, user.Id)
+			}
+			return nil
 		}); err != nil {
 			common.ApiError(c, err)
 			return
 		}
-		if err := authz.ReloadPolicy(); err != nil {
-			common.ApiError(c, err)
-			return
+		if clearAuthorization {
+			if err := authz.ReloadPolicy(); err != nil {
+				common.ApiError(c, err)
+				return
+			}
 		}
 		if err := model.PublishUserAuthCache(user.Id); err != nil {
 			common.ApiError(c, err)
 			return
 		}
-		if _, err := model.RevokeAllUserSessions(user.Id, "admin_demote"); err != nil {
+		revokeReason := "admin_role_changed"
+		if req.Action == "demote" {
+			revokeReason = "admin_demote"
+		}
+		if _, err := model.RevokeAllUserSessions(user.Id, revokeReason); err != nil {
 			common.ApiError(c, err)
 			return
 		}
-	} else {
-		if err := user.Update(false); err != nil {
-			common.ApiError(c, err)
-			return
+		if err := model.InvalidateUserTokensCache(user.Id); err != nil {
+			common.SysLog(fmt.Sprintf("failed to invalidate tokens cache for user %d: %s", user.Id, err.Error()))
 		}
+		recordManageAuditFor(c, user.Id, "user.role_change", map[string]interface{}{
+			"old_role": oldRole,
+			"new_role": user.Role,
+			"username": user.Username,
+			"id":       user.Id,
+		})
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data": model.User{
+				Role:   user.Role,
+				Status: user.Status,
+			},
+		})
+		return
+	}
+
+	if err := user.Update(false); err != nil {
+		common.ApiError(c, err)
+		return
 	}
 	// Update/UpdateWithTx has already published the new user hash and revoked
 	// browser sessions exactly once. Only PAT/relay token caches still need an

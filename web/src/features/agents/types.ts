@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 export interface AgentApiResponse<T> {
   success: boolean
   message?: string
@@ -46,6 +45,29 @@ export interface AgentAdminOverview {
   downline_user_count: number
   rebate_balance_amount: number
   rebate_total_amount: number
+}
+
+export interface AgentRebateGroup {
+  id: number
+  name: string
+  rebate_rate: number
+  status: number
+  is_default: boolean
+  remark?: string
+}
+
+export interface AgentPromoLink {
+  id: number
+  agent_user_id: number
+  username?: string
+  display_name?: string
+  name: string
+  code: string
+  status: number
+  landing_page?: string
+  remark?: string
+  created_at?: number
+  updated_at?: number
 }
 
 export interface AgentProfile {
@@ -103,6 +125,7 @@ export interface SupportManagedUser {
   inviter_id: number
   inviter_username?: string
   inviter_display_name?: string
+  is_agent: boolean
 }
 
 export interface ChangeableAgentUser {
@@ -161,6 +184,30 @@ export interface AgentAdjustment {
   change_type: 'increase' | 'decrease'
   reason: string
   created_at: number
+}
+
+export type AgentWithdrawStatus = 'pending' | 'exported' | 'paid'
+
+export interface AgentWithdrawRequest {
+  id: number
+  agent_user_id: number
+  username: string
+  display_name: string
+  email: string
+  amount: number
+  status: AgentWithdrawStatus
+  account_no_snapshot: string
+  account_name_snapshot: string
+  export_batch_no?: string
+  external_order_no?: string
+  remark?: string
+  created_at: number
+  processed_at?: number
+}
+
+export interface AgentWithdrawImportResult {
+  processed: number
+  request_ids: number[]
 }
 
 export interface AgentPageParams {

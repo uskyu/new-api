@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { RedemptionsDialogs } from './components/redemptions-dialogs'
 import { RedemptionsPrimaryButtons } from './components/redemptions-primary-buttons'
@@ -27,15 +29,20 @@ import { RedemptionsTable } from './components/redemptions-table'
 
 export function Redemptions() {
   const { t } = useTranslation()
+  const canManage = useAuthStore(
+    (state) => (state.auth.user?.role ?? ROLE.GUEST) >= ROLE.ADMIN
+  )
   return (
     <RedemptionsProvider>
       <SectionPageLayout fixedContent>
         <SectionPageLayout.Title>
           {t('Redemption Codes')}
         </SectionPageLayout.Title>
-        <SectionPageLayout.Actions>
-          <RedemptionsPrimaryButtons />
-        </SectionPageLayout.Actions>
+        {canManage && (
+          <SectionPageLayout.Actions>
+            <RedemptionsPrimaryButtons />
+          </SectionPageLayout.Actions>
+        )}
         <SectionPageLayout.Content>
           <RedemptionsTable />
         </SectionPageLayout.Content>

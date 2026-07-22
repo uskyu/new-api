@@ -60,7 +60,7 @@ export function AgentDownlinesTable(
               <div className='flex min-w-36 flex-col'>
                 <span>{item.display_name || item.username}</span>
                 <span className='text-muted-foreground text-xs'>
-                  #{item.user_id} · {item.username}
+                  #{item.user_id} / {item.username}
                 </span>
               </div>
             ),

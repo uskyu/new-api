@@ -1,0 +1,23 @@
+package common
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+func TestSupportRoleHasOnlyExpectedOperationalPermissions(t *testing.T) {
+	for _, permission := range []string{
+		PermissionRedemptionRead,
+		PermissionRedemptionDisable,
+		PermissionRedemptionDelete,
+		PermissionUserQuotaDecrease,
+		PermissionAgentDownlineAssign,
+		PermissionAgentDownlineTransfer,
+		PermissionAgentBalanceAdjust,
+	} {
+		assert.True(t, RoleHasPermission(RoleSupportUser, permission), permission)
+	}
+	assert.False(t, RoleHasPermission(RoleSupportUser, PermissionRedemptionManage))
+	assert.False(t, RoleHasPermission(RoleSupportUser, "admin.full_access"))
+}

@@ -29,7 +29,7 @@ import {
   Link2,
   CreditCard,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -47,6 +47,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { manageUser, resetUserPasskey, resetUserTwoFA } from '../api'
 import {
@@ -56,8 +57,10 @@ import {
   isUserDeleted,
 } from '../constants'
 import { getUserActionMessage } from '../lib'
+import { getPromotableUserRoles } from '../lib/role-options'
 import type { User, ManageUserAction } from '../types'
 import { UserBindingDialog } from './dialogs/user-binding-dialog'
+import { UserRoleDialog } from './user-role-dialog'
 import { useUsers } from './users-provider'
 
 interface DataTableRowActionsProps {
@@ -67,11 +70,15 @@ interface DataTableRowActionsProps {
 export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const { t } = useTranslation()
   const user = row.original
+  const operatorRole = useAuthStore(
+    (state) => state.auth.user?.role ?? USER_ROLE.USER
+  )
   const { setOpen, setCurrentRow, triggerRefresh } = useUsers()
   const [resetPasskeyOpen, setResetPasskeyOpen] = useState(false)
   const [resetTwoFAOpen, setResetTwoFAOpen] = useState(false)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
   const [subscriptionsDialogOpen, setSubscriptionsDialogOpen] = useState(false)
+  const [roleDialogOpen, setRoleDialogOpen] = useState(false)
 
   const handleEdit = () => {
     setCurrentRow(user)
@@ -133,7 +140,12 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
 
   const isDisabled = user.status === USER_STATUS.DISABLED
   const isAdmin = user.role >= USER_ROLE.ADMIN
+  const isSupport = user.role === USER_ROLE.SUPPORT
   const isRoot = user.role === USER_ROLE.ROOT
+  const promotionTargets = useMemo(
+    () => getPromotableUserRoles(user.role, operatorRole),
+    [operatorRole, user.role]
+  )
 
   if (isUserDeleted(user)) {
     return null
@@ -180,7 +192,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </DropdownMenuItem>
         )}
 
-        {isAdmin && !isRoot && (
+        {(isSupport || (isAdmin && !isRoot)) && (
           <DropdownMenuItem onClick={() => handleManage('demote')}>
             {t('Demote')}
             <DropdownMenuShortcut>
@@ -189,8 +201,13 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </DropdownMenuItem>
         )}
 
-        {!isAdmin && (
-          <DropdownMenuItem onClick={() => handleManage('promote')}>
+        {!isAdmin && promotionTargets.length > 0 && (
+          <DropdownMenuItem
+            onSelect={(event) => {
+              event.preventDefault()
+              setRoleDialogOpen(true)
+            }}
+          >
             {t('Promote')}
             <DropdownMenuShortcut>
               <ArrowUp size={16} />
@@ -299,6 +316,14 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         open={subscriptionsDialogOpen}
         onOpenChange={setSubscriptionsDialogOpen}
         user={{ id: user.id, username: user.username }}
+        onSuccess={triggerRefresh}
+      />
+
+      <UserRoleDialog
+        open={roleDialogOpen}
+        onOpenChange={setRoleDialogOpen}
+        user={user}
+        targetRoles={promotionTargets}
         onSuccess={triggerRefresh}
       />
     </div>
