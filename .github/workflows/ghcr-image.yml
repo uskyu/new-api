@@ -1,0 +1,69 @@
+name: Build GHCR Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional image tag
+        required: false
+        type: string
+  push:
+    branches:
+      - codex/personal-ai-console-next
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: tags
+        env:
+          BRANCH_NAME: ${{ github.ref_name }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT_SHA=$(git rev-parse --short=9 HEAD)
+          if [ -n "$REQUESTED_TAG" ]; then
+            CUSTOM_TAG="$REQUESTED_TAG"
+          else
+            CUSTOM_TAG="${BRANCH_NAME#codex/}"
+          fi
+          CUSTOM_TAG=$(printf '%s' "$CUSTOM_TAG" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^[.-]+//; s/[.-]+$//')
+          if [ -z "$CUSTOM_TAG" ]; then
+            echo "::error::Image tag is empty after normalization"
+            exit 1
+          fi
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "custom_tag=$CUSTOM_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/new-api:${{ steps.tags.outputs.custom_tag }}
+            ghcr.io/${{ github.repository_owner }}/new-api:${{ steps.tags.outputs.custom_tag }}-${{ steps.tags.outputs.short_sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
