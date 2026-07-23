@@ -353,6 +353,35 @@ func TestChangeAgentDownlineUserAssignsAndTransfersOrdinaryUser(t *testing.T) {
 	}
 }
 
+func TestAssignAgentDownlineUserOnlyAssignsEligibleOrdinaryUsers(t *testing.T) {
+	setupAgentBackendTest(t)
+	operator := createAgentBackendTestUser(t, "assign-operator")
+	targetAgent := createAgentBackendTestUser(t, "assign-target")
+	otherAgent := createAgentBackendTestUser(t, "assign-other")
+	unassigned := createAgentBackendTestUser(t, "assign-unassigned")
+	alreadyAssigned := createAgentBackendTestUser(t, "assign-existing")
+	childAgent := createAgentBackendTestUser(t, "assign-child-agent")
+	group := &AgentRebateGroup{Name: "assign-group", RebateRate: 3000, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+	for _, agent := range []*User{targetAgent, otherAgent, childAgent} {
+		require.NoError(t, DB.Create(&AgentProfile{UserId: agent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	}
+	targetPromo := &AgentPromoLink{AgentUserId: targetAgent.Id, Name: "target", Code: "ASSIGNTARGET", Status: AgentPromoLinkEnabled}
+	require.NoError(t, DB.Create(targetPromo).Error)
+	require.NoError(t, DB.Model(alreadyAssigned).Update("inviter_id", otherAgent.Id).Error)
+
+	require.NoError(t, AssignAgentDownlineUser(operator.Id, targetAgent.Id, unassigned.Id, targetPromo.Id, "assign"))
+	var assigned User
+	require.NoError(t, DB.Select("id", "inviter_id", "promo_link_id").First(&assigned, unassigned.Id).Error)
+	assert.Equal(t, targetAgent.Id, assigned.InviterId)
+	assert.Equal(t, targetPromo.Id, assigned.PromoLinkId)
+
+	err := AssignAgentDownlineUser(operator.Id, targetAgent.Id, alreadyAssigned.Id, targetPromo.Id, "duplicate")
+	require.ErrorContains(t, err, "already belongs")
+	err = AssignAgentDownlineUser(operator.Id, targetAgent.Id, childAgent.Id, targetPromo.Id, "agent")
+	require.ErrorContains(t, err, "is an agent")
+}
+
 func TestAgentRebateRateAndBalanceBounds(t *testing.T) {
 	setupAgentBackendTest(t)
 	operator := createAgentBackendTestUser(t, "bounds-operator")

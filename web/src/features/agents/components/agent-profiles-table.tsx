@@ -44,6 +44,7 @@ interface AgentProfilesTableProps {
   onEditProfile?: (profile: AgentProfile) => void
   onViewDownlines?: (profile: AgentProfile) => void
   onAssignDownline?: (profile: AgentProfile) => void
+  assignDisabledUserId?: number
 }
 
 export function AgentProfilesTable(props: AgentProfilesTableProps) {
@@ -179,16 +180,17 @@ export function AgentProfilesTable(props: AgentProfilesTableProps) {
                     {t('View downlines')}
                   </Button>
                 )}
-                {props.onAssignDownline && (
-                  <Button
-                    size='sm'
-                    variant='outline'
-                    onClick={() => props.onAssignDownline?.(profile)}
-                  >
-                    <UserPlus />
-                    {t('Assign user')}
-                  </Button>
-                )}
+                {props.onAssignDownline &&
+                  profile.user_id !== props.assignDisabledUserId && (
+                    <Button
+                      size='sm'
+                      variant='outline'
+                      onClick={() => props.onAssignDownline?.(profile)}
+                    >
+                      <UserPlus />
+                      {t('Assign user')}
+                    </Button>
+                  )}
               </div>
             ),
           },

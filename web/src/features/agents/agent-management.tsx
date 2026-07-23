@@ -65,7 +65,8 @@ const PAGE_SIZE = 10
 
 export function AgentManagement() {
   const { t } = useTranslation()
-  const role = useAuthStore((state) => state.auth.user?.role ?? ROLE.GUEST)
+  const currentUser = useAuthStore((state) => state.auth.user)
+  const role = currentUser?.role ?? ROLE.GUEST
   const isAdmin = role >= ROLE.ADMIN
   const isRoot = role === ROLE.SUPER_ADMIN
   const [initializeOpen, setInitializeOpen] = useState(false)
@@ -383,7 +384,8 @@ export function AgentManagement() {
                     showAvailableBalance={!isAdmin}
                     onEditProfile={openEditAgent}
                     onViewDownlines={setDownlineProfile}
-                    onAssignDownline={isAdmin ? setAssignProfile : undefined}
+                    onAssignDownline={setAssignProfile}
+                    assignDisabledUserId={isAdmin ? undefined : currentUser?.id}
                   />
                   <AgentPagination
                     page={profilePage}

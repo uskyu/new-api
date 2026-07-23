@@ -37,6 +37,12 @@ func TestSupportAgentOperationsRejectSelfBenefit(t *testing.T) {
 			handler: ChangeAgentDownlineUser,
 			message: "cannot assign downlines to their own agent account",
 		},
+		{
+			name:    "downline assignment",
+			body:    `{"target_agent_user_id":7,"downline_user_id":8,"remark":"self assignment"}`,
+			handler: AssignAgentDownlineUser,
+			message: "cannot assign downlines to their own agent account",
+		},
 	}
 
 	for _, test := range tests {

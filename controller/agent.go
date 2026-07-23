@@ -695,6 +695,10 @@ func AssignAgentDownlineUser(c *gin.Context) {
 		common.ApiErrorMsg(c, "invalid request body")
 		return
 	}
+	if c.GetInt("role") == common.RoleSupportUser && req.TargetAgentUserId == c.GetInt("id") {
+		common.ApiErrorMsg(c, "support users cannot assign downlines to their own agent account")
+		return
+	}
 	if err := model.AssignAgentDownlineUser(c.GetInt("id"), req.TargetAgentUserId, req.DownlineUserId, req.PromoLinkId, req.Remark); err != nil {
 		common.ApiError(c, err)
 		return

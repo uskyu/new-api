@@ -101,28 +101,36 @@ export function SupportUsersTable(props: SupportUsersTableProps) {
           {
             id: 'actions',
             header: t('Actions'),
-            cell: (user) => (
-              <div className='flex items-center gap-2'>
-                <Button
-                  size='sm'
-                  variant='outline'
-                  onClick={() => setActiveUser(user)}
-                >
-                  <Repeat2 />
-                  {t('Change')}
-                </Button>
-                {props.allowQuotaDecrease !== false && (
+            cell: (user) => {
+              let actionLabel = t('Assign user')
+              if (user.is_agent) {
+                actionLabel = t('Change agent parent')
+              } else if (user.inviter_id > 0) {
+                actionLabel = t('Transfer user')
+              }
+              return (
+                <div className='flex items-center gap-2'>
                   <Button
                     size='sm'
                     variant='outline'
-                    onClick={() => setQuotaUser(user)}
+                    onClick={() => setActiveUser(user)}
                   >
-                    <CircleMinus />
-                    {t('Decrease balance')}
+                    <Repeat2 />
+                    {actionLabel}
                   </Button>
-                )}
-              </div>
-            ),
+                  {props.allowQuotaDecrease !== false && (
+                    <Button
+                      size='sm'
+                      variant='outline'
+                      onClick={() => setQuotaUser(user)}
+                    >
+                      <CircleMinus />
+                      {t('Decrease balance')}
+                    </Button>
+                  )}
+                </div>
+              )
+            },
           },
         ]}
       />

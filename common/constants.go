@@ -207,6 +207,7 @@ var RolePermissions = map[int]map[string]bool{
 		PermissionRedemptionDisable:     true,
 		PermissionRedemptionDelete:      true,
 		PermissionUserQuotaDecrease:     true,
+		PermissionAgentDownlineAssign:   true,
 		PermissionAgentDownlineTransfer: true,
 		PermissionAgentBalanceAdjust:    true,
 	},

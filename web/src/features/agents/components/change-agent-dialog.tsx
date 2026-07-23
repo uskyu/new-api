@@ -58,6 +58,15 @@ export function ChangeAgentDialog(props: ChangeAgentDialogProps) {
   })
   const mutation = useChangeUserAgent()
   const transferMutation = useTransferAgentDownline()
+  const isAssignment = !props.userIsAgent && (props.user.inviter_id ?? 0) <= 0
+  let dialogTitle = t('Change upstream agent')
+  let confirmLabel = t('Confirm change')
+  if (props.userIsAgent) {
+    dialogTitle = t('Change agent parent')
+  } else if (isAssignment) {
+    dialogTitle = t('Assign user')
+    confirmLabel = t('Confirm assignment')
+  }
   const items = (profiles.data?.data?.items ?? []).filter(
     (profile) =>
       profile.user_id !== props.user.id &&
@@ -127,14 +136,25 @@ export function ChangeAgentDialog(props: ChangeAgentDialogProps) {
               remark: remark.trim(),
             })
       if (!response.success) {
-        toast.error(response.message || t('Failed to change upstream agent'))
+        toast.error(
+          response.message ||
+            (isAssignment
+              ? t('Failed to assign user')
+              : t('Failed to change upstream agent'))
+        )
         return
       }
-      toast.success(t('Upstream agent changed'))
+      toast.success(
+        isAssignment ? t('User assigned to agent') : t('Upstream agent changed')
+      )
       props.onSuccess?.()
       handleOpenChange(false)
     } catch {
-      toast.error(t('Failed to change upstream agent'))
+      toast.error(
+        isAssignment
+          ? t('Failed to assign user')
+          : t('Failed to change upstream agent')
+      )
     }
   }
 
@@ -142,11 +162,7 @@ export function ChangeAgentDialog(props: ChangeAgentDialogProps) {
     <Dialog
       open={props.open}
       onOpenChange={handleOpenChange}
-      title={
-        props.userIsAgent
-          ? t('Change agent parent')
-          : t('Change upstream agent')
-      }
+      title={dialogTitle}
       description={`${props.user.display_name || props.user.username} (#${props.user.id})`}
       contentClassName='sm:max-w-xl'
       footer={
@@ -165,7 +181,7 @@ export function ChangeAgentDialog(props: ChangeAgentDialogProps) {
           >
             {mutation.isPending || transferMutation.isPending
               ? t('Processing...')
-              : t('Confirm change')}
+              : confirmLabel}
           </Button>
         </>
       }
