@@ -224,6 +224,135 @@ func TestChangeAgentParentRejectsRateConflict(t *testing.T) {
 	assert.Equal(t, oldParent.Id, unchanged.ParentAgentUserId)
 }
 
+func TestTransferAgentDownlineUserChangesOnlyFutureRebateOwner(t *testing.T) {
+	setupAgentBackendTest(t)
+	previousQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500000
+	t.Cleanup(func() { common.QuotaPerUnit = previousQuotaPerUnit })
+
+	operator := createAgentBackendTestUser(t, "transfer-operator")
+	sourceAgent := createAgentBackendTestUser(t, "transfer-source")
+	targetAgent := createAgentBackendTestUser(t, "transfer-target")
+	downline := createAgentBackendTestUser(t, "transfer-downline")
+	group := &AgentRebateGroup{Name: "transfer-group", RebateRate: 3000, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+	for _, agent := range []*User{sourceAgent, targetAgent} {
+		require.NoError(t, DB.Create(&AgentProfile{UserId: agent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	}
+	oldPromo := &AgentPromoLink{AgentUserId: sourceAgent.Id, Name: "old", Code: "TRANSFEROLD", Status: AgentPromoLinkEnabled}
+	newPromo := &AgentPromoLink{AgentUserId: targetAgent.Id, Name: "new", Code: "TRANSFERNEW", Status: AgentPromoLinkEnabled}
+	require.NoError(t, DB.Create(oldPromo).Error)
+	require.NoError(t, DB.Create(newPromo).Error)
+	require.NoError(t, DB.Model(downline).Updates(map[string]interface{}{
+		"inviter_id":    sourceAgent.Id,
+		"promo_link_id": oldPromo.Id,
+	}).Error)
+
+	oldTopUp := &TopUp{UserId: downline.Id, Money: 100, TradeNo: "before-downline-transfer", Status: common.TopUpStatusSuccess}
+	require.NoError(t, DB.Create(oldTopUp).Error)
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		return SettleAgentRebateTx(tx, oldTopUp, AgentRebateSourceEPay)
+	}))
+
+	require.NoError(t, TransferAgentDownlineUser(operator.Id, sourceAgent.Id, targetAgent.Id, downline.Id, newPromo.Id, "move downline"))
+	var updatedDownline User
+	require.NoError(t, DB.Select("id", "inviter_id", "promo_link_id").First(&updatedDownline, downline.Id).Error)
+	assert.Equal(t, targetAgent.Id, updatedDownline.InviterId)
+	assert.Equal(t, newPromo.Id, updatedDownline.PromoLinkId)
+
+	newTopUp := &TopUp{UserId: downline.Id, Money: 100, TradeNo: "after-downline-transfer", Status: common.TopUpStatusSuccess}
+	require.NoError(t, DB.Create(newTopUp).Error)
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		return SettleAgentRebateTx(tx, newTopUp, AgentRebateSourceEPay)
+	}))
+	redemption := &Redemption{
+		UserId:      operator.Id,
+		Key:         "20000000000000000000000000000002",
+		Status:      common.RedemptionCodeStatusEnabled,
+		Name:        "transfer redemption rebate",
+		Quota:       int(100 * common.QuotaPerUnit),
+		CreatedTime: common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(redemption).Error)
+	_, err := Redeem(redemption.Key, downline.Id)
+	require.NoError(t, err)
+
+	sourceProfile, err := GetAgentProfileByUserId(sourceAgent.Id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3000), sourceProfile.RebateBalanceAmount)
+	targetProfile, err := GetAgentProfileByUserId(targetAgent.Id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(6000), targetProfile.RebateBalanceAmount)
+
+	var topUpRecords []AgentRebateRecord
+	require.NoError(t, DB.Order("id asc").Find(&topUpRecords).Error)
+	require.Len(t, topUpRecords, 2)
+	assert.Equal(t, sourceAgent.Id, topUpRecords[0].AgentUserId)
+	assert.Equal(t, oldPromo.Id, topUpRecords[0].PromoLinkId)
+	assert.Equal(t, targetAgent.Id, topUpRecords[1].AgentUserId)
+	assert.Equal(t, newPromo.Id, topUpRecords[1].PromoLinkId)
+
+	var redemptionRecord AgentRedemptionRebateRecord
+	require.NoError(t, DB.Where("redemption_id = ?", redemption.Id).First(&redemptionRecord).Error)
+	assert.Equal(t, targetAgent.Id, redemptionRecord.AgentUserId)
+	assert.Equal(t, newPromo.Id, redemptionRecord.PromoLinkId)
+}
+
+func TestTransferAgentDownlineUserRejectsInvalidOwnershipAndPromoLink(t *testing.T) {
+	setupAgentBackendTest(t)
+	operator := createAgentBackendTestUser(t, "transfer-guard-operator")
+	sourceAgent := createAgentBackendTestUser(t, "transfer-guard-source")
+	targetAgent := createAgentBackendTestUser(t, "transfer-guard-target")
+	otherAgent := createAgentBackendTestUser(t, "transfer-guard-other")
+	downline := createAgentBackendTestUser(t, "transfer-guard-downline")
+	childAgent := createAgentBackendTestUser(t, "transfer-guard-child")
+	group := &AgentRebateGroup{Name: "transfer-guard-group", RebateRate: 3000, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+	for _, agent := range []*User{sourceAgent, targetAgent, otherAgent, childAgent} {
+		require.NoError(t, DB.Create(&AgentProfile{UserId: agent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	}
+	targetPromo := &AgentPromoLink{AgentUserId: targetAgent.Id, Name: "target", Code: "GUARDTARGET", Status: AgentPromoLinkEnabled}
+	wrongPromo := &AgentPromoLink{AgentUserId: otherAgent.Id, Name: "wrong", Code: "GUARDWRONG", Status: AgentPromoLinkEnabled}
+	require.NoError(t, DB.Create(targetPromo).Error)
+	require.NoError(t, DB.Create(wrongPromo).Error)
+	require.NoError(t, DB.Model(downline).Update("inviter_id", otherAgent.Id).Error)
+	require.NoError(t, DB.Model(childAgent).Update("inviter_id", sourceAgent.Id).Error)
+
+	err := TransferAgentDownlineUser(operator.Id, sourceAgent.Id, targetAgent.Id, downline.Id, targetPromo.Id, "")
+	require.ErrorContains(t, err, "does not belong")
+	err = TransferAgentDownlineUser(operator.Id, sourceAgent.Id, targetAgent.Id, childAgent.Id, targetPromo.Id, "")
+	require.ErrorContains(t, err, "is an agent")
+	require.NoError(t, DB.Model(downline).Update("inviter_id", sourceAgent.Id).Error)
+	err = TransferAgentDownlineUser(operator.Id, sourceAgent.Id, targetAgent.Id, downline.Id, wrongPromo.Id, "")
+	require.Error(t, err)
+}
+
+func TestChangeAgentDownlineUserAssignsAndTransfersOrdinaryUser(t *testing.T) {
+	setupAgentBackendTest(t)
+	operator := createAgentBackendTestUser(t, "change-operator")
+	sourceAgent := createAgentBackendTestUser(t, "change-source")
+	targetAgent := createAgentBackendTestUser(t, "change-target")
+	unassigned := createAgentBackendTestUser(t, "change-unassigned")
+	assigned := createAgentBackendTestUser(t, "change-assigned")
+	group := &AgentRebateGroup{Name: "change-group", RebateRate: 3000, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+	for _, agent := range []*User{sourceAgent, targetAgent} {
+		require.NoError(t, DB.Create(&AgentProfile{UserId: agent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	}
+	targetPromo := &AgentPromoLink{AgentUserId: targetAgent.Id, Name: "target", Code: "CHANGETARGET", Status: AgentPromoLinkEnabled}
+	require.NoError(t, DB.Create(targetPromo).Error)
+	require.NoError(t, DB.Model(assigned).Update("inviter_id", sourceAgent.Id).Error)
+
+	require.NoError(t, ChangeAgentDownlineUser(operator.Id, targetAgent.Id, unassigned.Id, targetPromo.Id, "assign"))
+	require.NoError(t, ChangeAgentDownlineUser(operator.Id, targetAgent.Id, assigned.Id, targetPromo.Id, "transfer"))
+	for _, userId := range []int{unassigned.Id, assigned.Id} {
+		var user User
+		require.NoError(t, DB.Select("id", "inviter_id", "promo_link_id").First(&user, userId).Error)
+		assert.Equal(t, targetAgent.Id, user.InviterId)
+		assert.Equal(t, targetPromo.Id, user.PromoLinkId)
+	}
+}
+
 func TestAgentRebateRateAndBalanceBounds(t *testing.T) {
 	setupAgentBackendTest(t)
 	operator := createAgentBackendTestUser(t, "bounds-operator")
@@ -359,6 +488,51 @@ func TestSuccessfulTopUpsSettleAgentRebateAcrossProviders(t *testing.T) {
 			assert.Equal(t, int64(1000), profile.RebateTotalAmount)
 		})
 	}
+}
+
+func TestSuccessfulRedemptionSettlesAgentRebate(t *testing.T) {
+	setupAgentBackendTest(t)
+	previousQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500000
+	t.Cleanup(func() { common.QuotaPerUnit = previousQuotaPerUnit })
+
+	agent := createAgentBackendTestUser(t, "redemption-agent")
+	invitee := createAgentBackendTestUser(t, "redemption-invitee")
+	group := &AgentRebateGroup{Name: "redemption-group", RebateRate: 1500, Status: AgentStatusEnabled}
+	require.NoError(t, DB.Create(group).Error)
+	require.NoError(t, DB.Create(&AgentProfile{UserId: agent.Id, Status: AgentStatusEnabled, RebateGroupId: group.Id}).Error)
+	require.NoError(t, DB.Model(invitee).Update("inviter_id", agent.Id).Error)
+
+	redemption := &Redemption{
+		UserId:      agent.Id,
+		Key:         "10000000000000000000000000000001",
+		Status:      common.RedemptionCodeStatusEnabled,
+		Name:        "agent redemption rebate",
+		Quota:       int(100 * common.QuotaPerUnit),
+		CreatedTime: common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(redemption).Error)
+
+	quota, err := Redeem(redemption.Key, invitee.Id)
+	require.NoError(t, err)
+	assert.Equal(t, redemption.Quota, quota)
+
+	var record AgentRedemptionRebateRecord
+	require.NoError(t, DB.Where("redemption_id = ?", redemption.Id).First(&record).Error)
+	assert.Equal(t, invitee.Id, record.InviteeUserId)
+	assert.Equal(t, agent.Id, record.AgentUserId)
+	assert.Equal(t, int64(1500), record.RebateAmount)
+
+	profile, err := GetAgentProfileByUserId(agent.Id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1500), profile.RebateBalanceAmount)
+	assert.Equal(t, int64(1500), profile.RebateTotalAmount)
+
+	_, err = Redeem(redemption.Key, invitee.Id)
+	require.ErrorIs(t, err, ErrRedeemFailed)
+	var recordCount int64
+	require.NoError(t, DB.Model(&AgentRedemptionRebateRecord{}).Where("redemption_id = ?", redemption.Id).Count(&recordCount).Error)
+	assert.Equal(t, int64(1), recordCount)
 }
 
 func TestEpayRechargeRollsBackWhenAgentSettlementFails(t *testing.T) {
