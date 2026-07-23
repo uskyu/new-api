@@ -40,6 +40,7 @@ interface AgentProfilesTableProps {
   allowBalanceAdjustment: boolean
   allowProfileEditing?: boolean
   showFinancialDetails?: boolean
+  showAvailableBalance?: boolean
   onEditProfile?: (profile: AgentProfile) => void
   onViewDownlines?: (profile: AgentProfile) => void
   onAssignDownline?: (profile: AgentProfile) => void
@@ -112,6 +113,16 @@ export function AgentProfilesTable(props: AgentProfilesTableProps) {
                   header: t('Total rebate'),
                   cell: (profile: AgentProfile) =>
                     formatAgentAmount(profile.rebate_total_amount),
+                },
+              ]
+            : []),
+          ...(!props.showFinancialDetails && props.showAvailableBalance
+            ? [
+                {
+                  id: 'balance',
+                  header: t('Available rebate'),
+                  cell: (profile: AgentProfile) =>
+                    formatAgentAmount(profile.rebate_balance_amount),
                 },
               ]
             : []),

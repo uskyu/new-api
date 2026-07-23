@@ -95,11 +95,12 @@ type ChangeAgentDownlineUserRequest struct {
 }
 
 type SupportAgentProfileView struct {
-	Id          int    `json:"id"`
-	UserId      int    `json:"user_id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	Status      int    `json:"status"`
+	Id                  int    `json:"id"`
+	UserId              int    `json:"user_id"`
+	Username            string `json:"username"`
+	DisplayName         string `json:"display_name"`
+	Status              int    `json:"status"`
+	RebateBalanceAmount int64  `json:"rebate_balance_amount"`
 }
 
 func writeAgentConflict(c *gin.Context, err error) bool {
@@ -216,11 +217,12 @@ func GetAgentProfiles(c *gin.Context) {
 		safeProfiles := make([]*SupportAgentProfileView, 0, len(profiles))
 		for _, profile := range profiles {
 			safeProfiles = append(safeProfiles, &SupportAgentProfileView{
-				Id:          profile.Id,
-				UserId:      profile.UserId,
-				Username:    profile.Username,
-				DisplayName: profile.DisplayName,
-				Status:      profile.Status,
+				Id:                  profile.Id,
+				UserId:              profile.UserId,
+				Username:            profile.Username,
+				DisplayName:         profile.DisplayName,
+				Status:              profile.Status,
+				RebateBalanceAmount: profile.RebateBalanceAmount,
 			})
 		}
 		pageInfo.SetTotal(int(total))
@@ -260,6 +262,10 @@ func AdjustAgentBalance(c *gin.Context) {
 	var req AdjustAgentBalanceRequest
 	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
 		common.ApiErrorMsg(c, "invalid request body")
+		return
+	}
+	if c.GetInt("role") == common.RoleSupportUser && req.AgentUserId == c.GetInt("id") {
+		common.ApiErrorMsg(c, "support users cannot adjust their own agent balance")
 		return
 	}
 	reason := strings.TrimSpace(req.Reason)
@@ -644,6 +650,19 @@ func GetAgentDownlineUsers(c *gin.Context) {
 		return
 	}
 	users, total, err := model.GetAgentDownlineUsers(pageInfo, agentUserId, keyword)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(users)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func GetAgentAssignedUsers(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	agentUserId, _ := strconv.Atoi(c.Query("agent_user_id"))
+	users, total, err := model.GetAgentAssignedUsers(c.Query("keyword"), agentUserId, pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
 		return

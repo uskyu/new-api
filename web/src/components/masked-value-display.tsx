@@ -35,6 +35,7 @@ interface MaskedValueDisplayProps {
   copyTooltip: string
   /** 复制按钮的 aria-label */
   copyAriaLabel: string
+  copyable?: boolean
 }
 
 /**
@@ -70,13 +71,15 @@ export function MaskedValueDisplay(props: MaskedValueDisplayProps) {
           </div>
         </PopoverContent>
       </Popover>
-      <CopyButton
-        value={props.fullValue}
-        className='size-7'
-        iconClassName='size-3.5'
-        tooltip={props.copyTooltip}
-        aria-label={props.copyAriaLabel}
-      />
+      {props.copyable !== false && (
+        <CopyButton
+          value={props.fullValue}
+          className='size-7'
+          iconClassName='size-3.5'
+          tooltip={props.copyTooltip}
+          aria-label={props.copyAriaLabel}
+        />
+      )}
     </div>
   )
 }

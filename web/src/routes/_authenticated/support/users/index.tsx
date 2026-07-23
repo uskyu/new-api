@@ -18,32 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
-import { AuthenticatedLayout } from '@/components/layout'
+import { SupportUserManagement } from '@/features/agents/support-user-management'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
-export const Route = createFileRoute('/_authenticated')({
-  beforeLoad: ({ location }) => {
-    const { auth } = useAuthStore.getState()
-
-    if (!auth.user || !auth.accessToken) {
-      throw redirect({
-        to: '/sign-in',
-        search: { redirect: location.href },
-      })
-    }
-
-    if (auth.user.role === ROLE.SUPPORT) {
-      const pathname = location.pathname.replace(/\/$/, '')
-      const supportRoutes = new Set([
-        '/support/users',
-        '/agents',
-        '/redemption-codes',
-      ])
-      if (!supportRoutes.has(pathname)) {
-        throw redirect({ to: '/support/users' })
-      }
-    }
+export const Route = createFileRoute('/_authenticated/support/users/')({
+  beforeLoad: () => {
+    const user = useAuthStore.getState().auth.user
+    if (!user || user.role !== ROLE.SUPPORT) throw redirect({ to: '/403' })
   },
-  component: AuthenticatedLayout,
+  component: SupportUserManagement,
 })

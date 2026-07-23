@@ -26,7 +26,9 @@ import {
 } from '@/components/ui/sidebar'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
+import { ROLE } from '@/lib/roles'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 type SystemBrandProps = {
   defaultName?: string
@@ -49,6 +51,9 @@ export function SystemBrand(props: SystemBrandProps) {
   const { t } = useTranslation()
   const { status } = useStatus()
   const { logo } = useSystemConfig()
+  const isSupport = useAuthStore(
+    (state) => state.auth.user?.role === ROLE.SUPPORT
+  )
 
   const variant = props.variant ?? 'sidebar'
   const name = status?.system_name || props.defaultName || 'New API'
@@ -58,7 +63,7 @@ export function SystemBrand(props: SystemBrandProps) {
   if (variant === 'inline') {
     return (
       <Link
-        to='/'
+        to={isSupport ? '/support/users' : '/'}
         aria-label={t('Go to home')}
         className={cn(
           'text-foreground inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 text-sm font-medium transition-colors outline-none select-none',

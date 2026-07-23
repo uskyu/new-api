@@ -30,6 +30,8 @@ import {
 } from '@/components/data-table'
 import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { getRedemptions, searchRedemptions } from '../api'
 import {
@@ -55,6 +57,9 @@ function isDisabledRedemptionRow(redemption: Redemption) {
 
 export function RedemptionsTable() {
   const { t } = useTranslation()
+  const canManage = useAuthStore(
+    (state) => (state.auth.user?.role ?? ROLE.GUEST) >= ROLE.ADMIN
+  )
   const columns = useRedemptionsColumns()
   const { refreshTrigger } = useRedemptions()
   const isMobile = useMediaQuery('(max-width: 640px)')
@@ -132,7 +137,7 @@ export function RedemptionsTable() {
   const { table } = useDataTable({
     data: redemptions,
     columns,
-    enableRowSelection: true,
+    enableRowSelection: canManage,
     columnFilters,
     globalFilter,
     pagination,
@@ -185,7 +190,9 @@ export function RedemptionsTable() {
         if (!isDisabledRedemptionRow(row.original)) return undefined
         return isMobile ? DISABLED_ROW_MOBILE : DISABLED_ROW_DESKTOP
       }}
-      bulkActions={<DataTableBulkActions table={table} />}
+      bulkActions={
+        canManage ? <DataTableBulkActions table={table} /> : undefined
+      }
     />
   )
 }

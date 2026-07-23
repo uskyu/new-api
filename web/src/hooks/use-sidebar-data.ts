@@ -147,16 +147,16 @@ export function useSidebarData(): SidebarData {
             requiredRole: ROLE.ADMIN,
           },
           {
-            title: t('Users'),
-            url: '/users',
+            title: role === ROLE.SUPPORT ? t('User Management') : t('Users'),
+            url: role === ROLE.SUPPORT ? '/support/users' : '/users',
             icon: Users,
-            requiredRole: ROLE.ADMIN,
+            requiredRole: ROLE.SUPPORT,
           },
           {
             title: t('Redemption Codes'),
             url: '/redemption-codes',
             icon: Ticket,
-            requiredRole: ROLE.ADMIN,
+            requiredRole: ROLE.SUPPORT,
           },
           {
             title: t('Subscriptions'),
@@ -165,10 +165,7 @@ export function useSidebarData(): SidebarData {
             requiredRole: ROLE.ADMIN,
           },
           {
-            title:
-              role === ROLE.SUPPORT
-                ? t('User Management')
-                : t('Agent Management'),
+            title: t('Agent Management'),
             url: '/agents',
             icon: UserRoundCog,
             requiredRole: ROLE.SUPPORT,

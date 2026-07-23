@@ -98,6 +98,46 @@ func SearchSupportManagedUsers(keyword string, pageInfo *common.PageInfo) ([]*Su
 	return users, total, nil
 }
 
+func GetAgentAssignedUsers(keyword string, agentUserId int, pageInfo *common.PageInfo) ([]*SupportManagedUser, int64, error) {
+	users := make([]*SupportManagedUser, 0)
+	keyword = strings.TrimSpace(keyword)
+	query := DB.Model(&User{}).
+		Joins("LEFT JOIN users AS inviter ON inviter.id = users.inviter_id").
+		Where("users.role = ? AND users.inviter_id > ?", common.RoleCommonUser, 0)
+	if agentUserId > 0 {
+		query = query.Where("users.inviter_id = ?", agentUserId)
+	}
+	if keyword != "" {
+		pattern := strings.ReplaceAll(keyword, "!", "!!")
+		pattern = strings.ReplaceAll(pattern, "%", "!%")
+		pattern = strings.ReplaceAll(pattern, "_", "!_")
+		pattern = "%" + pattern + "%"
+		likeCondition := "users.username LIKE ? ESCAPE '!' OR users.email LIKE ? ESCAPE '!' OR users.display_name LIKE ? ESCAPE '!' OR inviter.username LIKE ? ESCAPE '!' OR inviter.display_name LIKE ? ESCAPE '!'"
+		if id, err := strconv.Atoi(keyword); err == nil {
+			query = query.Where("(users.id = ? OR users.inviter_id = ? OR "+likeCondition+")", id, id, pattern, pattern, pattern, pattern, pattern)
+		} else {
+			query = query.Where("("+likeCondition+")", pattern, pattern, pattern, pattern, pattern)
+		}
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := query.
+		Select("users.id, users.username, users.display_name, users.quota, users.used_quota, users.inviter_id, COALESCE(inviter.username, '') AS inviter_username, COALESCE(inviter.display_name, '') AS inviter_display_name").
+		Order("users.id DESC").
+		Limit(pageInfo.GetPageSize()).
+		Offset(pageInfo.GetStartIdx()).
+		Scan(&users).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := setSupportManagedUserAgentFlags(users); err != nil {
+		return nil, 0, err
+	}
+	return users, total, nil
+}
+
 func GetSupportManagedUserById(id int) (*SupportManagedUser, error) {
 	if id <= 0 {
 		return nil, errors.New("invalid user id")

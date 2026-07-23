@@ -46,12 +46,13 @@ func registerExtensionApiRoutes(apiRouter *gin.RouterGroup) {
 		agentRoute.POST("/upgrade-request/:id/review", middleware.AdminAuth(), controller.ReviewAgentUpgradeRequest)
 
 		agentRoute.GET("/profiles", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.GetAgentProfiles)
-		agentRoute.GET("/downlines", middleware.AdminAuth(), controller.GetAgentDownlineUsers)
+		agentRoute.GET("/assignments", middleware.AdminAuth(), controller.GetAgentAssignedUsers)
+		agentRoute.GET("/downlines", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.GetAgentDownlineUsers)
 		agentRoute.POST("/downline/assign", middleware.PermissionAuth(common.PermissionAgentDownlineAssign), controller.AssignAgentDownlineUser)
 		agentRoute.POST("/downline/transfer", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.TransferAgentDownlineUser)
 		agentRoute.POST("/downline/change", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.ChangeAgentDownlineUser)
 		agentRoute.POST("/adjust", middleware.PermissionAuth(common.PermissionAgentBalanceAdjust), controller.AdjustAgentBalance)
-		agentRoute.GET("/adjustments", middleware.PermissionAuth(common.PermissionAgentBalanceAdjust), controller.GetAgentAdjustments)
+		agentRoute.GET("/adjustments", middleware.AdminAuth(), controller.GetAgentAdjustments)
 	}
 
 	supportRoute := apiRouter.Group("/support")

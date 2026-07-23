@@ -8,14 +8,18 @@ import (
 
 func TestSupportRoleHasOnlyExpectedOperationalPermissions(t *testing.T) {
 	for _, permission := range []string{
+		PermissionRedemptionRead,
+		PermissionRedemptionDisable,
+		PermissionRedemptionDelete,
 		PermissionUserQuotaDecrease,
 		PermissionAgentDownlineTransfer,
+		PermissionAgentBalanceAdjust,
 	} {
 		assert.True(t, RoleHasPermission(RoleSupportUser, permission), permission)
 	}
 	for _, permission := range []string{
 		PermissionAgentDownlineAssign,
-		PermissionAgentBalanceAdjust,
+		PermissionRedemptionManage,
 	} {
 		assert.False(t, RoleHasPermission(RoleSupportUser, permission), permission)
 	}

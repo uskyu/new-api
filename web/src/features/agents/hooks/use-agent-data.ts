@@ -24,6 +24,7 @@ import {
   changeUserAgent,
   decreaseSupportUserQuota,
   getAgentDownlines,
+  getAgentAssignments,
   getAgentDailyMetrics,
   getAgentOverview,
   getAgentProfiles,
@@ -144,6 +145,7 @@ export function useAssignAgentDownline() {
         queryClient.invalidateQueries({
           queryKey: ['agents', 'support-users'],
         }),
+        queryClient.invalidateQueries({ queryKey: ['agents', 'assignments'] }),
       ])
     },
   })
@@ -160,6 +162,7 @@ export function useTransferAgentDownline() {
         queryClient.invalidateQueries({
           queryKey: ['agents', 'support-users'],
         }),
+        queryClient.invalidateQueries({ queryKey: ['agents', 'assignments'] }),
       ])
     },
   })
@@ -193,6 +196,20 @@ export function useSupportUsers(params: {
   })
 }
 
+export function useAgentAssignments(params: {
+  page: number
+  pageSize: number
+  keyword?: string
+  agentUserId?: number
+  enabled: boolean
+}) {
+  return useQuery({
+    queryKey: ['agents', 'assignments', params],
+    queryFn: () => getAgentAssignments(params),
+    enabled: params.enabled,
+  })
+}
+
 export function useAdjustAgentBalance() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -219,6 +236,7 @@ export function useChangeUserAgent() {
         queryClient.invalidateQueries({ queryKey: ['users'] }),
         queryClient.invalidateQueries({ queryKey: ['agents', 'profiles'] }),
         queryClient.invalidateQueries({ queryKey: ['agents', 'downlines'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents', 'assignments'] }),
       ])
     },
   })

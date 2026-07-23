@@ -252,6 +252,25 @@ export async function searchSupportUsers(params: {
   return response.data
 }
 
+export async function getAgentAssignments(params: {
+  page: number
+  pageSize: number
+  keyword?: string
+  agentUserId?: number
+}) {
+  const response = await api.get<
+    AgentApiResponse<PagedAgentData<SupportManagedUser>>
+  >('/api/agent/assignments', {
+    params: {
+      p: params.page,
+      page_size: params.pageSize,
+      keyword: params.keyword || undefined,
+      agent_user_id: params.agentUserId || undefined,
+    },
+  })
+  return response.data
+}
+
 export async function changeUserAgent(payload: {
   downlineUserId: number
   targetAgentUserId: number

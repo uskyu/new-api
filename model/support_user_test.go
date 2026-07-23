@@ -54,6 +54,39 @@ func TestSupportUserSearchMarksEnabledAgents(t *testing.T) {
 	assert.True(t, users[0].IsAgent)
 }
 
+func TestAgentAssignedUsersLoadsWithoutKeywordAndFiltersByAgent(t *testing.T) {
+	setupAgentBackendTest(t)
+	firstAgent := createAgentBackendTestUser(t, "assignment-first-agent")
+	secondAgent := createAgentBackendTestUser(t, "assignment-second-agent")
+	firstUser := createAgentBackendTestUser(t, "assignment-first-user")
+	secondUser := createAgentBackendTestUser(t, "assignment-second-user")
+	unassigned := createAgentBackendTestUser(t, "assignment-unassigned")
+	require.NoError(t, DB.Model(firstUser).Update("inviter_id", firstAgent.Id).Error)
+	require.NoError(t, DB.Model(secondUser).Update("inviter_id", secondAgent.Id).Error)
+
+	pageInfo := &common.PageInfo{Page: 1, PageSize: 10}
+	users, total, err := GetAgentAssignedUsers("", 0, pageInfo)
+	require.NoError(t, err)
+	require.Len(t, users, 2)
+	assert.Equal(t, int64(2), total)
+	for _, user := range users {
+		assert.NotEqual(t, unassigned.Id, user.Id)
+	}
+
+	users, total, err = GetAgentAssignedUsers("", firstAgent.Id, pageInfo)
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	assert.Equal(t, int64(1), total)
+	assert.Equal(t, firstUser.Id, users[0].Id)
+	assert.Equal(t, firstAgent.Username, users[0].InviterUsername)
+
+	users, total, err = GetAgentAssignedUsers(secondAgent.Username, 0, pageInfo)
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	assert.Equal(t, int64(1), total)
+	assert.Equal(t, secondUser.Id, users[0].Id)
+}
+
 func TestSupportQuotaDecreaseIsAtomicAndCannotOverdraw(t *testing.T) {
 	setupAgentBackendTest(t)
 	support := createAgentBackendTestUser(t, "quota-support")

@@ -34,6 +34,7 @@ interface SupportUsersTableProps {
   users: SupportManagedUser[]
   loading: boolean
   searched: boolean
+  allowQuotaDecrease?: boolean
 }
 
 export function SupportUsersTable(props: SupportUsersTableProps) {
@@ -110,14 +111,16 @@ export function SupportUsersTable(props: SupportUsersTableProps) {
                   <Repeat2 />
                   {t('Change')}
                 </Button>
-                <Button
-                  size='sm'
-                  variant='outline'
-                  onClick={() => setQuotaUser(user)}
-                >
-                  <CircleMinus />
-                  {t('Decrease balance')}
-                </Button>
+                {props.allowQuotaDecrease !== false && (
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={() => setQuotaUser(user)}
+                  >
+                    <CircleMinus />
+                    {t('Decrease balance')}
+                  </Button>
+                )}
               </div>
             ),
           },
@@ -127,6 +130,7 @@ export function SupportUsersTable(props: SupportUsersTableProps) {
       {activeUser && (
         <ChangeAgentDialog
           user={activeUser}
+          userIsAgent={activeUser.is_agent}
           open
           onOpenChange={(open) => !open && setActiveUser(undefined)}
         />

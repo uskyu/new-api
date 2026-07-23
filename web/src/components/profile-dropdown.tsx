@@ -47,6 +47,7 @@ export function ProfileDropdown() {
   const user = useAuthStore((state) => state.auth.user)
   const { displayName, roleLabel } = useUserDisplay(user)
   const isSuperAdmin = user?.role === ROLE.SUPER_ADMIN
+  const isSupport = user?.role === ROLE.SUPPORT
   const isWalletVisible = useIsSidebarModuleVisible('/wallet')
   const avatarName = user?.username || displayName
   const avatarFallback = getUserAvatarFallback(avatarName)
@@ -100,32 +101,33 @@ export function ProfileDropdown() {
             </div>
           </div>
 
-          <DropdownMenuSeparator />
-
-          <DropdownMenuItem onClick={() => navigate({ to: '/profile' })}>
-            <User className='size-4' />
-            {t('Profile')}
-          </DropdownMenuItem>
-
-          {isWalletVisible && (
-            <DropdownMenuItem onClick={() => navigate({ to: '/wallet' })}>
-              <Wallet className='size-4' />
-              {t('Wallet')}
-            </DropdownMenuItem>
-          )}
-
-          {isSuperAdmin && (
-            <DropdownMenuItem
-              onClick={() =>
-                navigate({
-                  to: '/system-settings/site/$section',
-                  params: { section: 'system-info' },
-                })
-              }
-            >
-              <Settings className='size-4' />
-              {t('System Settings')}
-            </DropdownMenuItem>
+          {!isSupport && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => navigate({ to: '/profile' })}>
+                <User className='size-4' />
+                {t('Profile')}
+              </DropdownMenuItem>
+              {isWalletVisible && (
+                <DropdownMenuItem onClick={() => navigate({ to: '/wallet' })}>
+                  <Wallet className='size-4' />
+                  {t('Wallet')}
+                </DropdownMenuItem>
+              )}
+              {isSuperAdmin && (
+                <DropdownMenuItem
+                  onClick={() =>
+                    navigate({
+                      to: '/system-settings/site/$section',
+                      params: { section: 'system-info' },
+                    })
+                  }
+                >
+                  <Settings className='size-4' />
+                  {t('System Settings')}
+                </DropdownMenuItem>
+              )}
+            </>
           )}
 
           <DropdownMenuSeparator />

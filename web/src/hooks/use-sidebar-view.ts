@@ -55,7 +55,10 @@ export function useSidebarView(): ResolvedSidebarView {
     const role = userRole ?? ROLE.GUEST
     const canSeeAdminGroup = role >= ROLE.SUPPORT
     return configFilteredRoot
-      .filter((group) => (group.id === 'admin' ? canSeeAdminGroup : true))
+      .filter((group) => {
+        if (role === ROLE.SUPPORT) return group.id === 'admin'
+        return group.id === 'admin' ? canSeeAdminGroup : true
+      })
       .map((group) => {
         const items = group.items.filter(
           (item) => item.requiredRole === undefined || role >= item.requiredRole

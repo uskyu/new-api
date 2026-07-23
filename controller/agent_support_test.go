@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSupportTransfersRejectSelfBenefit(t *testing.T) {
+func TestSupportAgentOperationsRejectSelfBenefit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
 		name    string
@@ -19,6 +19,12 @@ func TestSupportTransfersRejectSelfBenefit(t *testing.T) {
 		handler gin.HandlerFunc
 		message string
 	}{
+		{
+			name:    "balance adjustment",
+			body:    `{"agent_user_id":7,"amount":"1.00","reason":"self adjustment"}`,
+			handler: AdjustAgentBalance,
+			message: "cannot adjust their own agent balance",
+		},
 		{
 			name:    "downline transfer",
 			body:    `{"source_agent_user_id":9,"target_agent_user_id":7,"downline_user_id":8,"remark":"self transfer"}`,

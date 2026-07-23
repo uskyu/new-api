@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 
 import { MaskedValueDisplay } from '@/components/masked-value-display'
@@ -29,38 +29,44 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { REDEMPTION_FILTER_EXPIRED, REDEMPTION_STATUSES } from '../constants'
 import { isRedemptionExpired, isTimestampExpired } from '../lib'
-import { type Redemption } from '../types'
+import type { Redemption } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
 export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
   const { t } = useTranslation()
+  const canManage = useAuthStore(
+    (state) => (state.auth.user?.role ?? ROLE.GUEST) >= ROLE.ADMIN
+  )
+  const selectionColumn: ColumnDef<Redemption> = {
+    id: 'select',
+    header: ({ table }) => (
+      <Checkbox
+        checked={table.getIsAllPageRowsSelected()}
+        indeterminate={table.getIsSomePageRowsSelected()}
+        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+        aria-label={t('Select all')}
+        className='translate-y-[2px]'
+      />
+    ),
+    cell: ({ row }) => (
+      <Checkbox
+        checked={row.getIsSelected()}
+        onCheckedChange={(value) => row.toggleSelected(!!value)}
+        aria-label={t('Select row')}
+        className='translate-y-[2px]'
+      />
+    ),
+    enableSorting: false,
+    enableHiding: false,
+    size: 40,
+  }
   return [
-    {
-      id: 'select',
-      header: ({ table }) => (
-        <Checkbox
-          checked={table.getIsAllPageRowsSelected()}
-          indeterminate={table.getIsSomePageRowsSelected()}
-          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-          aria-label={t('Select all')}
-          className='translate-y-[2px]'
-        />
-      ),
-      cell: ({ row }) => (
-        <Checkbox
-          checked={row.getIsSelected()}
-          onCheckedChange={(value) => row.toggleSelected(!!value)}
-          aria-label={t('Select row')}
-          className='translate-y-[2px]'
-        />
-      ),
-      enableSorting: false,
-      enableHiding: false,
-      size: 40,
-    },
+    ...(canManage ? [selectionColumn] : []),
     {
       accessorKey: 'id',
       header: t('ID'),
@@ -148,6 +154,7 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
             maskedValue={maskedKey}
             copyTooltip={t('Copy code')}
             copyAriaLabel={t('Copy redemption code')}
+            copyable={canManage}
           />
         )
       },
@@ -233,7 +240,7 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
                   className='cursor-help'
                 />
               }
-            ></TooltipTrigger>
+            />
             <TooltipContent>
               <div className='space-y-1 text-xs'>
                 <div>

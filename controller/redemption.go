@@ -200,9 +200,18 @@ func UpdateRedemption(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	hasFullManage := common.RoleHasPermission(c.GetInt("role"), common.PermissionRedemptionManage)
+	if !hasFullManage && (statusOnly == "" || redemption.Status != common.RedemptionCodeStatusDisabled) {
+		common.ApiErrorMsg(c, "permission denied")
+		return
+	}
 	cleanRedemption, err := model.GetRedemptionById(redemption.Id)
 	if err != nil {
 		common.ApiError(c, err)
+		return
+	}
+	if !hasFullManage && cleanRedemption.Status != common.RedemptionCodeStatusEnabled {
+		common.ApiErrorMsg(c, "permission denied")
 		return
 	}
 	if statusOnly == "" {

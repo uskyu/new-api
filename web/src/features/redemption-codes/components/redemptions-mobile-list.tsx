@@ -32,7 +32,9 @@ import {
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatQuota } from '@/lib/format'
+import { ROLE } from '@/lib/roles'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { REDEMPTION_STATUS, REDEMPTION_STATUSES } from '../constants'
 import { isRedemptionExpired } from '../lib'
@@ -77,6 +79,9 @@ interface RedemptionsMobileListProps {
 
 export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
   const { t } = useTranslation()
+  const canManage = useAuthStore(
+    (state) => (state.auth.user?.role ?? ROLE.GUEST) >= ROLE.ADMIN
+  )
   const rows = props.table.getRowModel().rows
 
   if (props.isLoading) return <RedemptionsMobileSkeleton />
@@ -156,6 +161,7 @@ export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
                   maskedValue={maskedKey}
                   copyTooltip={t('Copy code')}
                   copyAriaLabel={t('Copy redemption code')}
+                  copyable={canManage}
                 />
               </div>
               <DataTableRowActions row={row} />

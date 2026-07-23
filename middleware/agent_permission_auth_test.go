@@ -63,7 +63,13 @@ func TestSupportPermissionUsesStatelessSessionWithoutGrantingAdmin(t *testing.T)
 	router.ServeHTTP(response, request)
 	assert.Equal(t, http.StatusForbidden, response.Code)
 
-	for _, path := range []string{"/agent/assign", "/agent/adjust"} {
+	request = httptest.NewRequest(http.MethodGet, "/agent/adjust", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	assert.Equal(t, http.StatusNoContent, response.Code)
+
+	for _, path := range []string{"/agent/assign"} {
 		request = httptest.NewRequest(http.MethodGet, path, nil)
 		request.Header.Set("Authorization", "Bearer "+token)
 		response = httptest.NewRecorder()
