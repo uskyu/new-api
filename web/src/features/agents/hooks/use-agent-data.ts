@@ -23,6 +23,7 @@ import {
   assignAgentDownline,
   changeUserAgent,
   decreaseSupportUserQuota,
+  deleteAgentRebateGroup,
   getAgentDownlines,
   getAgentAssignments,
   getAgentDailyMetrics,
@@ -40,6 +41,7 @@ import {
   initializeAgentModule,
   searchSupportUsers,
   transferAgentDownline,
+  upsertAgentRebateGroup,
   upsertAgentProfile,
 } from '../api'
 
@@ -69,6 +71,33 @@ export function useAgentRebateGroups(enabled: boolean) {
     queryKey: ['agents', 'groups'],
     queryFn: getAgentRebateGroups,
     enabled,
+  })
+}
+
+export function useUpsertAgentRebateGroup() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: upsertAgentRebateGroup,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['agents', 'groups'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents', 'profiles'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents', 'overview'] }),
+      ])
+    },
+  })
+}
+
+export function useDeleteAgentRebateGroup() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: deleteAgentRebateGroup,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['agents', 'groups'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents', 'overview'] }),
+      ])
+    },
   })
 }
 

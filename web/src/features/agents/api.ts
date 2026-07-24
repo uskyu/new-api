@@ -28,6 +28,7 @@ import type {
   AgentProfile,
   AgentPromoLink,
   AgentRebateGroup,
+  AgentRateConflict,
   AgentRebateRecord,
   AgentSelfSummary,
   AgentWithdrawImportResult,
@@ -54,6 +55,32 @@ export async function initializeAgentModule(defaultRebateRate: number) {
 export async function getAgentRebateGroups() {
   const response =
     await api.get<AgentApiResponse<AgentRebateGroup[]>>('/api/agent/groups')
+  return response.data
+}
+
+export async function upsertAgentRebateGroup(payload: {
+  id: number
+  name: string
+  rebateRate: number
+  status: number
+  remark: string
+}) {
+  const response = await api.post<
+    AgentApiResponse<AgentRebateGroup & { conflicts?: AgentRateConflict[] }>
+  >('/api/agent/group', {
+    id: payload.id,
+    name: payload.name,
+    rebate_rate: payload.rebateRate,
+    status: payload.status,
+    remark: payload.remark,
+  })
+  return response.data
+}
+
+export async function deleteAgentRebateGroup(groupId: number) {
+  const response = await api.delete<AgentApiResponse<boolean>>(
+    `/api/agent/group/${groupId}`
+  )
   return response.data
 }
 

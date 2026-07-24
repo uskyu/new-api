@@ -20,6 +20,7 @@ import dayjs from 'dayjs'
 import {
   CircleDollarSign,
   Database,
+  Plus,
   ReceiptText,
   Search,
   UserPlus,
@@ -43,6 +44,8 @@ import { useAuthStore } from '@/stores/auth-store'
 import { AgentDailyChart } from './components/agent-daily-chart'
 import { AgentDailyMetricsTable } from './components/agent-daily-metrics-table'
 import { AgentDownlinesDialog } from './components/agent-downlines-dialog'
+import { AgentGroupDialog } from './components/agent-group-dialog'
+import { AgentGroupsTable } from './components/agent-groups-table'
 import { AgentInitializeDialog } from './components/agent-initialize-dialog'
 import { AgentMetricCards } from './components/agent-metric-cards'
 import { AgentPagination } from './components/agent-pagination'
@@ -56,10 +59,11 @@ import {
   useAgentDailyMetrics,
   useAgentOverview,
   useAgentProfiles,
+  useAgentRebateGroups,
   useAgentStatus,
 } from './hooks/use-agent-data'
 import { formatAgentAmount } from './lib/format'
-import type { AgentProfile } from './types'
+import type { AgentProfile, AgentRebateGroup } from './types'
 
 const PAGE_SIZE = 10
 
@@ -74,6 +78,8 @@ export function AgentManagement() {
   const [editingProfile, setEditingProfile] = useState<AgentProfile>()
   const [downlineProfile, setDownlineProfile] = useState<AgentProfile>()
   const [assignProfile, setAssignProfile] = useState<AgentProfile>()
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false)
+  const [editingGroup, setEditingGroup] = useState<AgentRebateGroup>()
   const [profilePage, setProfilePage] = useState(1)
   const [profileInput, setProfileInput] = useState('')
   const [profileKeyword, setProfileKeyword] = useState('')
@@ -93,6 +99,7 @@ export function AgentManagement() {
     status.data.data.initialized === true &&
     status.data.data.migration_ready === true
   const overview = useAgentOverview(isAdmin && ready)
+  const groups = useAgentRebateGroups(isAdmin && ready)
   const profiles = useAgentProfiles({
     page: profilePage,
     pageSize: PAGE_SIZE,
@@ -146,6 +153,16 @@ export function AgentManagement() {
     setProfileDialogOpen(true)
   }
 
+  const openNewGroup = () => {
+    setEditingGroup(undefined)
+    setGroupDialogOpen(true)
+  }
+
+  const openEditGroup = (group: AgentRebateGroup) => {
+    setEditingGroup(group)
+    setGroupDialogOpen(true)
+  }
+
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Agent Management')}</SectionPageLayout.Title>
@@ -181,6 +198,7 @@ export function AgentManagement() {
                 <TabsTrigger value='assignments'>
                   {t('User assignments')}
                 </TabsTrigger>
+                <TabsTrigger value='groups'>{t('Rebate groups')}</TabsTrigger>
                 <TabsTrigger value='balances'>
                   {t('Agent balances')}
                 </TabsTrigger>
@@ -314,6 +332,27 @@ export function AgentManagement() {
             )}
 
             {isAdmin && (
+              <TabsContent value='groups'>
+                <Card>
+                  <CardHeader className='flex flex-row items-center justify-between gap-3'>
+                    <CardTitle>{t('Rebate groups')}</CardTitle>
+                    <Button size='sm' onClick={openNewGroup}>
+                      <Plus />
+                      {t('Add rebate group')}
+                    </Button>
+                  </CardHeader>
+                  <CardContent>
+                    <AgentGroupsTable
+                      groups={groups.data?.data ?? []}
+                      loading={groups.isLoading}
+                      onEdit={openEditGroup}
+                    />
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            )}
+
+            {isAdmin && (
               <TabsContent value='assignments'>
                 <Card>
                   <CardHeader>
@@ -424,6 +463,11 @@ export function AgentManagement() {
           profile={editingProfile}
           defaultGroupId={bootstrapStatus?.default_group_id ?? 0}
           onOpenChange={setProfileDialogOpen}
+        />
+        <AgentGroupDialog
+          open={groupDialogOpen}
+          group={editingGroup}
+          onOpenChange={setGroupDialogOpen}
         />
         {downlineProfile && (
           <AgentDownlinesDialog

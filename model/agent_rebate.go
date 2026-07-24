@@ -77,11 +77,12 @@ type AgentRebateGroup struct {
 	Id         int    `json:"id"`
 	Name       string `json:"name" gorm:"type:varchar(64);uniqueIndex;not null"`
 	RebateRate int    `json:"rebate_rate" gorm:"type:int;not null;default:0"`
-	Status     int    `json:"status" gorm:"type:int;not null;default:1;index"`
+	Status     int    `json:"status" gorm:"type:int;not null;index"`
 	IsDefault  bool   `json:"is_default" gorm:"not null"`
 	Remark     string `json:"remark" gorm:"type:varchar(255);default:''"`
 	CreatedAt  int64  `json:"created_at" gorm:"bigint"`
 	UpdatedAt  int64  `json:"updated_at" gorm:"bigint"`
+	AgentCount int64  `json:"agent_count" gorm:"column:agent_count;->;-:migration"`
 }
 
 func (g *AgentRebateGroup) BeforeCreate(tx *gorm.DB) error {
@@ -1431,7 +1432,10 @@ func convertQuotaToMinorUnit(quota int) int64 {
 
 func GetAllAgentRebateGroups() ([]*AgentRebateGroup, error) {
 	var groups []*AgentRebateGroup
-	err := DB.Order("is_default desc, id asc").Find(&groups).Error
+	err := DB.Model(&AgentRebateGroup{}).
+		Select("agent_rebate_groups.*, (SELECT COUNT(*) FROM agent_profiles WHERE agent_profiles.rebate_group_id = agent_rebate_groups.id) AS agent_count").
+		Order("is_default desc, id asc").
+		Find(&groups).Error
 	return groups, err
 }
 
@@ -1443,6 +1447,12 @@ func UpsertAgentRebateGroup(operatorUserId int, group *AgentRebateGroup) (*Agent
 	group.Remark = strings.TrimSpace(group.Remark)
 	if group.Name == "" {
 		return nil, errors.New("group name is required")
+	}
+	if len(group.Name) > 64 {
+		return nil, errors.New("group name must not exceed 64 characters")
+	}
+	if len(group.Remark) > 255 {
+		return nil, errors.New("group remark must not exceed 255 characters")
 	}
 	if err := validateAgentRebateRate(group.RebateRate); err != nil {
 		return nil, err
@@ -1540,6 +1550,9 @@ func UpsertAgentProfile(operatorUserId int, profile *AgentProfile) (*AgentProfil
 	}
 	if profile.RebateGroupId < 0 {
 		return nil, errors.New("invalid rebate group")
+	}
+	if profile.Status != AgentStatusEnabled && profile.Status != AgentStatusDisabled {
+		return nil, errors.New("invalid agent status")
 	}
 	var saved *AgentProfile
 	err := DB.Transaction(func(tx *gorm.DB) error {
@@ -2578,6 +2591,16 @@ func upsertAgentProfileTx(tx *gorm.DB, profile *AgentProfile) (*AgentProfile, er
 			return nil, err
 		}
 		groupId = defaultGroup.Id
+	}
+	var rebateGroup AgentRebateGroup
+	if err := lockForUpdate(tx).First(&rebateGroup, groupId).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("rebate group does not exist")
+		}
+		return nil, err
+	}
+	if rebateGroup.Status != AgentStatusEnabled {
+		return nil, errors.New("rebate group is disabled")
 	}
 	var existing AgentProfile
 	err := lockForUpdate(tx).Where("user_id = ?", profile.UserId).First(&existing).Error

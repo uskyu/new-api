@@ -19,7 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 
 import type {
+  AdminAnalyticsOverview,
+  AdminAnalyticsRangeKey,
+  DashboardApiResponse,
   FlowQuotaDataItem,
+  InactiveAccountType,
+  InactiveUserAnalytics,
   QuotaDataItem,
   UptimeGroupResult,
 } from './types'
@@ -90,4 +95,46 @@ export async function getUptimeStatus() {
     '/api/uptime/status'
   )
   return res.data
+}
+
+export async function getAdminAnalyticsOverview(params: {
+  range: AdminAnalyticsRangeKey
+  startTimestamp?: number
+  endTimestamp?: number
+  limit?: number
+}) {
+  const response = await api.get<DashboardApiResponse<AdminAnalyticsOverview>>(
+    '/api/admin/analytics/overview',
+    {
+      params: {
+        range: params.range,
+        start_timestamp: params.startTimestamp,
+        end_timestamp: params.endTimestamp,
+        limit: params.limit ?? 10,
+      },
+    }
+  )
+  return response.data
+}
+
+export async function getInactiveUserAnalytics(params: {
+  days: number
+  accountType: InactiveAccountType
+  keyword?: string
+  page: number
+  pageSize: number
+}) {
+  const response = await api.get<DashboardApiResponse<InactiveUserAnalytics>>(
+    '/api/admin/analytics/inactive-users',
+    {
+      params: {
+        days: params.days,
+        account_type: params.accountType,
+        keyword: params.keyword || undefined,
+        p: params.page,
+        page_size: params.pageSize,
+      },
+    }
+  )
+  return response.data
 }

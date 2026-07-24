@@ -158,6 +158,14 @@ export function SidebarModulesSection({
         title: t('Subscription Management'),
         description: t('Manage subscription plans and pricing.'),
       },
+      agent: {
+        title: t('Agent Management'),
+        description: t('Configure the agent account and rebate policy.'),
+      },
+      operations: {
+        title: t('Operational Analytics'),
+        description: t('User growth and activity'),
+      },
     },
   }
   const formDefaults = useMemo(() => config, [config])

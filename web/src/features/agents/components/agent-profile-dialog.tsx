@@ -55,7 +55,7 @@ const agentProfileSchema = z.object({
       (value) => Number.isInteger(Number(value)) && Number(value) > 0,
       'Enter a valid user ID'
     ),
-  status: z.enum(['1', '2']),
+  status: z.enum(['1', '0']),
   rebateGroupId: z
     .string()
     .refine(
@@ -97,7 +97,7 @@ export function AgentProfileDialog(props: AgentProfileDialogProps) {
     if (!props.open) return
     form.reset({
       userId: props.profile ? String(props.profile.user_id) : '',
-      status: String(props.profile?.status ?? 1) as '1' | '2',
+      status: String(props.profile?.status ?? 1) as '1' | '0',
       rebateGroupId: String(
         props.profile?.rebate_group_id || props.defaultGroupId || ''
       ),
@@ -126,7 +126,10 @@ export function AgentProfileDialog(props: AgentProfileDialogProps) {
     }
   })
 
-  const groupItems = (groups.data?.data ?? []).map((group) => ({
+  const availableGroups = (groups.data?.data ?? []).filter(
+    (group) => group.status === 1
+  )
+  const groupItems = availableGroups.map((group) => ({
     value: String(group.id),
     label: `${group.name} (${(group.rebate_rate / 100).toFixed(2)}%)`,
   }))
@@ -186,7 +189,7 @@ export function AgentProfileDialog(props: AgentProfileDialogProps) {
               <Select
                 items={[
                   { value: '1', label: t('Enabled') },
-                  { value: '2', label: t('Disabled') },
+                  { value: '0', label: t('Disabled') },
                 ]}
                 value={field.value}
                 onValueChange={(value) =>
@@ -199,7 +202,7 @@ export function AgentProfileDialog(props: AgentProfileDialogProps) {
                 <SelectContent alignItemWithTrigger={false}>
                   <SelectGroup>
                     <SelectItem value='1'>{t('Enabled')}</SelectItem>
-                    <SelectItem value='2'>{t('Disabled')}</SelectItem>
+                    <SelectItem value='0'>{t('Disabled')}</SelectItem>
                   </SelectGroup>
                 </SelectContent>
               </Select>
@@ -229,7 +232,7 @@ export function AgentProfileDialog(props: AgentProfileDialogProps) {
                 </SelectTrigger>
                 <SelectContent alignItemWithTrigger={false}>
                   <SelectGroup>
-                    {(groups.data?.data ?? []).map((group) => (
+                    {availableGroups.map((group) => (
                       <SelectItem key={group.id} value={String(group.id)}>
                         {group.name} ({(group.rebate_rate / 100).toFixed(2)}%)
                       </SelectItem>

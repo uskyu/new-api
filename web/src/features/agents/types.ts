@@ -54,6 +54,17 @@ export interface AgentRebateGroup {
   status: number
   is_default: boolean
   remark?: string
+  agent_count: number
+}
+
+export interface AgentRateConflict {
+  agent_user_id: number
+  agent_username: string
+  parent_agent_user_id: number
+  parent_agent_name: string
+  agent_rate: number
+  parent_allowed_rate: number
+  conflict_type: string
 }
 
 export interface AgentPromoLink {

@@ -11,6 +11,13 @@ import (
 // registerExtensionApiRoutes keeps locally maintained routes isolated from the
 // upstream API router so future upstream updates only touch this call site.
 func registerExtensionApiRoutes(apiRouter *gin.RouterGroup) {
+	adminAnalyticsRoute := apiRouter.Group("/admin/analytics")
+	adminAnalyticsRoute.Use(middleware.AdminAuth())
+	{
+		adminAnalyticsRoute.GET("/overview", controller.GetAdminAnalyticsOverview)
+		adminAnalyticsRoute.GET("/inactive-users", controller.GetInactiveUserAnalytics)
+	}
+
 	agentRoute := apiRouter.Group("/agent")
 	{
 		agentRoute.GET("/status", middleware.PermissionAuth(common.PermissionAgentDownlineTransfer), controller.GetAgentBootstrapStatus)

@@ -21,6 +21,7 @@ import {
   BadgePercent,
   Bot,
   Box,
+  ChartLine,
   CreditCard,
   FileText,
   FlaskConical,
@@ -169,6 +170,12 @@ export function useSidebarData(): SidebarData {
             url: '/agents',
             icon: UserRoundCog,
             requiredRole: ROLE.SUPPORT,
+          },
+          {
+            title: t('Operational Analytics'),
+            url: '/operations-analytics',
+            icon: ChartLine,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('System Info'),

@@ -211,6 +211,152 @@ export interface UserChartsFilters {
 }
 
 // ============================================================================
+// Operational Analytics Types
+// ============================================================================
+
+export type AdminAnalyticsRangeKey =
+  | 'today'
+  | 'yesterday'
+  | '7d'
+  | '30d'
+  | '90d'
+  | 'custom'
+
+export interface AdminAnalyticsRange {
+  range: AdminAnalyticsRangeKey
+  start: number
+  end: number
+  step: number
+}
+
+export interface AdminAnalyticsMetrics {
+  user_count: number
+  new_user_count: number
+  user_balance_quota: number
+  user_used_quota: number
+  successful_topup_amount: number
+  successful_topup_count: number
+  topup_user_count: number
+  repeat_topup_user_count: number
+  repurchase_rate: number
+  consume_quota: number
+  call_count: number
+  active_user_count: number
+}
+
+export interface AdminAnalyticsTrendPoint {
+  start: number
+  end: number
+  new_user_count: number
+  topup_amount: number
+  consume_quota: number
+  call_count: number
+  active_user_count: number
+}
+
+export interface AdminAnalyticsPaymentMethod {
+  payment_method: string
+  topup_amount: number
+  topup_count: number
+  ratio: number
+}
+
+export interface AdminAnalyticsBalanceBucket {
+  label: string
+  min_quota: number
+  max_quota?: number
+  user_count: number
+  ratio: number
+}
+
+export interface AdminAnalyticsUserTopupRank {
+  user_id: number
+  username: string
+  display_name: string
+  topup_amount: number
+  topup_count: number
+}
+
+export interface AdminAnalyticsUserConsumptionRank {
+  user_id: number
+  username: string
+  display_name: string
+  consume_quota: number
+  call_count: number
+}
+
+export interface AdminAnalyticsModelUsageRank {
+  model_name: string
+  consume_quota: number
+  call_count: number
+  active_user_count: number
+}
+
+export interface AdminAnalyticsAgentRank {
+  agent_user_id: number
+  username: string
+  display_name: string
+  topup_count: number
+  pay_amount: number
+  rebate_amount: number
+}
+
+export interface AdminAnalyticsOverview {
+  range: AdminAnalyticsRange
+  metrics: AdminAnalyticsMetrics
+  trends: AdminAnalyticsTrendPoint[]
+  distributions: {
+    payment_method: AdminAnalyticsPaymentMethod[]
+    balance_buckets: AdminAnalyticsBalanceBucket[]
+  }
+  rankings: {
+    agent_contribution: AdminAnalyticsAgentRank[]
+    model_usage: AdminAnalyticsModelUsageRank[]
+    user_topups: AdminAnalyticsUserTopupRank[]
+    user_consumptions: AdminAnalyticsUserConsumptionRank[]
+  }
+}
+
+export type InactiveAccountType = 'all' | 'users' | 'agents'
+
+export interface InactiveUserRow {
+  id: number
+  username: string
+  display_name: string
+  quota: number
+  used_quota: number
+  created_at: number
+  last_login_at: number
+  inactive_days: number
+  inviter_id: number
+  inviter_username: string
+  is_agent: boolean
+}
+
+export interface InactiveUserAnalytics {
+  days: number
+  cutoff: number
+  summary: {
+    eligible_user_count: number
+    inactive_user_count: number
+    inactive_balance_quota: number
+    never_logged_in_count: number
+    never_logged_in_balance: number
+    inactive_ratio: number
+  }
+  items: InactiveUserRow[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface DashboardApiResponse<T> {
+  success: boolean
+  message?: string
+  data?: T
+}
+
+// ============================================================================
 // API Info Types
 // ============================================================================
 
