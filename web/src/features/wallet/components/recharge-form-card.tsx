@@ -16,7 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Gift, ExternalLink, Loader2, Receipt, WalletCards } from 'lucide-react'
+import {
+  CircleAlert,
+  ExternalLink,
+  Gift,
+  Loader2,
+  Receipt,
+  WalletCards,
+} from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -73,6 +80,7 @@ interface RechargeFormCardProps {
   priceRatio?: number
   usdExchangeRate?: number
   onOpenBilling?: () => void
+  onScrollToNotice?: () => void
   creemProducts?: CreemProduct[]
   enableCreemTopup?: boolean
   onCreemProductSelect?: (product: CreemProduct) => void
@@ -103,6 +111,7 @@ export function RechargeFormCard({
   priceRatio = 1,
   usdExchangeRate = 1,
   onOpenBilling,
+  onScrollToNotice,
   creemProducts,
   enableCreemTopup,
   onCreemProductSelect,
@@ -199,16 +208,31 @@ export function RechargeFormCard({
       iconTone='success'
       disableHoverEffect
       action={
-        onOpenBilling ? (
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={onOpenBilling}
-            className='w-full gap-2 sm:w-auto'
-          >
-            <Receipt className='h-4 w-4' />
-            {t('Order History')}
-          </Button>
+        onOpenBilling || onScrollToNotice ? (
+          <div className='grid w-full grid-cols-1 gap-2 min-[480px]:grid-cols-2 sm:flex sm:w-auto'>
+            {onScrollToNotice ? (
+              <Button
+                variant='destructive'
+                size='sm'
+                onClick={onScrollToNotice}
+                className='min-h-9 w-full gap-2 whitespace-normal sm:w-auto'
+              >
+                <CircleAlert className='h-4 w-4' />
+                {t('Top-up not received')}
+              </Button>
+            ) : null}
+            {onOpenBilling ? (
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={onOpenBilling}
+                className='min-h-9 w-full gap-2 sm:w-auto'
+              >
+                <Receipt className='h-4 w-4' />
+                {t('Order History')}
+              </Button>
+            ) : null}
+          </div>
         ) : null
       }
       contentClassName='space-y-4 sm:space-y-6'

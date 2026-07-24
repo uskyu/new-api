@@ -281,6 +281,15 @@ export function Wallet(props: WalletProps) {
     []
   )
 
+  const handleScrollToNotice = useCallback(() => {
+    document.querySelector<HTMLElement>('#wallet-topup-help')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    })
+  }, [])
+
+  const hasWalletNotice = Boolean(topupInfo?.topup_notice_html?.trim())
+
   return (
     <>
       <SectionPageLayout>
@@ -317,6 +326,9 @@ export function Wallet(props: WalletProps) {
                   priceRatio={(status?.price as number) || 1}
                   usdExchangeRate={effectiveUsdExchangeRate}
                   onOpenBilling={() => setBillingDialogOpen(true)}
+                  onScrollToNotice={
+                    hasWalletNotice ? handleScrollToNotice : undefined
+                  }
                   creemProducts={topupInfo?.creem_products}
                   enableCreemTopup={topupInfo?.enable_creem_topup}
                   onCreemProductSelect={handleCreemProductSelect}

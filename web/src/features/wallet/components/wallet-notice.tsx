@@ -36,7 +36,11 @@ export function WalletNotice(props: WalletNoticeProps) {
   }
 
   return (
-    <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
+    <Card
+      id='wallet-topup-help'
+      data-card-hover='false'
+      className='scroll-mt-4 gap-0 overflow-hidden py-0'
+    >
       <CardHeader className='border-b px-3 py-3 sm:px-5 sm:py-4'>
         <CardTitle className='flex min-w-0 items-center gap-2 text-sm sm:text-base'>
           <IconBadge tone='warning' size='xs'>
