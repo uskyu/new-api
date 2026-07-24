@@ -134,6 +134,7 @@ const BILLING_SECTIONS = [
       <PaymentSettingsSection
         defaultValues={{
           PayAddress: settings.PayAddress,
+          TopupNoticeHTML: settings.TopupNoticeHTML,
           EpayId: settings.EpayId,
           EpayKey: settings.EpayKey,
           Price: settings.Price,

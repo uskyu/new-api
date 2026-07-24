@@ -100,6 +100,7 @@ const paymentSchema = z.object({
     if (!trimmed) return true
     return /^https?:\/\//.test(trimmed)
   }, 'Provide a valid callback URL starting with http:// or https://'),
+  TopupNoticeHTML: z.string(),
   EpayId: z.string(),
   EpayKey: z.string(),
   Price: z.coerce.number().min(0),
@@ -420,6 +421,7 @@ export function PaymentSettingsSection({
   const onSubmit = async (values: PaymentFormValues) => {
     const sanitized = {
       PayAddress: removeTrailingSlash(values.PayAddress),
+      TopupNoticeHTML: values.TopupNoticeHTML.trim(),
       EpayId: values.EpayId.trim(),
       EpayKey: values.EpayKey.trim(),
       Price: values.Price,
@@ -463,6 +465,7 @@ export function PaymentSettingsSection({
 
     const initial = {
       PayAddress: removeTrailingSlash(initialRef.current.PayAddress),
+      TopupNoticeHTML: initialRef.current.TopupNoticeHTML.trim(),
       EpayId: initialRef.current.EpayId.trim(),
       EpayKey: initialRef.current.EpayKey.trim(),
       Price: initialRef.current.Price,
@@ -513,6 +516,13 @@ export function PaymentSettingsSection({
 
     if (sanitized.PayAddress !== initial.PayAddress) {
       updates.push({ key: 'PayAddress', value: sanitized.PayAddress })
+    }
+
+    if (sanitized.TopupNoticeHTML !== initial.TopupNoticeHTML) {
+      updates.push({
+        key: 'TopupNoticeHTML',
+        value: sanitized.TopupNoticeHTML,
+      })
     }
 
     if (sanitized.EpayId !== initial.EpayId) {
@@ -984,6 +994,30 @@ export function PaymentSettingsSection({
                     )}
                   />
                 </div>
+
+                <FormField
+                  control={form.control}
+                  name='TopupNoticeHTML'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Wallet page notice')}</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          rows={5}
+                          placeholder={t('Enter wallet notice content')}
+                          className='min-h-32 resize-y'
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Displayed above the wallet recharge area. Safe HTML is supported.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
                 <FormField
                   control={form.control}

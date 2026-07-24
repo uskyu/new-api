@@ -24,6 +24,9 @@ import (
 
 func GetTopUpInfo(c *gin.Context) {
 	complianceConfirmed := operation_setting.IsPaymentComplianceConfirmed()
+	common.OptionMapRWMutex.RLock()
+	topupNoticeHTML := common.OptionMap["TopupNoticeHTML"]
+	common.OptionMapRWMutex.RUnlock()
 
 	// 获取支付方式
 	payMethods := operation_setting.PayMethods
@@ -120,6 +123,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
 		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
 		"topup_link":              common.TopUpLink,
+		"topup_notice_html":       topupNoticeHTML,
 	}
 	common.ApiSuccess(c, data)
 }
