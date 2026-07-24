@@ -289,8 +289,6 @@ export function Wallet(props: WalletProps) {
           <div className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-5'>
             <WalletStatsCard user={user} loading={userLoading} />
 
-            <WalletNotice content={topupInfo?.topup_notice_html} />
-
             <div
               className={
                 showSubscriptionPanel
@@ -349,6 +347,8 @@ export function Wallet(props: WalletProps) {
               }
               loading={affiliateLoading}
             />
+
+            <WalletNotice content={topupInfo?.topup_notice_html} />
           </div>
         </SectionPageLayout.Content>
       </SectionPageLayout>
