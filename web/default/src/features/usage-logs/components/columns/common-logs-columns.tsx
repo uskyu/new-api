@@ -36,7 +36,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
-import { LOG_TYPE_ALL_VALUE } from '../../constants'
+import { LOG_TYPE_ALL_VALUE, LOG_TYPE_ENUM } from '../../constants'
 import type { UsageLog } from '../../data/schema'
 import {
   formatModelName,
@@ -109,7 +109,26 @@ function buildDetailSegments(
   }
 
   if (log.type === 6) {
-    return [{ text: t('Async task refund') }]
+    const segments: DetailSegment[] = [
+      { text: other?.is_task ? t('Async task refund') : t('Refund') },
+    ]
+    if (other?.reason) {
+      segments.push({ text: `${t('Reason')}: ${other.reason}`, muted: true })
+    }
+    if (other?.source) {
+      const source = other.source === 'wallet' ? t('Wallet') : other.source
+      segments.push({
+        text: `${t('Billing Source')}: ${source}`,
+        muted: true,
+      })
+    }
+    if (log.channel > 0) {
+      segments.push({ text: `${t('Channel')}: #${log.channel}`, muted: true })
+    }
+    if (log.model_name) {
+      segments.push({ text: `${t('Model')}: ${log.model_name}`, muted: true })
+    }
+    return segments
   }
 
   if (log.type !== 2) return []
@@ -731,12 +750,23 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           )
         }
 
-        const quotaStr = formatLogQuota(quota)
+        const displayQuota =
+          log.type === LOG_TYPE_ENUM.REFUND ? Math.abs(quota) : quota
+        const quotaStr = formatLogQuota(displayQuota)
         const quotaDisplay = splitQuotaDisplay(quotaStr)
+        const isRefund = log.type === LOG_TYPE_ENUM.REFUND
 
         return (
           <div className='flex flex-col gap-0.5'>
-            <span className='border-border/80 bg-muted/60 inline-flex h-6 w-fit items-center rounded-md border px-2 [font-family:var(--font-body)] text-sm leading-none font-semibold tabular-nums'>
+            <span
+              className={cn(
+                'inline-flex h-6 w-fit items-center rounded-md border px-2 [font-family:var(--font-body)] text-sm leading-none font-semibold tabular-nums',
+                isRefund
+                  ? 'border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-400'
+                  : 'border-border/80 bg-muted/60'
+              )}
+            >
+              {isRefund && <span className='mr-0.5'>+</span>}
               {quotaDisplay.prefix && (
                 <span className='mr-1'>{quotaDisplay.prefix}</span>
               )}

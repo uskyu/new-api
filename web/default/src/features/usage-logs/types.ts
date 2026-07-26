@@ -199,6 +199,11 @@ export interface LogOtherData {
   is_task?: boolean
   task_id?: string
   reason?: string
+  // Quick-refund fields (type=6); these fields are safe for the log owner.
+  batch_id?: number
+  source_log_id?: number
+  source?: string
+  ratio?: number
   // Subscription billing fields
   subscription_plan_id?: string
   subscription_plan_title?: string

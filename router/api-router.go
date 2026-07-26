@@ -331,6 +331,16 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
 
+		refundAdminRoute := apiRouter.Group("/refund/admin")
+		refundAdminRoute.Use(middleware.AdminAuth(), middleware.CriticalRateLimit())
+		{
+			refundAdminRoute.GET("/options", controller.GetRefundOptions)
+			refundAdminRoute.POST("/preview", controller.PreviewRefund)
+			refundAdminRoute.POST("/batches", middleware.SecureVerificationRequired(), controller.CreateRefundBatch)
+			refundAdminRoute.GET("/batches", controller.ListRefundBatches)
+			refundAdminRoute.GET("/batches/:id", controller.GetRefundBatch)
+		}
+
 		dataRoute := apiRouter.Group("/data")
 		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)
 		dataRoute.GET("/users", middleware.AdminAuth(), controller.GetQuotaDatesByUser)

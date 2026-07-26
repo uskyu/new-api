@@ -1,6 +1,7 @@
 package model
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -191,9 +192,7 @@ func InitDB() (err error) {
 		if err != nil {
 			return err
 		}
-		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
-		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
-		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+		configureDatabasePool(sqlDB, common.UsingSQLite)
 
 		if !common.IsMasterNode {
 			return nil
@@ -231,9 +230,7 @@ func InitLogDB() (err error) {
 		if err != nil {
 			return err
 		}
-		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
-		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
-		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+		configureDatabasePool(sqlDB, common.LogSqlType == common.DatabaseTypeSQLite)
 
 		if !common.IsMasterNode {
 			return nil
@@ -285,6 +282,8 @@ func migrateDB() error {
 		&SelfServiceClaimAttempt{},
 		&SelfServiceUpgradeRule{},
 		&SelfServiceUpgradeHistory{},
+		&RefundBatch{},
+		&RefundItem{},
 	)
 	if err != nil {
 		return err
@@ -341,22 +340,34 @@ func migrateDBFast() error {
 		{&SelfServiceClaimAttempt{}, "SelfServiceClaimAttempt"},
 		{&SelfServiceUpgradeRule{}, "SelfServiceUpgradeRule"},
 		{&SelfServiceUpgradeHistory{}, "SelfServiceUpgradeHistory"},
+		{&RefundBatch{}, "RefundBatch"},
+		{&RefundItem{}, "RefundItem"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
 
-	for _, m := range migrations {
-		wg.Add(1)
-		go func(model interface{}, name string) {
-			defer wg.Done()
-			if err := DB.AutoMigrate(model); err != nil {
-				errChan <- fmt.Errorf("failed to migrate %s: %v", name, err)
+	// SQLite permits only one writer. Running schema changes concurrently causes
+	// intermittent "database is locked" failures, so its fast path is serial.
+	if common.UsingSQLite {
+		for _, m := range migrations {
+			if err := DB.AutoMigrate(m.model); err != nil {
+				return fmt.Errorf("failed to migrate %s: %v", m.name, err)
 			}
-		}(m.model, m.name)
-	}
+		}
+	} else {
+		for _, m := range migrations {
+			wg.Add(1)
+			go func(model interface{}, name string) {
+				defer wg.Done()
+				if err := DB.AutoMigrate(model); err != nil {
+					errChan <- fmt.Errorf("failed to migrate %s: %v", name, err)
+				}
+			}(m.model, m.name)
+		}
 
-	// Wait for all migrations to complete
-	wg.Wait()
+		// Wait for all errors-producing migrations before closing errChan.
+		wg.Wait()
+	}
 	close(errChan)
 
 	// Check for any errors
@@ -379,6 +390,18 @@ func migrateDBFast() error {
 	}
 	common.SysLog("database migrated")
 	return nil
+}
+
+func configureDatabasePool(sqlDB *sql.DB, sqlite bool) {
+	if sqlite {
+		// Serialize SQLite writes, including quick-refund quota transactions.
+		sqlDB.SetMaxIdleConns(1)
+		sqlDB.SetMaxOpenConns(1)
+	} else {
+		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
+		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
+	}
+	sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
 }
 
 func migrateSelfServiceSidebarModules() error {

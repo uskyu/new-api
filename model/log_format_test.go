@@ -33,3 +33,37 @@ func TestFormatUserLogsStripsQuotaSaturation(t *testing.T) {
 	// Non-admin billing fields remain visible.
 	require.Contains(t, parsed, "model_price")
 }
+
+func TestFormatUserRefundLogKeepsDisplayFieldsAndStripsAdminInfo(t *testing.T) {
+	other := common.MapToJsonStr(map[string]interface{}{
+		"batch_id":      12,
+		"source_log_id": 34,
+		"source":        "wallet",
+		"ratio":         60,
+		"reason":        "provider incident",
+		"admin_info": map[string]interface{}{
+			"operator_id": 99,
+		},
+	})
+	logs := []*Log{{
+		Type:        LogTypeRefund,
+		Quota:       120,
+		ChannelId:   7,
+		ChannelName: "private channel name",
+		ModelName:   "example-model",
+		Other:       other,
+	}}
+
+	formatUserLogs(logs, 0)
+
+	parsed, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	require.NotContains(t, parsed, "admin_info")
+	require.Equal(t, "provider incident", parsed["reason"])
+	require.Equal(t, "wallet", parsed["source"])
+	require.Equal(t, float64(60), parsed["ratio"])
+	require.Equal(t, 120, logs[0].Quota)
+	require.Equal(t, 7, logs[0].ChannelId)
+	require.Equal(t, "example-model", logs[0].ModelName)
+	require.Empty(t, logs[0].ChannelName)
+}

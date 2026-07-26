@@ -27,6 +27,7 @@ import {
   ListTodo,
   MessageSquare,
   Radio,
+  RotateCcw,
   Settings,
   Ticket,
   User,
@@ -151,6 +152,11 @@ export function useSidebarData(): SidebarData {
             title: t('Self-Service Management'),
             url: '/self-service-admin',
             icon: Wrench,
+          },
+          {
+            title: t('Quick Refund'),
+            url: '/quick-refund',
+            icon: RotateCcw,
           },
           {
             title: t('System Settings'),

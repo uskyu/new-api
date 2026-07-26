@@ -212,6 +212,9 @@ func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 
 func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {
 	withSelfUseModeDisabled(t)
+	// ListModels also resolves preferred model owners through model.DB. Initialize
+	// the same isolated database used by the non-token model-list test.
+	setupModelListControllerTestDB(t)
 	withTieredBillingConfig(t, map[string]string{
 		"zz-token-tiered-visible-model":      "tiered_expr",
 		"zz-token-tiered-empty-expr-model":   "tiered_expr",
@@ -224,6 +227,10 @@ func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	// Token-authenticated requests always carry a resolved user group. Keep the
+	// unit test aligned with middleware output so ListModels does not fall back
+	// to looking up a synthetic user with id=0.
+	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
 	common.SetContextKey(ctx, constant.ContextKeyTokenModelLimitEnabled, true)
 	common.SetContextKey(ctx, constant.ContextKeyTokenModelLimit, map[string]bool{
 		"zz-token-tiered-visible-model":      true,
