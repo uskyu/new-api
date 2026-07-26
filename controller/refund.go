@@ -62,7 +62,7 @@ func CreateRefundBatch(c *gin.Context) {
 	if key == "" {
 		key = strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	}
-	data, err := model.CreateAndRunRefund(req.RefundFilter, key, c.GetInt("id"))
+	data, err := model.CreateRefundBatch(req.RefundFilter, key, c.GetInt("id"))
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -86,7 +86,9 @@ func GetRefundBatch(c *gin.Context) {
 		common.ApiError(c, errors.New("invalid batch id"))
 		return
 	}
-	data, err := model.GetRefundBatch(id)
+	itemPage, _ := strconv.Atoi(c.DefaultQuery("item_page", "1"))
+	itemPageSize, _ := strconv.Atoi(c.DefaultQuery("item_page_size", "20"))
+	data, err := model.GetRefundBatchPage(id, itemPage, itemPageSize)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ApiError(c, errors.New("refund batch not found"))
 		return

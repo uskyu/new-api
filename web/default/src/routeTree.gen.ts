@@ -44,6 +44,7 @@ import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_a
 import { Route as AuthenticatedSelfServiceIndexRouteImport } from './routes/_authenticated/self-service/index'
 import { Route as AuthenticatedSelfServiceAdminIndexRouteImport } from './routes/_authenticated/self-service-admin/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
+import { Route as AuthenticatedQuickRefundIndexRouteImport } from './routes/_authenticated/quick-refund/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
@@ -252,6 +253,12 @@ const AuthenticatedRedemptionCodesIndexRoute =
     path: '/redemption-codes/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedQuickRefundIndexRoute =
+  AuthenticatedQuickRefundIndexRouteImport.update({
+    id: '/quick-refund/',
+    path: '/quick-refund/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedProfileIndexRoute =
   AuthenticatedProfileIndexRouteImport.update({
     id: '/profile/',
@@ -443,6 +450,7 @@ export interface FileRoutesByFullPath {
   '/models/': typeof AuthenticatedModelsIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
+  '/quick-refund/': typeof AuthenticatedQuickRefundIndexRoute
   '/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/self-service-admin/': typeof AuthenticatedSelfServiceAdminIndexRoute
   '/self-service/': typeof AuthenticatedSelfServiceIndexRoute
@@ -503,6 +511,7 @@ export interface FileRoutesByTo {
   '/models': typeof AuthenticatedModelsIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
+  '/quick-refund': typeof AuthenticatedQuickRefundIndexRoute
   '/redemption-codes': typeof AuthenticatedRedemptionCodesIndexRoute
   '/self-service-admin': typeof AuthenticatedSelfServiceAdminIndexRoute
   '/self-service': typeof AuthenticatedSelfServiceIndexRoute
@@ -567,6 +576,7 @@ export interface FileRoutesById {
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
+  '/_authenticated/quick-refund/': typeof AuthenticatedQuickRefundIndexRoute
   '/_authenticated/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/_authenticated/self-service-admin/': typeof AuthenticatedSelfServiceAdminIndexRoute
   '/_authenticated/self-service/': typeof AuthenticatedSelfServiceIndexRoute
@@ -630,6 +640,7 @@ export interface FileRouteTypes {
     | '/models/'
     | '/playground/'
     | '/profile/'
+    | '/quick-refund/'
     | '/redemption-codes/'
     | '/self-service-admin/'
     | '/self-service/'
@@ -690,6 +701,7 @@ export interface FileRouteTypes {
     | '/models'
     | '/playground'
     | '/profile'
+    | '/quick-refund'
     | '/redemption-codes'
     | '/self-service-admin'
     | '/self-service'
@@ -753,6 +765,7 @@ export interface FileRouteTypes {
     | '/_authenticated/models/'
     | '/_authenticated/playground/'
     | '/_authenticated/profile/'
+    | '/_authenticated/quick-refund/'
     | '/_authenticated/redemption-codes/'
     | '/_authenticated/self-service-admin/'
     | '/_authenticated/self-service/'
@@ -1046,6 +1059,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRedemptionCodesIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/quick-refund/': {
+      id: '/_authenticated/quick-refund/'
+      path: '/quick-refund'
+      fullPath: '/quick-refund/'
+      preLoaderRoute: typeof AuthenticatedQuickRefundIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/profile/': {
       id: '/_authenticated/profile/'
       path: '/profile'
@@ -1328,6 +1348,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
+  AuthenticatedQuickRefundIndexRoute: typeof AuthenticatedQuickRefundIndexRoute
   AuthenticatedRedemptionCodesIndexRoute: typeof AuthenticatedRedemptionCodesIndexRoute
   AuthenticatedSelfServiceAdminIndexRoute: typeof AuthenticatedSelfServiceAdminIndexRoute
   AuthenticatedSelfServiceIndexRoute: typeof AuthenticatedSelfServiceIndexRoute
@@ -1352,6 +1373,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
+  AuthenticatedQuickRefundIndexRoute: AuthenticatedQuickRefundIndexRoute,
   AuthenticatedRedemptionCodesIndexRoute:
     AuthenticatedRedemptionCodesIndexRoute,
   AuthenticatedSelfServiceAdminIndexRoute:

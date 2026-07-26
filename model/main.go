@@ -427,6 +427,7 @@ func migrateSelfServiceSidebarModules() error {
 	changed := ensureSelfServiceSidebarModule(config, "personal", "self_service")
 	changed = ensureSelfServiceSidebarModule(config, "admin", "self_service") || changed
 	changed = ensureSelfServiceSidebarModule(config, "admin", "self_service_admin") || changed
+	changed = ensureSelfServiceSidebarModule(config, "admin", "quick_refund") || changed
 	if !changed {
 		return nil
 	}

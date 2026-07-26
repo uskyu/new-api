@@ -336,7 +336,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			refundAdminRoute.GET("/options", controller.GetRefundOptions)
 			refundAdminRoute.POST("/preview", controller.PreviewRefund)
-			refundAdminRoute.POST("/batches", middleware.SecureVerificationRequired(), controller.CreateRefundBatch)
+			refundAdminRoute.POST("/batches", middleware.RootAuth(), controller.CreateRefundBatch)
 			refundAdminRoute.GET("/batches", controller.ListRefundBatches)
 			refundAdminRoute.GET("/batches/:id", controller.GetRefundBatch)
 		}

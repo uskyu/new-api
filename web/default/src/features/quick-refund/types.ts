@@ -70,6 +70,9 @@ export type RefundBatch = {
   created_at: number
   updated_at: number
   items?: RefundItem[]
+  item_page: number
+  item_page_size: number
+  item_total: number
 }
 
 export type RefundBatchPage = {

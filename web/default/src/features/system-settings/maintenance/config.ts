@@ -82,6 +82,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     setting: true,
     subscription: true,
     self_service_admin: true,
+    quick_refund: true,
   },
 }
 

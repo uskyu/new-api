@@ -80,6 +80,7 @@ import {
   Package,
   Server,
   CalendarClock,
+  HandCoins,
 } from 'lucide-react';
 import {
   SiAtlassian,
@@ -152,6 +153,8 @@ export function getLucideIcon(key, selected = false) {
       return <CalendarClock {...commonProps} color={iconColor} />;
     case 'setting':
       return <Settings {...commonProps} color={iconColor} />;
+    case 'quick_refund':
+      return <HandCoins {...commonProps} color={iconColor} />;
     default:
       return <CircleUser {...commonProps} color={iconColor} />;
   }

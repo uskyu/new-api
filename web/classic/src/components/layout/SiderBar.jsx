@@ -51,6 +51,7 @@ const routerMap = {
   personal: '/console/personal',
   self_service: '/console/self-service',
   self_service_admin: '/console/self-service-admin',
+  quick_refund: '/console/quick-refund',
 };
 
 const SiderBar = ({ onNavigate = () => {} }) => {
@@ -201,6 +202,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         itemKey: 'self_service_admin',
         to: '/self-service-admin',
         className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('快捷退款'),
+        itemKey: 'quick_refund',
+        to: '/quick-refund',
+        className: isRoot() ? '' : 'tableHiddle',
       },
     ];
 

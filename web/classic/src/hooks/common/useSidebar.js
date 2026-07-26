@@ -55,6 +55,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     subscription: true,
     setting: true,
     self_service_admin: true,
+    quick_refund: true,
   },
 };
 

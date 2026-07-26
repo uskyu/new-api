@@ -69,6 +69,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       subscription: true,
       setting: true,
       self_service_admin: true,
+      quick_refund: true,
     },
   });
 
@@ -132,6 +133,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         subscription: true,
         setting: true,
         self_service_admin: true,
+        quick_refund: true,
       },
     };
     setSidebarModulesAdmin(defaultModules);
@@ -207,6 +209,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             subscription: true,
             setting: true,
             self_service_admin: true,
+            quick_refund: true,
           },
         };
         setSidebarModulesAdmin(defaultModules);
@@ -295,6 +298,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           key: 'self_service_admin',
           title: t('自助平台管理'),
           description: t('空单检测和升级规则管理'),
+        },
+        {
+          key: 'quick_refund',
+          title: t('快捷退款'),
+          description: t('按消费日志批量创建钱包退款'),
         },
       ],
     },

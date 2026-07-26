@@ -158,6 +158,10 @@ export function SidebarModulesSection({
         title: t('Self-Service Management'),
         description: t('Manage empty output refunds and upgrade rules.'),
       },
+      quick_refund: {
+        title: t('Quick Refund'),
+        description: t('Create wallet refunds from eligible consume logs.'),
+      },
     },
   }
   const formDefaults = useMemo(() => config, [config])

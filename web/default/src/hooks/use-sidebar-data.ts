@@ -36,6 +36,8 @@ import {
   Wrench,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '@/stores/auth-store'
+import { ROLE } from '@/lib/roles'
 import { type SidebarData } from '@/components/layout/types'
 
 /**
@@ -46,6 +48,8 @@ import { type SidebarData } from '@/components/layout/types'
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
+  const role = useAuthStore((state) => state.auth.user?.role)
+  const isSuperAdmin = (role ?? ROLE.GUEST) >= ROLE.SUPER_ADMIN
 
   return {
     navGroups: [
@@ -153,11 +157,15 @@ export function useSidebarData(): SidebarData {
             url: '/self-service-admin',
             icon: Wrench,
           },
-          {
-            title: t('Quick Refund'),
-            url: '/quick-refund',
-            icon: RotateCcw,
-          },
+          ...(isSuperAdmin
+            ? [
+                {
+                  title: t('Quick Refund'),
+                  url: '/quick-refund',
+                  icon: RotateCcw,
+                },
+              ]
+            : []),
           {
             title: t('System Settings'),
             url: '/system-settings/site',

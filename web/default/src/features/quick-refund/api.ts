@@ -32,18 +32,23 @@ export async function createRefundBatch(
   return response.data
 }
 
-export async function getRefundBatches(): Promise<
-  ApiResponse<RefundBatchPage>
-> {
+export async function getRefundBatches(
+  page = 1,
+  pageSize = 20
+): Promise<ApiResponse<RefundBatchPage>> {
   const response = await api.get('/api/refund/admin/batches', {
-    params: { p: 1, page_size: 20 },
+    params: { p: page, page_size: pageSize },
   })
   return response.data
 }
 
 export async function getRefundBatch(
-  id: number
+  id: number,
+  itemPage = 1,
+  itemPageSize = 20
 ): Promise<ApiResponse<RefundBatch>> {
-  const response = await api.get(`/api/refund/admin/batches/${id}`)
+  const response = await api.get(`/api/refund/admin/batches/${id}`, {
+    params: { item_page: itemPage, item_page_size: itemPageSize },
+  })
   return response.data
 }

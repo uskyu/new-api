@@ -21,7 +21,7 @@ import React, { lazy, Suspense, useContext, useMemo } from 'react';
 import { Route, Routes, useLocation, useParams } from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
 import User from './pages/User';
-import { AuthRedirect, PrivateRoute, AdminRoute } from './helpers';
+import { AuthRedirect, PrivateRoute, AdminRoute, RootRoute } from './helpers';
 import RegisterForm from './components/auth/RegisterForm';
 import LoginForm from './components/auth/LoginForm';
 import NotFound from './pages/NotFound';
@@ -47,6 +47,7 @@ import Playground from './pages/Playground';
 import Subscription from './pages/Subscription';
 import SelfService from './pages/SelfService';
 import SelfServiceAdmin from './pages/SelfServiceAdmin';
+import QuickRefund from './pages/QuickRefund';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
@@ -139,6 +140,14 @@ function App() {
             <AdminRoute>
               <SelfServiceAdmin />
             </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/quick-refund'
+          element={
+            <RootRoute>
+              <QuickRefund />
+            </RootRoute>
           }
         />
         <Route
