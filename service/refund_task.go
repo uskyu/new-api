@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	refundWorkerTickInterval  = time.Second
+	refundWorkerTickInterval  = 2 * time.Second
 	refundWorkerLeaseSeconds  = int64(60)
 	refundWorkerChunksPerRun  = 20
 	refundLogDeliveriesPerRun = 100

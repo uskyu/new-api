@@ -332,11 +332,11 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
 
 		refundAdminRoute := apiRouter.Group("/refund/admin")
-		refundAdminRoute.Use(middleware.AdminAuth(), middleware.CriticalRateLimit())
+		refundAdminRoute.Use(middleware.AdminAuth())
 		{
 			refundAdminRoute.GET("/options", controller.GetRefundOptions)
-			refundAdminRoute.POST("/preview", controller.PreviewRefund)
-			refundAdminRoute.POST("/batches", middleware.RootAuth(), controller.CreateRefundBatch)
+			refundAdminRoute.POST("/preview", middleware.CriticalRateLimit(), controller.PreviewRefund)
+			refundAdminRoute.POST("/batches", middleware.RootAuth(), middleware.CriticalRateLimit(), controller.CreateRefundBatch)
 			refundAdminRoute.GET("/batches", controller.ListRefundBatches)
 			refundAdminRoute.GET("/batches/:id", controller.GetRefundBatch)
 		}

@@ -573,12 +573,12 @@ func ProcessNextRefundBatchChunk(workerId string, leaseSeconds int64) (bool, err
 	}
 	now := common.GetTimestamp()
 	var candidate RefundBatch
-	err := DB.Where("status IN ? AND (lease_expires_at = 0 OR lease_expires_at <= ? OR lease_owner = ?)", []string{RefundBatchPending, RefundBatchRunning}, now, workerId).Order("id asc").First(&candidate).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, nil
-	}
+	err := DB.Where("status IN ? AND (lease_expires_at = 0 OR lease_expires_at <= ? OR lease_owner = ?)", []string{RefundBatchPending, RefundBatchRunning}, now, workerId).Order("id asc").Limit(1).Find(&candidate).Error
 	if err != nil {
 		return false, err
+	}
+	if candidate.Id == 0 {
+		return false, nil
 	}
 	claim := DB.Model(&RefundBatch{}).
 		Where("id = ? AND status IN ? AND (lease_expires_at = 0 OR lease_expires_at <= ? OR lease_owner = ?)", candidate.Id, []string{RefundBatchPending, RefundBatchRunning}, now, workerId).
@@ -737,12 +737,12 @@ func ProcessNextRefundLogDelivery(workerId string, leaseSeconds int64) (bool, er
 	}
 	now := common.GetTimestamp()
 	var candidate RefundItem
-	err := DB.Where("status = ? AND log_recorded = ? AND (log_next_attempt_at = 0 OR log_next_attempt_at <= ?) AND (log_lease_expires_at = 0 OR log_lease_expires_at <= ? OR log_lease_owner = ?)", RefundItemSuccess, false, now, now, workerId).Order("id asc").First(&candidate).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, nil
-	}
+	err := DB.Where("status = ? AND log_recorded = ? AND (log_next_attempt_at = 0 OR log_next_attempt_at <= ?) AND (log_lease_expires_at = 0 OR log_lease_expires_at <= ? OR log_lease_owner = ?)", RefundItemSuccess, false, now, now, workerId).Order("id asc").Limit(1).Find(&candidate).Error
 	if err != nil {
 		return false, err
+	}
+	if candidate.Id == 0 {
+		return false, nil
 	}
 	claim := DB.Model(&RefundItem{}).
 		Where("id = ? AND status = ? AND log_recorded = ? AND (log_next_attempt_at = 0 OR log_next_attempt_at <= ?) AND (log_lease_expires_at = 0 OR log_lease_expires_at <= ? OR log_lease_owner = ?)", candidate.Id, RefundItemSuccess, false, now, now, workerId).

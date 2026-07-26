@@ -63,7 +63,7 @@ func TestFormatUserRefundLogKeepsDisplayFieldsAndStripsAdminInfo(t *testing.T) {
 	require.Equal(t, "wallet", parsed["source"])
 	require.Equal(t, float64(60), parsed["ratio"])
 	require.Equal(t, 120, logs[0].Quota)
-	require.Equal(t, 7, logs[0].ChannelId)
+	require.Zero(t, logs[0].ChannelId)
 	require.Equal(t, "example-model", logs[0].ModelName)
 	require.Empty(t, logs[0].ChannelName)
 }

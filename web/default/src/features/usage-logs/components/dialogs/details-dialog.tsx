@@ -481,7 +481,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
   // Channel update records which fields changed (stable field tokens); render
   // them with their localized labels for admins.
   const changedFieldTokens =
-    isManage && props.isAdmin && Array.isArray(other?.op?.params?.changed_fields)
+    isManage &&
+    props.isAdmin &&
+    Array.isArray(other?.op?.params?.changed_fields)
       ? (other.op.params.changed_fields as string[])
       : []
   const changedFieldsText = changedFieldTokens
@@ -758,7 +760,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   value={other.source === 'wallet' ? t('Wallet') : other.source}
                 />
               )}
-              {props.log.channel > 0 && (
+              {props.isAdmin && props.log.channel > 0 && (
                 <DetailRow
                   label={t('Channel')}
                   value={

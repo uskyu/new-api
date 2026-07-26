@@ -122,9 +122,6 @@ function buildDetailSegments(
         muted: true,
       })
     }
-    if (log.channel > 0) {
-      segments.push({ text: `${t('Channel')}: #${log.channel}`, muted: true })
-    }
     if (log.model_name) {
       segments.push({ text: `${t('Model')}: ${log.model_name}`, muted: true })
     }
