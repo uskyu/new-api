@@ -19,7 +19,22 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { parseSidebarModulesAdmin } from '../config'
+import { parseHeaderNavModules, parseSidebarModulesAdmin } from '../config'
+
+describe('header navigation configuration migration', () => {
+  test('keeps legacy configurations and initializes custom links as empty', () => {
+    const config = parseHeaderNavModules(
+      JSON.stringify({
+        home: false,
+        docs: true,
+      })
+    )
+
+    assert.equal(config.home, false)
+    assert.equal(config.docs, true)
+    assert.deepEqual(config.customLinks, [])
+  })
+})
 
 describe('sidebar module configuration migration', () => {
   test('enables newly added admin modules for legacy configurations', () => {

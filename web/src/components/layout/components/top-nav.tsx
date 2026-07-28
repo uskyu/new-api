@@ -17,8 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Link } from '@tanstack/react-router'
-import { Menu } from 'lucide-react'
+import { Menu, MoreHorizontal } from 'lucide-react'
 import { useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -29,7 +30,11 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 
-import { type TopNavLink } from '../types'
+import {
+  COMPACT_TOP_NAV_LINK_COUNT,
+  splitTopNavLinks,
+} from '../lib/top-nav-overflow'
+import type { TopNavLink } from '../types'
 
 type TopNavProps = React.HTMLAttributes<HTMLElement> & {
   links: TopNavLink[]
@@ -40,6 +45,7 @@ type TopNavProps = React.HTMLAttributes<HTMLElement> & {
  * 在大屏幕显示水平导航，在小屏幕显示下拉菜单
  */
 export function TopNav({ className, links, ...props }: TopNavProps) {
+  const { t } = useTranslation()
   // 规范化链接，确保所有可选属性都有默认值
   const normalizedLinks = useMemo(
     () =>
@@ -50,6 +56,10 @@ export function TopNav({ className, links, ...props }: TopNavProps) {
         ...link,
       })),
     [links]
+  )
+  const desktopNavigation = splitTopNavLinks(
+    normalizedLinks,
+    COMPACT_TOP_NAV_LINK_COUNT
   )
 
   return (
@@ -64,9 +74,9 @@ export function TopNav({ className, links, ...props }: TopNavProps) {
           </DropdownMenuTrigger>
           <DropdownMenuContent side='bottom' align='start'>
             {normalizedLinks.map(
-              ({ title, href, isActive, disabled, external }) => (
+              ({ id, title, href, isActive, disabled, external }) => (
                 <DropdownMenuItem
-                  key={`${title}-${href}`}
+                  key={id ?? `${title}-${href}`}
                   render={
                     external ? (
                       <a
@@ -87,7 +97,7 @@ export function TopNav({ className, links, ...props }: TopNavProps) {
                       </Link>
                     )
                   }
-                ></DropdownMenuItem>
+                />
               )
             )}
           </DropdownMenuContent>
@@ -102,28 +112,78 @@ export function TopNav({ className, links, ...props }: TopNavProps) {
         )}
         {...props}
       >
-        {normalizedLinks.map(({ title, href, isActive, disabled, external }) =>
-          external ? (
-            <a
-              key={`${title}-${href}`}
-              href={href}
-              target='_blank'
-              rel='noopener noreferrer'
-              className={`hover:text-primary text-sm font-medium transition-colors ${isActive ? '' : 'text-muted-foreground'}`}
-            >
-              {title}
-            </a>
-          ) : (
-            <Link
-              key={`${title}-${href}`}
-              to={href}
-              disabled={disabled}
-              className={`hover:text-primary text-sm font-medium transition-colors ${isActive ? '' : 'text-muted-foreground'}`}
-            >
-              {title}
-            </Link>
-          )
+        {desktopNavigation.visible.map(
+          ({ id, title, href, isActive, disabled, external }) =>
+            external ? (
+              <a
+                key={id ?? `${title}-${href}`}
+                href={href}
+                target='_blank'
+                rel='noopener noreferrer'
+                title={title}
+                className={`hover:text-primary max-w-32 truncate text-sm font-medium transition-colors ${isActive ? '' : 'text-muted-foreground'}`}
+              >
+                {title}
+              </a>
+            ) : (
+              <Link
+                key={id ?? `${title}-${href}`}
+                to={href}
+                disabled={disabled}
+                title={title}
+                className={`hover:text-primary max-w-32 truncate text-sm font-medium transition-colors ${isActive ? '' : 'text-muted-foreground'}`}
+              >
+                {title}
+              </Link>
+            )
         )}
+        {desktopNavigation.overflow.length > 0 ? (
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  type='button'
+                  size='icon-sm'
+                  variant='ghost'
+                  aria-label={t('More navigation links')}
+                  title={t('More navigation links')}
+                />
+              }
+            >
+              <MoreHorizontal aria-hidden='true' />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side='bottom' align='end'>
+              {desktopNavigation.overflow.map(
+                ({ id, title, href, isActive, disabled, external }) => (
+                  <DropdownMenuItem
+                    key={id ?? `${title}-${href}`}
+                    disabled={disabled}
+                    render={
+                      external ? (
+                        <a
+                          href={href}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                          className={!isActive ? 'text-muted-foreground' : ''}
+                        >
+                          {title}
+                        </a>
+                      ) : (
+                        <Link
+                          to={href}
+                          className={!isActive ? 'text-muted-foreground' : ''}
+                          disabled={disabled}
+                        >
+                          {title}
+                        </Link>
+                      )
+                    }
+                  />
+                )
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </nav>
     </>
   )

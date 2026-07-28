@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
+import { MoreHorizontal } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -26,6 +27,12 @@ import { NotificationPopover } from '@/components/notification-popover'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useNotifications } from '@/hooks/use-notifications'
 import { useSystemConfig } from '@/hooks/use-system-config'
@@ -34,6 +41,11 @@ import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { defaultTopNavLinks } from '../config/top-nav.config'
+import {
+  COMPACT_TOP_NAV_LINK_COUNT,
+  splitTopNavLinks,
+  WIDE_TOP_NAV_LINK_COUNT,
+} from '../lib/top-nav-overflow'
 import type { TopNavLink } from '../types'
 import { HeaderLogo } from './header-logo'
 
@@ -42,6 +54,69 @@ const AUTH_PROMPT_SECONDS = 5
 type AuthPromptTarget = {
   title: string
   href: string
+}
+
+type HeaderOverflowMenuProps = {
+  links: TopNavLink[]
+  className?: string
+  onLinkClick: (
+    event: React.MouseEvent<HTMLAnchorElement>,
+    link: TopNavLink
+  ) => void
+}
+
+function HeaderOverflowMenu(props: HeaderOverflowMenuProps) {
+  const { t } = useTranslation()
+  if (props.links.length === 0) return null
+
+  return (
+    <div className={props.className}>
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              type='button'
+              size='icon-sm'
+              variant='ghost'
+              className='rounded-lg'
+              aria-label={t('More navigation links')}
+              title={t('More navigation links')}
+            />
+          }
+        >
+          <MoreHorizontal aria-hidden='true' />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side='bottom' align='end'>
+          {props.links.map((link) => (
+            <DropdownMenuItem
+              key={link.id ?? `${link.title}-${link.href}`}
+              disabled={link.disabled}
+              render={
+                link.external ? (
+                  <a
+                    href={link.href}
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    onClick={(event) => props.onLinkClick(event, link)}
+                  >
+                    {link.title}
+                  </a>
+                ) : (
+                  <Link
+                    to={link.href}
+                    disabled={link.disabled}
+                    onClick={(event) => props.onLinkClick(event, link)}
+                  >
+                    {link.title}
+                  </Link>
+                )
+              }
+            />
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
 }
 
 export interface PublicHeaderProps {
@@ -97,6 +172,8 @@ export function PublicHeader(props: PublicHeaderProps) {
   const isAuthenticated = !!user
   const displaySiteName = customSiteName || systemName
   const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
+  const compactNavigation = splitTopNavLinks(links, COMPACT_TOP_NAV_LINK_COUNT)
+  const wideNavigation = splitTopNavLinks(links, WIDE_TOP_NAV_LINK_COUNT)
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20)
@@ -160,7 +237,7 @@ export function PublicHeader(props: PublicHeaderProps) {
         }
         setAuthPromptSecondsLeft(AUTH_PROMPT_SECONDS)
         setAuthPromptTarget({
-          title: t(link.title),
+          title: link.title,
           href: link.href,
         })
         return
@@ -170,8 +247,39 @@ export function PublicHeader(props: PublicHeaderProps) {
         setMobileOpen(false)
       }
     },
-    [t]
+    []
   )
+
+  let logoContent: React.ReactNode = (
+    <HeaderLogo
+      src={systemLogo}
+      loading={loading}
+      logoLoaded={logoLoaded}
+      className='size-full rounded-lg object-contain'
+    />
+  )
+  if (customLogo) {
+    logoContent = customLogo
+  }
+  if (loading) {
+    logoContent = <Skeleton className='size-full rounded-lg' />
+  }
+
+  let desktopAuthContent: React.ReactNode = (
+    <Button
+      size='sm'
+      className='h-8 rounded-lg px-3.5 text-xs font-medium'
+      render={<Link to='/sign-in' />}
+    >
+      {t('Sign in')}
+    </Button>
+  )
+  if (isAuthenticated) {
+    desktopAuthContent = <ProfileDropdown />
+  }
+  if (loading) {
+    desktopAuthContent = <Skeleton className='h-8 w-20 rounded-lg' />
+  }
 
   return (
     <>
@@ -196,18 +304,7 @@ export function PublicHeader(props: PublicHeaderProps) {
               className='group flex shrink-0 items-center gap-2.5'
             >
               <div className='flex size-7 shrink-0 items-center justify-center transition-all duration-300 group-hover:scale-105'>
-                {loading ? (
-                  <Skeleton className='size-full rounded-lg' />
-                ) : customLogo ? (
-                  customLogo
-                ) : (
-                  <HeaderLogo
-                    src={systemLogo}
-                    loading={loading}
-                    logoLoaded={logoLoaded}
-                    className='size-full rounded-lg object-contain'
-                  />
-                )}
+                {logoContent}
               </div>
               <span className='text-sm font-semibold tracking-tight'>
                 {loading ? <Skeleton className='h-4 w-16' /> : displaySiteName}
@@ -216,45 +313,61 @@ export function PublicHeader(props: PublicHeaderProps) {
 
             {/* Desktop nav */}
             <div className='hidden items-center gap-0.5 sm:flex'>
-              {links.map((link, i) => {
+              {wideNavigation.visible.map((link, i) => {
                 const isActive = pathname === link.href
                 if (link.external) {
                   return (
                     <a
-                      key={i}
+                      key={link.id ?? `${link.title}-${link.href}`}
                       href={link.href}
                       target='_blank'
                       rel='noopener noreferrer'
                       aria-disabled={link.disabled}
                       tabIndex={link.disabled ? -1 : undefined}
+                      title={link.title}
                       onClick={(event) => handleNavLinkClick(event, link)}
                       className={cn(
-                        'text-muted-foreground hover:text-foreground rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-200',
+                        'text-muted-foreground hover:text-foreground max-w-32 truncate rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-200',
+                        i >= COMPACT_TOP_NAV_LINK_COUNT &&
+                          'hidden xl:inline-flex',
                         link.disabled && 'pointer-events-none opacity-50'
                       )}
                     >
-                      {t(link.title)}
+                      {link.title}
                     </a>
                   )
                 }
                 return (
                   <Link
-                    key={i}
+                    key={link.id ?? `${link.title}-${link.href}`}
                     to={link.href}
                     disabled={link.disabled}
+                    title={link.title}
                     onClick={(event) => handleNavLinkClick(event, link)}
                     className={cn(
-                      'rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-200',
+                      'max-w-32 truncate rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-200',
+                      i >= COMPACT_TOP_NAV_LINK_COUNT &&
+                        'hidden xl:inline-flex',
                       isActive
                         ? 'text-foreground'
                         : 'text-muted-foreground hover:text-foreground',
                       link.disabled && 'pointer-events-none opacity-50'
                     )}
                   >
-                    {t(link.title)}
+                    {link.title}
                   </Link>
                 )
               })}
+              <HeaderOverflowMenu
+                links={compactNavigation.overflow}
+                className='xl:hidden'
+                onLinkClick={handleNavLinkClick}
+              />
+              <HeaderOverflowMenu
+                links={wideNavigation.overflow}
+                className='hidden xl:block'
+                onLinkClick={handleNavLinkClick}
+              />
 
               {(showLanguageSwitcher ||
                 showThemeSwitch ||
@@ -280,19 +393,7 @@ export function PublicHeader(props: PublicHeaderProps) {
               {showAuthButtons && (
                 <>
                   <div className='bg-border/40 mx-1 h-4 w-px' />
-                  {loading ? (
-                    <Skeleton className='h-8 w-20 rounded-lg' />
-                  ) : isAuthenticated ? (
-                    <ProfileDropdown />
-                  ) : (
-                    <Button
-                      size='sm'
-                      className='h-8 rounded-lg px-3.5 text-xs font-medium'
-                      render={<Link to='/sign-in' />}
-                    >
-                      {t('Sign in')}
-                    </Button>
-                  )}
+                  {desktopAuthContent}
                 </>
               )}
             </div>
@@ -364,7 +465,7 @@ export function PublicHeader(props: PublicHeaderProps) {
               if (link.external) {
                 return (
                   <a
-                    key={i}
+                    key={link.id ?? `${link.title}-${link.href}`}
                     href={link.href}
                     target='_blank'
                     rel='noopener noreferrer'
@@ -374,20 +475,20 @@ export function PublicHeader(props: PublicHeaderProps) {
                     className={linkClassName}
                     style={transitionStyle}
                   >
-                    {t(link.title)}
+                    {link.title}
                   </a>
                 )
               }
               return (
                 <Link
-                  key={i}
+                  key={link.id ?? `${link.title}-${link.href}`}
                   to={link.href}
                   disabled={link.disabled}
                   onClick={(event) => handleNavLinkClick(event, link, true)}
                   className={linkClassName}
                   style={transitionStyle}
                 >
-                  {t(link.title)}
+                  {link.title}
                 </Link>
               )
             })}

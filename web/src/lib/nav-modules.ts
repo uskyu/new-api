@@ -20,6 +20,17 @@ import { getStatus } from '@/lib/api'
 
 export type ModuleAccess = { enabled: boolean; requireAuth: boolean }
 
+export const MAX_CUSTOM_TOP_NAV_LINKS = 8
+export const MAX_CUSTOM_TOP_NAV_TITLE_LENGTH = 24
+export const MAX_CUSTOM_TOP_NAV_URL_LENGTH = 2048
+
+export type HeaderNavCustomLink = {
+  id: string
+  title: string
+  url: string
+  enabled: boolean
+}
+
 export type HeaderNavModule = 'rankings' | 'pricing'
 
 export type HeaderNavModules = {
@@ -29,7 +40,8 @@ export type HeaderNavModules = {
   rankings: ModuleAccess
   docs: boolean
   about: boolean
-  [key: string]: boolean | ModuleAccess
+  customLinks: HeaderNavCustomLink[]
+  [key: string]: boolean | ModuleAccess | HeaderNavCustomLink[]
 }
 
 const DEFAULT_HEADER_NAV_MODULES: HeaderNavModules = {
@@ -39,6 +51,7 @@ const DEFAULT_HEADER_NAV_MODULES: HeaderNavModules = {
   rankings: { enabled: true, requireAuth: false },
   docs: true,
   about: true,
+  customLinks: [],
 }
 
 const DEFAULTS: Record<HeaderNavModule, ModuleAccess> = {
@@ -51,7 +64,65 @@ function cloneHeaderNavDefaults(): HeaderNavModules {
     ...DEFAULT_HEADER_NAV_MODULES,
     pricing: { ...DEFAULT_HEADER_NAV_MODULES.pricing },
     rankings: { ...DEFAULT_HEADER_NAV_MODULES.rankings },
+    customLinks: DEFAULT_HEADER_NAV_MODULES.customLinks.map((link) => ({
+      ...link,
+    })),
   }
+}
+
+export function isSafeTopNavHref(value: string): boolean {
+  const href = value.trim()
+  if (href.startsWith('/') && !href.startsWith('//')) return true
+
+  try {
+    const parsed = new URL(href)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+export function isExternalTopNavHref(value: string): boolean {
+  try {
+    const parsed = new URL(value.trim())
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+export function parseHeaderNavCustomLinks(raw: unknown): HeaderNavCustomLink[] {
+  if (!Array.isArray(raw)) return []
+
+  return raw
+    .slice(0, MAX_CUSTOM_TOP_NAV_LINKS)
+    .map((item, index): HeaderNavCustomLink | null => {
+      if (!item || typeof item !== 'object') return null
+
+      const record = item as Record<string, unknown>
+      const title = typeof record.title === 'string' ? record.title.trim() : ''
+      const url = typeof record.url === 'string' ? record.url.trim() : ''
+      if (
+        !title ||
+        title.length > MAX_CUSTOM_TOP_NAV_TITLE_LENGTH ||
+        !url ||
+        url.length > MAX_CUSTOM_TOP_NAV_URL_LENGTH ||
+        !isSafeTopNavHref(url)
+      ) {
+        return null
+      }
+
+      const rawId = typeof record.id === 'string' ? record.id.trim() : ''
+      const id = rawId.slice(0, 64) || `custom-link-${index + 1}`
+
+      return {
+        id,
+        title,
+        url,
+        enabled: parseHeaderNavBoolean(record.enabled, true),
+      }
+    })
+    .filter((link): link is HeaderNavCustomLink => link !== null)
 }
 
 export function parseHeaderNavBoolean(
@@ -118,6 +189,10 @@ export function parseHeaderNavModules(raw: unknown): HeaderNavModules {
       result.rankings = parseAccess(value, result.rankings)
       return
     }
+    if (key === 'customLinks') {
+      result.customLinks = parseHeaderNavCustomLinks(value)
+      return
+    }
 
     const fallback = result[key]
     if (
@@ -140,6 +215,12 @@ export function parseHeaderNavModulesFromStatus(
   status: Record<string, unknown> | null
 ): HeaderNavModules {
   return parseHeaderNavModules(status?.HeaderNavModules)
+}
+
+export function getVisibleHeaderNavCustomLinks(
+  modules: HeaderNavModules
+): HeaderNavCustomLink[] {
+  return modules.customLinks.filter((link) => link.enabled)
 }
 
 function getCachedStatus(): Record<string, unknown> | null {
