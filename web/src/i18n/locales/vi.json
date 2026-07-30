@@ -1,5 +1,14 @@
 {
   "translation": {
+    "A personal API key in your current group will be created for this application.": "Một khóa API cá nhân trong nhóm hiện tại của bạn sẽ được tạo cho ứng dụng này.",
+    "Authorize quick login": "Cho phép đăng nhập nhanh",
+    "Authorization failed. Please try again.": "Ủy quyền không thành công. Vui lòng thử lại.",
+    "Authorizing...": "Đang ủy quyền...",
+    "Invalid or expired authorization request": "Yêu cầu ủy quyền không hợp lệ hoặc đã hết hạn",
+    "Local callback": "Lệnh gọi lại cục bộ",
+    "Quick login": "Đăng nhập nhanh",
+    "Signed in account": "Tài khoản đang đăng nhập",
+    "{{client}} is requesting API access": "{{client}} đang yêu cầu quyền truy cập API",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

@@ -48,6 +48,7 @@ import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authen
 import { Route as AuthenticatedOperationsAnalyticsIndexRouteImport } from './routes/_authenticated/operations-analytics/index'
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
+import { Route as AuthenticatedQuickLoginIndexRouteImport } from './routes/_authenticated/quick-login/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
 import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
@@ -279,6 +280,12 @@ const AuthenticatedProfileIndexRoute =
     path: '/profile/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedQuickLoginIndexRoute =
+  AuthenticatedQuickLoginIndexRouteImport.update({
+    id: '/quick-login/',
+    path: '/quick-login/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedRedemptionCodesIndexRoute =
   AuthenticatedRedemptionCodesIndexRouteImport.update({
     id: '/redemption-codes/',
@@ -461,6 +468,7 @@ export interface FileRoutesByFullPath {
   '/operations-analytics/': typeof AuthenticatedOperationsAnalyticsIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
+  '/quick-login/': typeof AuthenticatedQuickLoginIndexRoute
   '/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
@@ -523,6 +531,7 @@ export interface FileRoutesByTo {
   '/operations-analytics': typeof AuthenticatedOperationsAnalyticsIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
+  '/quick-login': typeof AuthenticatedQuickLoginIndexRoute
   '/redemption-codes': typeof AuthenticatedRedemptionCodesIndexRoute
   '/subscriptions': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
@@ -589,6 +598,7 @@ export interface FileRoutesById {
   '/_authenticated/operations-analytics/': typeof AuthenticatedOperationsAnalyticsIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
+  '/_authenticated/quick-login/': typeof AuthenticatedQuickLoginIndexRoute
   '/_authenticated/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/_authenticated/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
@@ -654,6 +664,7 @@ export interface FileRouteTypes {
     | '/operations-analytics/'
     | '/playground/'
     | '/profile/'
+    | '/quick-login/'
     | '/redemption-codes/'
     | '/subscriptions/'
     | '/system-info/'
@@ -716,6 +727,7 @@ export interface FileRouteTypes {
     | '/operations-analytics'
     | '/playground'
     | '/profile'
+    | '/quick-login'
     | '/redemption-codes'
     | '/subscriptions'
     | '/system-info'
@@ -781,6 +793,7 @@ export interface FileRouteTypes {
     | '/_authenticated/operations-analytics/'
     | '/_authenticated/playground/'
     | '/_authenticated/profile/'
+    | '/_authenticated/quick-login/'
     | '/_authenticated/redemption-codes/'
     | '/_authenticated/subscriptions/'
     | '/_authenticated/system-info/'
@@ -1100,6 +1113,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProfileIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/quick-login/': {
+      id: '/_authenticated/quick-login/'
+      path: '/quick-login'
+      fullPath: '/quick-login/'
+      preLoaderRoute: typeof AuthenticatedQuickLoginIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/redemption-codes/': {
       id: '/_authenticated/redemption-codes/'
       path: '/redemption-codes'
@@ -1372,6 +1392,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedOperationsAnalyticsIndexRoute: typeof AuthenticatedOperationsAnalyticsIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
+  AuthenticatedQuickLoginIndexRoute: typeof AuthenticatedQuickLoginIndexRoute
   AuthenticatedRedemptionCodesIndexRoute: typeof AuthenticatedRedemptionCodesIndexRoute
   AuthenticatedSubscriptionsIndexRoute: typeof AuthenticatedSubscriptionsIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
@@ -1401,6 +1422,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
     AuthenticatedOperationsAnalyticsIndexRoute,
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
+  AuthenticatedQuickLoginIndexRoute: AuthenticatedQuickLoginIndexRoute,
   AuthenticatedRedemptionCodesIndexRoute:
     AuthenticatedRedemptionCodesIndexRoute,
   AuthenticatedSubscriptionsIndexRoute: AuthenticatedSubscriptionsIndexRoute,

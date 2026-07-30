@@ -43,6 +43,13 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/verification", middleware.EmailVerificationRateLimit(), middleware.TurnstileCheck(), controller.SendEmailVerification)
 		apiRouter.GET("/reset_password", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.SendPasswordResetEmail)
 		apiRouter.POST("/user/reset", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.ResetPassword)
+		quickLoginRoute := apiRouter.Group("/quick-login")
+		{
+			quickLoginRoute.POST("/start", middleware.CriticalRateLimit(), middleware.DisableCache(), anonymousRequestBodyLimit, controller.StartQuickLogin)
+			quickLoginRoute.POST("/exchange", middleware.CriticalRateLimit(), middleware.DisableCache(), anonymousRequestBodyLimit, controller.ExchangeQuickLogin)
+			quickLoginRoute.GET("/authorize", middleware.UserAuth(), middleware.DisableCache(), controller.GetQuickLoginAuthorization)
+			quickLoginRoute.POST("/approve", middleware.UserAuth(), middleware.CriticalRateLimit(), middleware.DisableCache(), controller.ApproveQuickLogin)
+		}
 		// OAuth routes - specific routes must come before :provider wildcard
 		apiRouter.POST("/oauth/state", middleware.CriticalRateLimit(), middleware.DisableCache(), middleware.TryUserAuth(), anonymousRequestBodyLimit, controller.GenerateOAuthCode)
 		apiRouter.POST("/oauth/email/bind", middleware.UserAuth(), middleware.CriticalRateLimit(), controller.EmailBind)

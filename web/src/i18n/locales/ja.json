@@ -1,5 +1,14 @@
 {
   "translation": {
+    "A personal API key in your current group will be created for this application.": "このアプリケーション用に、現在のグループの個人 API キーが作成されます。",
+    "Authorize quick login": "クイックログインを許可",
+    "Authorization failed. Please try again.": "認証に失敗しました。もう一度お試しください。",
+    "Authorizing...": "認証中...",
+    "Invalid or expired authorization request": "認証リクエストが無効か期限切れです",
+    "Local callback": "ローカルコールバック",
+    "Quick login": "クイックログイン",
+    "Signed in account": "ログイン中のアカウント",
+    "{{client}} is requesting API access": "{{client}} が API アクセスを要求しています",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

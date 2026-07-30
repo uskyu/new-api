@@ -1,5 +1,14 @@
 {
   "translation": {
+    "A personal API key in your current group will be created for this application.": "Для этого приложения будет создан персональный API-ключ вашей текущей группы.",
+    "Authorize quick login": "Разрешить быстрый вход",
+    "Authorization failed. Please try again.": "Не удалось выполнить авторизацию. Повторите попытку.",
+    "Authorizing...": "Авторизация...",
+    "Invalid or expired authorization request": "Запрос авторизации недействителен или просрочен",
+    "Local callback": "Локальный обратный вызов",
+    "Quick login": "Быстрый вход",
+    "Signed in account": "Текущая учетная запись",
+    "{{client}} is requesting API access": "{{client}} запрашивает доступ к API",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

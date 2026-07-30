@@ -22,6 +22,7 @@ const (
 	AuthFlowPurposePasskeyStepUp     = "passkey_step_up"
 	AuthFlowPurposeTelegramBind      = "telegram_bind"
 	AuthFlowPurposeTelegramAssertion = "telegram_assertion"
+	AuthFlowPurposeQuickLogin        = "quick_login"
 	AuthFlowIntentLogin              = "login"
 	AuthFlowIntentBind               = "bind"
 	AuthFlowTokenBytes               = 32
@@ -32,6 +33,7 @@ var (
 	ErrAuthFlowInvalid  = errors.New("auth flow is invalid")
 	ErrAuthFlowExpired  = errors.New("auth flow has expired")
 	ErrAuthFlowConsumed = errors.New("auth flow has already been consumed")
+	ErrAuthFlowApproved = errors.New("auth flow has already been approved")
 )
 
 // AuthFlow stores one-time, short-lived state for authentication ceremonies.
@@ -176,6 +178,52 @@ func GetAuthFlow(token string, match AuthFlowMatch) (*AuthFlow, error) {
 		return nil, ErrAuthFlowExpired
 	}
 	return &flow, nil
+}
+
+// ApproveAuthFlow atomically binds an unclaimed flow to the authenticated user.
+// Repeating the same approval is idempotent, while a different user cannot
+// take over a flow that has already been approved.
+func ApproveAuthFlow(token string, match AuthFlowMatch, userId int) (*AuthFlow, error) {
+	if token == "" || match.Purpose == "" || userId <= 0 {
+		return nil, ErrAuthFlowInvalid
+	}
+	var approved AuthFlow
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		query := applyAuthFlowMatch(lockForUpdate(tx), token, match)
+		if err := query.First(&approved).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrAuthFlowInvalid
+			}
+			return err
+		}
+		if approved.ConsumedAt != nil {
+			return ErrAuthFlowConsumed
+		}
+		if !approved.ExpiresAt.After(time.Now()) {
+			return ErrAuthFlowExpired
+		}
+		if approved.UserId != 0 {
+			if approved.UserId == userId {
+				return nil
+			}
+			return ErrAuthFlowApproved
+		}
+		result := tx.Model(&AuthFlow{}).
+			Where("id = ? AND user_id = 0 AND consumed_at IS NULL", approved.Id).
+			Update("user_id", userId)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrAuthFlowApproved
+		}
+		approved.UserId = userId
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &approved, nil
 }
 
 // ConsumeAuthFlow atomically validates and consumes a flow. Optional match

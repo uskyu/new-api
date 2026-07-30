@@ -1,5 +1,14 @@
 {
   "translation": {
+    "A personal API key in your current group will be created for this application.": "Une clé API personnelle utilisant votre groupe actuel sera créée pour cette application.",
+    "Authorize quick login": "Autoriser la connexion rapide",
+    "Authorization failed. Please try again.": "L’autorisation a échoué. Veuillez réessayer.",
+    "Authorizing...": "Autorisation en cours...",
+    "Invalid or expired authorization request": "La demande d’autorisation est invalide ou a expiré",
+    "Local callback": "Rappel local",
+    "Quick login": "Connexion rapide",
+    "Signed in account": "Compte connecté",
+    "{{client}} is requesting API access": "{{client}} demande un accès à l’API",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

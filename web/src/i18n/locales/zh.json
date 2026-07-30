@@ -1,5 +1,14 @@
 {
   "translation": {
+    "A personal API key in your current group will be created for this application.": "将为此应用创建一个属于您的、使用当前分组的 API 令牌。",
+    "Authorize quick login": "授权快捷登录",
+    "Authorization failed. Please try again.": "授权失败，请重试。",
+    "Authorizing...": "正在授权...",
+    "Invalid or expired authorization request": "授权请求无效或已过期",
+    "Local callback": "本地回调",
+    "Quick login": "快捷登录",
+    "Signed in account": "当前登录账号",
+    "{{client}} is requesting API access": "{{client}} 正在请求 API 访问权限",
     "360": "360",
     "1000": "1000",
     "10000": "10000",
