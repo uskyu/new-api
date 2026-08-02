@@ -18,7 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from 'react-router-dom';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import {
@@ -67,9 +72,14 @@ import LinuxDoIcon from '../common/logo/LinuxDoIcon';
 import TwoFAVerification from './TwoFAVerification';
 import { useTranslation } from 'react-i18next';
 import { SiDiscord } from 'react-icons/si';
+import {
+  consumeQuickLoginReturn,
+  rememberQuickLoginReturn,
+} from '../../helpers/quickLogin';
 
 const LoginForm = () => {
   let navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const githubButtonTextKeyByState = {
     idle: '使用 GitHub 继续',
@@ -116,6 +126,17 @@ const LoginForm = () => {
 
   const logo = getLogo();
   const systemName = getSystemName();
+
+  useEffect(() => {
+    rememberQuickLoginReturn(location.state?.from);
+  }, [location.state]);
+
+  const navigateAfterLogin = (fallback = '/console') => {
+    const quickLoginPath = consumeQuickLoginReturn();
+    navigate(quickLoginPath || fallback, {
+      replace: Boolean(quickLoginPath),
+    });
+  };
 
   const status = useMemo(() => {
     if (statusState?.status) return statusState.status;
@@ -195,7 +216,7 @@ const LoginForm = () => {
           localStorage.setItem('user', JSON.stringify(data));
         setUserData(data);
         updateAPI();
-        navigate('/');
+        navigateAfterLogin('/');
         showSuccess('登录成功！');
         setShowWeChatLoginModal(false);
       } else {
@@ -253,7 +274,7 @@ const LoginForm = () => {
               centered: true,
             });
           }
-          navigate('/console');
+          navigateAfterLogin();
         } else {
           showError(message);
         }
@@ -299,7 +320,7 @@ const LoginForm = () => {
         showSuccess('登录成功！');
         setUserData(data);
         updateAPI();
-        navigate('/');
+        navigateAfterLogin('/');
       } else {
         showError(message);
       }
@@ -456,7 +477,7 @@ const LoginForm = () => {
         updateAPI();
         clearStoredAffiliateCode();
         showSuccess('登录成功！');
-        navigate('/console');
+        navigateAfterLogin();
       } else {
         showError(finish.message || 'Passkey 登录失败，请重试');
       }
@@ -492,7 +513,7 @@ const LoginForm = () => {
     updateAPI();
     clearStoredAffiliateCode();
     showSuccess('登录成功！');
-    navigate('/console');
+    navigateAfterLogin();
   };
 
   // 返回登录页面

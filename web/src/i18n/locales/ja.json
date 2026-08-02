@@ -3346,6 +3346,18 @@
     "生成失败": "Generation failed",
     "充值页额外通知": "チャージページの追加通知",
     "请输入充值页额外通知内容，支持 HTML": "チャージページの追加通知内容を入力してください。HTMLに対応しています。",
-    "额外通知": "追加通知"
+    "额外通知": "追加通知",
+    "A personal API key in your current group will be created for this application.": "このアプリ用に、現在のグループの個人 API キーが作成されます。",
+    "Authorization failed. Please try again.": "認証に失敗しました。もう一度お試しください。",
+    "Authorize": "許可",
+    "Authorize quick login": "クイックログインを許可",
+    "Authorizing...": "認証中...",
+    "Cancel": "キャンセル",
+    "Invalid or expired authorization request": "無効または期限切れの認証リクエストです",
+    "Local callback": "ローカルコールバック",
+    "Quick login": "クイックログイン",
+    "Return to dashboard": "ダッシュボードに戻る",
+    "Signed in account": "ログイン中のアカウント",
+    "{{client}} is requesting API access": "{{client}} が API アクセスを要求しています"
   }
 }

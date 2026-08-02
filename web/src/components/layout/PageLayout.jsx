@@ -62,6 +62,7 @@ const PageLayout = () => {
     '/console/task',
     '/console/models',
     '/pricing',
+    '/quick-login',
   ];
 
   const shouldHideFooter = cardProPages.includes(location.pathname);

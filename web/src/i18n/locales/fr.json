@@ -3365,6 +3365,18 @@
     "生成失败": "Echec de generation",
     "充值页额外通知": "Avis supplementaire de la page de recharge",
     "请输入充值页额外通知内容，支持 HTML": "Saisissez le contenu de l'avis supplementaire de la page de recharge. HTML pris en charge.",
-    "额外通知": "Avis supplementaire"
+    "额外通知": "Avis supplementaire",
+    "A personal API key in your current group will be created for this application.": "Une clé API personnelle utilisant votre groupe actuel sera créée pour cette application.",
+    "Authorization failed. Please try again.": "Échec de l'autorisation. Réessayez.",
+    "Authorize": "Autoriser",
+    "Authorize quick login": "Autoriser la connexion rapide",
+    "Authorizing...": "Autorisation...",
+    "Cancel": "Annuler",
+    "Invalid or expired authorization request": "Demande d'autorisation invalide ou expirée",
+    "Local callback": "Rappel local",
+    "Quick login": "Connexion rapide",
+    "Return to dashboard": "Retour au tableau de bord",
+    "Signed in account": "Compte connecté",
+    "{{client}} is requesting API access": "{{client}} demande l'accès à l'API"
   }
 }

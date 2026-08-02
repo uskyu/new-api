@@ -78,6 +78,7 @@ const AIEcommerceTemplate = lazy(() => import('./pages/AIEcommerceTemplate'));
 const AIImageLogs = lazy(() => import('./pages/AIImageLogs'));
 const AIVideoLogs = lazy(() => import('./pages/AIVideoLogs'));
 const Analytics = lazy(() => import('./pages/Analytics'));
+const QuickLogin = lazy(() => import('./pages/QuickLogin'));
 
 function DynamicOAuth2Callback() {
   const { provider } = useParams();
@@ -189,6 +190,16 @@ function App() {
           element={
             <PrivateRoute>
               <Token />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/quick-login'
+          element={
+            <PrivateRoute>
+              <Suspense fallback={<Loading></Loading>}>
+                <QuickLogin />
+              </Suspense>
             </PrivateRoute>
           }
         />

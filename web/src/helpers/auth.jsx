@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { history } from './history';
 import { can } from './utils';
 
@@ -44,8 +44,9 @@ export const AuthRedirect = ({ children }) => {
 };
 
 function PrivateRoute({ children }) {
+  const location = useLocation();
   if (!localStorage.getItem('user')) {
-    return <Navigate to='/login' state={{ from: history.location }} />;
+    return <Navigate to='/login' state={{ from: location }} />;
   }
   return children;
 }

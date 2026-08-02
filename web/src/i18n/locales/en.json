@@ -3409,6 +3409,18 @@
     "生成失败": "Generation failed",
     "充值页额外通知": "Top-up Page Extra Notice",
     "请输入充值页额外通知内容，支持 HTML": "Enter extra notice content for the top-up page. HTML is supported.",
-    "额外通知": "Extra Notice"
+    "额外通知": "Extra Notice",
+    "A personal API key in your current group will be created for this application.": "A personal API key in your current group will be created for this application.",
+    "Authorization failed. Please try again.": "Authorization failed. Please try again.",
+    "Authorize": "Authorize",
+    "Authorize quick login": "Authorize quick login",
+    "Authorizing...": "Authorizing...",
+    "Cancel": "Cancel",
+    "Invalid or expired authorization request": "Invalid or expired authorization request",
+    "Local callback": "Local callback",
+    "Quick login": "Quick login",
+    "Return to dashboard": "Return to dashboard",
+    "Signed in account": "Signed in account",
+    "{{client}} is requesting API access": "{{client}} is requesting API access"
   }
 }

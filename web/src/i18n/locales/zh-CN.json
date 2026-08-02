@@ -3013,6 +3013,18 @@
     "生成失败": "生成失败",
     "充值页额外通知": "充值页额外通知",
     "请输入充值页额外通知内容，支持 HTML": "请输入充值页额外通知内容，支持 HTML",
-    "额外通知": "额外通知"
+    "额外通知": "额外通知",
+    "A personal API key in your current group will be created for this application.": "将为此应用创建一个使用当前分组的个人 API 令牌。",
+    "Authorization failed. Please try again.": "授权失败，请重试。",
+    "Authorize": "授权",
+    "Authorize quick login": "授权快捷登录",
+    "Authorizing...": "正在授权...",
+    "Cancel": "取消",
+    "Invalid or expired authorization request": "授权请求无效或已过期",
+    "Local callback": "本地回调地址",
+    "Quick login": "快捷登录",
+    "Return to dashboard": "返回控制台",
+    "Signed in account": "当前登录账号",
+    "{{client}} is requesting API access": "{{client}} 正在请求 API 访问权限"
   }
 }

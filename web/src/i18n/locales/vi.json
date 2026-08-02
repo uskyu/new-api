@@ -3914,6 +3914,18 @@
     "详情段生成中": "Generating detail sections",
     "充值页额外通知": "Additional notice on top-up page",
     "请输入充值页额外通知内容，支持 HTML": "Enter additional notice content for the top-up page. HTML is supported.",
-    "额外通知": "Additional Notice"
+    "额外通知": "Additional Notice",
+    "A personal API key in your current group will be created for this application.": "Một khóa API cá nhân trong nhóm hiện tại của bạn sẽ được tạo cho ứng dụng này.",
+    "Authorization failed. Please try again.": "Ủy quyền thất bại. Vui lòng thử lại.",
+    "Authorize": "Cho phép",
+    "Authorize quick login": "Cho phép đăng nhập nhanh",
+    "Authorizing...": "Đang ủy quyền...",
+    "Cancel": "Hủy",
+    "Invalid or expired authorization request": "Yêu cầu ủy quyền không hợp lệ hoặc đã hết hạn",
+    "Local callback": "Callback cục bộ",
+    "Quick login": "Đăng nhập nhanh",
+    "Return to dashboard": "Quay lại bảng điều khiển",
+    "Signed in account": "Tài khoản đã đăng nhập",
+    "{{client}} is requesting API access": "{{client}} đang yêu cầu quyền truy cập API"
   }
 }

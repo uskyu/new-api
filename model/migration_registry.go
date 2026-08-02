@@ -50,6 +50,7 @@ func CoreSchemaModels() []interface{} {
 		&Channel{},
 		&Token{},
 		&User{},
+		&AuthFlow{},
 		&AgentRebateGroup{},
 		&AgentProfile{},
 		&AgentPromoLink{},
