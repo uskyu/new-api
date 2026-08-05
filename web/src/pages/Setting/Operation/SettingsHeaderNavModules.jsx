@@ -23,13 +23,24 @@ import {
   Card,
   Col,
   Form,
+  Input,
   Row,
   Switch,
+  Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
 import { API, showError, showSuccess } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../../context/Status';
+import { MoveDown, MoveUp, Plus, Trash2 } from 'lucide-react';
+import {
+  createDefaultHeaderNavModules,
+  isSafeTopNavHref,
+  MAX_CUSTOM_TOP_NAV_LINKS,
+  MAX_CUSTOM_TOP_NAV_TITLE_LENGTH,
+  MAX_CUSTOM_TOP_NAV_URL_LENGTH,
+  parseHeaderNavModules,
+} from '../../../helpers/headerNav';
 
 const { Text } = Typography;
 
@@ -39,16 +50,9 @@ export default function SettingsHeaderNavModules(props) {
   const [statusState, statusDispatch] = useContext(StatusContext);
 
   // 顶栏模块管理状态
-  const [headerNavModules, setHeaderNavModules] = useState({
-    home: true,
-    console: true,
-    pricing: {
-      enabled: true,
-      requireAuth: false, // 默认不需要登录鉴权
-    },
-    docs: true,
-    about: true,
-  });
+  const [headerNavModules, setHeaderNavModules] = useState(
+    createDefaultHeaderNavModules,
+  );
 
   // 处理顶栏模块配置变更
   function handleHeaderNavModuleChange(moduleKey) {
@@ -79,27 +83,96 @@ export default function SettingsHeaderNavModules(props) {
 
   // 重置顶栏模块为默认配置
   function resetHeaderNavModules() {
-    const defaultModules = {
-      home: true,
-      console: true,
-      pricing: {
-        enabled: true,
-        requireAuth: false,
-      },
-      docs: true,
-      about: true,
-    };
-    setHeaderNavModules(defaultModules);
+    setHeaderNavModules(createDefaultHeaderNavModules());
     showSuccess(t('已重置为默认配置'));
+  }
+
+  function addCustomLink() {
+    if (
+      (headerNavModules.customLinks || []).length >= MAX_CUSTOM_TOP_NAV_LINKS
+    ) {
+      showError(
+        t('最多只能添加 {{count}} 个自定义导航', {
+          count: MAX_CUSTOM_TOP_NAV_LINKS,
+        }),
+      );
+      return;
+    }
+    const id =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `custom-${Date.now()}`;
+    setHeaderNavModules((current) => ({
+      ...current,
+      customLinks: [
+        ...(current.customLinks || []),
+        { id, title: '', url: '', enabled: true },
+      ],
+    }));
+  }
+
+  function updateCustomLink(id, field, value) {
+    setHeaderNavModules((current) => ({
+      ...current,
+      customLinks: (current.customLinks || []).map((link) =>
+        link.id === id ? { ...link, [field]: value } : link,
+      ),
+    }));
+  }
+
+  function deleteCustomLink(id) {
+    setHeaderNavModules((current) => ({
+      ...current,
+      customLinks: (current.customLinks || []).filter((link) => link.id !== id),
+    }));
+  }
+
+  function moveCustomLink(index, direction) {
+    setHeaderNavModules((current) => {
+      const links = [...(current.customLinks || [])];
+      const target = index + direction;
+      if (target < 0 || target >= links.length) return current;
+      [links[index], links[target]] = [links[target], links[index]];
+      return { ...current, customLinks: links };
+    });
   }
 
   // 保存配置
   async function onSubmit() {
+    const customLinks = headerNavModules.customLinks || [];
+    for (const link of customLinks) {
+      const title = String(link.title || '').trim();
+      const url = String(link.url || '').trim();
+      if (!title || title.length > MAX_CUSTOM_TOP_NAV_TITLE_LENGTH) {
+        showError(
+          t('自定义导航名称不能为空，且不能超过 {{count}} 个字符', {
+            count: MAX_CUSTOM_TOP_NAV_TITLE_LENGTH,
+          }),
+        );
+        return;
+      }
+      if (
+        !url ||
+        url.length > MAX_CUSTOM_TOP_NAV_URL_LENGTH ||
+        !isSafeTopNavHref(url)
+      ) {
+        showError(t('导航链接仅支持站内路径或 http/https 地址'));
+        return;
+      }
+    }
+    const nextModules = {
+      ...headerNavModules,
+      customLinks: customLinks.map((link) => ({
+        ...link,
+        title: link.title.trim(),
+        url: link.url.trim(),
+      })),
+    };
     setLoading(true);
     try {
       const res = await API.put('/api/option/', {
         key: 'HeaderNavModules',
-        value: JSON.stringify(headerNavModules),
+        value: JSON.stringify(nextModules),
       });
       const { success, message } = res.data;
       if (success) {
@@ -110,7 +183,7 @@ export default function SettingsHeaderNavModules(props) {
           type: 'set',
           payload: {
             ...statusState.status,
-            HeaderNavModules: JSON.stringify(headerNavModules),
+            HeaderNavModules: JSON.stringify(nextModules),
           },
         });
 
@@ -131,32 +204,9 @@ export default function SettingsHeaderNavModules(props) {
   useEffect(() => {
     // 从 props.options 中获取配置
     if (props.options && props.options.HeaderNavModules) {
-      try {
-        const modules = JSON.parse(props.options.HeaderNavModules);
-
-        // 处理向后兼容性：如果pricing是boolean，转换为对象格式
-        if (typeof modules.pricing === 'boolean') {
-          modules.pricing = {
-            enabled: modules.pricing,
-            requireAuth: false, // 默认不需要登录鉴权
-          };
-        }
-
-        setHeaderNavModules(modules);
-      } catch (error) {
-        // 使用默认配置
-        const defaultModules = {
-          home: true,
-          console: true,
-          pricing: {
-            enabled: true,
-            requireAuth: false,
-          },
-          docs: true,
-          about: true,
-        };
-        setHeaderNavModules(defaultModules);
-      }
+      setHeaderNavModules(
+        parseHeaderNavModules(props.options.HeaderNavModules),
+      );
     }
   }, [props.options]);
 
@@ -314,6 +364,95 @@ export default function SettingsHeaderNavModules(props) {
             </Col>
           ))}
         </Row>
+
+        <div className='mb-6'>
+          <div className='mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+            <div>
+              <div className='font-semibold'>{t('自定义顶部导航')}</div>
+              <Text type='secondary' size='small'>
+                {t('可添加站内路径或外部链接，关闭后保留配置但不显示')}
+              </Text>
+            </div>
+            <Button
+              type='primary'
+              theme='light'
+              icon={<Plus size={16} />}
+              onClick={addCustomLink}
+              disabled={
+                (headerNavModules.customLinks || []).length >=
+                MAX_CUSTOM_TOP_NAV_LINKS
+              }
+            >
+              {t('新增顶部导航')}
+            </Button>
+          </div>
+
+          <div className='flex flex-col gap-2'>
+            {(headerNavModules.customLinks || []).length === 0 ? (
+              <Text type='tertiary'>{t('暂未添加自定义顶部导航')}</Text>
+            ) : (
+              headerNavModules.customLinks.map((link, index) => (
+                <div
+                  key={link.id}
+                  className='grid grid-cols-1 gap-2 border-b border-solid border-[var(--semi-color-border)] py-3 md:grid-cols-[minmax(160px,0.8fr)_minmax(260px,1.6fr)_auto] md:items-center'
+                >
+                  <Input
+                    value={link.title}
+                    maxLength={MAX_CUSTOM_TOP_NAV_TITLE_LENGTH}
+                    placeholder={t('导航名称')}
+                    onChange={(value) =>
+                      updateCustomLink(link.id, 'title', value)
+                    }
+                  />
+                  <Input
+                    value={link.url}
+                    maxLength={MAX_CUSTOM_TOP_NAV_URL_LENGTH}
+                    placeholder='/console 或 https://example.com'
+                    onChange={(value) =>
+                      updateCustomLink(link.id, 'url', value)
+                    }
+                  />
+                  <div className='flex items-center justify-end gap-1'>
+                    <Switch
+                      checked={link.enabled}
+                      onChange={(checked) =>
+                        updateCustomLink(link.id, 'enabled', checked)
+                      }
+                    />
+                    <Tooltip content={t('上移')}>
+                      <Button
+                        type='tertiary'
+                        theme='borderless'
+                        icon={<MoveUp size={16} />}
+                        disabled={index === 0}
+                        onClick={() => moveCustomLink(index, -1)}
+                      />
+                    </Tooltip>
+                    <Tooltip content={t('下移')}>
+                      <Button
+                        type='tertiary'
+                        theme='borderless'
+                        icon={<MoveDown size={16} />}
+                        disabled={
+                          index === headerNavModules.customLinks.length - 1
+                        }
+                        onClick={() => moveCustomLink(index, 1)}
+                      />
+                    </Tooltip>
+                    <Tooltip content={t('删除')}>
+                      <Button
+                        type='danger'
+                        theme='borderless'
+                        icon={<Trash2 size={16} />}
+                        onClick={() => deleteCustomLink(link.id)}
+                      />
+                    </Tooltip>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
 
         <div
           style={{

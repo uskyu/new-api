@@ -23,6 +23,10 @@ import {
   Card,
   DatePicker,
   Empty,
+  Input,
+  InputNumber,
+  Pagination,
+  Select,
   Spin,
   Table,
   TabPane,
@@ -56,6 +60,17 @@ const RANGE_OPTIONS = [
   { key: 'month', label: '本月' },
   { key: 'custom', label: '自定义' },
 ];
+
+const INACTIVE_DAY_OPTIONS = [
+  { value: 7, label: '7 天' },
+  { value: 30, label: '30 天' },
+  { value: 60, label: '2 个月' },
+  { value: 90, label: '3 个月' },
+  { value: 180, label: '6 个月' },
+  { value: 'custom', label: '自定义' },
+];
+
+const INACTIVE_PAGE_SIZE = 10;
 
 const chartColors = [
   '#1664FF',
@@ -94,6 +109,13 @@ const Analytics = () => {
   const [distributionType, setDistributionType] = useState('models');
   const [rankingType, setRankingType] = useState('consumption');
   const [usageType, setUsageType] = useState('models');
+  const [inactiveRange, setInactiveRange] = useState(30);
+  const [inactiveCustomDays, setInactiveCustomDays] = useState(30);
+  const [inactiveAccountType, setInactiveAccountType] = useState('all');
+  const [inactiveKeyword, setInactiveKeyword] = useState('');
+  const [inactivePage, setInactivePage] = useState(1);
+  const [inactiveLoading, setInactiveLoading] = useState(false);
+  const [inactiveResult, setInactiveResult] = useState(null);
 
   useEffect(() => {
     initVChartSemiTheme({ isWatchingThemeSwitch: true });
@@ -131,6 +153,58 @@ const Analytics = () => {
   useEffect(() => {
     loadOverview();
   }, [loadOverview]);
+
+  const loadInactiveUsers = useCallback(
+    async (page = inactivePage) => {
+      const days =
+        inactiveRange === 'custom'
+          ? Number(inactiveCustomDays || 0)
+          : Number(inactiveRange);
+      if (days < 1 || days > 3650) {
+        showError(t('未调用天数必须在 1 到 3650 之间'));
+        return;
+      }
+      setInactiveLoading(true);
+      try {
+        const res = await API.get('/api/admin/analytics/inactive-users', {
+          params: {
+            days,
+            account_type: inactiveAccountType,
+            keyword: inactiveKeyword.trim(),
+            p: page,
+            page_size: INACTIVE_PAGE_SIZE,
+          },
+        });
+        const { success, message, data } = res.data || {};
+        if (!success) {
+          showError(message || t('加载僵尸用户失败'));
+          return;
+        }
+        setInactivePage(page);
+        setInactiveResult(data || null);
+      } catch (error) {
+        showError(
+          error?.response?.data?.message ||
+            error?.message ||
+            t('加载僵尸用户失败'),
+        );
+      } finally {
+        setInactiveLoading(false);
+      }
+    },
+    [
+      inactiveAccountType,
+      inactiveCustomDays,
+      inactiveKeyword,
+      inactivePage,
+      inactiveRange,
+      t,
+    ],
+  );
+
+  useEffect(() => {
+    loadInactiveUsers(1);
+  }, [inactiveRange, inactiveAccountType]);
 
   const metrics = overview.metrics || {};
   const distributions = overview.distributions || {};
@@ -500,6 +574,65 @@ const Analytics = () => {
     [t, usageType],
   );
 
+  const inactiveColumns = useMemo(
+    () => [
+      {
+        title: t('用户'),
+        dataIndex: 'username',
+        width: 200,
+        render: (value, record) => (
+          <div className='flex flex-col'>
+            <Text strong>{record.display_name || value}</Text>
+            <Text type='tertiary' size='small'>
+              ID: {record.id} · {value}
+            </Text>
+          </div>
+        ),
+      },
+      {
+        title: t('账户类型'),
+        dataIndex: 'is_agent',
+        width: 100,
+        render: (value) => (
+          <Tag color={value ? 'blue' : 'grey'}>
+            {value ? t('代理') : t('普通用户')}
+          </Tag>
+        ),
+      },
+      {
+        title: t('沉淀余额'),
+        dataIndex: 'quota',
+        width: 150,
+        render: (value) => <Text strong>{renderQuota(value || 0, 4)}</Text>,
+      },
+      {
+        title: t('最后有效调用'),
+        dataIndex: 'last_api_activity_at',
+        width: 170,
+        render: (value) =>
+          value > 0
+            ? dayjs.unix(value).format('YYYY-MM-DD HH:mm')
+            : t('从未调用'),
+      },
+      {
+        title: t('未调用天数'),
+        dataIndex: 'inactive_days',
+        width: 120,
+        render: (value) => t('{{count}} 天', { count: value || 0 }),
+      },
+      {
+        title: t('上级代理'),
+        dataIndex: 'inviter_username',
+        width: 150,
+        render: (value, record) =>
+          value || (record.inviter_id ? `#${record.inviter_id}` : '-'),
+      },
+    ],
+    [t],
+  );
+
+  const inactiveSummary = inactiveResult?.summary || {};
+
   const rangeText =
     overview.range?.start && overview.range?.end
       ? `${dayjs.unix(overview.range.start).format('YYYY-MM-DD HH:mm')} - ${dayjs
@@ -716,6 +849,132 @@ const Analytics = () => {
             />
           </Card>
         </div>
+
+        <Card
+          className='mt-3'
+          bordered
+          headerLine
+          title={
+            <div className='flex flex-col gap-1'>
+              <div className='flex items-center gap-2'>
+                <Users size={16} />
+                {t('僵尸用户分析')}
+              </div>
+              <Text type='tertiary' size='small'>
+                {t('按最后一次有效 API 调用时间统计')}
+              </Text>
+            </div>
+          }
+          bodyStyle={{ padding: 16 }}
+        >
+          <div className='mb-4 flex flex-col gap-2 xl:flex-row xl:items-center'>
+            <Select
+              value={inactiveRange}
+              optionList={INACTIVE_DAY_OPTIONS.map((option) => ({
+                ...option,
+                label: t(option.label),
+              }))}
+              onChange={(value) => {
+                setInactiveRange(value);
+                setInactivePage(1);
+              }}
+              style={{ width: 150 }}
+            />
+            {inactiveRange === 'custom' ? (
+              <InputNumber
+                value={inactiveCustomDays}
+                min={1}
+                max={3650}
+                suffix={t('天')}
+                onChange={setInactiveCustomDays}
+                style={{ width: 150 }}
+              />
+            ) : null}
+            <Select
+              value={inactiveAccountType}
+              optionList={[
+                { value: 'all', label: t('全部账户') },
+                { value: 'users', label: t('普通用户') },
+                { value: 'agents', label: t('代理账户') },
+              ]}
+              onChange={(value) => {
+                setInactiveAccountType(value);
+                setInactivePage(1);
+              }}
+              style={{ width: 140 }}
+            />
+            <Input
+              value={inactiveKeyword}
+              onChange={setInactiveKeyword}
+              onEnterPress={() => loadInactiveUsers(1)}
+              placeholder={t('搜索用户 ID、用户名或显示名称')}
+              showClear
+              className='xl:max-w-[320px]'
+            />
+            <Button
+              type='primary'
+              loading={inactiveLoading}
+              onClick={() => loadInactiveUsers(1)}
+            >
+              {t('查询')}
+            </Button>
+          </div>
+
+          <div className='mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4'>
+            {[
+              {
+                label: t('僵尸用户数量'),
+                value: renderNumber(inactiveSummary.inactive_user_count || 0),
+              },
+              {
+                label: t('沉默资金金额'),
+                value: renderQuota(
+                  inactiveSummary.inactive_balance_quota || 0,
+                  4,
+                ),
+              },
+              {
+                label: t('从未调用用户'),
+                value: renderNumber(inactiveSummary.never_called_count || 0),
+              },
+              {
+                label: t('僵尸用户占比'),
+                value: formatPercent(inactiveSummary.inactive_ratio || 0),
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className='border border-solid border-[var(--semi-color-border)] p-3'
+              >
+                <Text type='secondary' size='small'>
+                  {item.label}
+                </Text>
+                <div className='mt-2 text-xl font-semibold'>{item.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <Spin spinning={inactiveLoading}>
+            <Table
+              size='small'
+              rowKey='id'
+              columns={inactiveColumns}
+              dataSource={inactiveResult?.items || []}
+              pagination={false}
+              scroll={{ x: 1000 }}
+              empty={<Empty title={t('未找到僵尸用户')} />}
+            />
+            <div className='mt-3 flex justify-end'>
+              <Pagination
+                currentPage={inactivePage}
+                pageSize={INACTIVE_PAGE_SIZE}
+                total={Number(inactiveResult?.total || 0)}
+                onPageChange={(page) => loadInactiveUsers(page)}
+                showTotal
+              />
+            </div>
+          </Spin>
+        </Card>
       </Spin>
     </div>
   );

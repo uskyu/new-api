@@ -1,9 +1,11 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var commonGroupCol string
@@ -334,6 +337,48 @@ func ensureUserCreatedAtColumn() error {
 		}
 	}
 	return DB.Model(&User{}).Where("created_at IS NULL OR created_at = 0").Update("created_at", common.GetTimestamp()).Error
+}
+
+const userLastAPIActivityMigrationKey = "Migration.UserLastAPIActivityAtInitialized"
+
+func ensureUserLastAPIActivityAtColumn() error {
+	if !DB.Migrator().HasTable(&User{}) {
+		return nil
+	}
+	if !DB.Migrator().HasColumn(&User{}, "last_api_activity_at") {
+		if err := DB.Migrator().AddColumn(&User{}, "LastAPIActivityAt"); err != nil {
+			return err
+		}
+	}
+	if !DB.Migrator().HasTable(&Option{}) {
+		return nil
+	}
+	var marker Option
+	err := DB.Where(&Option{Key: userLastAPIActivityMigrationKey}).First(&marker).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	now := common.GetTimestamp()
+	marker = Option{Key: userLastAPIActivityMigrationKey, Value: strconv.FormatInt(now, 10)}
+	return DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&marker).Error
+}
+
+func getUserLastAPIActivityTrackingStartedAt() int64 {
+	if DB == nil || !DB.Migrator().HasTable(&Option{}) {
+		return 0
+	}
+	var marker Option
+	if err := DB.Where(&Option{Key: userLastAPIActivityMigrationKey}).First(&marker).Error; err != nil {
+		return 0
+	}
+	startedAt, err := strconv.ParseInt(marker.Value, 10, 64)
+	if err != nil || startedAt <= 0 {
+		return 0
+	}
+	return startedAt
 }
 
 func ensureSubscriptionPlanTableSQLite() error {

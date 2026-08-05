@@ -110,3 +110,23 @@ func GetAdminAnalyticsOverview(c *gin.Context) {
 	}
 	common.ApiSuccess(c, overview)
 }
+
+func GetInactiveUserAnalytics(c *gin.Context) {
+	days, err := strconv.Atoi(strings.TrimSpace(c.DefaultQuery("days", "30")))
+	if err != nil || days <= 0 || days > model.MaxInactiveAnalyticsDays {
+		common.ApiErrorMsg(c, "inactive days must be between 1 and 3650")
+		return
+	}
+	accountType := strings.TrimSpace(c.DefaultQuery("account_type", model.InactiveAccountTypeAll))
+	pageInfo := common.GetPageQuery(c)
+	result, err := model.GetInactiveUserAnalytics(pageInfo, model.InactiveUserAnalyticsOptions{
+		Days:        days,
+		Keyword:     c.Query("keyword"),
+		AccountType: accountType,
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}

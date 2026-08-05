@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useMemo } from 'react';
+import { isExternalTopNavHref } from '../../helpers/headerNav';
 
 export const useNavigation = (t, docsLink, headerNavModules) => {
   const mainNavLinks = useMemo(() => {
@@ -64,6 +65,18 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
         itemKey: 'about',
         to: '/about',
       },
+      ...(modules.customLinks || [])
+        .filter((link) => link.enabled)
+        .map((link) => {
+          const isExternal = isExternalTopNavHref(link.url);
+          return {
+            text: link.title,
+            itemKey: `custom-${link.id}`,
+            to: isExternal ? undefined : link.url,
+            isExternal,
+            externalLink: isExternal ? link.url : undefined,
+          };
+        }),
     ];
 
     // 根据配置过滤导航链接
@@ -76,6 +89,9 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
         return typeof modules.pricing === 'object'
           ? modules.pricing.enabled
           : modules.pricing;
+      }
+      if (link.itemKey.startsWith('custom-')) {
+        return true;
       }
       return modules[link.itemKey] === true;
     });

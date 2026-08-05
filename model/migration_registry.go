@@ -111,11 +111,19 @@ func preSchemaCompatMigrations() []Migration {
 			name: "users_created_at_column",
 			run:  ensureUserCreatedAtColumn,
 		},
+		namedMigration{
+			name: "users_last_api_activity_at_column",
+			run:  ensureUserLastAPIActivityAtColumn,
+		},
 	}
 }
 
 func postSchemaCompatMigrations() []Migration {
 	return []Migration{
+		namedMigration{
+			name: "users_last_api_activity_at_initialization",
+			run:  ensureUserLastAPIActivityAtColumn,
+		},
 		namedMigration{
 			name: "subscription_plan_schema",
 			run: func() error {
