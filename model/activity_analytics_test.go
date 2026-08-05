@@ -103,7 +103,7 @@ func TestGetAgentLeaderboardRanksAndMasksAgents(t *testing.T) {
 		return user
 	}
 	a1 := createDownline("alpha_today", agentA.Id, dayStart+60, 800)
-	createDownline("alpha_month", agentA.Id, monthStart+60, 1200)
+	a2 := createDownline("alpha_month", agentA.Id, monthStart+60, 1200)
 	b1 := createDownline("beta_today", agentB.Id, dayStart+120, 500)
 
 	require.NoError(t, DB.Create(&AgentRebateRecord{
@@ -116,17 +116,44 @@ func TestGetAgentLeaderboardRanksAndMasksAgents(t *testing.T) {
 		InviteeUserId: b1.Id, AgentUserId: agentB.Id, PayAmount: 9000,
 		RebateAmount: 900, Status: AgentRebateRecordSettled, SettledAt: monthStart + 200,
 	}).Error)
+	require.NoError(t, DB.Create(&AgentRebateRecord{
+		TopUpId: 3, TradeNo: "rank-a-today-repeat", SourceType: AgentRebateSourceEPay,
+		InviteeUserId: a1.Id, AgentUserId: agentA.Id, PayAmount: 4000,
+		RebateAmount: 400, Status: AgentRebateRecordSettled, SettledAt: dayStart + 300,
+	}).Error)
+	require.NoError(t, DB.Create(&AgentRebateRecord{
+		TopUpId: 4, TradeNo: "rank-a-today-new", SourceType: AgentRebateSourceEPay,
+		InviteeUserId: a2.Id, AgentUserId: agentA.Id, PayAmount: 2000,
+		RebateAmount: 200, Status: AgentRebateRecordSettled, SettledAt: dayStart + 400,
+	}).Error)
 
-	result, err := getAgentLeaderboardAt(agentB.Id, now)
+	result, err := getAgentLeaderboardAt(agentB.Id, &common.PageInfo{Page: 1, PageSize: 1}, now)
 	require.NoError(t, err)
-	require.Len(t, result.Items, 2)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, int64(2), result.Total)
+	require.Equal(t, 1, result.Page)
 	require.Equal(t, agentA.Username[:2]+"***"+agentA.Username[len(agentA.Username)-2:], result.Items[0].AgentLabel)
 	require.False(t, strings.Contains(result.Items[0].AgentLabel, fmt.Sprintf("%d", agentA.Id)))
 	require.Equal(t, int64(2), result.Items[0].MonthNewUserCount)
 	require.Equal(t, int64(1), result.Items[0].DayNewUserCount)
-	require.Equal(t, int64(3000), result.Items[0].MonthTopupAmount)
-	require.Equal(t, int64(2000), result.Items[0].DownlineBalanceQuota)
+	require.Equal(t, int64(6000), result.Items[0].DayTopupAmount)
+	require.InDelta(t, 0.5, result.Items[0].MonthRepurchaseRate, 0.0001)
 	require.NotNil(t, result.Self)
 	require.Equal(t, 2, result.Self.Rank)
 	require.True(t, result.Self.IsSelf)
+
+	payload, err := common.Marshal(result)
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), "downline_balance_quota")
+
+	secondPage, err := getAgentLeaderboardAt(agentB.Id, &common.PageInfo{Page: 2, PageSize: 1}, now)
+	require.NoError(t, err)
+	require.Len(t, secondPage.Items, 1)
+	require.True(t, secondPage.Items[0].IsSelf)
+
+	normalizedPage, err := getAgentLeaderboardAt(agentB.Id, &common.PageInfo{Page: -1, PageSize: -1}, now)
+	require.NoError(t, err)
+	require.Equal(t, 1, normalizedPage.Page)
+	require.Equal(t, common.ItemsPerPage, normalizedPage.PageSize)
+	require.Len(t, normalizedPage.Items, 2)
 }

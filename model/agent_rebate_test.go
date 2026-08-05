@@ -110,6 +110,7 @@ func TestSettleAgentRebateTx(t *testing.T) {
 	require.NoError(t, DB.Model(invitee).Updates(map[string]interface{}{
 		"inviter_id":    agent.Id,
 		"promo_link_id": promoLink.Id,
+		"quota":         4321,
 	}).Error)
 	profile := &AgentProfile{
 		UserId:        agent.Id,
@@ -474,8 +475,16 @@ func TestAgentPromoLinkStatsAndDownlines(t *testing.T) {
 	require.Equal(t, int64(1), total)
 	require.Len(t, downlines, 1)
 	require.Equal(t, invitee.Id, downlines[0].UserId)
+	var currentBalance int64
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", invitee.Id).Select("quota").Scan(&currentBalance).Error)
+	require.Equal(t, currentBalance, downlines[0].BalanceQuota)
 	require.Equal(t, int64(8800), downlines[0].TopupAmount)
 	require.Equal(t, int64(1656), downlines[0].RebateAmount)
+
+	downlines, total, err = GetAgentDownlineUsers(&common.PageInfo{Page: -1, PageSize: -1}, agent.Id, "")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, downlines, 1)
 }
 
 func TestAgentUpgradeRequestAndRateConflict(t *testing.T) {

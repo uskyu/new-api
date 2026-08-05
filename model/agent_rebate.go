@@ -392,6 +392,7 @@ type AgentDownlineUserView struct {
 	UserId           int    `json:"user_id"`
 	Username         string `json:"username"`
 	DisplayName      string `json:"display_name"`
+	BalanceQuota     int64  `json:"balance_quota"`
 	InviterId        int    `json:"inviter_id"`
 	PromoLinkId      int    `json:"promo_link_id"`
 	PromoLinkName    string `json:"promo_link_name"`
@@ -2499,14 +2500,36 @@ func GetAgentPromoLinkStats(agentUserId int) ([]*AgentPromoLinkStat, error) {
 	return stats, err
 }
 
+func normalizeAgentPageInfo(pageInfo *common.PageInfo) (int, int) {
+	page := 1
+	pageSize := common.ItemsPerPage
+	if pageInfo == nil {
+		return page, pageSize
+	}
+	if pageInfo.GetPage() > 0 {
+		page = pageInfo.GetPage()
+	}
+	if pageInfo.GetPageSize() > 0 {
+		pageSize = pageInfo.GetPageSize()
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return page, pageSize
+}
+
 func GetAgentDownlineUsers(pageInfo *common.PageInfo, agentUserId int, keyword string) ([]*AgentDownlineUserView, int64, error) {
+	if agentUserId <= 0 {
+		return nil, 0, errors.New("agent_user_id is required")
+	}
+	page, pageSize := normalizeAgentPageInfo(pageInfo)
 	users := make([]*AgentDownlineUserView, 0)
 	tx := queryx.BuildAgentDownlineUsersQuery(DB, agentUserId, keyword, AgentStatusEnabled, AgentRebateRecordSettled)
 	var total int64
 	if err := tx.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	if err := tx.Order("u.id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&users).Error; err != nil {
+	if err := tx.Order("u.id desc").Limit(pageSize).Offset((page - 1) * pageSize).Scan(&users).Error; err != nil {
 		return nil, 0, err
 	}
 	return users, total, nil

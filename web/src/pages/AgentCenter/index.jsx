@@ -63,6 +63,10 @@ function formatRate(rate) {
   return `${(Number(rate || 0) / 100).toFixed(2)}%`;
 }
 
+function formatRatio(ratio) {
+  return `${(Number(ratio || 0) * 100).toFixed(1)}%`;
+}
+
 function MetricStat({ label, value }) {
   return (
     <div
@@ -138,6 +142,7 @@ export default function AgentCenter() {
   );
   const [dailyMetricPage, setDailyMetricPage] = useState(1);
   const [leaderboard, setLeaderboard] = useState(null);
+  const [leaderboardPage, setLeaderboardPage] = useState(1);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [rebates, setRebates] = useState([]);
   const [rebatesTotal, setRebatesTotal] = useState(0);
@@ -159,6 +164,10 @@ export default function AgentCenter() {
     remark: '',
   });
   const [downlines, setDownlines] = useState([]);
+  const [downlinesTotal, setDownlinesTotal] = useState(0);
+  const [downlinesPage, setDownlinesPage] = useState(1);
+  const [downlineKeyword, setDownlineKeyword] = useState('');
+  const [downlineSearchKeyword, setDownlineSearchKeyword] = useState('');
   const [downlinesLoading, setDownlinesLoading] = useState(false);
   const [upgradeModalVisible, setUpgradeModalVisible] = useState(false);
   const [upgradeSubmitting, setUpgradeSubmitting] = useState(false);
@@ -223,25 +232,34 @@ export default function AgentCenter() {
     }
   }, [dailyMetricEndDate, dailyMetricStartDate, summary?.is_agent, t]);
 
-  const loadLeaderboard = useCallback(async () => {
-    if (!summary?.is_agent) {
-      setLeaderboard(null);
-      return;
-    }
-    setLeaderboardLoading(true);
-    try {
-      const res = await API.get('/api/agent/self/leaderboard');
-      if (!res.data.success) {
-        showError(res.data.message);
+  const loadLeaderboard = useCallback(
+    async (page = 1) => {
+      if (!summary?.is_agent) {
+        setLeaderboard(null);
         return;
       }
-      setLeaderboard(res.data.data);
-    } catch (error) {
-      showError(error.message || t('获取代理竞争排名失败'));
-    } finally {
-      setLeaderboardLoading(false);
-    }
-  }, [summary?.is_agent, t]);
+      setLeaderboardLoading(true);
+      try {
+        const res = await API.get('/api/agent/self/leaderboard', {
+          params: {
+            p: page,
+            page_size: DEFAULT_PAGE_SIZE,
+          },
+        });
+        if (!res.data.success) {
+          showError(res.data.message);
+          return;
+        }
+        setLeaderboard(res.data.data);
+        setLeaderboardPage(page);
+      } catch (error) {
+        showError(error.message || t('获取代理竞争排名失败'));
+      } finally {
+        setLeaderboardLoading(false);
+      }
+    },
+    [summary?.is_agent, t],
+  );
 
   const loadRebates = useCallback(
     async (page = rebatesPage) => {
@@ -348,30 +366,37 @@ export default function AgentCenter() {
     }
   }, [summary?.is_agent, t]);
 
-  const loadDownlines = useCallback(async () => {
-    if (!summary?.is_agent) {
-      setDownlines([]);
-      return;
-    }
-    setDownlinesLoading(true);
-    try {
-      const res = await API.get('/api/agent/self/downlines', {
-        params: {
-          p: 1,
-          page_size: 50,
-        },
-      });
-      if (!res.data.success) {
-        showError(res.data.message);
+  const loadDownlines = useCallback(
+    async (page = 1, keyword = downlineSearchKeyword) => {
+      if (!summary?.is_agent) {
+        setDownlines([]);
+        setDownlinesTotal(0);
         return;
       }
-      setDownlines(res.data.data?.items || []);
-    } catch (error) {
-      showError(error.message || t('获取直属下级失败'));
-    } finally {
-      setDownlinesLoading(false);
-    }
-  }, [summary?.is_agent, t]);
+      setDownlinesLoading(true);
+      try {
+        const res = await API.get('/api/agent/self/downlines', {
+          params: {
+            p: page,
+            page_size: DEFAULT_PAGE_SIZE,
+            keyword: keyword.trim(),
+          },
+        });
+        if (!res.data.success) {
+          showError(res.data.message);
+          return;
+        }
+        setDownlines(res.data.data?.items || []);
+        setDownlinesTotal(res.data.data?.total || 0);
+        setDownlinesPage(page);
+      } catch (error) {
+        showError(error.message || t('获取直属下级失败'));
+      } finally {
+        setDownlinesLoading(false);
+      }
+    },
+    [downlineSearchKeyword, summary?.is_agent, t],
+  );
 
   const loadWithdrawRequests = useCallback(
     async (page = withdrawRequestsPage) => {
@@ -444,6 +469,18 @@ export default function AgentCenter() {
     loadWithdrawRequests,
     summary?.is_agent,
   ]);
+
+  const handleSearchDownlines = useCallback(() => {
+    const keyword = downlineKeyword.trim();
+    setDownlineSearchKeyword(keyword);
+    loadDownlines(1, keyword);
+  }, [downlineKeyword, loadDownlines]);
+
+  const handleResetDownlines = useCallback(() => {
+    setDownlineKeyword('');
+    setDownlineSearchKeyword('');
+    loadDownlines(1, '');
+  }, [loadDownlines]);
 
   const handleCopyPromoLink = async (record) => {
     const landingPath = record.landing_page || '/';
@@ -624,16 +661,16 @@ export default function AgentCenter() {
       { title: t('今日新增'), dataIndex: 'day_new_user_count', width: 110 },
       { title: t('本月新增'), dataIndex: 'month_new_user_count', width: 110 },
       {
-        title: t('本月在线充值'),
-        dataIndex: 'month_topup_amount',
+        title: t('今日在线充值'),
+        dataIndex: 'day_topup_amount',
         width: 150,
         render: (value) => formatAmount(value),
       },
       {
-        title: t('直属客户余额'),
-        dataIndex: 'downline_balance_quota',
-        width: 160,
-        render: (value) => renderQuotaWithAmount(value || 0),
+        title: t('本月二次充值率'),
+        dataIndex: 'month_repurchase_rate',
+        width: 150,
+        render: (value) => formatRatio(value),
       },
     ],
     [t],
@@ -764,6 +801,16 @@ export default function AgentCenter() {
       { title: t('显示名称'), dataIndex: 'display_name' },
       { title: t('来源渠道'), dataIndex: 'promo_link_name' },
       {
+        title: t('充值金额'),
+        dataIndex: 'topup_amount',
+        render: (_, record) => formatAmount(record.topup_amount),
+      },
+      {
+        title: t('当前余额'),
+        dataIndex: 'balance_quota',
+        render: (_, record) => renderQuotaWithAmount(record.balance_quota || 0),
+      },
+      {
         title: t('是否代理'),
         dataIndex: 'is_agent',
         render: (_, record) =>
@@ -772,11 +819,6 @@ export default function AgentCenter() {
           ) : (
             <Tag>{t('否')}</Tag>
           ),
-      },
-      {
-        title: t('充值金额'),
-        dataIndex: 'topup_amount',
-        render: (_, record) => formatAmount(record.topup_amount),
       },
       {
         title: t('操作'),
@@ -936,15 +978,15 @@ export default function AgentCenter() {
                       value={selfOutsideLeaderboard.month_new_user_count || 0}
                     />
                     <MetricStat
-                      label={t('本月在线充值')}
+                      label={t('今日在线充值')}
                       value={formatAmount(
-                        selfOutsideLeaderboard.month_topup_amount,
+                        selfOutsideLeaderboard.day_topup_amount,
                       )}
                     />
                     <MetricStat
-                      label={t('直属客户余额')}
-                      value={renderQuotaWithAmount(
-                        selfOutsideLeaderboard.downline_balance_quota || 0,
+                      label={t('本月二次充值率')}
+                      value={formatRatio(
+                        selfOutsideLeaderboard.month_repurchase_rate,
                       )}
                     />
                   </div>
@@ -957,8 +999,16 @@ export default function AgentCenter() {
                   scroll={{ x: 860 }}
                   empty={<Empty title={t('暂无代理排名数据')} />}
                 />
+                <Pagination
+                  currentPage={leaderboardPage}
+                  pageSize={DEFAULT_PAGE_SIZE}
+                  total={Number(leaderboard?.total || 0)}
+                  onPageChange={(page) => loadLeaderboard(page)}
+                />
                 <Text type='tertiary' size='small'>
-                  {t('充值金额仅统计本月已结算的在线充值，不包含卡密兑换。')}
+                  {t(
+                    '今日充值和本月二次充值率仅统计已结算的在线充值，不包含卡密兑换。',
+                  )}
                 </Text>
               </Space>
             </Card>
@@ -1091,16 +1141,42 @@ export default function AgentCenter() {
                 style={{ width: '100%' }}
                 spacing={12}
               >
-                <Title heading={5} style={{ margin: 0 }}>
-                  {t('我的直属下级')}
-                </Title>
+                <div className='flex w-full flex-col gap-2 md:flex-row md:items-center md:justify-between'>
+                  <Title heading={5} style={{ margin: 0 }}>
+                    {t('我的直属下级')}
+                  </Title>
+                  <div className='flex w-full flex-col gap-2 sm:flex-row md:w-auto'>
+                    <Input
+                      value={downlineKeyword}
+                      placeholder={t('搜索用户 ID、用户名或显示名称')}
+                      onChange={setDownlineKeyword}
+                      onEnterPress={handleSearchDownlines}
+                      showClear
+                      style={{ width: 260, maxWidth: '100%' }}
+                    />
+                    <Button type='primary' onClick={handleSearchDownlines}>
+                      {t('查询')}
+                    </Button>
+                    <Button theme='light' onClick={handleResetDownlines}>
+                      {t('重置')}
+                    </Button>
+                  </div>
+                </div>
                 <Table
                   rowKey='user_id'
                   columns={downlineColumns}
                   dataSource={downlines}
                   loading={downlinesLoading}
                   pagination={false}
+                  scroll={{ x: 980 }}
                   empty={<Empty title={t('暂无直属下级')} />}
+                />
+                <Pagination
+                  currentPage={downlinesPage}
+                  pageSize={DEFAULT_PAGE_SIZE}
+                  total={downlinesTotal}
+                  onPageChange={(page) => loadDownlines(page)}
+                  showTotal
                 />
               </Space>
             </Card>

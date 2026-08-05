@@ -310,7 +310,8 @@ func GetAgentSelfDailyMetrics(c *gin.Context) {
 }
 
 func GetAgentSelfLeaderboard(c *gin.Context) {
-	leaderboard, err := model.GetAgentLeaderboard(c.GetInt("id"))
+	pageInfo := common.GetPageQuery(c)
+	leaderboard, err := model.GetAgentLeaderboard(c.GetInt("id"), pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
 		return

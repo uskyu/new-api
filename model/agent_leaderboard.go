@@ -9,16 +9,14 @@ import (
 	"gorm.io/gorm"
 )
 
-const AgentLeaderboardLimit = 20
-
 type AgentLeaderboardEntry struct {
-	Rank                 int    `json:"rank"`
-	AgentLabel           string `json:"agent_label"`
-	IsSelf               bool   `json:"is_self"`
-	DayNewUserCount      int64  `json:"day_new_user_count"`
-	MonthNewUserCount    int64  `json:"month_new_user_count"`
-	MonthTopupAmount     int64  `json:"month_topup_amount"`
-	DownlineBalanceQuota int64  `json:"downline_balance_quota"`
+	Rank                int     `json:"rank"`
+	AgentLabel          string  `json:"agent_label"`
+	IsSelf              bool    `json:"is_self"`
+	DayNewUserCount     int64   `json:"day_new_user_count"`
+	MonthNewUserCount   int64   `json:"month_new_user_count"`
+	DayTopupAmount      int64   `json:"day_topup_amount"`
+	MonthRepurchaseRate float64 `json:"month_repurchase_rate"`
 }
 
 type AgentLeaderboardResult struct {
@@ -27,25 +25,30 @@ type AgentLeaderboardResult struct {
 	MonthStart  int64                   `json:"month_start"`
 	Items       []AgentLeaderboardEntry `json:"items"`
 	Self        *AgentLeaderboardEntry  `json:"self"`
+	Total       int64                   `json:"total"`
+	Page        int                     `json:"page"`
+	PageSize    int                     `json:"page_size"`
 }
 
 type agentLeaderboardRow struct {
-	AgentUserId          int
-	Username             string
-	DayNewUserCount      int64
-	MonthNewUserCount    int64
-	MonthTopupAmount     int64
-	DownlineBalanceQuota int64
+	AgentUserId               int
+	Username                  string
+	DayNewUserCount           int64
+	MonthNewUserCount         int64
+	DayTopupAmount            int64
+	MonthTopupUserCount       int64
+	MonthRepeatTopupUserCount int64
 }
 
-func GetAgentLeaderboard(requesterUserId int) (*AgentLeaderboardResult, error) {
-	return getAgentLeaderboardAt(requesterUserId, time.Now())
+func GetAgentLeaderboard(requesterUserId int, pageInfo *common.PageInfo) (*AgentLeaderboardResult, error) {
+	return getAgentLeaderboardAt(requesterUserId, pageInfo, time.Now())
 }
 
-func getAgentLeaderboardAt(requesterUserId int, now time.Time) (*AgentLeaderboardResult, error) {
-	if requesterUserId <= 0 {
-		return nil, errors.New("invalid user id")
+func getAgentLeaderboardAt(requesterUserId int, pageInfo *common.PageInfo, now time.Time) (*AgentLeaderboardResult, error) {
+	if requesterUserId <= 0 || pageInfo == nil {
+		return nil, errors.New("invalid leaderboard query")
 	}
+	page, pageSize := normalizeAgentPageInfo(pageInfo)
 	var requesterProfile AgentProfile
 	if err := DB.Where("user_id = ? AND status = ?", requesterUserId, AgentStatusEnabled).First(&requesterProfile).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -64,8 +67,9 @@ func getAgentLeaderboardAt(requesterUserId int, now time.Time) (*AgentLeaderboar
 			u.username,
 			COALESCE(day_users.new_user_count, 0) AS day_new_user_count,
 			COALESCE(month_users.new_user_count, 0) AS month_new_user_count,
-			COALESCE(month_topups.topup_amount, 0) AS month_topup_amount,
-			COALESCE(downline_balances.balance_quota, 0) AS downline_balance_quota`).
+			COALESCE(day_topups.topup_amount, 0) AS day_topup_amount,
+			COALESCE(month_repurchase.topup_user_count, 0) AS month_topup_user_count,
+			COALESCE(month_repurchase.repeat_topup_user_count, 0) AS month_repeat_topup_user_count`).
 		Joins("JOIN users AS u ON u.id = ap.user_id AND u.deleted_at IS NULL").
 		Joins(`LEFT JOIN (
 			SELECT inviter_id AS agent_user_id, COUNT(*) AS new_user_count
@@ -84,18 +88,24 @@ func getAgentLeaderboardAt(requesterUserId int, now time.Time) (*AgentLeaderboar
 			FROM agent_rebate_records
 			WHERE status = ? AND settled_at >= ? AND settled_at < ?
 			GROUP BY agent_user_id
-		) AS month_topups ON month_topups.agent_user_id = ap.user_id`, AgentRebateRecordSettled, monthStart.Unix(), end).
+		) AS day_topups ON day_topups.agent_user_id = ap.user_id`, AgentRebateRecordSettled, dayStart.Unix(), end).
 		Joins(`LEFT JOIN (
-			SELECT du.inviter_id AS agent_user_id, COALESCE(SUM(du.quota), 0) AS balance_quota
-			FROM users AS du
-			LEFT JOIN agent_profiles AS dap ON dap.user_id = du.id
-			WHERE du.inviter_id > 0 AND du.deleted_at IS NULL AND du.role = ? AND dap.id IS NULL
-			GROUP BY du.inviter_id
-		) AS downline_balances ON downline_balances.agent_user_id = ap.user_id`, common.RoleCommonUser).
+			SELECT agent_user_id,
+				COUNT(*) AS topup_user_count,
+				COALESCE(SUM(CASE WHEN topup_count >= 2 THEN 1 ELSE 0 END), 0) AS repeat_topup_user_count
+			FROM (
+				SELECT agent_user_id, invitee_user_id, COUNT(id) AS topup_count
+				FROM agent_rebate_records
+				WHERE status = ? AND settled_at >= ? AND settled_at < ?
+				GROUP BY agent_user_id, invitee_user_id
+			) AS month_user_topups
+			GROUP BY agent_user_id
+		) AS month_repurchase ON month_repurchase.agent_user_id = ap.user_id`, AgentRebateRecordSettled, monthStart.Unix(), end).
 		Where("ap.status = ?", AgentStatusEnabled).
 		Order("month_new_user_count DESC").
-		Order("month_topup_amount DESC").
 		Order("day_new_user_count DESC").
+		Order("day_topup_amount DESC").
+		Order("month_repeat_topup_user_count DESC").
 		Order("ap.user_id ASC").
 		Scan(&rows).Error
 	if err != nil {
@@ -106,19 +116,24 @@ func getAgentLeaderboardAt(requesterUserId int, now time.Time) (*AgentLeaderboar
 		GeneratedAt: now.Unix(),
 		DayStart:    dayStart.Unix(),
 		MonthStart:  monthStart.Unix(),
-		Items:       make([]AgentLeaderboardEntry, 0, AgentLeaderboardLimit),
+		Items:       make([]AgentLeaderboardEntry, 0, pageSize),
+		Total:       int64(len(rows)),
+		Page:        page,
+		PageSize:    pageSize,
 	}
+	pageStart := (page - 1) * pageSize
+	pageEnd := pageStart + pageSize
 	for index, row := range rows {
 		entry := AgentLeaderboardEntry{
-			Rank:                 index + 1,
-			AgentLabel:           maskAgentLeaderboardName(row.Username),
-			IsSelf:               row.AgentUserId == requesterUserId,
-			DayNewUserCount:      row.DayNewUserCount,
-			MonthNewUserCount:    row.MonthNewUserCount,
-			MonthTopupAmount:     row.MonthTopupAmount,
-			DownlineBalanceQuota: row.DownlineBalanceQuota,
+			Rank:                index + 1,
+			AgentLabel:          maskAgentLeaderboardName(row.Username),
+			IsSelf:              row.AgentUserId == requesterUserId,
+			DayNewUserCount:     row.DayNewUserCount,
+			MonthNewUserCount:   row.MonthNewUserCount,
+			DayTopupAmount:      row.DayTopupAmount,
+			MonthRepurchaseRate: analyticsRatio(float64(row.MonthRepeatTopupUserCount), float64(row.MonthTopupUserCount)),
 		}
-		if index < AgentLeaderboardLimit {
+		if index >= pageStart && index < pageEnd {
 			result.Items = append(result.Items, entry)
 		}
 		if entry.IsSelf {

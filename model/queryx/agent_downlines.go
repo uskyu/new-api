@@ -11,7 +11,7 @@ import (
 )
 
 func agentDownlineSelectFields() string {
-	return fmt.Sprintf(`u.id AS user_id, u.username, u.display_name, u.inviter_id, u.promo_link_id,
+	return fmt.Sprintf(`u.id AS user_id, u.username, u.display_name, u.inviter_id, u.promo_link_id, u.quota AS balance_quota,
 COALESCE(apl.name, '') AS promo_link_name,
 CASE WHEN child_profile.user_id IS NULL THEN %s ELSE %s END AS is_agent,
 COALESCE(topup_stats.topup_count, 0) AS topup_count,
