@@ -35,6 +35,7 @@ import {
 import {
   API,
   copy,
+  renderQuota,
   renderQuotaWithAmount,
   showError,
   showSuccess,
@@ -107,7 +108,7 @@ function renderRebateBase(record, t) {
       <Space vertical align='start' spacing={0}>
         <Text>{formatAmount(record.pay_amount)}</Text>
         <Text type='secondary' size='small'>
-          {t('兑换额度')} {renderQuotaWithAmount(record.redeem_quota)}
+          {t('兑换额度')} {renderQuota(record.redeem_quota)}
         </Text>
       </Space>
     );
@@ -808,7 +809,7 @@ export default function AgentCenter() {
       {
         title: t('当前余额'),
         dataIndex: 'balance_quota',
-        render: (_, record) => renderQuotaWithAmount(record.balance_quota || 0),
+        render: (_, record) => renderQuota(record.balance_quota || 0),
       },
       {
         title: t('是否代理'),
