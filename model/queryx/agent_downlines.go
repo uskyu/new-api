@@ -66,7 +66,7 @@ func applyDownlineKeywordFilter(tx *gorm.DB, keyword string) *gorm.DB {
 	return tx.Where("u.username LIKE ? OR u.display_name LIKE ?", like, like)
 }
 
-func BuildAgentDownlineUsersQuery(db *gorm.DB, agentUserId int, keyword string, childAgentStatus int, rebateStatus string) *gorm.DB {
+func BuildAgentDownlineUsersQuery(db *gorm.DB, agentUserId int, keyword string, recentSince int64, childAgentStatus int, rebateStatus string) *gorm.DB {
 	tx := db.Table("users AS u").
 		Select(agentDownlineSelectFields()).
 		Joins("LEFT JOIN agent_promo_links AS apl ON apl.id = u.promo_link_id").
@@ -74,6 +74,9 @@ func BuildAgentDownlineUsersQuery(db *gorm.DB, agentUserId int, keyword string, 
 		Joins(agentDownlineTopupJoin(), rebateStatus, agentUserId).
 		Joins(agentDownlineRebateJoin(), rebateStatus, rebateStatus, agentUserId).
 		Where("u.inviter_id = ? AND u.deleted_at IS NULL", agentUserId)
+	if strings.TrimSpace(keyword) == "" && recentSince > 0 {
+		tx = tx.Where("u.created_at >= ?", recentSince)
+	}
 	tx = applyDownlineKeywordFilter(tx, keyword)
 	return tx
 }

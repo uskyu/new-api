@@ -27,6 +27,8 @@ import {
   InputNumber,
   Modal,
   Pagination,
+  Radio,
+  RadioGroup,
   Space,
   Table,
   Tag,
@@ -46,6 +48,15 @@ import { Trophy } from 'lucide-react';
 const { Title, Text } = Typography;
 const DEFAULT_PAGE_SIZE = 10;
 const DAILY_METRIC_PAGE_SIZE = 10;
+const DEFAULT_LEADERBOARD_SORT = 'day_new_user_count';
+const LEADERBOARD_SORT_OPTIONS = [
+  { value: 'day_new_user_count', label: '今日新增' },
+  { value: 'month_new_user_count', label: '本月新增' },
+  { value: 'day_topup_amount', label: '今日在线充值' },
+  { value: 'month_second_topup_rate', label: '本月二次充值率' },
+  { value: 'month_third_topup_rate', label: '本月三次充值率' },
+  { value: 'month_fourth_topup_rate', label: '本月四次充值率' },
+];
 
 function getLocalDateString(offsetDays = 0) {
   const date = new Date();
@@ -66,6 +77,19 @@ function formatRate(rate) {
 
 function formatRatio(ratio) {
   return `${(Number(ratio || 0) * 100).toFixed(1)}%`;
+}
+
+function RankedMetric({ rank, value, active }) {
+  return (
+    <Space spacing={6} wrap={false}>
+      <Tag color={active ? 'blue' : 'grey'}>#{rank || '-'}</Tag>
+      <Text strong={active}>{value}</Text>
+    </Space>
+  );
+}
+
+function formatRankedValue(rank, value) {
+  return `#${rank || '-'} / ${value}`;
 }
 
 function MetricStat({ label, value }) {
@@ -144,6 +168,9 @@ export default function AgentCenter() {
   const [dailyMetricPage, setDailyMetricPage] = useState(1);
   const [leaderboard, setLeaderboard] = useState(null);
   const [leaderboardPage, setLeaderboardPage] = useState(1);
+  const [leaderboardSortBy, setLeaderboardSortBy] = useState(
+    DEFAULT_LEADERBOARD_SORT,
+  );
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [rebates, setRebates] = useState([]);
   const [rebatesTotal, setRebatesTotal] = useState(0);
@@ -234,7 +261,7 @@ export default function AgentCenter() {
   }, [dailyMetricEndDate, dailyMetricStartDate, summary?.is_agent, t]);
 
   const loadLeaderboard = useCallback(
-    async (page = 1) => {
+    async (page = 1, sortBy = DEFAULT_LEADERBOARD_SORT) => {
       if (!summary?.is_agent) {
         setLeaderboard(null);
         return;
@@ -245,6 +272,7 @@ export default function AgentCenter() {
           params: {
             p: page,
             page_size: DEFAULT_PAGE_SIZE,
+            sort_by: sortBy,
           },
         });
         if (!res.data.success) {
@@ -253,6 +281,7 @@ export default function AgentCenter() {
         }
         setLeaderboard(res.data.data);
         setLeaderboardPage(page);
+        setLeaderboardSortBy(res.data.data?.sort_by || sortBy);
       } catch (error) {
         showError(error.message || t('获取代理竞争排名失败'));
       } finally {
@@ -435,7 +464,7 @@ export default function AgentCenter() {
 
   useEffect(() => {
     if (summary?.is_agent) {
-      loadLeaderboard();
+      loadLeaderboard(1, DEFAULT_LEADERBOARD_SORT);
       loadDailyMetrics();
       loadRebates(1);
       loadAdjustments(1);
@@ -449,7 +478,7 @@ export default function AgentCenter() {
   const refreshAll = useCallback(async () => {
     await loadSummary();
     if (summary?.is_agent) {
-      await loadLeaderboard();
+      await loadLeaderboard(1, leaderboardSortBy);
       await loadDailyMetrics();
       await loadRebates(1);
       await loadAdjustments(1);
@@ -468,8 +497,18 @@ export default function AgentCenter() {
     loadRebates,
     loadSummary,
     loadWithdrawRequests,
+    leaderboardSortBy,
     summary?.is_agent,
   ]);
+
+  const handleLeaderboardSortChange = useCallback(
+    (event) => {
+      const sortBy = event?.target?.value || DEFAULT_LEADERBOARD_SORT;
+      setLeaderboardSortBy(sortBy);
+      loadLeaderboard(1, sortBy);
+    },
+    [loadLeaderboard],
+  );
 
   const handleSearchDownlines = useCallback(() => {
     const keyword = downlineKeyword.trim();
@@ -637,21 +676,9 @@ export default function AgentCenter() {
   const leaderboardColumns = useMemo(
     () => [
       {
-        title: t('排名'),
-        dataIndex: 'rank',
-        width: 80,
-        render: (rank) =>
-          rank <= 3 ? (
-            <Tag color={rank === 1 ? 'amber' : rank === 2 ? 'grey' : 'orange'}>
-              #{rank}
-            </Tag>
-          ) : (
-            `#${rank}`
-          ),
-      },
-      {
         title: t('代理'),
         dataIndex: 'agent_label',
+        width: 150,
         render: (_, record) => (
           <Space spacing={6}>
             <Text>{record.is_self ? t('我的代理') : record.agent_label}</Text>
@@ -659,22 +686,80 @@ export default function AgentCenter() {
           </Space>
         ),
       },
-      { title: t('今日新增'), dataIndex: 'day_new_user_count', width: 110 },
-      { title: t('本月新增'), dataIndex: 'month_new_user_count', width: 110 },
+      {
+        title: t('今日新增'),
+        dataIndex: 'day_new_user_count',
+        width: 140,
+        render: (value, record) => (
+          <RankedMetric
+            rank={record.day_new_user_rank}
+            value={value || 0}
+            active={leaderboardSortBy === 'day_new_user_count'}
+          />
+        ),
+      },
+      {
+        title: t('本月新增'),
+        dataIndex: 'month_new_user_count',
+        width: 140,
+        render: (value, record) => (
+          <RankedMetric
+            rank={record.month_new_user_rank}
+            value={value || 0}
+            active={leaderboardSortBy === 'month_new_user_count'}
+          />
+        ),
+      },
       {
         title: t('今日在线充值'),
         dataIndex: 'day_topup_amount',
-        width: 150,
-        render: (value) => formatAmount(value),
+        width: 175,
+        render: (value, record) => (
+          <RankedMetric
+            rank={record.day_topup_rank}
+            value={formatAmount(value)}
+            active={leaderboardSortBy === 'day_topup_amount'}
+          />
+        ),
       },
       {
         title: t('本月二次充值率'),
-        dataIndex: 'month_repurchase_rate',
-        width: 150,
-        render: (value) => formatRatio(value),
+        dataIndex: 'month_second_topup_rate',
+        width: 170,
+        render: (value, record) => (
+          <RankedMetric
+            rank={record.month_second_topup_rank}
+            value={formatRatio(value)}
+            active={leaderboardSortBy === 'month_second_topup_rate'}
+          />
+        ),
+      },
+      {
+        title: t('本月三次充值率'),
+        dataIndex: 'month_third_topup_rate',
+        width: 170,
+        render: (value, record) => (
+          <RankedMetric
+            rank={record.month_third_topup_rank}
+            value={formatRatio(value)}
+            active={leaderboardSortBy === 'month_third_topup_rate'}
+          />
+        ),
+      },
+      {
+        title: t('本月四次充值率'),
+        dataIndex: 'month_fourth_topup_rate',
+        width: 170,
+        render: (value, record) => (
+          <RankedMetric
+            rank={record.month_fourth_topup_rank}
+            value={formatRatio(value)}
+            active={leaderboardSortBy === 'month_fourth_topup_rate'}
+          />
+        ),
       },
     ],
-    [t],
+    [leaderboardSortBy, t],
   );
 
   const rebateColumns = useMemo(
@@ -961,33 +1046,71 @@ export default function AgentCenter() {
                     </Title>
                   </div>
                   <Text type='secondary' size='small'>
-                    {t('按本月新增用户优先排名，代理身份已脱敏')}
+                    {t('每项指标独立排名，代理身份已脱敏')}
                   </Text>
                 </div>
+                <div className='w-full overflow-x-auto pb-1'>
+                  <RadioGroup
+                    type='button'
+                    value={leaderboardSortBy}
+                    onChange={handleLeaderboardSortChange}
+                    disabled={leaderboardLoading}
+                  >
+                    {LEADERBOARD_SORT_OPTIONS.map((option) => (
+                      <Radio key={option.value} value={option.value}>
+                        {t(option.label)}
+                      </Radio>
+                    ))}
+                  </RadioGroup>
+                </div>
                 {selfOutsideLeaderboard ? (
-                  <div className='grid w-full grid-cols-2 gap-3 border border-solid border-[var(--semi-color-primary-light-default)] bg-[var(--semi-color-primary-light-default)] p-3 md:grid-cols-5'>
-                    <MetricStat
-                      label={t('我的排名')}
-                      value={`#${selfOutsideLeaderboard.rank}`}
-                    />
+                  <div className='grid w-full grid-cols-2 gap-3 border border-solid border-[var(--semi-color-primary-light-default)] bg-[var(--semi-color-primary-light-default)] p-3 md:grid-cols-3 xl:grid-cols-6'>
                     <MetricStat
                       label={t('今日新增')}
-                      value={selfOutsideLeaderboard.day_new_user_count || 0}
+                      value={formatRankedValue(
+                        selfOutsideLeaderboard.day_new_user_rank,
+                        selfOutsideLeaderboard.day_new_user_count || 0,
+                      )}
                     />
                     <MetricStat
                       label={t('本月新增')}
-                      value={selfOutsideLeaderboard.month_new_user_count || 0}
+                      value={formatRankedValue(
+                        selfOutsideLeaderboard.month_new_user_rank,
+                        selfOutsideLeaderboard.month_new_user_count || 0,
+                      )}
                     />
                     <MetricStat
                       label={t('今日在线充值')}
-                      value={formatAmount(
-                        selfOutsideLeaderboard.day_topup_amount,
+                      value={formatRankedValue(
+                        selfOutsideLeaderboard.day_topup_rank,
+                        formatAmount(selfOutsideLeaderboard.day_topup_amount),
                       )}
                     />
                     <MetricStat
                       label={t('本月二次充值率')}
-                      value={formatRatio(
-                        selfOutsideLeaderboard.month_repurchase_rate,
+                      value={formatRankedValue(
+                        selfOutsideLeaderboard.month_second_topup_rank,
+                        formatRatio(
+                          selfOutsideLeaderboard.month_second_topup_rate,
+                        ),
+                      )}
+                    />
+                    <MetricStat
+                      label={t('本月三次充值率')}
+                      value={formatRankedValue(
+                        selfOutsideLeaderboard.month_third_topup_rank,
+                        formatRatio(
+                          selfOutsideLeaderboard.month_third_topup_rate,
+                        ),
+                      )}
+                    />
+                    <MetricStat
+                      label={t('本月四次充值率')}
+                      value={formatRankedValue(
+                        selfOutsideLeaderboard.month_fourth_topup_rank,
+                        formatRatio(
+                          selfOutsideLeaderboard.month_fourth_topup_rate,
+                        ),
                       )}
                     />
                   </div>
@@ -997,18 +1120,20 @@ export default function AgentCenter() {
                   columns={leaderboardColumns}
                   dataSource={leaderboardItems}
                   pagination={false}
-                  scroll={{ x: 860 }}
+                  scroll={{ x: 1145 }}
                   empty={<Empty title={t('暂无代理排名数据')} />}
                 />
                 <Pagination
                   currentPage={leaderboardPage}
                   pageSize={DEFAULT_PAGE_SIZE}
                   total={Number(leaderboard?.total || 0)}
-                  onPageChange={(page) => loadLeaderboard(page)}
+                  onPageChange={(page) =>
+                    loadLeaderboard(page, leaderboardSortBy)
+                  }
                 />
                 <Text type='tertiary' size='small'>
                   {t(
-                    '今日充值和本月二次充值率仅统计已结算的在线充值，不包含卡密兑换。',
+                    '今日充值与本月二至四次充值率仅统计已结算的在线充值，不包含卡密兑换。',
                   )}
                 </Text>
               </Space>
@@ -1143,9 +1268,14 @@ export default function AgentCenter() {
                 spacing={12}
               >
                 <div className='flex w-full flex-col gap-2 md:flex-row md:items-center md:justify-between'>
-                  <Title heading={5} style={{ margin: 0 }}>
-                    {t('我的直属下级')}
-                  </Title>
+                  <Space spacing={8}>
+                    <Title heading={5} style={{ margin: 0 }}>
+                      {t('我的直属下级')}
+                    </Title>
+                    <Tag color={downlineSearchKeyword ? 'blue' : 'grey'}>
+                      {downlineSearchKeyword ? t('搜索全部历史') : t('近30天')}
+                    </Tag>
+                  </Space>
                   <div className='flex w-full flex-col gap-2 sm:flex-row md:w-auto'>
                     <Input
                       value={downlineKeyword}

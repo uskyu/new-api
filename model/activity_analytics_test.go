@@ -126,34 +126,93 @@ func TestGetAgentLeaderboardRanksAndMasksAgents(t *testing.T) {
 		InviteeUserId: a2.Id, AgentUserId: agentA.Id, PayAmount: 2000,
 		RebateAmount: 200, Status: AgentRebateRecordSettled, SettledAt: dayStart + 400,
 	}).Error)
+	require.NoError(t, DB.Create(&AgentRebateRecord{
+		TopUpId: 5, TradeNo: "rank-a-today-third", SourceType: AgentRebateSourceEPay,
+		InviteeUserId: a1.Id, AgentUserId: agentA.Id, PayAmount: 1000,
+		RebateAmount: 100, Status: AgentRebateRecordSettled, SettledAt: dayStart + 500,
+	}).Error)
+	require.NoError(t, DB.Create(&AgentRebateRecord{
+		TopUpId: 6, TradeNo: "rank-a-today-fourth", SourceType: AgentRebateSourceEPay,
+		InviteeUserId: a1.Id, AgentUserId: agentA.Id, PayAmount: 1000,
+		RebateAmount: 100, Status: AgentRebateRecordSettled, SettledAt: dayStart + 600,
+	}).Error)
+	require.NoError(t, DB.Create(&AgentRebateRecord{
+		TopUpId: 7, TradeNo: "rank-b-second", SourceType: AgentRebateSourceEPay,
+		InviteeUserId: b1.Id, AgentUserId: agentB.Id, PayAmount: 1000,
+		RebateAmount: 100, Status: AgentRebateRecordSettled, SettledAt: monthStart + 300,
+	}).Error)
+	require.NoError(t, DB.Create(&AgentRebateRecord{
+		TopUpId: 8, TradeNo: "rank-a-manual", SourceType: AgentRebateSourceManual,
+		InviteeUserId: a2.Id, AgentUserId: agentA.Id, PayAmount: 99000,
+		RebateAmount: 9900, Status: AgentRebateRecordSettled, SettledAt: dayStart + 700,
+	}).Error)
 
-	result, err := getAgentLeaderboardAt(agentB.Id, &common.PageInfo{Page: 1, PageSize: 1}, now)
+	result, err := getAgentLeaderboardAt(agentB.Id, &common.PageInfo{Page: 1, PageSize: 1}, "", now)
 	require.NoError(t, err)
 	require.Len(t, result.Items, 1)
 	require.Equal(t, int64(2), result.Total)
 	require.Equal(t, 1, result.Page)
+	require.Equal(t, AgentLeaderboardSortDayNewUser, result.SortBy)
 	require.Equal(t, agentA.Username[:2]+"***"+agentA.Username[len(agentA.Username)-2:], result.Items[0].AgentLabel)
 	require.False(t, strings.Contains(result.Items[0].AgentLabel, fmt.Sprintf("%d", agentA.Id)))
 	require.Equal(t, int64(2), result.Items[0].MonthNewUserCount)
 	require.Equal(t, int64(1), result.Items[0].DayNewUserCount)
-	require.Equal(t, int64(6000), result.Items[0].DayTopupAmount)
-	require.InDelta(t, 0.5, result.Items[0].MonthRepurchaseRate, 0.0001)
+	require.Equal(t, int64(8000), result.Items[0].DayTopupAmount)
+	require.InDelta(t, 0.5, result.Items[0].MonthSecondTopupRate, 0.0001)
+	require.InDelta(t, result.Items[0].MonthSecondTopupRate, result.Items[0].MonthRepurchaseRate, 0.0001)
+	require.InDelta(t, 0.5, result.Items[0].MonthThirdTopupRate, 0.0001)
+	require.InDelta(t, 0.5, result.Items[0].MonthFourthTopupRate, 0.0001)
+	require.Equal(t, 1, result.Items[0].DayNewUserRank)
+	require.Equal(t, 1, result.Items[0].MonthNewUserRank)
+	require.Equal(t, 1, result.Items[0].DayTopupRank)
+	require.Equal(t, 2, result.Items[0].MonthSecondTopupRank)
+	require.Equal(t, 1, result.Items[0].MonthThirdTopupRank)
+	require.Equal(t, 1, result.Items[0].MonthFourthTopupRank)
 	require.NotNil(t, result.Self)
-	require.Equal(t, 2, result.Self.Rank)
+	require.Equal(t, 1, result.Self.DayNewUserRank)
+	require.Equal(t, 1, result.Self.MonthSecondTopupRank)
 	require.True(t, result.Self.IsSelf)
 
 	payload, err := common.Marshal(result)
 	require.NoError(t, err)
 	require.NotContains(t, string(payload), "downline_balance_quota")
+	require.NotContains(t, string(payload), "agent_user_id")
 
-	secondPage, err := getAgentLeaderboardAt(agentB.Id, &common.PageInfo{Page: 2, PageSize: 1}, now)
+	secondPage, err := getAgentLeaderboardAt(agentB.Id, &common.PageInfo{Page: 2, PageSize: 1}, "", now)
 	require.NoError(t, err)
 	require.Len(t, secondPage.Items, 1)
 	require.True(t, secondPage.Items[0].IsSelf)
 
-	normalizedPage, err := getAgentLeaderboardAt(agentB.Id, &common.PageInfo{Page: -1, PageSize: -1}, now)
+	secondTopupRanking, err := getAgentLeaderboardAt(agentB.Id, &common.PageInfo{Page: 1, PageSize: 1}, AgentLeaderboardSortMonthSecondTopupRate, now)
+	require.NoError(t, err)
+	require.Equal(t, AgentLeaderboardSortMonthSecondTopupRate, secondTopupRanking.SortBy)
+	require.Len(t, secondTopupRanking.Items, 1)
+	require.True(t, secondTopupRanking.Items[0].IsSelf)
+	require.InDelta(t, 1.0, secondTopupRanking.Items[0].MonthSecondTopupRate, 0.0001)
+	require.Equal(t, 1, secondTopupRanking.Items[0].MonthSecondTopupRank)
+
+	for _, testCase := range []struct {
+		sortBy      string
+		firstIsSelf bool
+	}{
+		{sortBy: AgentLeaderboardSortDayNewUser, firstIsSelf: false},
+		{sortBy: AgentLeaderboardSortMonthNewUser, firstIsSelf: false},
+		{sortBy: AgentLeaderboardSortDayTopup, firstIsSelf: false},
+		{sortBy: AgentLeaderboardSortMonthSecondTopupRate, firstIsSelf: true},
+		{sortBy: AgentLeaderboardSortMonthThirdTopupRate, firstIsSelf: false},
+		{sortBy: AgentLeaderboardSortMonthFourthTopupRate, firstIsSelf: false},
+	} {
+		ranking, rankingErr := getAgentLeaderboardAt(agentB.Id, &common.PageInfo{Page: 1, PageSize: 1}, testCase.sortBy, now)
+		require.NoError(t, rankingErr)
+		require.Equal(t, testCase.sortBy, ranking.SortBy)
+		require.Len(t, ranking.Items, 1)
+		require.Equal(t, testCase.firstIsSelf, ranking.Items[0].IsSelf)
+	}
+
+	normalizedPage, err := getAgentLeaderboardAt(agentB.Id, &common.PageInfo{Page: -1, PageSize: -1}, "invalid", now)
 	require.NoError(t, err)
 	require.Equal(t, 1, normalizedPage.Page)
 	require.Equal(t, common.ItemsPerPage, normalizedPage.PageSize)
+	require.Equal(t, AgentLeaderboardSortDayNewUser, normalizedPage.SortBy)
 	require.Len(t, normalizedPage.Items, 2)
 }

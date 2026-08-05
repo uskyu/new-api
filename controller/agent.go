@@ -311,7 +311,7 @@ func GetAgentSelfDailyMetrics(c *gin.Context) {
 
 func GetAgentSelfLeaderboard(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	leaderboard, err := model.GetAgentLeaderboard(c.GetInt("id"), pageInfo)
+	leaderboard, err := model.GetAgentLeaderboard(c.GetInt("id"), pageInfo, c.Query("sort_by"))
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -346,7 +346,7 @@ func GetAgentSelfAdjustments(c *gin.Context) {
 func GetAgentSelfDownlines(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	keyword := c.Query("keyword")
-	users, total, err := model.GetAgentDownlineUsers(pageInfo, c.GetInt("id"), keyword)
+	users, total, err := model.GetRecentAgentDownlineUsers(pageInfo, c.GetInt("id"), keyword)
 	if err != nil {
 		common.ApiError(c, err)
 		return

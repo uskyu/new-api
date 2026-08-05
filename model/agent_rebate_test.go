@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/common/dbx"
@@ -417,6 +418,7 @@ func TestAgentPromoLinkStatsAndDownlines(t *testing.T) {
 	})
 	agent := createAgentTestUser(t, "agent_stats", "AFF9")
 	invitee := createAgentTestUser(t, "invitee_stats", "AFF10")
+	oldInvitee := createAgentTestUser(t, "old_invitee_stats", "AFF_OLD")
 	require.NoError(t, DB.Create(&AgentProfile{UserId: agent.Id, Status: AgentStatusEnabled, CustomRate: 1200}).Error)
 	promoLink, err := UpsertAgentPromoLink(agent.Id, &AgentPromoLink{
 		AgentUserId: agent.Id,
@@ -429,6 +431,10 @@ func TestAgentPromoLinkStatsAndDownlines(t *testing.T) {
 	require.NoError(t, DB.Model(invitee).Updates(map[string]interface{}{
 		"inviter_id":    agent.Id,
 		"promo_link_id": promoLink.Id,
+	}).Error)
+	require.NoError(t, DB.Model(oldInvitee).Updates(map[string]interface{}{
+		"inviter_id": agent.Id,
+		"created_at": time.Now().AddDate(0, 0, -31).Unix(),
 	}).Error)
 	topup := &TopUp{
 		UserId:       invitee.Id,
@@ -470,7 +476,7 @@ func TestAgentPromoLinkStatsAndDownlines(t *testing.T) {
 	require.Equal(t, int64(8800), targetStat.TopupAmount)
 	require.Equal(t, int64(1656), targetStat.RebateAmount)
 
-	downlines, total, err := GetAgentDownlineUsers(&common.PageInfo{Page: 1, PageSize: 10}, agent.Id, "")
+	downlines, total, err := GetRecentAgentDownlineUsers(&common.PageInfo{Page: 1, PageSize: 10}, agent.Id, "")
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total)
 	require.Len(t, downlines, 1)
@@ -481,10 +487,21 @@ func TestAgentPromoLinkStatsAndDownlines(t *testing.T) {
 	require.Equal(t, int64(8800), downlines[0].TopupAmount)
 	require.Equal(t, int64(1656), downlines[0].RebateAmount)
 
-	downlines, total, err = GetAgentDownlineUsers(&common.PageInfo{Page: -1, PageSize: -1}, agent.Id, "")
+	downlines, total, err = GetRecentAgentDownlineUsers(&common.PageInfo{Page: -1, PageSize: -1}, agent.Id, "")
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total)
 	require.Len(t, downlines, 1)
+
+	downlines, total, err = GetRecentAgentDownlineUsers(&common.PageInfo{Page: 1, PageSize: 10}, agent.Id, oldInvitee.Username)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, downlines, 1)
+	require.Equal(t, oldInvitee.Id, downlines[0].UserId)
+
+	allDownlines, allTotal, err := GetAgentDownlineUsers(&common.PageInfo{Page: 1, PageSize: 10}, agent.Id, "")
+	require.NoError(t, err)
+	require.Equal(t, int64(2), allTotal)
+	require.Len(t, allDownlines, 2)
 }
 
 func TestAgentUpgradeRequestAndRateConflict(t *testing.T) {

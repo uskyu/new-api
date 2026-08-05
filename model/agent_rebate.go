@@ -2519,12 +2519,21 @@ func normalizeAgentPageInfo(pageInfo *common.PageInfo) (int, int) {
 }
 
 func GetAgentDownlineUsers(pageInfo *common.PageInfo, agentUserId int, keyword string) ([]*AgentDownlineUserView, int64, error) {
+	return getAgentDownlineUsers(pageInfo, agentUserId, keyword, 0)
+}
+
+func GetRecentAgentDownlineUsers(pageInfo *common.PageInfo, agentUserId int, keyword string) ([]*AgentDownlineUserView, int64, error) {
+	recentSince := time.Now().AddDate(0, 0, -30).Unix()
+	return getAgentDownlineUsers(pageInfo, agentUserId, keyword, recentSince)
+}
+
+func getAgentDownlineUsers(pageInfo *common.PageInfo, agentUserId int, keyword string, recentSince int64) ([]*AgentDownlineUserView, int64, error) {
 	if agentUserId <= 0 {
 		return nil, 0, errors.New("agent_user_id is required")
 	}
 	page, pageSize := normalizeAgentPageInfo(pageInfo)
 	users := make([]*AgentDownlineUserView, 0)
-	tx := queryx.BuildAgentDownlineUsersQuery(DB, agentUserId, keyword, AgentStatusEnabled, AgentRebateRecordSettled)
+	tx := queryx.BuildAgentDownlineUsersQuery(DB, agentUserId, keyword, recentSince, AgentStatusEnabled, AgentRebateRecordSettled)
 	var total int64
 	if err := tx.Count(&total).Error; err != nil {
 		return nil, 0, err
