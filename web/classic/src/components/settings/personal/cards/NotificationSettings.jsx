@@ -786,12 +786,11 @@ const NotificationSettings = ({
               <div className='py-4'>
                 <Form.Switch
                   field='recordIpLog'
-                  label={t('记录请求与错误日志IP')}
+                  label={t('记录登录、令牌与请求日志IP')}
                   checkedText={t('开')}
                   uncheckedText={t('关')}
-                  disabled
                   extraText={t(
-                    'IP 记录由系统强制开启，用于账号与令牌安全风控',
+                    '关闭后将停止记录新的登录、令牌调用以及请求日志 IP，历史记录不会删除',
                   )}
                 />
               </div>

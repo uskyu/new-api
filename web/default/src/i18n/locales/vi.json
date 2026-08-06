@@ -4752,7 +4752,7 @@
     "Invitees": "Người được mời",
     "Review": "Cần xem xét",
     "No risk records found": "Không tìm thấy bản ghi rủi ro",
-    "IP recording is enforced for account and token security": "Ghi nhận IP được bắt buộc để bảo vệ tài khoản và token",
+    "Disable to stop recording new login, token, and request log IP addresses. Existing history is kept": "Tắt tùy chọn này để ngừng ghi các địa chỉ IP mới cho đăng nhập, lệnh gọi bằng token và nhật ký yêu cầu. Lịch sử hiện có vẫn được giữ lại",
     "Review shared IP and invitation relationships.": "Kiểm tra IP dùng chung và quan hệ mời.",
     "Last Login IP": "IP đăng nhập gần nhất"
   }

@@ -4752,7 +4752,7 @@
     "Invitees": "Utilisateurs invites",
     "Review": "A verifier",
     "No risk records found": "Aucun enregistrement de risque",
-    "IP recording is enforced for account and token security": "L'enregistrement IP est impose pour la securite des comptes et des jetons",
+    "Disable to stop recording new login, token, and request log IP addresses. Existing history is kept": "Desactivez cette option pour ne plus enregistrer les nouvelles adresses IP de connexion, de jeton et de journaux de requetes. L'historique existant est conserve.",
     "Review shared IP and invitation relationships.": "Examinez les IP partagees et les relations d'invitation.",
     "Last Login IP": "IP de derniere connexion"
   }

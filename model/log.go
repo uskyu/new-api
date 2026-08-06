@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -255,7 +257,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		UseTime:           useTimeSeconds,
 		IsStream:          isStream,
 		Group:             group,
-		Ip:                c.ClientIP(),
+		Ip:                getUserRequestLogIP(c, userId),
 		RequestId:         requestId,
 		UpstreamRequestId: upstreamRequestId,
 		Other:             otherStr,
@@ -306,7 +308,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		UseTime:           params.UseTimeSeconds,
 		IsStream:          params.IsStream,
 		Group:             params.Group,
-		Ip:                c.ClientIP(),
+		Ip:                getUserRequestLogIP(c, userId),
 		RequestId:         requestId,
 		UpstreamRequestId: upstreamRequestId,
 		Other:             otherStr,
@@ -320,6 +322,20 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			LogQuotaData(userId, username, params.ModelName, params.Quota, common.GetTimestamp(), params.PromptTokens+params.CompletionTokens)
 		})
 	}
+}
+
+func getUserRequestLogIP(c *gin.Context, userId int) string {
+	if setting, ok := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting); ok {
+		if setting.RecordIpLog {
+			return c.ClientIP()
+		}
+		return ""
+	}
+	setting, err := GetUserSetting(userId, false)
+	if err != nil || !setting.RecordIpLog {
+		return ""
+	}
+	return c.ClientIP()
 }
 
 type RecordTaskBillingLogParams struct {

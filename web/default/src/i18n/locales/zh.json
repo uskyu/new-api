@@ -4752,7 +4752,7 @@
     "Invitees": "被邀请用户",
     "Review": "需复核",
     "No risk records found": "未找到风控记录",
-    "IP recording is enforced for account and token security": "IP 记录由系统强制开启，用于账号与令牌安全风控",
+    "Disable to stop recording new login, token, and request log IP addresses. Existing history is kept": "关闭后将停止记录新的登录、令牌调用和请求日志 IP，已有历史记录会保留",
     "Review shared IP and invitation relationships.": "查看共享 IP 与邀请关联风险。",
     "Last Login IP": "最后登录 IP"
   }

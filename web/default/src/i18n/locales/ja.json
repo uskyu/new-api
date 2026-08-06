@@ -4752,7 +4752,7 @@
     "Invitees": "招待されたユーザー",
     "Review": "要確認",
     "No risk records found": "リスク記録がありません",
-    "IP recording is enforced for account and token security": "アカウントとトークンの安全管理のため IP 記録は常に有効です",
+    "Disable to stop recording new login, token, and request log IP addresses. Existing history is kept": "オフにすると、新しいログイン、トークン呼び出し、リクエストログの IP アドレス記録を停止します。既存の履歴は保持されます",
     "Review shared IP and invitation relationships.": "共有 IP と招待関係を確認します。",
     "Last Login IP": "最終ログイン IP"
   }

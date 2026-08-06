@@ -4752,7 +4752,7 @@
     "Invitees": "Приглашенные",
     "Review": "Проверить",
     "No risk records found": "Записи рисков не найдены",
-    "IP recording is enforced for account and token security": "Запись IP обязательна для безопасности учетных записей и токенов",
+    "Disable to stop recording new login, token, and request log IP addresses. Existing history is kept": "Отключите, чтобы прекратить запись новых IP-адресов входа, вызовов по токену и журналов запросов. Существующая история сохранится",
     "Review shared IP and invitation relationships.": "Проверяйте общие IP и связи приглашений.",
     "Last Login IP": "IP последнего входа"
   }

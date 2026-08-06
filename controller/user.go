@@ -114,9 +114,8 @@ func loginMethodFromContext(c *gin.Context) string {
 }
 
 // recordLoginAudit 记录登录成功审计日志（对所有用户启用，仅记录成功，不记录失败）。
-func recordLoginAudit(user *model.User, c *gin.Context) {
+func recordLoginAudit(user *model.User, c *gin.Context, ip string) {
 	method := loginMethodFromContext(c)
-	ip := c.ClientIP()
 	extra := map[string]interface{}{
 		"login_method": method,
 		"user_agent":   c.Request.UserAgent(),
@@ -129,9 +128,14 @@ func recordLoginAudit(user *model.User, c *gin.Context) {
 
 // setup session & cookies and then return user info
 func setupLogin(user *model.User, c *gin.Context) {
-	loginIP := c.ClientIP()
-	model.UpdateUserLastLogin(user.Id, loginIP)
-	model.RecordRiskIPAsync(user.Id, 0, model.RiskIPSourceLogin, loginIP)
+	loginIP := ""
+	if user.GetSetting().RecordIpLog {
+		loginIP = c.ClientIP()
+		model.UpdateUserLastLogin(user.Id, loginIP)
+		model.RecordRiskIPAsync(user.Id, 0, model.RiskIPSourceLogin, loginIP)
+	} else {
+		model.UpdateUserLastLoginAt(user.Id)
+	}
 	session := sessions.Default(c)
 	session.Set("id", user.Id)
 	session.Set("username", user.Username)
@@ -143,7 +147,7 @@ func setupLogin(user *model.User, c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
 		return
 	}
-	recordLoginAudit(user, c)
+	recordLoginAudit(user, c, loginIP)
 	c.JSON(http.StatusOK, gin.H{
 		"message": "",
 		"success": true,
@@ -448,7 +452,7 @@ func GetSelf(c *gin.Context) {
 
 	// 获取用户设置并提取sidebar_modules
 	userSetting := user.GetSetting()
-	// Return the enforced IP-recording state even for legacy rows that predate this feature.
+	// Return resolved defaults even for legacy rows that predate this feature.
 	user.SetSetting(userSetting)
 
 	// 构建响应数据，包含用户信息和权限
@@ -1210,7 +1214,7 @@ type UpdateUserSettingRequest struct {
 	GotifyPriority                   int     `json:"gotify_priority,omitempty"`
 	UpstreamModelUpdateNotifyEnabled *bool   `json:"upstream_model_update_notify_enabled,omitempty"`
 	AcceptUnsetModelRatioModel       bool    `json:"accept_unset_model_ratio_model"`
-	RecordIpLog                      bool    `json:"record_ip_log"`
+	RecordIpLog                      *bool   `json:"record_ip_log"`
 }
 
 func UpdateUserSetting(c *gin.Context) {
@@ -1305,6 +1309,10 @@ func UpdateUserSetting(c *gin.Context) {
 	if user.Role >= common.RoleAdminUser && req.UpstreamModelUpdateNotifyEnabled != nil {
 		upstreamModelUpdateNotifyEnabled = *req.UpstreamModelUpdateNotifyEnabled
 	}
+	recordIpLog := existingSettings.RecordIpLog
+	if req.RecordIpLog != nil {
+		recordIpLog = *req.RecordIpLog
+	}
 
 	// 构建设置
 	settings := dto.UserSetting{
@@ -1312,7 +1320,10 @@ func UpdateUserSetting(c *gin.Context) {
 		QuotaWarningThreshold:            req.QuotaWarningThreshold,
 		UpstreamModelUpdateNotifyEnabled: upstreamModelUpdateNotifyEnabled,
 		AcceptUnsetRatioModel:            req.AcceptUnsetModelRatioModel,
-		RecordIpLog:                      true,
+		RecordIpLog:                      recordIpLog,
+		SidebarModules:                   existingSettings.SidebarModules,
+		BillingPreference:                existingSettings.BillingPreference,
+		Language:                         existingSettings.Language,
 	}
 
 	// 如果是webhook类型,添加webhook相关设置

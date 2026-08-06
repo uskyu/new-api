@@ -4752,7 +4752,7 @@
     "Invitees": "Invitees",
     "Review": "Review",
     "No risk records found": "No risk records found",
-    "IP recording is enforced for account and token security": "IP recording is enforced for account and token security",
+    "Disable to stop recording new login, token, and request log IP addresses. Existing history is kept": "Disable to stop recording new login, token, and request log IP addresses. Existing history is kept",
     "Review shared IP and invitation relationships.": "Review shared IP and invitation relationships.",
     "Last Login IP": "Last Login IP"
   }
