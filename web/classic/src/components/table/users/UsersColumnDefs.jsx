@@ -368,6 +368,15 @@ export const getUsersColumns = ({
       render: renderTimestamp,
     },
     {
+      title: t('最后登录 IP'),
+      dataIndex: 'last_login_ip',
+      render: (value) => (
+        <Typography.Text copyable={value ? { content: value } : false}>
+          {value || '-'}
+        </Typography.Text>
+      ),
+    },
+    {
       title: '',
       dataIndex: 'operate',
       fixed: 'right',

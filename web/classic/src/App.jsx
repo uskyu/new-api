@@ -48,6 +48,7 @@ import Subscription from './pages/Subscription';
 import SelfService from './pages/SelfService';
 import SelfServiceAdmin from './pages/SelfServiceAdmin';
 import QuickRefund from './pages/QuickRefund';
+import RiskControl from './pages/RiskControl';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
@@ -148,6 +149,14 @@ function App() {
             <RootRoute>
               <QuickRefund />
             </RootRoute>
+          }
+        />
+        <Route
+          path='/console/risk-control'
+          element={
+            <AdminRoute>
+              <RiskControl />
+            </AdminRoute>
           }
         />
         <Route

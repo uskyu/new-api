@@ -284,6 +284,7 @@ func migrateDB() error {
 		&SelfServiceUpgradeHistory{},
 		&RefundBatch{},
 		&RefundItem{},
+		&RiskIPRecord{},
 	)
 	if err != nil {
 		return err
@@ -342,6 +343,7 @@ func migrateDBFast() error {
 		{&SelfServiceUpgradeHistory{}, "SelfServiceUpgradeHistory"},
 		{&RefundBatch{}, "RefundBatch"},
 		{&RefundItem{}, "RefundItem"},
+		{&RiskIPRecord{}, "RiskIPRecord"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
@@ -428,6 +430,7 @@ func migrateSelfServiceSidebarModules() error {
 	changed = ensureSelfServiceSidebarModule(config, "admin", "self_service") || changed
 	changed = ensureSelfServiceSidebarModule(config, "admin", "self_service_admin") || changed
 	changed = ensureSelfServiceSidebarModule(config, "admin", "quick_refund") || changed
+	changed = ensureSelfServiceSidebarModule(config, "admin", "risk_control") || changed
 	if !changed {
 		return nil
 	}

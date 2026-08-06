@@ -29,6 +29,7 @@ import {
   Radio,
   RotateCcw,
   Settings,
+  ShieldAlert,
   Ticket,
   User,
   Users,
@@ -156,6 +157,11 @@ export function useSidebarData(): SidebarData {
             title: t('Self-Service Management'),
             url: '/self-service-admin',
             icon: Wrench,
+          },
+          {
+            title: t('Risk Control'),
+            url: '/risk-control',
+            icon: ShieldAlert,
           },
           ...(isSuperAdmin
             ? [

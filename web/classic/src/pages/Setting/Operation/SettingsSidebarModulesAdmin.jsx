@@ -70,6 +70,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       setting: true,
       self_service_admin: true,
       quick_refund: true,
+      risk_control: true,
     },
   });
 
@@ -134,6 +135,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         setting: true,
         self_service_admin: true,
         quick_refund: true,
+        risk_control: true,
       },
     };
     setSidebarModulesAdmin(defaultModules);
@@ -210,6 +212,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             setting: true,
             self_service_admin: true,
             quick_refund: true,
+            risk_control: true,
           },
         };
         setSidebarModulesAdmin(defaultModules);
@@ -303,6 +306,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           key: 'quick_refund',
           title: t('快捷退款'),
           description: t('按消费日志批量创建钱包退款'),
+        },
+        {
+          key: 'risk_control',
+          title: t('风控管理'),
+          description: t('查看共享 IP 与邀请关联风险'),
         },
       ],
     },

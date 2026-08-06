@@ -52,6 +52,7 @@ type User struct {
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 	CreatedAt        int64          `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	LastLoginAt      int64          `json:"last_login_at" gorm:"default:0;column:last_login_at"`
+	LastLoginIp      string         `json:"last_login_ip" gorm:"type:varchar(64);default:'';column:last_login_ip;index"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -86,6 +87,7 @@ func (user *User) GetSetting() dto.UserSetting {
 			common.SysLog("failed to unmarshal setting: " + err.Error())
 		}
 	}
+	setting.RecordIpLog = true
 	return setting
 }
 
@@ -139,6 +141,7 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 			"setting":            false,
 			"self_service":       true,
 			"self_service_admin": true,
+			"risk_control":       true,
 		}
 	} else if userRole == common.RoleRootUser {
 		// 超级管理员可以访问所有功能
@@ -151,6 +154,7 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 			"setting":            true,
 			"self_service":       true,
 			"self_service_admin": true,
+			"risk_control":       true,
 		}
 	}
 	// 普通用户不包含admin区域
@@ -960,7 +964,15 @@ func GetRootUser() (user *User) {
 }
 
 func UpdateUserLastLoginAt(id int) {
-	if err := DB.Model(&User{}).Where("id = ?", id).Update("last_login_at", common.GetTimestamp()).Error; err != nil {
+	UpdateUserLastLogin(id, "")
+}
+
+func UpdateUserLastLogin(id int, rawIP string) {
+	updates := map[string]interface{}{"last_login_at": common.GetTimestamp()}
+	if ip := NormalizeRiskIP(rawIP); ip != "" {
+		updates["last_login_ip"] = ip
+	}
+	if err := DB.Model(&User{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		common.SysLog("failed to update user last_login_at: " + err.Error())
 	}
 }

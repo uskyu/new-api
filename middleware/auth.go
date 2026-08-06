@@ -412,6 +412,7 @@ func TokenAuth() func(c *gin.Context) {
 		if err != nil {
 			return
 		}
+		model.RecordRiskIPAsync(token.UserId, token.Id, model.RiskIPSourceToken, c.ClientIP())
 		c.Next()
 	}
 }

@@ -129,7 +129,9 @@ func recordLoginAudit(user *model.User, c *gin.Context) {
 
 // setup session & cookies and then return user info
 func setupLogin(user *model.User, c *gin.Context) {
-	model.UpdateUserLastLoginAt(user.Id)
+	loginIP := c.ClientIP()
+	model.UpdateUserLastLogin(user.Id, loginIP)
+	model.RecordRiskIPAsync(user.Id, 0, model.RiskIPSourceLogin, loginIP)
 	session := sessions.Default(c)
 	session.Set("id", user.Id)
 	session.Set("username", user.Username)
@@ -446,6 +448,8 @@ func GetSelf(c *gin.Context) {
 
 	// 获取用户设置并提取sidebar_modules
 	userSetting := user.GetSetting()
+	// Return the enforced IP-recording state even for legacy rows that predate this feature.
+	user.SetSetting(userSetting)
 
 	// 构建响应数据，包含用户信息和权限
 	responseData := map[string]interface{}{
@@ -1308,7 +1312,7 @@ func UpdateUserSetting(c *gin.Context) {
 		QuotaWarningThreshold:            req.QuotaWarningThreshold,
 		UpstreamModelUpdateNotifyEnabled: upstreamModelUpdateNotifyEnabled,
 		AcceptUnsetRatioModel:            req.AcceptUnsetModelRatioModel,
-		RecordIpLog:                      req.RecordIpLog,
+		RecordIpLog:                      true,
 	}
 
 	// 如果是webhook类型,添加webhook相关设置

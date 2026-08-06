@@ -65,6 +65,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     subscription: true,
     self_service_admin: true,
     quick_refund: true,
+    risk_control: true,
   },
 }
 
@@ -119,6 +120,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/subscriptions': { section: 'admin', module: 'subscription' },
   '/self-service-admin': { section: 'admin', module: 'self_service_admin' },
   '/quick-refund': { section: 'admin', module: 'quick_refund' },
+  '/risk-control': { section: 'admin', module: 'risk_control' },
   '/system-settings': { section: 'admin', module: 'setting' },
   '/system-settings/site': { section: 'admin', module: 'setting' },
 }

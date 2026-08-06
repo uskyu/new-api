@@ -52,6 +52,7 @@ const routerMap = {
   self_service: '/console/self-service',
   self_service_admin: '/console/self-service-admin',
   quick_refund: '/console/quick-refund',
+  risk_control: '/console/risk-control',
 };
 
 const SiderBar = ({ onNavigate = () => {} }) => {
@@ -208,6 +209,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         itemKey: 'quick_refund',
         to: '/quick-refund',
         className: isRoot() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('风控管理'),
+        itemKey: 'risk_control',
+        to: '/risk-control',
+        className: isAdmin() ? '' : 'tableHiddle',
       },
     ];
 

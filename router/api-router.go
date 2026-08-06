@@ -203,6 +203,15 @@ func SetApiRouter(router *gin.Engine) {
 			}
 		}
 
+		riskControlRoute := apiRouter.Group("/risk-control")
+		riskControlRoute.Use(middleware.AdminAuth())
+		{
+			riskControlRoute.GET("/overview", controller.GetRiskControlOverview)
+			riskControlRoute.GET("/shared-ips", controller.GetRiskControlSharedIPs)
+			riskControlRoute.GET("/inviters", controller.GetRiskControlInviters)
+			riskControlRoute.GET("/users/:id", controller.GetRiskControlUser)
+		}
+
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{

@@ -43,6 +43,7 @@ import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_
 import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
 import { Route as AuthenticatedSelfServiceIndexRouteImport } from './routes/_authenticated/self-service/index'
 import { Route as AuthenticatedSelfServiceAdminIndexRouteImport } from './routes/_authenticated/self-service-admin/index'
+import { Route as AuthenticatedRiskControlIndexRouteImport } from './routes/_authenticated/risk-control/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
 import { Route as AuthenticatedQuickRefundIndexRouteImport } from './routes/_authenticated/quick-refund/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
@@ -245,6 +246,12 @@ const AuthenticatedSelfServiceAdminIndexRoute =
   AuthenticatedSelfServiceAdminIndexRouteImport.update({
     id: '/self-service-admin/',
     path: '/self-service-admin/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedRiskControlIndexRoute =
+  AuthenticatedRiskControlIndexRouteImport.update({
+    id: '/risk-control/',
+    path: '/risk-control/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedRedemptionCodesIndexRoute =
@@ -452,6 +459,7 @@ export interface FileRoutesByFullPath {
   '/profile/': typeof AuthenticatedProfileIndexRoute
   '/quick-refund/': typeof AuthenticatedQuickRefundIndexRoute
   '/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
+  '/risk-control/': typeof AuthenticatedRiskControlIndexRoute
   '/self-service-admin/': typeof AuthenticatedSelfServiceAdminIndexRoute
   '/self-service/': typeof AuthenticatedSelfServiceIndexRoute
   '/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
@@ -513,6 +521,7 @@ export interface FileRoutesByTo {
   '/profile': typeof AuthenticatedProfileIndexRoute
   '/quick-refund': typeof AuthenticatedQuickRefundIndexRoute
   '/redemption-codes': typeof AuthenticatedRedemptionCodesIndexRoute
+  '/risk-control': typeof AuthenticatedRiskControlIndexRoute
   '/self-service-admin': typeof AuthenticatedSelfServiceAdminIndexRoute
   '/self-service': typeof AuthenticatedSelfServiceIndexRoute
   '/subscriptions': typeof AuthenticatedSubscriptionsIndexRoute
@@ -578,6 +587,7 @@ export interface FileRoutesById {
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
   '/_authenticated/quick-refund/': typeof AuthenticatedQuickRefundIndexRoute
   '/_authenticated/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
+  '/_authenticated/risk-control/': typeof AuthenticatedRiskControlIndexRoute
   '/_authenticated/self-service-admin/': typeof AuthenticatedSelfServiceAdminIndexRoute
   '/_authenticated/self-service/': typeof AuthenticatedSelfServiceIndexRoute
   '/_authenticated/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
@@ -642,6 +652,7 @@ export interface FileRouteTypes {
     | '/profile/'
     | '/quick-refund/'
     | '/redemption-codes/'
+    | '/risk-control/'
     | '/self-service-admin/'
     | '/self-service/'
     | '/subscriptions/'
@@ -703,6 +714,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/quick-refund'
     | '/redemption-codes'
+    | '/risk-control'
     | '/self-service-admin'
     | '/self-service'
     | '/subscriptions'
@@ -767,6 +779,7 @@ export interface FileRouteTypes {
     | '/_authenticated/profile/'
     | '/_authenticated/quick-refund/'
     | '/_authenticated/redemption-codes/'
+    | '/_authenticated/risk-control/'
     | '/_authenticated/self-service-admin/'
     | '/_authenticated/self-service/'
     | '/_authenticated/subscriptions/'
@@ -1050,6 +1063,13 @@ declare module '@tanstack/react-router' {
       path: '/self-service-admin'
       fullPath: '/self-service-admin/'
       preLoaderRoute: typeof AuthenticatedSelfServiceAdminIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/risk-control/': {
+      id: '/_authenticated/risk-control/'
+      path: '/risk-control'
+      fullPath: '/risk-control/'
+      preLoaderRoute: typeof AuthenticatedRiskControlIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/redemption-codes/': {
@@ -1350,6 +1370,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
   AuthenticatedQuickRefundIndexRoute: typeof AuthenticatedQuickRefundIndexRoute
   AuthenticatedRedemptionCodesIndexRoute: typeof AuthenticatedRedemptionCodesIndexRoute
+  AuthenticatedRiskControlIndexRoute: typeof AuthenticatedRiskControlIndexRoute
   AuthenticatedSelfServiceAdminIndexRoute: typeof AuthenticatedSelfServiceAdminIndexRoute
   AuthenticatedSelfServiceIndexRoute: typeof AuthenticatedSelfServiceIndexRoute
   AuthenticatedSubscriptionsIndexRoute: typeof AuthenticatedSubscriptionsIndexRoute
@@ -1376,6 +1397,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedQuickRefundIndexRoute: AuthenticatedQuickRefundIndexRoute,
   AuthenticatedRedemptionCodesIndexRoute:
     AuthenticatedRedemptionCodesIndexRoute,
+  AuthenticatedRiskControlIndexRoute: AuthenticatedRiskControlIndexRoute,
   AuthenticatedSelfServiceAdminIndexRoute:
     AuthenticatedSelfServiceAdminIndexRoute,
   AuthenticatedSelfServiceIndexRoute: AuthenticatedSelfServiceIndexRoute,

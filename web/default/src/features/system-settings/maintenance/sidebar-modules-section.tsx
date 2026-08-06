@@ -162,6 +162,10 @@ export function SidebarModulesSection({
         title: t('Quick Refund'),
         description: t('Create wallet refunds from eligible consume logs.'),
       },
+      risk_control: {
+        title: t('Risk Control'),
+        description: t('Review shared IP and invitation relationships.'),
+      },
     },
   }
   const formDefaults = useMemo(() => config, [config])

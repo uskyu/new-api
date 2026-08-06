@@ -114,6 +114,7 @@ export default function SettingsSidebarModulesUser() {
           'admin',
           'self_service_admin',
         ),
+        risk_control: isSidebarModuleAllowed('admin', 'risk_control'),
       };
     }
 
@@ -370,6 +371,11 @@ export default function SettingsSidebarModulesUser() {
           key: 'self_service_admin',
           title: t('自助平台管理'),
           description: t('空单检测和升级规则管理'),
+        },
+        {
+          key: 'risk_control',
+          title: t('风控管理'),
+          description: t('查看共享 IP 与邀请关联风险'),
         },
       ],
     },

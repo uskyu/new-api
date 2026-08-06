@@ -163,6 +163,17 @@ func main() {
 
 	// Initialize HTTP server
 	server := gin.New()
+	trustedProxyEnv := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES"))
+	if trustedProxyEnv == "" {
+		common.SysLog("TRUSTED_PROXIES is not set; using Gin's compatibility proxy behavior")
+	} else {
+		trustedProxies := strings.FieldsFunc(trustedProxyEnv, func(r rune) bool {
+			return r == ',' || r == ';' || r == ' '
+		})
+		if err := server.SetTrustedProxies(trustedProxies); err != nil {
+			common.FatalLog("invalid TRUSTED_PROXIES: " + err.Error())
+		}
+	}
 	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
 		common.SysLog(fmt.Sprintf("panic detected: %v", err))
 		c.JSON(http.StatusInternalServerError, gin.H{
