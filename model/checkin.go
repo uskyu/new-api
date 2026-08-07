@@ -49,6 +49,57 @@ func HasCheckedInToday(userId int) (bool, error) {
 	return count > 0, err
 }
 
+// GetYesterdayCheckinUsage 统计用户昨日成功计费调用次数和消耗额度
+func GetYesterdayCheckinUsage(userId int) (calls int64, quota int64, err error) {
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	start := startOfDay.Add(-24 * time.Hour).Unix()
+	end := startOfDay.Unix()
+	err = LOG_DB.Model(&Log{}).
+		Where("user_id = ? AND type = ? AND created_at >= ? AND created_at < ?", userId, LogTypeConsume, start, end).
+		Count(&calls).Error
+	if err != nil {
+		return 0, 0, err
+	}
+	err = LOG_DB.Model(&Log{}).
+		Where("user_id = ? AND type = ? AND created_at >= ? AND created_at < ?", userId, LogTypeConsume, start, end).
+		Select("COALESCE(SUM(quota), 0)").Scan(&quota).Error
+	return calls, quota, err
+}
+
+// SelectCheckinTier 返回用户命中的最高活跃奖励档位
+func SelectCheckinTier(tiers []operation_setting.CheckinBonusTier, metric int64) *operation_setting.CheckinBonusTier {
+	var selected *operation_setting.CheckinBonusTier
+	for i := range tiers {
+		tier := &tiers[i]
+		if int64(tier.Threshold) > metric {
+			continue
+		}
+		if selected == nil || tier.Threshold > selected.Threshold {
+			selected = tier
+		}
+	}
+	return selected
+}
+
+func selectCheckinReward(setting *operation_setting.CheckinSetting, metric int64) int {
+	quotaAwarded := setting.MinQuota
+	if setting.MaxQuota > setting.MinQuota {
+		quotaAwarded = setting.MinQuota + rand.Intn(setting.MaxQuota-setting.MinQuota+1)
+	}
+	if !setting.BonusEnabled {
+		return quotaAwarded
+	}
+	tier := SelectCheckinTier(setting.BonusTiers, metric)
+	if tier == nil || tier.MaxQuota < tier.MinQuota {
+		return quotaAwarded
+	}
+	if tier.MinQuota == tier.MaxQuota {
+		return tier.MinQuota
+	}
+	return tier.MinQuota + rand.Intn(tier.MaxQuota-tier.MinQuota+1)
+}
+
 // UserCheckin 执行用户签到
 // MySQL 和 PostgreSQL 使用事务保证原子性
 // SQLite 不支持嵌套事务，使用顺序操作 + 手动回滚
@@ -67,10 +118,20 @@ func UserCheckin(userId int) (*Checkin, error) {
 		return nil, errors.New("今日已签到")
 	}
 
-	// 计算随机额度奖励
+	// 计算随机额度奖励，命中活跃阶梯时使用对应奖励区间
 	quotaAwarded := setting.MinQuota
 	if setting.MaxQuota > setting.MinQuota {
 		quotaAwarded = setting.MinQuota + rand.Intn(setting.MaxQuota-setting.MinQuota+1)
+	}
+	if setting.BonusEnabled && len(setting.BonusTiers) > 0 {
+		calls, consumedQuota, usageErr := GetYesterdayCheckinUsage(userId)
+		if usageErr == nil {
+			metric := calls
+			if setting.BonusMetric == "quota_consumed" {
+				metric = consumedQuota
+			}
+			quotaAwarded = selectCheckinReward(setting, metric)
+		}
 	}
 
 	today := time.Now().Format("2006-01-02")

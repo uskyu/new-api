@@ -25,6 +25,7 @@ import type {
   DeleteAccountRequest,
   CheckinStatusResponse,
   CheckinResponse,
+  CheckinCaptcha,
 } from './types'
 
 // ============================================================================
@@ -173,14 +174,32 @@ export async function getCheckinStatus(
 }
 
 /**
+ * Get a one-time image captcha for check-in
+ */
+export async function getCheckinCaptcha(): Promise<
+  ApiResponse<CheckinCaptcha>
+> {
+  const res = await api.get('/api/user/checkin/captcha')
+  return res.data
+}
+
+/**
  * Perform daily checkin
  */
 export async function performCheckin(
-  turnstileToken?: string
+  turnstileToken?: string,
+  captcha?: { captcha_id: string; captcha_answer: string }
 ): Promise<ApiResponse<CheckinResponse>> {
-  const url = turnstileToken
-    ? `/api/user/checkin?turnstile=${encodeURIComponent(turnstileToken)}`
-    : '/api/user/checkin'
+  const params = new URLSearchParams()
+  if (turnstileToken) {
+    params.append('turnstile', turnstileToken)
+  }
+  if (captcha) {
+    params.append('captcha_id', captcha.captcha_id)
+    params.append('captcha_answer', captcha.captcha_answer)
+  }
+  const query = params.toString()
+  const url = query ? `/api/user/checkin?${query}` : '/api/user/checkin'
   const res = await api.post(url)
   return res.data
 }

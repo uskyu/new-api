@@ -221,8 +221,37 @@ export interface CheckinStats {
 export interface CheckinStatusResponse {
   /** Whether check-in feature is enabled */
   enabled: boolean
+  /** Minimum base check-in quota */
+  min_quota: number
+  /** Maximum base check-in quota */
+  max_quota: number
+  /** Whether the image captcha is enabled */
+  captcha_enabled: boolean
+  /** Captcha kind: math or digit */
+  captcha_kind: 'math' | 'digit'
+  /** Whether active tier rewards are enabled */
+  bonus_enabled: boolean
+  /** Bonus metric: request_count or quota_consumed */
+  bonus_metric: 'request_count' | 'quota_consumed'
+  /** Yesterday request count when bonus is enabled */
+  yesterday_calls?: number
+  /** Yesterday consumed quota when bonus is enabled */
+  yesterday_quota?: number
+  /** Matched active reward tier */
+  bonus_tier?: CheckinBonusTier
   /** Check-in statistics */
   stats: CheckinStats
+}
+
+export interface CheckinBonusTier {
+  threshold: number
+  min_quota: number
+  max_quota: number
+}
+
+export interface CheckinCaptcha {
+  captcha_id: string
+  image_base64: string
 }
 
 /**

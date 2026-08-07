@@ -24,6 +24,7 @@ func GetRiskControlSharedIPs(c *gin.Context) {
 	minUsers, _ := strconv.Atoi(c.Query("min_users"))
 	items, total, err := model.ListRiskSharedIPs(
 		strings.TrimSpace(c.Query("source")),
+		strings.TrimSpace(c.DefaultQuery("search_type", "ip")),
 		strings.TrimSpace(c.Query("keyword")),
 		minUsers,
 		pageInfo.GetStartIdx(),

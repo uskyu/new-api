@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 import { api } from '@/lib/api'
 import type {
   ApiResponse,
@@ -35,6 +34,7 @@ export async function getSharedIPs(params: {
   p: number
   page_size: number
   source?: string
+  search_type?: string
   keyword?: string
   min_users: number
 }): Promise<ApiResponse<PageResponse<RiskSharedIP>>> {

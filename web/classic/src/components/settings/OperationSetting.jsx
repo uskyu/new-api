@@ -78,6 +78,11 @@ const OperationSetting = () => {
     'checkin_setting.enabled': false,
     'checkin_setting.min_quota': 1000,
     'checkin_setting.max_quota': 10000,
+    'checkin_setting.captcha_enabled': false,
+    'checkin_setting.captcha_kind': 'math',
+    'checkin_setting.bonus_enabled': false,
+    'checkin_setting.bonus_metric': 'request_count',
+    'checkin_setting.bonus_tiers': '[]',
 
     /* 令牌设置 */
     'token_setting.max_user_tokens': 1000,

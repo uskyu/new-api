@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -51,7 +52,7 @@ func TestListRiskSharedIPsReturnsAssociatedUsers(t *testing.T) {
 		require.NoError(t, DB.Create(&RiskIPRecord{UserId: users[index].Id, TokenId: index + 1, IP: "198.51.100.8", Source: RiskIPSourceToken, FirstSeenAt: 100, LastSeenAt: 200 + int64(index), EventCount: 3}).Error)
 	}
 
-	items, total, err := ListRiskSharedIPs(RiskIPSourceToken, "198.51.100", 2, 0, 10)
+	items, total, err := ListRiskSharedIPs(RiskIPSourceToken, "ip", "198.51.100", 2, 0, 10)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
@@ -60,12 +61,23 @@ func TestListRiskSharedIPsReturnsAssociatedUsers(t *testing.T) {
 	require.Len(t, items[0].Users, 2)
 
 	RecordRiskIP(users[0].Id, 0, RiskIPSourceLogin, "198.51.100.8")
-	items, total, err = ListRiskSharedIPs("", "", 2, 0, 10)
+	items, total, err = ListRiskSharedIPs("", "ip", "", 2, 0, 10)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Equal(t, "all", items[0].Source)
 	require.EqualValues(t, 2, items[0].UserCount)
 	require.Len(t, items[0].Users, 2)
+
+	items, total, err = ListRiskSharedIPs(RiskIPSourceToken, "username", "risk-shared-a", 2, 0, 10)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, items, 1)
+	require.EqualValues(t, 2, items[0].UserCount)
+
+	items, total, err = ListRiskSharedIPs(RiskIPSourceToken, "user_id", strconv.Itoa(users[1].Id), 2, 0, 10)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, items, 1)
 }
 
 func TestListRiskInvitersUsesActualInviteCount(t *testing.T) {

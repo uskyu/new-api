@@ -124,6 +124,7 @@ export default function RiskControl() {
   const [overview, setOverview] = useState({});
   const [tab, setTab] = useState('shared');
   const [source, setSource] = useState('all');
+  const [searchType, setSearchType] = useState('ip');
   const [keyword, setKeyword] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -137,6 +138,7 @@ export default function RiskControl() {
       const params = { p: page, page_size: PAGE_SIZE, keyword: search };
       if (tab === 'shared' && source !== 'all') params.source = source;
       if (tab === 'shared') params.min_users = 2;
+      if (tab === 'shared') params.search_type = searchType;
       const [overviewRes, listRes] = await Promise.all([
         API.get('/api/risk-control/overview'),
         API.get(endpoint, { params }),
@@ -155,7 +157,7 @@ export default function RiskControl() {
 
   useEffect(() => {
     loadData();
-  }, [tab, source, search, page]);
+  }, [tab, source, searchType, search, page]);
 
   const sharedColumns = useMemo(() => [
     { title: t('IP 地址'), dataIndex: 'ip', render: (value) => <Text copyable={{ content: value }}>{value}</Text> },
@@ -215,7 +217,14 @@ export default function RiskControl() {
                 <Select.Option value='token'>{t('令牌')}</Select.Option>
               </Select>
             )}
-            <Input value={keyword} onChange={setKeyword} prefix={<Search size={16} />} placeholder={tab === 'shared' ? t('搜索 IP') : t('搜索邀请人')} onEnterPress={() => { setSearch(keyword.trim()); setPage(1); }} />
+            {tab === 'shared' && (
+              <Select value={searchType} onChange={(value) => { setSearchType(value); setPage(1); }} className='w-full sm:w-32'>
+                <Select.Option value='ip'>{t('搜索 IP')}</Select.Option>
+                <Select.Option value='username'>{t('搜索用户名/昵称')}</Select.Option>
+                <Select.Option value='user_id'>{t('搜索用户ID')}</Select.Option>
+              </Select>
+            )}
+            <Input value={keyword} onChange={setKeyword} prefix={<Search size={16} />} placeholder={tab === 'shared' ? (searchType === 'username' ? t('搜索用户名/昵称') : searchType === 'user_id' ? t('搜索用户ID') : t('搜索 IP')) : t('搜索邀请人')} onEnterPress={() => { setSearch(keyword.trim()); setPage(1); }} />
             <Button onClick={() => { setSearch(keyword.trim()); setPage(1); }}>{t('查询')}</Button>
           </div>
 

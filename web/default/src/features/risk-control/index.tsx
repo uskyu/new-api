@@ -132,6 +132,7 @@ export function RiskControl() {
   const { t } = useTranslation()
   const [tab, setTab] = useState<'shared' | 'inviters'>('shared')
   const [source, setSource] = useState('all')
+  const [searchType, setSearchType] = useState<'ip' | 'username' | 'user_id'>('ip')
   const [keyword, setKeyword] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -141,13 +142,14 @@ export function RiskControl() {
     queryFn: async () => (await getRiskOverview()).data,
   })
   const listQuery = useQuery({
-    queryKey: ['risk-control-list', tab, source, search, page],
+    queryKey: ['risk-control-list', tab, source, searchType, search, page],
     queryFn: async () => {
       if (tab === 'shared') {
         return (await getSharedIPs({
           p: page,
           page_size: PAGE_SIZE,
           source: source === 'all' ? undefined : source,
+          search_type: searchType,
           keyword: search || undefined,
           min_users: 2,
         })).data
@@ -223,9 +225,19 @@ export function RiskControl() {
                     </SelectContent>
                   </Select>
                 )}
+                {tab === 'shared' && (
+                  <Select value={searchType} onValueChange={(value) => { setSearchType((value ?? 'ip') as 'ip' | 'username' | 'user_id'); setPage(1) }}>
+                    <SelectTrigger className='w-full sm:w-36'><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value='ip'>{t('Search IP')}</SelectItem>
+                      <SelectItem value='username'>{t('Search Username / Nickname')}</SelectItem>
+                      <SelectItem value='user_id'>{t('Search User ID')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
                 <div className='relative flex-1'>
                   <Search className='text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2' />
-                  <Input className='pl-9' value={keyword} onChange={(event) => setKeyword(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitSearch()} placeholder={tab === 'shared' ? t('Search IP') : t('Search inviter')} />
+                  <Input className='pl-9' value={keyword} onChange={(event) => setKeyword(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitSearch()} placeholder={tab === 'shared' ? (searchType === 'username' ? t('Search Username / Nickname') : searchType === 'user_id' ? t('Search User ID') : t('Search IP')) : t('Search inviter')} />
                 </div>
                 <Button onClick={submitSearch}>{t('Search')}</Button>
               </div>

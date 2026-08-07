@@ -117,6 +117,7 @@ func SetApiRouter(router *gin.Engine) {
 
 				// Check-in routes
 				selfRoute.GET("/checkin", controller.GetCheckinStatus)
+				selfRoute.GET("/checkin/captcha", controller.GetCheckinCaptcha)
 				selfRoute.POST("/checkin", middleware.TurnstileCheck(), controller.DoCheckin)
 
 				// Custom OAuth bindings

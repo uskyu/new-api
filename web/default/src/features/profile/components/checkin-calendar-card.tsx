@@ -32,6 +32,7 @@ import { formatQuotaWithCurrency } from '@/lib/currency'
 import dayjs from '@/lib/dayjs'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Tooltip,
@@ -41,8 +42,8 @@ import {
 } from '@/components/ui/tooltip'
 import { Dialog } from '@/components/dialog'
 import { Turnstile } from '@/components/turnstile'
-import { getCheckinStatus, performCheckin } from '../api'
-import type { CheckinRecord } from '../types'
+import { getCheckinCaptcha, getCheckinStatus, performCheckin } from '../api'
+import type { CheckinCaptcha, CheckinRecord } from '../types'
 
 interface CheckinCalendarCardProps {
   checkinEnabled: boolean
@@ -63,6 +64,10 @@ export function CheckinCalendarCard({
   const [checkinLoading, setCheckinLoading] = useState(false)
   const [turnstileModalVisible, setTurnstileModalVisible] = useState(false)
   const [turnstileWidgetKey, setTurnstileWidgetKey] = useState(0)
+  const [captchaModalVisible, setCaptchaModalVisible] = useState(false)
+  const [captchaData, setCaptchaData] = useState<CheckinCaptcha | null>(null)
+  const [captchaAnswer, setCaptchaAnswer] = useState('')
+  const [captchaLoading, setCaptchaLoading] = useState(false)
   const [initialLoaded, setInitialLoaded] = useState(false)
   const [collapsed, setCollapsed] = useState<boolean>(false)
 
@@ -168,6 +173,60 @@ export function CheckinCalendarCard({
     [refetch, shouldTriggerTurnstile, t, turnstileSiteKey]
   )
 
+  const fetchCheckinCaptcha = useCallback(async () => {
+    setCaptchaLoading(true)
+    try {
+      const res = await getCheckinCaptcha()
+      if (res.success && res.data) {
+        setCaptchaData(res.data)
+        setCaptchaAnswer('')
+        setCaptchaModalVisible(true)
+      } else {
+        toast.error(res.message || t('Failed to fetch checkin captcha'))
+      }
+    } catch (_error) {
+      toast.error(t('Failed to fetch checkin captcha'))
+    } finally {
+      setCaptchaLoading(false)
+    }
+  }, [t])
+
+  const doCheckinWithCaptcha = useCallback(async () => {
+    if (!captchaData?.captcha_id || !captchaAnswer.trim()) {
+      toast.error(t('Enter captcha'))
+      return
+    }
+    setCheckinLoading(true)
+    try {
+      const res = await performCheckin(undefined, {
+        captcha_id: captchaData.captcha_id,
+        captcha_answer: captchaAnswer.trim(),
+      })
+      if (res.success && res.data) {
+        toast.success(
+          `${t('Check-in successful! Received')} ${formatQuotaWithCurrency(res.data.quota_awarded)}`
+        )
+        refetch()
+        setCaptchaModalVisible(false)
+        setCaptchaAnswer('')
+      } else {
+        const message = String(res.message || '')
+        if (
+          message.includes('\u6b21\u6570\u8fc7\u591a') ||
+          message.includes('\u8fc7\u671f') ||
+          message.includes('\u4e0d\u5b58\u5728')
+        ) {
+          setCaptchaModalVisible(false)
+        }
+        toast.error(res.message || t('Check-in failed'))
+      }
+    } catch (_error) {
+      toast.error(t('Check-in failed'))
+    } finally {
+      setCheckinLoading(false)
+    }
+  }, [captchaAnswer, captchaData, refetch, t])
+
   const handlePrevMonth = () => {
     setCurrentMonth(
       new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1)
@@ -241,6 +300,57 @@ export function CheckinCalendarCard({
   return (
     <TooltipProvider delay={100}>
       <Dialog
+        open={captchaModalVisible}
+        onOpenChange={(open) => {
+          setCaptchaModalVisible(open)
+          if (!open) setCaptchaAnswer('')
+        }}
+        title={t('Check-in Captcha')}
+        contentClassName='sm:max-w-md'
+        contentHeight='auto'
+        bodyClassName='space-y-4'
+      >
+        <div className='flex flex-col items-center gap-3'>
+          {captchaData?.image_base64 ? (
+            <img
+              src={captchaData.image_base64}
+              alt='captcha'
+              className='h-auto max-w-full rounded-lg border'
+            />
+          ) : null}
+          <Input
+            value={captchaAnswer}
+            onChange={(event) => setCaptchaAnswer(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                doCheckinWithCaptcha()
+              }
+            }}
+            placeholder={t('Enter captcha')}
+            autoFocus
+          />
+          <div className='flex gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={fetchCheckinCaptcha}
+              disabled={captchaLoading}
+            >
+              {t('Refresh captcha')}
+            </Button>
+            <Button
+              type='button'
+              onClick={doCheckinWithCaptcha}
+              disabled={checkinLoading}
+            >
+              {t('Confirm check-in')}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
         open={turnstileModalVisible}
         onOpenChange={(open) => {
           setTurnstileModalVisible(open)
@@ -313,7 +423,11 @@ export function CheckinCalendarCard({
               </div>
             </Button>
             <Button
-              onClick={() => doCheckin()}
+              onClick={() =>
+                checkinData?.captcha_enabled
+                  ? fetchCheckinCaptcha()
+                  : doCheckin()
+              }
               disabled={checkinLoading || checkedToday}
               size='sm'
               className='w-full shrink-0 sm:w-auto'
@@ -461,6 +575,15 @@ export function CheckinCalendarCard({
                   {t('You can only check in once per day')}
                 </div>
 
+                {checkinData?.bonus_enabled && checkinData?.bonus_tier && (
+                  <div className='bg-primary/10 text-primary rounded-lg border px-3 py-2 text-xs font-medium sm:text-sm'>
+                    {t('Yesterday calls')} {checkinData.yesterday_calls ?? 0}{' '}
+                    {t('times, today check-in reward range')}{' '}
+                    {formatQuotaWithCurrency(checkinData.bonus_tier.min_quota)}{' '}
+                    -{' '}
+                    {formatQuotaWithCurrency(checkinData.bonus_tier.max_quota)}
+                  </div>
+                )}
                 <div className='bg-muted/30 text-muted-foreground rounded-lg border p-3 text-xs'>
                   <ul className='list-disc space-y-1 pl-5'>
                     <li>

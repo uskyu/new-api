@@ -789,6 +789,9 @@ const NotificationSettings = ({
                   label={t('记录登录、令牌与请求日志IP')}
                   checkedText={t('开')}
                   uncheckedText={t('关')}
+                  onChange={(value) =>
+                    handleFormChange('recordIpLog', value)
+                  }
                   extraText={t(
                     '关闭后将停止记录新的登录、令牌调用以及请求日志 IP，历史记录不会删除',
                   )}

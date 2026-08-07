@@ -22,6 +22,7 @@ import {
   Card,
   Calendar,
   Button,
+  Input,
   Typography,
   Avatar,
   Spin,
@@ -44,6 +45,10 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
   const [checkinLoading, setCheckinLoading] = useState(false);
   const [turnstileModalVisible, setTurnstileModalVisible] = useState(false);
   const [turnstileWidgetKey, setTurnstileWidgetKey] = useState(0);
+  const [captchaModalVisible, setCaptchaModalVisible] = useState(false);
+  const [captchaData, setCaptchaData] = useState(null);
+  const [captchaAnswer, setCaptchaAnswer] = useState('');
+  const [captchaLoading, setCaptchaLoading] = useState(false);
   const [checkinData, setCheckinData] = useState({
     enabled: false,
     stats: {
@@ -159,6 +164,61 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
     }
   };
 
+  const fetchCheckinCaptcha = async () => {
+    setCaptchaLoading(true);
+    try {
+      const res = await API.get('/api/user/checkin/captcha');
+      const { success, data, message } = res.data;
+      if (success) {
+        setCaptchaData(data);
+        setCaptchaAnswer('');
+        setCaptchaModalVisible(true);
+      } else {
+        showError(message || t('获取验证码失败'));
+      }
+    } catch (error) {
+      showError(t('获取验证码失败'));
+    } finally {
+      setCaptchaLoading(false);
+    }
+  };
+
+  const doCheckinWithCaptcha = async () => {
+    if (!captchaData?.captcha_id || !captchaAnswer.trim()) {
+      showError(t('请输入验证码'));
+      return;
+    }
+    setCheckinLoading(true);
+    try {
+      const url =
+        `/api/user/checkin?captcha_id=${encodeURIComponent(captchaData.captcha_id)}` +
+        `&captcha_answer=${encodeURIComponent(captchaAnswer.trim())}`;
+      const res = await API.post(url);
+      const { success, data, message } = res.data;
+      if (success) {
+        showSuccess(
+          t('签到成功！获得') + ' ' + renderQuota(data.quota_awarded),
+        );
+        fetchCheckinStatus(currentMonth);
+        setCaptchaModalVisible(false);
+      } else {
+        const errorText = String(message || '');
+        showError(message || t('签到失败'));
+        if (
+          errorText.includes('次数过多') ||
+          errorText.includes('过期') ||
+          errorText.includes('不存在')
+        ) {
+          setCaptchaModalVisible(false);
+        }
+      }
+    } catch (error) {
+      showError(t('签到失败'));
+    } finally {
+      setCheckinLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (status?.checkin_enabled) {
       fetchCheckinStatus(currentMonth);
@@ -214,6 +274,44 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
 
   return (
     <Card className='!rounded-2xl'>
+      <Modal
+        title={t('输入验证码')}
+        visible={captchaModalVisible}
+        footer={null}
+        centered
+        onCancel={() => {
+          setCaptchaModalVisible(false);
+          setCaptchaAnswer('');
+        }}
+      >
+        <div className='flex flex-col items-center gap-3 py-2'>
+          <img
+            src={captchaData?.image_base64}
+            alt='captcha'
+            className='max-w-full h-auto rounded-lg border'
+          />
+          <Input
+            placeholder={t('请输入验证码')}
+            value={captchaAnswer}
+            onChange={(value) => setCaptchaAnswer(value)}
+            onEnterPress={doCheckinWithCaptcha}
+            autoFocus
+            style={{ width: '100%' }}
+          />
+          <div className='flex gap-2'>
+            <Button loading={captchaLoading} onClick={fetchCheckinCaptcha}>
+              {t('刷新验证码')}
+            </Button>
+            <Button
+              type='primary'
+              loading={checkinLoading}
+              onClick={doCheckinWithCaptcha}
+            >
+              {t('确认签到')}
+            </Button>
+          </div>
+        </div>
+      </Modal>
       <Modal
         title='Security Check'
         visible={turnstileModalVisible}
@@ -273,7 +371,11 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
           type='primary'
           theme='solid'
           icon={<Gift size={16} />}
-          onClick={() => doCheckin()}
+          onClick={() =>
+            checkinData?.captcha_enabled
+              ? fetchCheckinCaptcha()
+              : doCheckin()
+          }
           loading={checkinLoading || !initialLoaded}
           disabled={!initialLoaded || checkinData.stats?.checked_in_today}
           className='!bg-green-600 hover:!bg-green-700'
@@ -374,6 +476,14 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
               <li>{t('签到奖励将直接添加到您的账户余额')}</li>
               <li>{t('每日仅可签到一次，请勿重复签到')}</li>
             </ul>
+            {checkinData?.bonus_enabled && checkinData?.bonus_tier && (
+              <div className='mt-2 pt-2 border-t border-gray-200 dark:border-gray-700'>
+                {t('昨日调用')} {checkinData.yesterday_calls ?? 0}{' '}
+                {t('次，今日签到奖励区间')}{' '}
+                {renderQuota(checkinData.bonus_tier.min_quota)} -{' '}
+                {renderQuota(checkinData.bonus_tier.max_quota)}
+              </div>
+            )}
           </Typography.Text>
         </div>
       </Collapsible>

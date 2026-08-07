@@ -135,15 +135,50 @@ func RecordRiskIPAsync(userId int, tokenId int, source string, ip string) {
 	})
 }
 
-func ListRiskSharedIPs(source string, keyword string, minUsers int, startIdx int, limit int) ([]*RiskSharedIP, int64, error) {
+func ListRiskSharedIPs(source string, searchType string, keyword string, minUsers int, startIdx int, limit int) ([]*RiskSharedIP, int64, error) {
 	if minUsers < 2 {
 		minUsers = 2
 	}
 	if limit <= 0 {
 		limit = common.ItemsPerPage
 	}
+
+	var matchingUserIds []int
+	var matchingIPs []string
+	if searchType == "username" && keyword != "" {
+		pattern, err := sanitizeLikePattern("%" + keyword + "%")
+		if err != nil {
+			return nil, 0, err
+		}
+		if err := DB.Model(&User{}).
+			Where("username LIKE ? ESCAPE '!' OR display_name LIKE ? ESCAPE '!'", pattern, pattern).
+			Pluck("id", &matchingUserIds).Error; err != nil {
+			return nil, 0, err
+		}
+		if len(matchingUserIds) == 0 {
+			return []*RiskSharedIP{}, 0, nil
+		}
+	} else if searchType == "user_id" && keyword != "" {
+		id, err := strconv.Atoi(strings.TrimSpace(keyword))
+		if err != nil || id <= 0 {
+			return []*RiskSharedIP{}, 0, nil
+		}
+		matchingUserIds = append(matchingUserIds, id)
+	}
+	if len(matchingUserIds) > 0 {
+		if err := DB.Model(&RiskIPRecord{}).
+			Where("user_id IN ? AND ip <> ''", matchingUserIds).
+			Distinct("ip").
+			Pluck("ip", &matchingIPs).Error; err != nil {
+			return nil, 0, err
+		}
+		if len(matchingIPs) == 0 {
+			return []*RiskSharedIP{}, 0, nil
+		}
+	}
+
 	pattern := ""
-	if keyword != "" {
+	if searchType != "username" && searchType != "user_id" && keyword != "" {
 		var err error
 		pattern, err = sanitizeLikePattern("%" + keyword + "%")
 		if err != nil {
@@ -154,6 +189,9 @@ func ListRiskSharedIPs(source string, keyword string, minUsers int, startIdx int
 		tx = tx.Where("ip <> ''")
 		if source == RiskIPSourceLogin || source == RiskIPSourceToken {
 			tx = tx.Where("source = ?", source)
+		}
+		if len(matchingIPs) > 0 {
+			tx = tx.Where("ip IN ?", matchingIPs)
 		}
 		if pattern != "" {
 			tx = tx.Where("ip LIKE ? ESCAPE '!'", pattern)
