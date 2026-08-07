@@ -137,10 +137,11 @@ export function CheckinSettingsSection({
       },
     })
 
-  const enabled = form.watch('enabled')
-  const captchaEnabled = form.watch('captchaEnabled')
-  const bonusEnabled = form.watch('bonusEnabled')
-  const bonusMetric = form.watch('bonusMetric')
+  const enabled = form.watch('enabled') ?? defaultValues.enabled
+  const captchaEnabled =
+    form.watch('captchaEnabled') ?? defaultValues.captchaEnabled
+  const bonusEnabled = form.watch('bonusEnabled') ?? defaultValues.bonusEnabled
+  const bonusMetric = form.watch('bonusMetric') ?? defaultValues.bonusMetric
 
   useEffect(() => {
     setTiers(parseBonusTiers(defaultValues.bonusTiers))
@@ -303,6 +304,7 @@ export function CheckinSettingsSection({
                   <FormField
                     control={form.control}
                     name='captchaKind'
+                    defaultValue={defaultValues.captchaKind}
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>{t('Captcha Type')}</FormLabel>
@@ -364,6 +366,7 @@ export function CheckinSettingsSection({
                     <FormField
                       control={form.control}
                       name='bonusMetric'
+                      defaultValue={defaultValues.bonusMetric}
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>{t('Metric')}</FormLabel>
@@ -414,50 +417,67 @@ export function CheckinSettingsSection({
                           key={index}
                           className='bg-muted/30 grid grid-cols-2 gap-2 rounded-lg border p-3 md:grid-cols-4'
                         >
-                          <Input
-                            type='number'
-                            min={0}
-                            value={tier.threshold}
-                            placeholder={
-                              bonusMetric === 'quota_consumed'
-                                ? t('Quota Threshold')
-                                : t('Calls Threshold')
-                            }
-                            onChange={(event) =>
-                              handleTierChange(
-                                index,
-                                'threshold',
-                                event.target.valueAsNumber
-                              )
-                            }
-                          />
-                          <Input
-                            type='number'
-                            min={0}
-                            value={tier.min_quota}
-                            placeholder={t('Minimum (quota)')}
-                            onChange={(event) =>
-                              handleTierChange(
-                                index,
-                                'min_quota',
-                                event.target.valueAsNumber
-                              )
-                            }
-                          />
-                          <Input
-                            type='number'
-                            min={0}
-                            value={tier.max_quota}
-                            placeholder={t('Maximum (quota)')}
-                            onChange={(event) =>
-                              handleTierChange(
-                                index,
-                                'max_quota',
-                                event.target.valueAsNumber
-                              )
-                            }
-                          />
-                          <div className='flex items-center justify-end'>
+                          <div className='flex flex-col gap-1'>
+                            <span className='text-muted-foreground text-xs md:hidden'>
+                              {bonusMetric === 'quota_consumed'
+                                ? t('Threshold (tokens)')
+                                : t('Threshold (calls)')}
+                            </span>
+                            <Input
+                              type='number'
+                              min={0}
+                              value={tier.threshold}
+                              placeholder={
+                                bonusMetric === 'quota_consumed'
+                                  ? t('Quota Threshold')
+                                  : t('Calls Threshold')
+                              }
+                              onChange={(event) =>
+                                handleTierChange(
+                                  index,
+                                  'threshold',
+                                  event.target.valueAsNumber
+                                )
+                              }
+                            />
+                          </div>
+                          <div className='flex flex-col gap-1'>
+                            <span className='text-muted-foreground text-xs md:hidden'>
+                              {t('Minimum Reward (tokens)')}
+                            </span>
+                            <Input
+                              type='number'
+                              min={0}
+                              value={tier.min_quota}
+                              placeholder={t('Minimum (quota)')}
+                              onChange={(event) =>
+                                handleTierChange(
+                                  index,
+                                  'min_quota',
+                                  event.target.valueAsNumber
+                                )
+                              }
+                            />
+                          </div>
+                          <div className='flex flex-col gap-1'>
+                            <span className='text-muted-foreground text-xs md:hidden'>
+                              {t('Maximum Reward (tokens)')}
+                            </span>
+                            <Input
+                              type='number'
+                              min={0}
+                              value={tier.max_quota}
+                              placeholder={t('Maximum (quota)')}
+                              onChange={(event) =>
+                                handleTierChange(
+                                  index,
+                                  'max_quota',
+                                  event.target.valueAsNumber
+                                )
+                              }
+                            />
+                          </div>
+                          <div className='col-span-2 flex items-center justify-end md:col-span-1'>
                             <Button
                               type='button'
                               variant='ghost'

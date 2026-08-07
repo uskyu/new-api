@@ -130,11 +130,15 @@ export default function SettingsCheckin(props) {
   useEffect(() => {
     const currentInputs = {};
     for (const key of Object.keys(DEFAULT_INPUTS)) {
-      currentInputs[key] =
+      let value =
         props.options &&
         Object.prototype.hasOwnProperty.call(props.options, key)
           ? props.options[key]
           : DEFAULT_INPUTS[key];
+      if (typeof DEFAULT_INPUTS[key] === 'boolean' && typeof value === 'string') {
+        value = value === 'true' || value === '1';
+      }
+      currentInputs[key] = value;
     }
     setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));
@@ -148,7 +152,7 @@ export default function SettingsCheckin(props) {
     <>
       <Spin spinning={loading}>
         <Form
-          values={inputs}
+          initValues={inputs}
           getFormApi={(formAPI) => (refForm.current = formAPI)}
           style={{ marginBottom: 15 }}
         >
@@ -282,39 +286,57 @@ export default function SettingsCheckin(props) {
                     key={index}
                     className='grid grid-cols-2 md:grid-cols-4 gap-2 mb-2 p-3 border rounded-lg bg-slate-50 dark:bg-slate-800'
                   >
-                    <InputNumber
-                      value={tier.threshold}
-                      min={0}
-                      placeholder={
-                        inputs['checkin_setting.bonus_metric'] ===
+                    <div className='flex flex-col gap-1'>
+                      <span className='text-xs text-gray-500 md:hidden'>
+                        {inputs['checkin_setting.bonus_metric'] ===
                         'quota_consumed'
-                          ? t('额度门槛')
-                          : t('次数门槛')
-                      }
-                      onChange={(value) =>
-                        handleTierChange(index, 'threshold', value)
-                      }
-                      style={{ width: '100%' }}
-                    />
-                    <InputNumber
-                      value={tier.min_quota}
-                      min={0}
-                      placeholder={t('最低（额度）')}
-                      onChange={(value) =>
-                        handleTierChange(index, 'min_quota', value)
-                      }
-                      style={{ width: '100%' }}
-                    />
-                    <InputNumber
-                      value={tier.max_quota}
-                      min={0}
-                      placeholder={t('最高（额度）')}
-                      onChange={(value) =>
-                        handleTierChange(index, 'max_quota', value)
-                      }
-                      style={{ width: '100%' }}
-                    />
-                    <div className='flex items-center justify-end'>
+                          ? t('门槛（token）')
+                          : t('门槛（次数）')}
+                      </span>
+                      <InputNumber
+                        value={tier.threshold}
+                        min={0}
+                        placeholder={
+                          inputs['checkin_setting.bonus_metric'] ===
+                          'quota_consumed'
+                            ? t('额度门槛')
+                            : t('次数门槛')
+                        }
+                        onChange={(value) =>
+                          handleTierChange(index, 'threshold', value)
+                        }
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div className='flex flex-col gap-1'>
+                      <span className='text-xs text-gray-500 md:hidden'>
+                        {t('最低奖励（token）')}
+                      </span>
+                      <InputNumber
+                        value={tier.min_quota}
+                        min={0}
+                        placeholder={t('最低（额度）')}
+                        onChange={(value) =>
+                          handleTierChange(index, 'min_quota', value)
+                        }
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div className='flex flex-col gap-1'>
+                      <span className='text-xs text-gray-500 md:hidden'>
+                        {t('最高奖励（token）')}
+                      </span>
+                      <InputNumber
+                        value={tier.max_quota}
+                        min={0}
+                        placeholder={t('最高（额度）')}
+                        onChange={(value) =>
+                          handleTierChange(index, 'max_quota', value)
+                        }
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div className='col-span-2 flex items-center justify-end md:col-span-1'>
                       <Button
                         type='danger'
                         theme='borderless'

@@ -94,9 +94,9 @@ const OperationSetting = () => {
     const res = await API.get('/api/option/');
     const { success, message, data } = res.data;
     if (success) {
-      let newInputs = {};
+      let newInputs = { ...inputs };
       data.forEach((item) => {
-        if (typeof inputs[item.key] === 'boolean') {
+        if (typeof newInputs[item.key] === 'boolean') {
           newInputs[item.key] = toBoolean(item.value);
         } else {
           newInputs[item.key] = item.value;
