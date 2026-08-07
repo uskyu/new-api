@@ -1,7 +1,7 @@
 # Check-in + Risk Control Handoff
 
 Branch: `HelpSelf-latest`
-Status: implemented and verified locally, pending user acceptance.
+Status: user accepted (verified on live preview), GHCR image build triggered.
 
 ## Completed since last GHCR image
 
@@ -58,6 +58,7 @@ Seeded SQLite DB `one-api.db` (backend compiled from this branch, both frontends
 
 Committed to `HelpSelf-latest` with `[skip ci]` (no GHCR/CI triggered). Local `one-api.db` with seeded demo data is available in the workspace for manual testing; the backend binary at `/tmp/new-api-server` embeds both freshly built frontends.
 
-Remaining for the next developer:
-- User acceptance testing on the live preview.
-- After approval, run a build that triggers the GHCR image (drop the `[skip ci]` marker on the merge/trigger commit).
+## Released
+
+- User acceptance testing on the live preview passed (check-in captcha, active-tier rewards, admin settings persistence, risk-control multi-search, mobile layouts).
+- This commit (no `[skip ci]` marker) pushes to `HelpSelf-latest`, which triggers the GHCR image workflow (`ghcr-image.yml`, tags: `helpself-latest` + `helpself-latest-<short-sha>`).
