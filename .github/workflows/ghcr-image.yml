@@ -10,6 +10,7 @@ on:
   push:
     branches:
       - HelpSelf-latest
+      - HelpSelf-beerxx
 
 jobs:
   build-and-push:
@@ -38,6 +39,9 @@ jobs:
           SHORT_SHA=$(git rev-parse --short HEAD)
           if [ -n "${{ github.event.inputs.tag }}" ]; then
             CUSTOM_TAG="${{ github.event.inputs.tag }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            # 用分支名作为镜像标签：helpself-latest / helpself-beerxx
+            CUSTOM_TAG=$(echo "${GITHUB_REF#refs/heads/}" | tr '[:upper:]' '[:lower:]')
           else
             CUSTOM_TAG="helpself-latest"
           fi
