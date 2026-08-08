@@ -160,6 +160,7 @@ const Home = () => {
           {/* Banner 部分 */}
           <div className='classic-home-hero w-full border-b border-semi-color-border relative overflow-x-hidden'>
             {/* 背景模糊晕染球 */}
+            <div className='blur-ball blur-ball-sakura' />
             <div className='blur-ball blur-ball-indigo' />
             <div className='blur-ball blur-ball-teal' />
             <div className='flex items-center justify-center px-4 pt-24 pb-8'>
@@ -218,7 +219,7 @@ const Home = () => {
                       theme='solid'
                       type='primary'
                       size={isMobile ? 'default' : 'large'}
-                      className='!rounded-3xl px-8 py-2'
+                      className='!rounded-3xl px-8 py-2 btn-anime-gradient'
                       icon={<IconPlay />}
                     >
                       {t('获取密钥')}
@@ -262,7 +263,7 @@ const Home = () => {
                       {t('支持众多的大模型供应商')}
                     </Text>
                   </div>
-                  <div className='flex flex-wrap items-center justify-center gap-3 sm:gap-4 md:gap-6 lg:gap-8 max-w-5xl mx-auto px-4'>
+                  <div className='anime-model-cloud flex flex-wrap items-center justify-center gap-3 sm:gap-4 md:gap-6 lg:gap-8 max-w-5xl mx-auto px-4'>
                     <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
                       <Moonshot size={40} />
                     </div>

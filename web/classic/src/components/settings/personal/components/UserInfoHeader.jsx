@@ -53,13 +53,12 @@ const UserInfoHeader = ({ t, userState }) => {
 
   return (
     <Card
-      className='!rounded-2xl overflow-hidden'
+      className='!rounded-2xl overflow-hidden anime-feature-card'
       cover={
         <div
           className='relative h-32'
           style={{
-            '--palette-primary-darkerChannel': '0 75 80',
-            backgroundImage: `linear-gradient(0deg, rgba(var(--palette-primary-darkerChannel) / 80%), rgba(var(--palette-primary-darkerChannel) / 80%)), url('/cover-4.webp')`,
+            backgroundImage: `linear-gradient(135deg, rgba(48, 102, 120, 0.88), rgba(103, 86, 151, 0.78) 55%, rgba(191, 89, 135, 0.68)), url('/cover-4.webp')`,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat',
@@ -69,7 +68,11 @@ const UserInfoHeader = ({ t, userState }) => {
           <div className='relative z-10 h-full flex flex-col justify-end p-6'>
             <div className='flex items-center'>
               <div className='flex items-stretch gap-3 sm:gap-4 flex-1 min-w-0'>
-                <Avatar size='large' color={stringToColor(getUsername())}>
+                <Avatar
+                  size='large'
+                  color={stringToColor(getUsername())}
+                  className='anime-profile-avatar'
+                >
                   {getAvatarText()}
                 </Avatar>
                 <div className='flex-1 min-w-0 flex flex-col justify-between'>

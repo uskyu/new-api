@@ -348,6 +348,7 @@ export default function SelfService() {
                 <Button
                   type='primary'
                   theme='solid'
+                  className='btn-anime-gradient'
                   disabled={!enabled || !offer}
                   loading={upgrading}
                   onClick={runUpgrade}
@@ -387,6 +388,7 @@ export default function SelfService() {
               ])}
               <Button
                 type='primary'
+                className='btn-anime-gradient'
                 loading={checking}
                 disabled={!enabled}
                 onClick={runCheck}

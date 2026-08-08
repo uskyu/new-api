@@ -342,7 +342,10 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
           className='flex items-center flex-1 cursor-pointer'
           onClick={() => setIsCollapsed(!isCollapsed)}
         >
-          <Avatar size='small' color='pink' className='mr-3 shadow-md'>
+          <Avatar
+            size='small'
+            className='mr-3 anime-icon-bubble anime-icon-bubble-pink'
+          >
             <CalendarCheck size={16} />
           </Avatar>
           <div className='flex-1'>
@@ -370,6 +373,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
         <Button
           type='primary'
           theme='solid'
+          className='btn-anime-gradient'
           icon={<Gift size={16} />}
           onClick={() =>
             checkinData?.captcha_enabled
@@ -391,20 +395,20 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
       <Collapsible isOpen={isCollapsed === false} keepDOM>
         {/* 签到统计 */}
         <div className='grid grid-cols-3 gap-3 mb-4 mt-4'>
-          <div className='text-center p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg'>
-            <div className='text-xl font-bold text-pink-500'>
+          <div className='anime-stat-tile anime-stat-tile-pink'>
+            <div className='text-xl font-bold anime-text-pink'>
               {checkinData.stats?.total_checkins || 0}
             </div>
             <div className='text-xs text-gray-500'>{t('累计签到')}</div>
           </div>
-          <div className='text-center p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg'>
-            <div className='text-xl font-bold text-orange-600'>
+          <div className='anime-stat-tile anime-stat-tile-peach'>
+            <div className='text-xl font-bold anime-text-peach'>
               {renderQuota(monthlyQuota, 6)}
             </div>
             <div className='text-xs text-gray-500'>{t('本月获得')}</div>
           </div>
-          <div className='text-center p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg'>
-            <div className='text-xl font-bold text-blue-600'>
+          <div className='anime-stat-tile anime-stat-tile-sky'>
+            <div className='text-xl font-bold anime-text-sky'>
               {renderQuota(checkinData.stats?.total_quota || 0, 6)}
             </div>
             <div className='text-xs text-gray-500'>{t('累计获得')}</div>
@@ -413,8 +417,8 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
 
         {/* 活跃阶梯档位展示：完整档位表 + 当前命中高亮 */}
         {checkinData?.bonus_enabled && checkinData?.bonus_tiers?.length > 0 && (
-          <div className='mb-4 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden'>
-            <div className='flex items-center justify-between px-3 py-2 bg-slate-50 dark:bg-slate-800 border-b border-gray-200 dark:border-gray-700'>
+          <div className='mb-4 rounded-xl anime-tier-panel overflow-hidden'>
+            <div className='flex items-center justify-between px-3 py-2 anime-tier-header'>
               <span className='text-xs font-semibold text-gray-700 dark:text-gray-300'>
                 {t('活跃奖励档位')}
               </span>
@@ -435,14 +439,14 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
                     key={index}
                     className={`flex items-center justify-between px-3 py-2 ${
                       isHit
-                        ? 'bg-pink-50 dark:bg-pink-500/10'
-                        : 'bg-white dark:bg-transparent'
+                        ? 'anime-tier-active'
+                        : 'anime-tier-row'
                     }`}
                   >
                     <span
                       className={`text-xs ${
                         isHit
-                          ? 'font-semibold text-pink-600 dark:text-pink-400'
+                          ? 'font-semibold anime-text-pink'
                           : 'text-gray-600 dark:text-gray-400'
                       }`}
                     >
@@ -457,7 +461,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
                         {renderQuota(tier.max_quota, 6)}
                       </span>
                       {isHit && (
-                        <span className='inline-flex items-center rounded-full bg-pink-500 px-2 py-0.5 text-[10px] font-medium text-white'>
+                        <span className='anime-tier-badge'>
                           {t('当前档位')}
                         </span>
                       )}
@@ -523,7 +527,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
         </Spin>
 
         {/* 签到说明 */}
-        <div className='mt-3 p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg'>
+        <div className='mt-3 p-2.5 anime-note-panel rounded-xl'>
           <Typography.Text type='tertiary' className='text-xs'>
             <ul className='list-disc list-inside space-y-0.5'>
               <li>{t('每日签到可获得随机额度奖励')}</li>

@@ -125,13 +125,12 @@ const RechargeCard = ({
     <Space vertical style={{ width: '100%' }}>
       {/* 统计数据 */}
       <Card
-        className='!rounded-xl w-full'
+        className='!rounded-xl w-full anime-feature-card'
         cover={
           <div
             className='relative h-30'
             style={{
-              '--palette-primary-darkerChannel': '37 99 235',
-              backgroundImage: `linear-gradient(0deg, rgba(var(--palette-primary-darkerChannel) / 80%), rgba(var(--palette-primary-darkerChannel) / 80%)), url('/cover-4.webp')`,
+              backgroundImage: `linear-gradient(135deg, rgba(66, 137, 196, 0.9), rgba(100, 107, 205, 0.82) 55%, rgba(175, 106, 188, 0.72)), url('/cover-4.webp')`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
               backgroundRepeat: 'no-repeat',
