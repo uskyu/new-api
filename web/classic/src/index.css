@@ -1126,3 +1126,39 @@ body[theme-mode='dark'] {
   box-shadow: none;
   transform: none;
 }
+
+/* light / outline / borderless 按钮：文字用深玫粉，避免浅粉文字
+   与淡粉背景/边框同色导致看不清（如自助平台“检查回空”、绑定邮箱“绑定”） */
+.semi-button-primary.semi-button-light:not(.semi-button-disabled),
+.semi-button-primary.semi-button-outline:not(.semi-button-disabled),
+.semi-button-primary.semi-button-borderless:not(.semi-button-disabled) {
+  color: #c2255c;
+}
+
+.semi-button-primary.semi-button-light:not(.semi-button-disabled):hover,
+.semi-button-primary.semi-button-outline:not(.semi-button-disabled):hover,
+.semi-button-primary.semi-button-borderless:not(.semi-button-disabled):hover {
+  color: #a61e50;
+}
+
+.semi-button-primary.semi-button-outline:not(.semi-button-disabled) {
+  border-color: #e04a97;
+}
+
+body[theme-mode='dark']
+  .semi-button-primary.semi-button-light:not(.semi-button-disabled),
+body[theme-mode='dark']
+  .semi-button-primary.semi-button-outline:not(.semi-button-disabled),
+body[theme-mode='dark']
+  .semi-button-primary.semi-button-borderless:not(.semi-button-disabled) {
+  color: #ff9dcb;
+}
+
+body[theme-mode='dark']
+  .semi-button-primary.semi-button-light:not(.semi-button-disabled):hover,
+body[theme-mode='dark']
+  .semi-button-primary.semi-button-outline:not(.semi-button-disabled):hover,
+body[theme-mode='dark']
+  .semi-button-primary.semi-button-borderless:not(.semi-button-disabled):hover {
+  color: #ffb6d9;
+}
