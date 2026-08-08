@@ -90,7 +90,7 @@ func selectCheckinReward(setting *operation_setting.CheckinSetting, metric int64
 	if !setting.BonusEnabled {
 		return quotaAwarded
 	}
-	tier := SelectCheckinTier(setting.BonusTiers, metric)
+	tier := SelectCheckinTier(setting.ActiveTiers(), metric)
 	if tier == nil || tier.MaxQuota < tier.MinQuota {
 		return quotaAwarded
 	}
@@ -123,7 +123,7 @@ func UserCheckin(userId int) (*Checkin, error) {
 	if setting.MaxQuota > setting.MinQuota {
 		quotaAwarded = setting.MinQuota + rand.Intn(setting.MaxQuota-setting.MinQuota+1)
 	}
-	if setting.BonusEnabled && len(setting.BonusTiers) > 0 {
+	if setting.BonusEnabled && len(setting.ActiveTiers()) > 0 {
 		calls, consumedQuota, usageErr := GetYesterdayCheckinUsage(userId)
 		if usageErr == nil {
 			metric := calls

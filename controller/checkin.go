@@ -41,6 +41,7 @@ func GetCheckinStatus(c *gin.Context) {
 		"captcha_kind":    setting.CaptchaKind,
 		"bonus_enabled":   setting.BonusEnabled,
 		"bonus_metric":    setting.BonusMetric,
+		"bonus_tiers":     setting.ActiveTiers(),
 		"stats":           stats,
 	}
 	if setting.BonusEnabled {
@@ -52,7 +53,7 @@ func GetCheckinStatus(c *gin.Context) {
 			if setting.BonusMetric == "quota_consumed" {
 				metric = consumedQuota
 			}
-			if tier := model.SelectCheckinTier(setting.BonusTiers, metric); tier != nil {
+			if tier := model.SelectCheckinTier(setting.ActiveTiers(), metric); tier != nil {
 				data["bonus_tier"] = gin.H{
 					"threshold": tier.Threshold,
 					"min_quota": tier.MinQuota,

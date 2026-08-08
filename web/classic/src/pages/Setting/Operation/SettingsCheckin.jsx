@@ -45,7 +45,14 @@ const DEFAULT_INPUTS = {
   'checkin_setting.captcha_kind': 'math',
   'checkin_setting.bonus_enabled': false,
   'checkin_setting.bonus_metric': 'request_count',
-  'checkin_setting.bonus_tiers': '[]',
+  'checkin_setting.request_count_tiers': '[]',
+  'checkin_setting.quota_consumed_tiers': '[]',
+};
+
+// 指标 -> 档位存储键 映射
+const TIER_KEY_BY_METRIC = {
+  request_count: 'checkin_setting.request_count_tiers',
+  quota_consumed: 'checkin_setting.quota_consumed_tiers',
 };
 
 const parseTiers = (value) => {
@@ -63,8 +70,16 @@ export default function SettingsCheckin(props) {
   const [loading, setLoading] = useState(false);
   const [inputs, setInputs] = useState(DEFAULT_INPUTS);
   const [inputsRow, setInputsRow] = useState(DEFAULT_INPUTS);
-  const [tiers, setTiers] = useState([]);
+  // 两套独立档位：按次 / 按额度，切换指标互不覆盖
+  const [tiersByMetric, setTiersByMetric] = useState({
+    request_count: [],
+    quota_consumed: [],
+  });
   const refForm = useRef();
+
+  const bonusMetric =
+    inputs['checkin_setting.bonus_metric'] || 'request_count';
+  const currentTiers = tiersByMetric[bonusMetric] || [];
 
   function handleFieldChange(fieldName) {
     return (value) => {
@@ -73,15 +88,16 @@ export default function SettingsCheckin(props) {
   }
 
   function updateTiers(nextTiers) {
-    setTiers(nextTiers);
+    const key = TIER_KEY_BY_METRIC[bonusMetric];
+    setTiersByMetric((prev) => ({ ...prev, [bonusMetric]: nextTiers }));
     setInputs((prev) => ({
       ...prev,
-      'checkin_setting.bonus_tiers': JSON.stringify(nextTiers),
+      [key]: JSON.stringify(nextTiers),
     }));
   }
 
   function handleTierChange(index, field, value) {
-    const nextTiers = tiers.map((tier, i) =>
+    const nextTiers = currentTiers.map((tier, i) =>
       i === index ? { ...tier, [field]: Number(value) || 0 } : tier,
     );
     updateTiers(nextTiers);
@@ -89,13 +105,18 @@ export default function SettingsCheckin(props) {
 
   function handleAddTier() {
     updateTiers([
-      ...tiers,
+      ...currentTiers,
       { threshold: 50, min_quota: 2000, max_quota: 20000 },
     ]);
   }
 
   function handleRemoveTier(index) {
-    updateTiers(tiers.filter((_, i) => i !== index));
+    updateTiers(currentTiers.filter((_, i) => i !== index));
+  }
+
+  // 切换统计口径：只切换展示与编辑目标，两套数据各自独立
+  function handleMetricChange(value) {
+    setInputs((prev) => ({ ...prev, 'checkin_setting.bonus_metric': value }));
   }
 
   async function onSubmit() {
@@ -142,7 +163,14 @@ export default function SettingsCheckin(props) {
     }
     setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));
-    setTiers(parseTiers(currentInputs['checkin_setting.bonus_tiers']));
+    setTiersByMetric({
+      request_count: parseTiers(
+        currentInputs['checkin_setting.request_count_tiers'],
+      ),
+      quota_consumed: parseTiers(
+        currentInputs['checkin_setting.quota_consumed_tiers'],
+      ),
+    });
     if (refForm.current) {
       refForm.current.setValues(currentInputs);
     }
@@ -264,7 +292,7 @@ export default function SettingsCheckin(props) {
                       { label: t('昨日调用次数'), value: 'request_count' },
                       { label: t('昨日消耗额度'), value: 'quota_consumed' },
                     ]}
-                    onChange={handleFieldChange('checkin_setting.bonus_metric')}
+                    onChange={handleMetricChange}
                   />
                 </Col>
               )}
@@ -281,7 +309,7 @@ export default function SettingsCheckin(props) {
                   <div>{t('最高奖励（额度）')}</div>
                   <div>{t('操作')}</div>
                 </div>
-                {tiers.map((tier, index) => (
+                {currentTiers.map((tier, index) => (
                   <div
                     key={index}
                     className='grid grid-cols-2 md:grid-cols-4 gap-2 mb-2 p-3 border rounded-lg bg-slate-50 dark:bg-slate-800'
@@ -356,6 +384,12 @@ export default function SettingsCheckin(props) {
                 >
                   {t('添加档位')}
                 </Button>
+                <Typography.Text
+                  type='tertiary'
+                  style={{ marginLeft: 12, fontSize: 12 }}
+                >
+                  {t('档位按统计口径独立保存，切换口径不会互相覆盖')}
+                </Typography.Text>
               </div>
             )}
           </Form.Section>

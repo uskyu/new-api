@@ -56,26 +56,26 @@ func (seedCheckin) TableName() string {
 }
 
 type seedLog struct {
-	Id          int    `gorm:"primaryKey"`
-	UserId      int    `gorm:"index"`
-	CreatedAt   int64  `gorm:"bigint"`
-	Type        int    `gorm:"index"`
-	Content     string
-	Username    string `gorm:"default:''"`
-	TokenName   string `gorm:"default:''"`
-	ModelName   string `gorm:"default:''"`
-	Quota       int    `gorm:"default:0"`
-	IsStream    bool
-	ChannelId   int `gorm:"default:0"`
-	TokenId     int `gorm:"default:0"`
-	Group       string `gorm:"default:''"`
-	Ip          string `gorm:"default:''"`
-	RequestId   string `gorm:"default:''"`
-	UseTime     int    `gorm:"default:0"`
-	PromptToks  int    `gorm:"column:prompt_tokens;default:0"`
-	CompletionToks int `gorm:"column:completion_tokens;default:0"`
+	Id                int   `gorm:"primaryKey"`
+	UserId            int   `gorm:"index"`
+	CreatedAt         int64 `gorm:"bigint"`
+	Type              int   `gorm:"index"`
+	Content           string
+	Username          string `gorm:"default:''"`
+	TokenName         string `gorm:"default:''"`
+	ModelName         string `gorm:"default:''"`
+	Quota             int    `gorm:"default:0"`
+	IsStream          bool
+	ChannelId         int    `gorm:"default:0"`
+	TokenId           int    `gorm:"default:0"`
+	Group             string `gorm:"default:''"`
+	Ip                string `gorm:"default:''"`
+	RequestId         string `gorm:"default:''"`
+	UseTime           int    `gorm:"default:0"`
+	PromptToks        int    `gorm:"column:prompt_tokens;default:0"`
+	CompletionToks    int    `gorm:"column:completion_tokens;default:0"`
 	UpstreamRequestId string `gorm:"default:''"`
-	Other       string `gorm:"default:''"`
+	Other             string `gorm:"default:''"`
 }
 
 func (seedLog) TableName() string {
@@ -94,14 +94,14 @@ func (seedOption) TableName() string {
 const checkinTiers = `[{"threshold":20,"min_quota":5000,"max_quota":20000},{"threshold":100,"min_quota":20000,"max_quota":100000}]`
 
 var checkinOptions = map[string]string{
-	"checkin_setting.enabled":        "true",
-	"checkin_setting.min_quota":      "1000",
-	"checkin_setting.max_quota":      "10000",
-	"checkin_setting.captcha_enabled": "true",
-	"checkin_setting.captcha_kind":   "math",
-	"checkin_setting.bonus_enabled":  "true",
-	"checkin_setting.bonus_metric":   "request_count",
-	"checkin_setting.bonus_tiers":    checkinTiers,
+	"checkin_setting.enabled":             "true",
+	"checkin_setting.min_quota":           "1000",
+	"checkin_setting.max_quota":           "10000",
+	"checkin_setting.captcha_enabled":     "true",
+	"checkin_setting.captcha_kind":        "math",
+	"checkin_setting.bonus_enabled":       "true",
+	"checkin_setting.bonus_metric":        "request_count",
+	"checkin_setting.request_count_tiers": checkinTiers,
 }
 
 // yesterdayCalls 每个用户昨日模拟的调用次数（用于命中活跃阶梯档位）

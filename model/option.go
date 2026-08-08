@@ -192,6 +192,38 @@ func loadOptionsFromDatabase() {
 			common.SysLog("failed to update option map: " + err.Error())
 		}
 	}
+	// 旧版签到档位（checkin_setting.bonus_tiers）迁移为按次档位
+	migrateLegacyCheckinTiers()
+}
+
+// migrateLegacyCheckinTiers 将旧版单一档位键迁移到按次档位键。
+// 旧版 bonus_tiers 只有一套数据，且默认指标为 request_count，因此
+// 直接归入 request_count_tiers；仅当新键不存在时才迁移，幂等。
+// 注意：不能依赖 common.OptionMap 判断新键是否存在——ExportAllConfigs
+// 会把注册配置的默认值（空数组）预填进 OptionMap，需直接查数据库。
+func migrateLegacyCheckinTiers() {
+	var newKeyCount int64
+	if err := DB.Model(&Option{}).Where("key = ?", "checkin_setting.request_count_tiers").Count(&newKeyCount).Error; err != nil {
+		return
+	}
+	if newKeyCount > 0 {
+		return
+	}
+	common.OptionMapRWMutex.RLock()
+	legacy, hasLegacyKey := common.OptionMap["checkin_setting.bonus_tiers"]
+	common.OptionMapRWMutex.RUnlock()
+	if !hasLegacyKey || strings.TrimSpace(legacy) == "" {
+		return
+	}
+	if err := UpdateOption("checkin_setting.request_count_tiers", legacy); err != nil {
+		common.SysLog("failed to migrate legacy checkin tiers: " + err.Error())
+		return
+	}
+	if err := DeleteOption("checkin_setting.bonus_tiers"); err != nil {
+		common.SysLog("failed to remove legacy checkin tiers key: " + err.Error())
+		return
+	}
+	common.SysLog("migrated legacy checkin_setting.bonus_tiers to checkin_setting.request_count_tiers")
 }
 
 func SyncOptions(frequency int) {
@@ -248,6 +280,17 @@ func UpdateOptionsBulk(values map[string]string) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// DeleteOption 从数据库和内存缓存中删除一个配置项
+func DeleteOption(key string) error {
+	if err := DB.Where("key = ?", key).Delete(&Option{}).Error; err != nil {
+		return err
+	}
+	common.OptionMapRWMutex.Lock()
+	defer common.OptionMapRWMutex.Unlock()
+	delete(common.OptionMap, key)
 	return nil
 }
 

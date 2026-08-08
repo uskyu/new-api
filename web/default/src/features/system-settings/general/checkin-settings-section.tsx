@@ -64,7 +64,11 @@ const checkinSchema = z.object({
   captchaKind: z.string(),
   bonusEnabled: z.boolean(),
   bonusMetric: z.string(),
+  // 渲染/编辑载体：始终指向当前指标对应的套
   bonusTiers: z.string(),
+  // 两套独立档位（按次 / 按额度），各自保存互不覆盖
+  requestCountTiers: z.string(),
+  quotaConsumedTiers: z.string(),
 })
 
 type CheckinFormValues = z.infer<typeof checkinSchema>
@@ -76,7 +80,10 @@ type CheckinBonusTier = {
 }
 
 type CheckinSettingsSectionProps = {
-  defaultValues: CheckinFormValues
+  defaultValues: CheckinFormValues & {
+    requestCountTiers: string
+    quotaConsumedTiers: string
+  }
 }
 
 const OPTION_KEY_MAP: Record<string, string> = {
@@ -87,7 +94,15 @@ const OPTION_KEY_MAP: Record<string, string> = {
   captchaKind: 'checkin_setting.captcha_kind',
   bonusEnabled: 'checkin_setting.bonus_enabled',
   bonusMetric: 'checkin_setting.bonus_metric',
-  bonusTiers: 'checkin_setting.bonus_tiers',
+  // bonusTiers 仅作渲染载体，不直接保存；保存走下面两个独立键
+  requestCountTiers: 'checkin_setting.request_count_tiers',
+  quotaConsumedTiers: 'checkin_setting.quota_consumed_tiers',
+}
+
+// 指标 -> 表单字段 映射
+const TIER_FIELD_BY_METRIC: Record<string, keyof CheckinFormValues> = {
+  request_count: 'requestCountTiers',
+  quota_consumed: 'quotaConsumedTiers',
 }
 
 function parseBonusTiers(raw: string | undefined): CheckinBonusTier[] {
@@ -147,9 +162,44 @@ export function CheckinSettingsSection({
     setTiers(parseBonusTiers(defaultValues.bonusTiers))
   }, [defaultValues.bonusTiers])
 
+  const currentMetricField = () =>
+    TIER_FIELD_BY_METRIC[bonusMetric] ?? 'requestCountTiers'
+
   const updateTiers = (next: CheckinBonusTier[]) => {
     setTiers(next)
-    form.setValue('bonusTiers', JSON.stringify(next), {
+    const serialized = JSON.stringify(next)
+    // 同时写入渲染载体与当前指标对应的独立字段
+    form.setValue('bonusTiers', serialized, {
+      shouldDirty: true,
+      shouldTouch: true,
+    })
+    form.setValue(currentMetricField(), serialized, {
+      shouldDirty: true,
+      shouldTouch: true,
+    })
+  }
+
+  // 切换统计口径：先把当前编辑存入原指标字段，再从目标指标字段加载，
+  // 两套数据各自独立，切换互不覆盖、不丢失未保存的编辑。
+  const handleMetricChange = (value: string) => {
+    const oldField = TIER_FIELD_BY_METRIC[bonusMetric] ?? 'requestCountTiers'
+    form.setValue(oldField, form.getValues('bonusTiers'), {
+      shouldDirty: true,
+      shouldTouch: true,
+    })
+    const nextField = TIER_FIELD_BY_METRIC[value] ?? 'requestCountTiers'
+    const nextRaw =
+      form.getValues(nextField) ||
+      (value === 'quota_consumed'
+        ? defaultValues.quotaConsumedTiers
+        : defaultValues.requestCountTiers)
+    const nextTiers = parseBonusTiers(nextRaw)
+    setTiers(nextTiers)
+    form.setValue('bonusTiers', JSON.stringify(nextTiers), {
+      shouldDirty: true,
+      shouldTouch: true,
+    })
+    form.setValue('bonusMetric', value, {
       shouldDirty: true,
       shouldTouch: true,
     })
@@ -372,7 +422,10 @@ export function CheckinSettingsSection({
                           <FormLabel>{t('Metric')}</FormLabel>
                           <Select
                             value={field.value}
-                            onValueChange={field.onChange}
+                            onValueChange={(value) => {
+                              handleMetricChange(value)
+                              field.onChange(value)
+                            }}
                           >
                             <FormControl>
                               <SelectTrigger>

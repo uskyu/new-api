@@ -82,7 +82,8 @@ const OperationSetting = () => {
     'checkin_setting.captcha_kind': 'math',
     'checkin_setting.bonus_enabled': false,
     'checkin_setting.bonus_metric': 'request_count',
-    'checkin_setting.bonus_tiers': '[]',
+    'checkin_setting.request_count_tiers': '[]',
+    'checkin_setting.quota_consumed_tiers': '[]',
 
     /* 令牌设置 */
     'token_setting.max_user_tokens': 1000,

@@ -1046,3 +1046,83 @@ html.dark .with-pastel-balls::before {
 }
 
 .ec-dbcd0a3c01b55203 { forced-color-adjust: auto; }
+
+/* ==================== 粉嫩二次元主题 ====================
+   以品牌粉 #F85EAD 为基调：全局 Semi 主色 + 柔和圆角。
+   注意：Semi 的变量定义在 body 选择器上，若只覆盖 :root，
+   body 自身的蓝色定义会压过继承值，导致文字仍显示蓝色。
+   因此这里必须与 Semi 同作用域（body）覆盖。 */
+body {
+  --semi-color-primary: #f85ead;
+  --semi-color-primary-hover: #fa74b8;
+  --semi-color-primary-active: #e04a97;
+  --semi-color-primary-disabled: #f9a8d4;
+  --semi-color-primary-light-default: rgba(248, 94, 173, 0.08);
+  --semi-color-primary-light-hover: rgba(248, 94, 173, 0.15);
+  --semi-color-primary-light-active: rgba(248, 94, 173, 0.24);
+  --semi-color-focus-border: rgba(248, 94, 173, 0.6);
+  --semi-border-radius-medium: 10px;
+  --semi-border-radius-small: 8px;
+  --semi-border-radius-large: 14px;
+}
+
+body[theme-mode='dark'] {
+  --semi-color-primary: #ff7ec0;
+  --semi-color-primary-hover: #ff94cc;
+  --semi-color-primary-active: #f568ad;
+  --semi-color-primary-disabled: #a8557f;
+  --semi-color-primary-light-default: rgba(255, 126, 192, 0.14);
+  --semi-color-primary-light-hover: rgba(255, 126, 192, 0.22);
+  --semi-color-primary-light-active: rgba(255, 126, 192, 0.3);
+  --semi-color-focus-border: rgba(255, 126, 192, 0.6);
+}
+
+/* 表格操作按钮（如“详情/收起”）粉底白字 */
+.btn-pink-solid {
+  background: linear-gradient(
+    135deg,
+    #ff8fc7 0%,
+    #f85ead 55%,
+    #f0509f 100%
+  );
+  color: #fff !important;
+  border: none;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(248, 94, 173, 0.28);
+  transition: box-shadow 0.2s ease, transform 0.15s ease;
+}
+
+.btn-pink-solid:hover {
+  box-shadow: 0 6px 18px rgba(248, 94, 173, 0.38);
+  transform: translateY(-1px);
+}
+
+.btn-pink-solid:active {
+  transform: translateY(0);
+}
+
+/* 全站 primary 主按钮（含管理端与用户端）粉色渐变点缀 */
+.semi-button-primary {
+  background-image: linear-gradient(
+    135deg,
+    #ff8fc7 0%,
+    #f85ead 55%,
+    #f0509f 100%
+  );
+  background-color: transparent;
+  border: none;
+  box-shadow: 0 4px 14px rgba(248, 94, 173, 0.28);
+  transition: box-shadow 0.2s ease, transform 0.15s ease;
+}
+
+.semi-button-primary:hover {
+  box-shadow: 0 6px 18px rgba(248, 94, 173, 0.38);
+  transform: translateY(-1px);
+}
+
+.semi-button-primary.semi-button-disabled {
+  background-image: none;
+  background-color: var(--semi-color-primary-disabled);
+  box-shadow: none;
+  transform: none;
+}

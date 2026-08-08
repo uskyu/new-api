@@ -184,7 +184,7 @@ const CardTable = ({
             <Button
               theme='borderless'
               size='small'
-              className='w-full flex justify-center mt-2'
+              className='btn-pink-solid w-full flex justify-center mt-2'
               icon={showDetails ? <IconChevronUp /> : <IconChevronDown />}
               onClick={(e) => {
                 e.stopPropagation();

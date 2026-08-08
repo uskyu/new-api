@@ -109,7 +109,8 @@ const defaultBillingSettings: BillingSettings = {
   'checkin_setting.captcha_kind': 'math',
   'checkin_setting.bonus_enabled': false,
   'checkin_setting.bonus_metric': 'request_count',
-  'checkin_setting.bonus_tiers': '[]',
+  'checkin_setting.request_count_tiers': '[]',
+  'checkin_setting.quota_consumed_tiers': '[]',
 }
 
 export function BillingSettings() {

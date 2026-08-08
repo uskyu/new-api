@@ -271,7 +271,8 @@ export type BillingSettings = {
   'checkin_setting.captcha_kind': string
   'checkin_setting.bonus_enabled': boolean
   'checkin_setting.bonus_metric': string
-  'checkin_setting.bonus_tiers': string
+  'checkin_setting.request_count_tiers': string
+  'checkin_setting.quota_consumed_tiers': string
 }
 
 export type OperationsSettings = {

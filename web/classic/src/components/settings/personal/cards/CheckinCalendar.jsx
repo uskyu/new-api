@@ -342,7 +342,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
           className='flex items-center flex-1 cursor-pointer'
           onClick={() => setIsCollapsed(!isCollapsed)}
         >
-          <Avatar size='small' color='green' className='mr-3 shadow-md'>
+          <Avatar size='small' color='pink' className='mr-3 shadow-md'>
             <CalendarCheck size={16} />
           </Avatar>
           <div className='flex-1'>
@@ -378,7 +378,6 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
           }
           loading={checkinLoading || !initialLoaded}
           disabled={!initialLoaded || checkinData.stats?.checked_in_today}
-          className='!bg-green-600 hover:!bg-green-700'
         >
           {!initialLoaded
             ? t('加载中...')
@@ -393,7 +392,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
         {/* 签到统计 */}
         <div className='grid grid-cols-3 gap-3 mb-4 mt-4'>
           <div className='text-center p-2.5 bg-slate-50 dark:bg-slate-800 rounded-lg'>
-            <div className='text-xl font-bold text-green-600'>
+            <div className='text-xl font-bold text-pink-500'>
               {checkinData.stats?.total_checkins || 0}
             </div>
             <div className='text-xs text-gray-500'>{t('累计签到')}</div>
@@ -412,9 +411,67 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
           </div>
         </div>
 
+        {/* 活跃阶梯档位展示：完整档位表 + 当前命中高亮 */}
+        {checkinData?.bonus_enabled && checkinData?.bonus_tiers?.length > 0 && (
+          <div className='mb-4 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden'>
+            <div className='flex items-center justify-between px-3 py-2 bg-slate-50 dark:bg-slate-800 border-b border-gray-200 dark:border-gray-700'>
+              <span className='text-xs font-semibold text-gray-700 dark:text-gray-300'>
+                {t('活跃奖励档位')}
+              </span>
+              <span className='text-[11px] text-gray-500 dark:text-gray-400'>
+                {checkinData.bonus_metric === 'quota_consumed'
+                  ? `${t('昨日消耗额度')} ${renderQuota(checkinData.yesterday_quota ?? 0, 6)}`
+                  : `${t('昨日调用')} ${checkinData.yesterday_calls ?? 0} ${t('次')}`}
+              </span>
+            </div>
+            <div className='divide-y divide-gray-100 dark:divide-gray-800'>
+              {checkinData.bonus_tiers.map((tier, index) => {
+                const isHit =
+                  checkinData.bonus_tier &&
+                  Number(checkinData.bonus_tier.threshold) ===
+                    Number(tier.threshold);
+                return (
+                  <div
+                    key={index}
+                    className={`flex items-center justify-between px-3 py-2 ${
+                      isHit
+                        ? 'bg-pink-50 dark:bg-pink-500/10'
+                        : 'bg-white dark:bg-transparent'
+                    }`}
+                  >
+                    <span
+                      className={`text-xs ${
+                        isHit
+                          ? 'font-semibold text-pink-600 dark:text-pink-400'
+                          : 'text-gray-600 dark:text-gray-400'
+                      }`}
+                    >
+                      ≥{' '}
+                      {checkinData.bonus_metric === 'quota_consumed'
+                        ? renderQuota(tier.threshold, 6)
+                        : `${tier.threshold} ${t('次')}`}
+                    </span>
+                    <span className='flex items-center gap-2'>
+                      <span className='text-xs text-gray-600 dark:text-gray-400'>
+                        {renderQuota(tier.min_quota, 6)} -{' '}
+                        {renderQuota(tier.max_quota, 6)}
+                      </span>
+                      {isHit && (
+                        <span className='inline-flex items-center rounded-full bg-pink-500 px-2 py-0.5 text-[10px] font-medium text-white'>
+                          {t('当前档位')}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* 签到日历 - 使用更紧凑的样式 */}
         <Spin spinning={loading}>
-          <div className='border rounded-lg overflow-hidden checkin-calendar'>
+          <div className='border rounded-lg overflow-hidden checkin-calendar max-w-md mx-auto w-full'>
             <style>{`
             .checkin-calendar .semi-calendar {
               font-size: 13px;
@@ -433,7 +490,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
               height: auto;
             }
             .checkin-calendar .semi-calendar-month-grid-row td {
-              height: 56px;
+              height: 44px;
               padding: 2px;
             }
             .checkin-calendar .semi-calendar-month-grid-row-cell {
@@ -451,14 +508,11 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
             .checkin-calendar .semi-calendar-month-same {
               background: transparent;
             }
-            .checkin-calendar .semi-calendar-month-today .semi-calendar-month-grid-row-cell-day {
+            .checkin-calendar .semi-calendar-month .semi-calendar-today .semi-calendar-today-date {
               background: var(--semi-color-primary);
-              color: white;border-radius: 50%;
-              width: 20px;
-              height: 20px;
-              display: flex;
-              align-items: center;
-              justify-content: center;}
+              color: #fff;
+              border-radius: 50%;
+            }
           `}</style>
             <Calendar
               mode='month'
@@ -476,14 +530,6 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
               <li>{t('签到奖励将直接添加到您的账户余额')}</li>
               <li>{t('每日仅可签到一次，请勿重复签到')}</li>
             </ul>
-            {checkinData?.bonus_enabled && checkinData?.bonus_tier && (
-              <div className='mt-2 pt-2 border-t border-gray-200 dark:border-gray-700'>
-                {t('昨日调用')} {checkinData.yesterday_calls ?? 0}{' '}
-                {t('次，今日签到奖励区间')}{' '}
-                {renderQuota(checkinData.bonus_tier.min_quota)} -{' '}
-                {renderQuota(checkinData.bonus_tier.max_quota)}
-              </div>
-            )}
           </Typography.Text>
         </div>
       </Collapsible>
