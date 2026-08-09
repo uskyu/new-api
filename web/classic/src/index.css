@@ -181,10 +181,12 @@ code {
 
 /* 普通项不常驻阴影；仅交互态呈现轻量玻璃胶囊。 */
 .sidebar-nav .semi-navigation-item {
+  box-sizing: border-box;
+  width: calc(100% - 16px);
   margin: 3px 8px;
   padding: 8px 12px;
   border: 1px solid transparent;
-  border-radius: 11px;
+  border-radius: 999px;
   transition:
     background-color 0.15s ease,
     border-color 0.15s ease,
@@ -219,10 +221,10 @@ code {
   ) !important;
   color: var(--anime-pink-deep) !important;
   font-weight: 600;
-  border-color: rgba(232, 106, 157, 0.2);
+  border-color: rgba(232, 106, 157, 0.28);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.74),
-    0 4px 13px rgba(189, 71, 118, 0.09);
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 4px 13px rgba(189, 71, 118, 0.11);
 }
 
 .sidebar-nav .semi-navigation-item.semi-navigation-item-selected:hover {
@@ -1262,6 +1264,40 @@ body[theme-mode='dark'] .semi-card {
   box-shadow: var(--anime-shadow);
 }
 
+/* 主操作统一为粉色玻璃胶囊；危险按钮和禁用态保留各自语义。 */
+.semi-button.semi-button-primary.semi-button-solid:not(.semi-button-disabled):not(.semi-button-dangerous) {
+  border: 1px solid rgba(255, 255, 255, 0.42) !important;
+  border-radius: 999px !important;
+  background: linear-gradient(135deg, #e47aa4 0%, #c987cf 54%, #8f9bea 100%) !important;
+  color: #fff !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    0 5px 14px rgba(189, 71, 118, 0.16);
+  transition: box-shadow 0.2s ease, transform 0.15s ease, filter 0.2s ease;
+}
+
+.semi-button.semi-button-primary.semi-button-solid:not(.semi-button-disabled):not(.semi-button-dangerous):hover {
+  border-radius: 999px !important;
+  filter: brightness(1.03) saturate(1.03);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.46),
+    0 7px 18px rgba(189, 71, 118, 0.22);
+  transform: translateY(-1px);
+}
+
+.semi-button.semi-button-primary.semi-button-solid:not(.semi-button-disabled):not(.semi-button-dangerous):active {
+  border-radius: 999px !important;
+  filter: brightness(0.99);
+  box-shadow: 0 3px 8px rgba(189, 71, 118, 0.14);
+  transform: translateY(0);
+}
+
+/* 令牌表单等组件的 Tailwind 圆角类不能覆盖主题主操作胶囊。 */
+.semi-button.semi-button-primary.semi-button-solid[class~='!rounded-lg'],
+.semi-button.semi-button-primary.semi-button-solid.\!rounded-lg {
+  border-radius: 999px !important;
+}
+
 /* 普通 primary 保持克制：由 Semi 提供莓果粉实色，不再全站套用高饱和渐变。 */
 .semi-button-primary {
   transition: box-shadow 0.2s ease, transform 0.15s ease;
@@ -1283,8 +1319,10 @@ body[theme-mode='dark'] .semi-card {
   background: linear-gradient(135deg, #e47aa4 0%, #c987cf 52%, #8f9bea 100%) !important;
   color: #fff !important;
   border: none !important;
-  border-radius: 10px;
-  box-shadow: 0 6px 18px rgba(155, 138, 235, 0.16);
+  border-radius: 999px !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    0 6px 18px rgba(155, 138, 235, 0.16);
   transition: box-shadow 0.2s ease, transform 0.15s ease, filter 0.2s ease;
 }
 
@@ -1561,4 +1599,9 @@ body[theme-mode='dark'] .anime-model-cloud > div {
   .anime-model-cloud > div,
   .sidebar-container,
   .sidebar-nav .semi-navigation-item { transition: none; }
+}
+
+/* 主操作胶囊最后覆盖组件工具类，确保手机端同样保持完整圆角。 */
+body .semi-button.semi-button-primary.semi-button-solid:not(.semi-button-disabled):not(.semi-button-dangerous) {
+  border-radius: 999px !important;
 }

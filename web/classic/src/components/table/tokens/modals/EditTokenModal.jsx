@@ -328,7 +328,7 @@ const EditTokenModal = (props) => {
           <Space>
             <Button
               theme='solid'
-              className='!rounded-lg'
+              className='btn-anime-gradient !rounded-full'
               onClick={() => formApiRef.current?.submitForm()}
               icon={<IconSave />}
               loading={loading}
