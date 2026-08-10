@@ -42,6 +42,8 @@ import {
   Wallet,
   Receipt,
   Sparkles,
+  Gift,
+  ExternalLink,
 } from 'lucide-react';
 import { IconGift } from '@douyinfe/semi-icons';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
@@ -513,13 +515,23 @@ const RechargeCard = ({
 
       {/* 兑换码充值 */}
       <Card
-        className='!rounded-xl w-full'
-        title={
-          <Text type='tertiary' strong>
+        className='!rounded-2xl w-full redemption-card transition-all duration-300 hover:shadow-md overflow-hidden'
+        bodyStyle={{ position: 'relative', zIndex: 1 }}
+      >
+        {/* 顶部渐变装饰条 */}
+        <div className='redemption-card-accent' />
+        {/* 卡片标题 */}
+        <div className='flex items-center gap-2 mb-4'>
+          <div
+            className='flex items-center justify-center w-7 h-7 rounded-lg text-white shadow-sm'
+            style={{ background: 'linear-gradient(135deg, #8b5cf6, #6366f1)' }}
+          >
+            <Gift size={14} />
+          </div>
+          <Text strong style={{ fontSize: 15 }}>
             {t('兑换码充值')}
           </Text>
-        }
-      >
+        </div>
         <Form
           getFormApi={(api) => (redeemFormApiRef.current = api)}
           initValues={{ redemptionCode: redemptionCode }}
@@ -545,23 +557,27 @@ const RechargeCard = ({
             }
             showClear
             style={{ width: '100%' }}
-            extraText={
-              topUpLink && (
-                <Text type='tertiary'>
-                  {t('在找兑换码？')}
-                  <Text
-                    type='secondary'
-                    underline
-                    className='cursor-pointer'
-                    onClick={openTopUpLink}
-                  >
-                    {t('购买兑换码')}
-                  </Text>
-                </Text>
-              )
-            }
           />
         </Form>
+        {/* 备用卡网充值入口 */}
+        {topUpLink && (
+          <div className='mt-4'>
+            <div className='mb-2'>
+              <Text type='tertiary' style={{ fontSize: 12 }}>
+                {t('在找兑换码？')}
+              </Text>
+            </div>
+            <Button
+              block
+              size='large'
+              className='gradient-cta-btn'
+              icon={<ExternalLink size={18} />}
+              onClick={openTopUpLink}
+            >
+              {t('备用卡网充值地址')}
+            </Button>
+          </div>
+        )}
       </Card>
     </Space>
   );

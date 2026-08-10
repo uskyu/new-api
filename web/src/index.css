@@ -1269,3 +1269,58 @@ html.dark .with-pastel-balls::before {
 }
 
 .ec-dbcd0a3c01b55203 { forced-color-adjust: auto; }
+
+/* ==================== 兑换码充值卡片（精致简洁） ==================== */
+.redemption-card {
+  position: relative;
+  /* 极淡的紫 tint，叠在卡片默认底色上 */
+  background:
+    radial-gradient(circle at 92% -10%, rgba(139, 92, 246, 0.08), transparent 60%),
+    var(--semi-color-bg-1);
+}
+
+/* 暗色模式下 tint 稍提亮以保持层次 */
+html.dark .redemption-card {
+  background:
+    radial-gradient(circle at 92% -10%, rgba(139, 92, 246, 0.14), transparent 60%),
+    var(--semi-color-bg-1);
+}
+
+/* 顶部渐变装饰条 */
+.redemption-card-accent {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 2;
+  background: linear-gradient(90deg, #8b5cf6, #6366f1);
+}
+
+/* 备用卡网充值大按钮 */
+.gradient-cta-btn {
+  height: 44px !important;
+  border: none !important;
+  border-radius: 12px !important;
+  background: linear-gradient(90deg, #8b5cf6, #6366f1) !important;
+  color: #fff !important;
+  font-size: 15px;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+  transition: all 0.3s ease !important;
+}
+
+.gradient-cta-btn .semi-button-icon {
+  color: #fff !important;
+}
+
+.gradient-cta-btn:hover,
+.gradient-cta-btn:focus-visible {
+  background: linear-gradient(90deg, #7c3aed, #4f46e5) !important;
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+  transform: translateY(-1px);
+}
+
+.gradient-cta-btn:active {
+  transform: translateY(0) scale(0.98);
+}
