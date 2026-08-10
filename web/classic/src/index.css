@@ -1256,7 +1256,6 @@ body:not([theme-mode='dark']) .semi-card {
   border-color: var(--anime-border);
   background: var(--anime-surface);
   box-shadow: var(--anime-shadow);
-  backdrop-filter: blur(12px);
 }
 
 body[theme-mode='dark'] .semi-card {
