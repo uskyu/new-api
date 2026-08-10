@@ -82,17 +82,12 @@ func SelectCheckinTier(tiers []operation_setting.CheckinBonusTier, metric int64)
 	return selected
 }
 
+// selectCheckinReward 计算签到奖励：奖励全部来自活跃档位。
+// 未命中任何档位时奖励为 0；命中多个档位时仅按 threshold 最高的档位发放，各档奖励不叠加。
 func selectCheckinReward(setting *operation_setting.CheckinSetting, metric int64) int {
-	quotaAwarded := setting.MinQuota
-	if setting.MaxQuota > setting.MinQuota {
-		quotaAwarded = setting.MinQuota + rand.Intn(setting.MaxQuota-setting.MinQuota+1)
-	}
-	if !setting.BonusEnabled {
-		return quotaAwarded
-	}
 	tier := SelectCheckinTier(setting.ActiveTiers(), metric)
 	if tier == nil || tier.MaxQuota < tier.MinQuota {
-		return quotaAwarded
+		return 0
 	}
 	if tier.MinQuota == tier.MaxQuota {
 		return tier.MinQuota
@@ -118,12 +113,10 @@ func UserCheckin(userId int) (*Checkin, error) {
 		return nil, errors.New("今日已签到")
 	}
 
-	// 计算随机额度奖励，命中活跃阶梯时使用对应奖励区间
-	quotaAwarded := setting.MinQuota
-	if setting.MaxQuota > setting.MinQuota {
-		quotaAwarded = setting.MinQuota + rand.Intn(setting.MaxQuota-setting.MinQuota+1)
-	}
-	if setting.BonusEnabled && len(setting.ActiveTiers()) > 0 {
+	// 计算签到奖励：全部来自活跃档位，未命中时奖励为 0。
+	// 不再使用基础签到额度（checkin_setting.min_quota/max_quota）。
+	quotaAwarded := 0
+	if len(setting.ActiveTiers()) > 0 {
 		calls, consumedQuota, usageErr := GetYesterdayCheckinUsage(userId)
 		if usageErr == nil {
 			metric := calls

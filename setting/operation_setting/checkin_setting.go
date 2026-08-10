@@ -1,6 +1,14 @@
 package operation_setting
 
-import "github.com/QuantumNous/new-api/setting/config"
+import (
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/config"
+)
 
 // CheckinBonusTier defines one active-reward tier.
 type CheckinBonusTier struct {
@@ -41,6 +49,70 @@ var checkinSetting = CheckinSetting{
 func init() {
 	// 注册到全局配置管理器
 	config.GlobalConfig.Register("checkin_setting", &checkinSetting)
+}
+
+// SortedUniqueTiers 返回按 threshold 升序、重复 threshold 保留首条后的档位副本。
+// 用于接口展示，保证用户端不会出现重复档位；奖励计算以原始配置为准。
+func SortedUniqueTiers(tiers []CheckinBonusTier) []CheckinBonusTier {
+	if len(tiers) < 2 {
+		return tiers
+	}
+	sorted := make([]CheckinBonusTier, len(tiers))
+	copy(sorted, tiers)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Threshold < sorted[j].Threshold
+	})
+	out := sorted[:0]
+	seen := make(map[int]struct{}, len(sorted))
+	for _, tier := range sorted {
+		if _, ok := seen[tier.Threshold]; ok {
+			continue
+		}
+		seen[tier.Threshold] = struct{}{}
+		out = append(out, tier)
+	}
+	return out
+}
+
+// ValidateAndNormalizeCheckinTiers 校验并规范化签到档位 JSON：
+// threshold/min_quota/max_quota 非负、min_quota <= max_quota、threshold 唯一，
+// 返回按 threshold 升序序列化后的 JSON 字符串。
+func ValidateAndNormalizeCheckinTiers(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "[]", nil
+	}
+	var tiers []CheckinBonusTier
+	if err := common.UnmarshalJsonStr(raw, &tiers); err != nil {
+		return "", errors.New("签到档位配置必须是合法的 JSON 数组")
+	}
+	if tiers == nil {
+		return "[]", nil
+	}
+	seen := make(map[int]struct{}, len(tiers))
+	for i, tier := range tiers {
+		if tier.Threshold < 0 {
+			return "", fmt.Errorf("第 %d 个档位的门槛不能为负数", i+1)
+		}
+		if tier.MinQuota < 0 || tier.MaxQuota < 0 {
+			return "", fmt.Errorf("第 %d 个档位的奖励额度不能为负数", i+1)
+		}
+		if tier.MaxQuota < tier.MinQuota {
+			return "", fmt.Errorf("第 %d 个档位的最高奖励不能低于最低奖励", i+1)
+		}
+		if _, ok := seen[tier.Threshold]; ok {
+			return "", fmt.Errorf("存在重复的档位门槛: %d", tier.Threshold)
+		}
+		seen[tier.Threshold] = struct{}{}
+	}
+	sort.Slice(tiers, func(i, j int) bool {
+		return tiers[i].Threshold < tiers[j].Threshold
+	})
+	normalized, err := common.Marshal(tiers)
+	if err != nil {
+		return "", errors.New("签到档位序列化失败")
+	}
+	return string(normalized), nil
 }
 
 // GetCheckinSetting 获取签到配置

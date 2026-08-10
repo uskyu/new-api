@@ -95,11 +95,8 @@ const checkinTiers = `[{"threshold":20,"min_quota":5000,"max_quota":20000},{"thr
 
 var checkinOptions = map[string]string{
 	"checkin_setting.enabled":             "true",
-	"checkin_setting.min_quota":           "1000",
-	"checkin_setting.max_quota":           "10000",
 	"checkin_setting.captcha_enabled":     "true",
 	"checkin_setting.captcha_kind":        "math",
-	"checkin_setting.bonus_enabled":       "true",
 	"checkin_setting.bonus_metric":        "request_count",
 	"checkin_setting.request_count_tiers": checkinTiers,
 }

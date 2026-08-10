@@ -86,6 +86,54 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
     );
   }, [checkinData.stats?.records]);
 
+  // 状态接口通常已升序去重，这里仍做防御性校验，避免异常配置重复展示。
+  const bonusTiers = useMemo(() => {
+    const tiers = Array.isArray(checkinData?.bonus_tiers)
+      ? checkinData.bonus_tiers
+      : [];
+    const seenThresholds = new Set();
+
+    return tiers
+      .filter((tier) => {
+        if (
+          tier?.threshold === null ||
+          tier?.threshold === undefined ||
+          tier?.min_quota === null ||
+          tier?.min_quota === undefined ||
+          tier?.max_quota === null ||
+          tier?.max_quota === undefined
+        ) {
+          return false;
+        }
+
+        const threshold = Number(tier.threshold);
+        const minQuota = Number(tier.min_quota);
+        const maxQuota = Number(tier.max_quota);
+        if (
+          !Number.isFinite(threshold) ||
+          !Number.isFinite(minQuota) ||
+          !Number.isFinite(maxQuota) ||
+          threshold < 0 ||
+          minQuota < 0 ||
+          maxQuota < minQuota ||
+          seenThresholds.has(threshold)
+        ) {
+          return false;
+        }
+
+        seenThresholds.add(threshold);
+        return true;
+      })
+      .sort((a, b) => Number(a.threshold) - Number(b.threshold));
+  }, [checkinData?.bonus_tiers]);
+
+  const matchedTierThreshold = Number(checkinData?.bonus_tier?.threshold);
+  const matchedBonusTier = Number.isFinite(matchedTierThreshold)
+    ? bonusTiers.find((tier) => Number(tier.threshold) === matchedTierThreshold)
+    : null;
+  const hasMatchedTier = Boolean(matchedBonusTier);
+  const isQuotaMetric = checkinData?.bonus_metric === 'quota_consumed';
+
   // 获取签到状态
   const fetchCheckinStatus = async (month) => {
     const isFirstLoad = !initialLoaded;
@@ -131,15 +179,21 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
     return message.includes('Turnstile');
   };
 
+  const showCheckinSuccess = (data) => {
+    if (Number(data?.quota_awarded) === 0) {
+      showSuccess(t('签到成功，昨日活跃度未达标，本次无额度奖励'));
+      return;
+    }
+    showSuccess(t('签到成功！获得') + ' ' + renderQuota(data?.quota_awarded));
+  };
+
   const doCheckin = async (token) => {
     setCheckinLoading(true);
     try {
       const res = await postCheckin(token);
       const { success, data, message } = res.data;
       if (success) {
-        showSuccess(
-          t('签到成功！获得') + ' ' + renderQuota(data.quota_awarded),
-        );
+        showCheckinSuccess(data);
         // 刷新签到状态
         fetchCheckinStatus(currentMonth);
         setTurnstileModalVisible(false);
@@ -196,9 +250,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
       const res = await API.post(url);
       const { success, data, message } = res.data;
       if (success) {
-        showSuccess(
-          t('签到成功！获得') + ' ' + renderQuota(data.quota_awarded),
-        );
+        showCheckinSuccess(data);
         fetchCheckinStatus(currentMonth);
         setCaptchaModalVisible(false);
       } else {
@@ -366,7 +418,9 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
                   ? t('今日已签到，累计签到') +
                     ` ${checkinData.stats?.total_checkins || 0} ` +
                     t('天')
-                  : t('每日签到可获得随机额度奖励')}
+                  : checkinData?.bonus_enabled
+                    ? t('达标后随机获得对应档位奖励')
+                    : t('签到后可获得随机额度奖励')}
             </div>
           </div>
         </div>
@@ -376,9 +430,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
           className='btn-anime-gradient'
           icon={<Gift size={16} />}
           onClick={() =>
-            checkinData?.captcha_enabled
-              ? fetchCheckinCaptcha()
-              : doCheckin()
+            checkinData?.captcha_enabled ? fetchCheckinCaptcha() : doCheckin()
           }
           loading={checkinLoading || !initialLoaded}
           disabled={!initialLoaded || checkinData.stats?.checked_in_today}
@@ -415,56 +467,99 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
           </div>
         </div>
 
-        {/* 活跃阶梯档位展示：完整档位表 + 当前命中高亮 */}
-        {checkinData?.bonus_enabled && checkinData?.bonus_tiers?.length > 0 && (
+        {/* 活跃阶梯档位展示：始终展示全部有效档位，仅最高命中档发放 */}
+        {checkinData?.bonus_enabled && bonusTiers.length > 0 && (
           <div className='mb-4 rounded-xl anime-tier-panel overflow-hidden'>
-            <div className='flex items-center justify-between px-3 py-2 anime-tier-header'>
+            <div className='flex flex-col gap-1 px-3 py-2 anime-tier-header sm:flex-row sm:items-center sm:justify-between'>
               <span className='text-xs font-semibold text-gray-700 dark:text-gray-300'>
                 {t('活跃奖励档位')}
               </span>
-              <span className='text-[11px] text-gray-500 dark:text-gray-400'>
-                {checkinData.bonus_metric === 'quota_consumed'
+              <span className='text-[11px] break-words text-gray-500 dark:text-gray-400 sm:text-right'>
+                {isQuotaMetric
                   ? `${t('昨日消耗额度')} ${renderQuota(checkinData.yesterday_quota ?? 0, 6)}`
-                  : `${t('昨日调用')} ${checkinData.yesterday_calls ?? 0} ${t('次')}`}
+                  : `${t('昨日调用次数')} ${checkinData.yesterday_calls ?? 0} ${t('次')}`}
               </span>
             </div>
+
+            <div
+              className={`anime-tier-summary ${
+                hasMatchedTier ? '' : 'anime-tier-summary-empty'
+              }`}
+            >
+              {hasMatchedTier ? (
+                <>
+                  <span className='font-semibold'>
+                    {t('适用最高档奖励范围')}
+                  </span>{' '}
+                  <span className='break-words'>
+                    {renderQuota(matchedBonusTier.min_quota, 6)} -{' '}
+                    {renderQuota(matchedBonusTier.max_quota, 6)}
+                  </span>
+                </>
+              ) : (
+                <span className='font-semibold'>
+                  {t('昨日未达标，本次签到奖励为 0')}
+                </span>
+              )}
+              <div className='mt-0.5 text-[10px] font-normal opacity-80'>
+                {t('仅最高命中档发放，各档奖励不叠加')}
+              </div>
+            </div>
+
             <div className='divide-y divide-gray-100 dark:divide-gray-800'>
-              {checkinData.bonus_tiers.map((tier, index) => {
-                const isHit =
-                  checkinData.bonus_tier &&
-                  Number(checkinData.bonus_tier.threshold) ===
-                    Number(tier.threshold);
+              {bonusTiers.map((tier) => {
+                const threshold = Number(tier.threshold);
+                const isCurrent =
+                  hasMatchedTier && threshold === matchedTierThreshold;
+                const isAchieved =
+                  hasMatchedTier && threshold <= matchedTierThreshold;
+
                 return (
                   <div
-                    key={index}
-                    className={`flex items-center justify-between px-3 py-2 ${
-                      isHit
+                    key={threshold}
+                    className={`flex flex-col gap-1.5 px-3 py-2 sm:flex-row sm:items-center sm:justify-between ${
+                      isCurrent
                         ? 'anime-tier-active'
-                        : 'anime-tier-row'
+                        : isAchieved
+                          ? 'anime-tier-achieved'
+                          : 'anime-tier-row'
                     }`}
                   >
-                    <span
-                      className={`text-xs ${
-                        isHit
-                          ? 'font-semibold anime-text-pink'
-                          : 'text-gray-600 dark:text-gray-400'
-                      }`}
-                    >
-                      ≥{' '}
-                      {checkinData.bonus_metric === 'quota_consumed'
-                        ? renderQuota(tier.threshold, 6)
-                        : `${tier.threshold} ${t('次')}`}
+                    <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
+                      <span
+                        className={`text-xs ${
+                          isCurrent
+                            ? 'font-semibold anime-text-pink'
+                            : 'text-gray-600 dark:text-gray-400'
+                        }`}
+                      >
+                        ≥{' '}
+                        {isQuotaMetric
+                          ? renderQuota(tier.threshold, 6)
+                          : `${tier.threshold} ${t('次')}`}
+                      </span>
+                      <span
+                        className={`anime-tier-status ${
+                          isCurrent
+                            ? 'anime-tier-badge'
+                            : isAchieved
+                              ? 'anime-tier-status-achieved'
+                              : 'anime-tier-status-pending'
+                        }`}
+                      >
+                        {isCurrent
+                          ? t('已达标 · 当前档位')
+                          : isAchieved
+                            ? t('已达标')
+                            : t('未达标')}
+                      </span>
                     </span>
-                    <span className='flex items-center gap-2'>
-                      <span className='text-xs text-gray-600 dark:text-gray-400'>
+                    <span className='min-w-0 text-xs break-words text-gray-600 dark:text-gray-400 sm:text-right'>
+                      {t('奖励范围')}:{' '}
+                      <span className={isCurrent ? 'font-semibold' : ''}>
                         {renderQuota(tier.min_quota, 6)} -{' '}
                         {renderQuota(tier.max_quota, 6)}
                       </span>
-                      {isHit && (
-                        <span className='anime-tier-badge'>
-                          {t('当前档位')}
-                        </span>
-                      )}
                     </span>
                   </div>
                 );
@@ -530,7 +625,11 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
         <div className='mt-3 p-2.5 anime-note-panel rounded-xl'>
           <Typography.Text type='tertiary' className='text-xs'>
             <ul className='list-disc list-inside space-y-0.5'>
-              <li>{t('每日签到可获得随机额度奖励')}</li>
+              <li>
+                {checkinData?.bonus_enabled
+                  ? t('达标后随机获得对应档位奖励，仅最高档生效且不叠加')
+                  : t('签到后可随机获得管理员设置的额度奖励')}
+              </li>
               <li>{t('签到奖励将直接添加到您的账户余额')}</li>
               <li>{t('每日仅可签到一次，请勿重复签到')}</li>
             </ul>

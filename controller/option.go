@@ -331,6 +331,24 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "checkin_setting.request_count_tiers", "checkin_setting.quota_consumed_tiers":
+		normalized, err := operation_setting.ValidateAndNormalizeCheckinTiers(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+		option.Value = normalized
+	case "checkin_setting.bonus_metric":
+		if option.Value.(string) != "request_count" && option.Value.(string) != "quota_consumed" {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无效的签到统计口径，可选值：request_count、quota_consumed",
+			})
+			return
+		}
 	}
 	err = model.UpdateOption(option.Key, option.Value.(string))
 	if err != nil {

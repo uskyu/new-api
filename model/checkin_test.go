@@ -21,27 +21,42 @@ func TestSelectCheckinTierUsesHighestThreshold(t *testing.T) {
 
 func TestSelectCheckinRewardUsesTierRange(t *testing.T) {
 	setting := &operation_setting.CheckinSetting{
-		MinQuota:     1000,
-		MaxQuota:     1000,
-		BonusEnabled: true,
 		RequestCountTiers: []operation_setting.CheckinBonusTier{
 			{Threshold: 50, MinQuota: 2000, MaxQuota: 2000},
 		},
 	}
-	require.Equal(t, 1000, selectCheckinReward(setting, 10))
+	// 未达标：奖励为 0，不再回退基础签到奖励
+	require.Equal(t, 0, selectCheckinReward(setting, 10))
+	require.Equal(t, 0, selectCheckinReward(setting, 49))
+	// 达标：使用档位区间
 	require.Equal(t, 2000, selectCheckinReward(setting, 50))
+	require.Equal(t, 2000, selectCheckinReward(setting, 51))
 }
 
-func TestSelectCheckinRewardFallsBackToBaseForInvalidTier(t *testing.T) {
+func TestSelectCheckinRewardZeroWhenNoTierOrInvalidTier(t *testing.T) {
+	// 无效档位（最高奖励低于最低奖励）：奖励为 0
 	setting := &operation_setting.CheckinSetting{
-		MinQuota:     1000,
-		MaxQuota:     1000,
-		BonusEnabled: true,
 		RequestCountTiers: []operation_setting.CheckinBonusTier{
 			{Threshold: 50, MinQuota: 5000, MaxQuota: 2000},
 		},
 	}
-	require.Equal(t, 1000, selectCheckinReward(setting, 50))
+	require.Equal(t, 0, selectCheckinReward(setting, 50))
+	// 无档位配置：奖励为 0
+	emptySetting := &operation_setting.CheckinSetting{}
+	require.Equal(t, 0, selectCheckinReward(emptySetting, 100))
+}
+
+func TestSelectCheckinRewardOnlyHighestTierNoStacking(t *testing.T) {
+	setting := &operation_setting.CheckinSetting{
+		RequestCountTiers: []operation_setting.CheckinBonusTier{
+			{Threshold: 50, MinQuota: 2000, MaxQuota: 2000},
+			{Threshold: 100, MinQuota: 5000, MaxQuota: 5000},
+			{Threshold: 200, MinQuota: 20000, MaxQuota: 20000},
+		},
+	}
+	// 命中多个档位时只取 threshold 最高的一档，各档奖励不叠加
+	require.Equal(t, 5000, selectCheckinReward(setting, 120))
+	require.Equal(t, 20000, selectCheckinReward(setting, 250))
 }
 
 func TestActiveTiersIndependentPerMetric(t *testing.T) {

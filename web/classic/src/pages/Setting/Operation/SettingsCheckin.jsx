@@ -34,16 +34,14 @@ import {
   showError,
   showSuccess,
   showWarning,
+  renderQuota,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 
 const DEFAULT_INPUTS = {
   'checkin_setting.enabled': false,
-  'checkin_setting.min_quota': 1000,
-  'checkin_setting.max_quota': 10000,
   'checkin_setting.captcha_enabled': false,
   'checkin_setting.captcha_kind': 'math',
-  'checkin_setting.bonus_enabled': false,
   'checkin_setting.bonus_metric': 'request_count',
   'checkin_setting.request_count_tiers': '[]',
   'checkin_setting.quota_consumed_tiers': '[]',
@@ -77,8 +75,7 @@ export default function SettingsCheckin(props) {
   });
   const refForm = useRef();
 
-  const bonusMetric =
-    inputs['checkin_setting.bonus_metric'] || 'request_count';
+  const bonusMetric = inputs['checkin_setting.bonus_metric'] || 'request_count';
   const currentTiers = tiersByMetric[bonusMetric] || [];
 
   function handleFieldChange(fieldName) {
@@ -89,10 +86,14 @@ export default function SettingsCheckin(props) {
 
   function updateTiers(nextTiers) {
     const key = TIER_KEY_BY_METRIC[bonusMetric];
+    // 保存时按门槛升序序列化，保证接口与用户端展示顺序稳定
+    const sorted = [...nextTiers].sort(
+      (a, b) => Number(a.threshold) - Number(b.threshold),
+    );
     setTiersByMetric((prev) => ({ ...prev, [bonusMetric]: nextTiers }));
     setInputs((prev) => ({
       ...prev,
-      [key]: JSON.stringify(nextTiers),
+      [key]: JSON.stringify(sorted),
     }));
   }
 
@@ -104,14 +105,38 @@ export default function SettingsCheckin(props) {
   }
 
   function handleAddTier() {
+    // 基于当前最大门槛递推默认值，避免连续添加完全相同的档位
+    const maxThreshold = currentTiers.reduce(
+      (max, tier) => Math.max(max, Number(tier.threshold) || 0),
+      0,
+    );
+    const nextThreshold =
+      maxThreshold + (bonusMetric === 'quota_consumed' ? 50000 : 50);
     updateTiers([
       ...currentTiers,
-      { threshold: 50, min_quota: 2000, max_quota: 20000 },
+      { threshold: nextThreshold, min_quota: 2000, max_quota: 20000 },
     ]);
   }
 
   function handleRemoveTier(index) {
     updateTiers(currentTiers.filter((_, i) => i !== index));
+  }
+
+  // 校验当前统计口径的档位配置：非负、min <= max、门槛唯一
+  function validateTiers(tiers) {
+    if (!Array.isArray(tiers)) return t('档位配置无效');
+    const seen = new Set();
+    for (const tier of tiers) {
+      if (Number(tier.threshold) < 0) return t('档位门槛不能为负数');
+      if (Number(tier.min_quota) < 0 || Number(tier.max_quota) < 0)
+        return t('档位奖励额度不能为负数');
+      if (Number(tier.min_quota) > Number(tier.max_quota))
+        return t('档位最低奖励不能高于最高奖励');
+      if (seen.has(Number(tier.threshold)))
+        return t('档位门槛不能重复：') + ` ${tier.threshold}`;
+      seen.add(Number(tier.threshold));
+    }
+    return null;
   }
 
   // 切换统计口径：只切换展示与编辑目标，两套数据各自独立
@@ -120,6 +145,9 @@ export default function SettingsCheckin(props) {
   }
 
   async function onSubmit() {
+    // 保存前校验当前统计口径的档位配置
+    const validateError = validateTiers(currentTiers);
+    if (validateError) return showError(validateError);
     const updateArray = compareObjects(inputs, inputsRow);
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
     const requestQueue = updateArray.map((item) =>
@@ -156,7 +184,10 @@ export default function SettingsCheckin(props) {
         Object.prototype.hasOwnProperty.call(props.options, key)
           ? props.options[key]
           : DEFAULT_INPUTS[key];
-      if (typeof DEFAULT_INPUTS[key] === 'boolean' && typeof value === 'string') {
+      if (
+        typeof DEFAULT_INPUTS[key] === 'boolean' &&
+        typeof value === 'string'
+      ) {
         value = value === 'true' || value === '1';
       }
       currentInputs[key] = value;
@@ -189,7 +220,9 @@ export default function SettingsCheckin(props) {
               type='tertiary'
               style={{ marginBottom: 16, display: 'block' }}
             >
-              {t('签到功能允许用户每日签到获取随机额度奖励')}
+              {t(
+                '签到奖励全部来自活跃档位：未达标奖励为 0，命中多个档位仅按最高档发放，各档不叠加',
+              )}
             </Typography.Text>
             <Row gutter={16}>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
@@ -200,26 +233,6 @@ export default function SettingsCheckin(props) {
                   checkedText='开'
                   uncheckedText='关'
                   onChange={handleFieldChange('checkin_setting.enabled')}
-                />
-              </Col>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.InputNumber
-                  field={'checkin_setting.min_quota'}
-                  label={t('签到最小额度')}
-                  placeholder={t('签到奖励的最小额度')}
-                  onChange={handleFieldChange('checkin_setting.min_quota')}
-                  min={0}
-                  disabled={!inputs['checkin_setting.enabled']}
-                />
-              </Col>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.InputNumber
-                  field={'checkin_setting.max_quota'}
-                  label={t('签到最大额度')}
-                  placeholder={t('签到奖励的最大额度')}
-                  onChange={handleFieldChange('checkin_setting.max_quota')}
-                  min={0}
-                  disabled={!inputs['checkin_setting.enabled']}
                 />
               </Col>
             </Row>
@@ -262,42 +275,29 @@ export default function SettingsCheckin(props) {
             </Row>
           </Form.Section>
 
-          <Form.Section text={t('活跃阶梯奖励')}>
+          <Form.Section text={t('活跃奖励档位')}>
             <Typography.Text
               type='tertiary'
               style={{ marginBottom: 16, display: 'block' }}
             >
               {t(
-                '根据昨日调用量命中最高档，签到奖励使用该档最低至最高区间随机发放',
+                '按昨日活跃数据命中门槛最高的档位发放该档奖励区间，未达标奖励为 0，各档奖励不叠加',
               )}
             </Typography.Text>
             <Row gutter={16}>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.Switch
-                  field={'checkin_setting.bonus_enabled'}
-                  label={t('启用活跃阶梯奖励')}
-                  size='default'
-                  checkedText='开'
-                  uncheckedText='关'
-                  disabled={!inputs['checkin_setting.enabled']}
-                  onChange={handleFieldChange('checkin_setting.bonus_enabled')}
+                <Form.Select
+                  field={'checkin_setting.bonus_metric'}
+                  label={t('统计口径')}
+                  optionList={[
+                    { label: t('昨日调用次数'), value: 'request_count' },
+                    { label: t('昨日消耗额度'), value: 'quota_consumed' },
+                  ]}
+                  onChange={handleMetricChange}
                 />
               </Col>
-              {inputs['checkin_setting.bonus_enabled'] && (
-                <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                  <Form.Select
-                    field={'checkin_setting.bonus_metric'}
-                    label={t('统计口径')}
-                    optionList={[
-                      { label: t('昨日调用次数'), value: 'request_count' },
-                      { label: t('昨日消耗额度'), value: 'quota_consumed' },
-                    ]}
-                    onChange={handleMetricChange}
-                  />
-                </Col>
-              )}
             </Row>
-            {inputs['checkin_setting.bonus_enabled'] && (
+            {inputs['checkin_setting.enabled'] && (
               <div className='mt-3'>
                 <div className='hidden md:grid grid-cols-4 gap-2 mb-2 text-xs font-medium text-gray-500'>
                   <div>
@@ -335,6 +335,12 @@ export default function SettingsCheckin(props) {
                         }
                         style={{ width: '100%' }}
                       />
+                      {inputs['checkin_setting.bonus_metric'] ===
+                        'quota_consumed' && (
+                        <span className='break-words text-[10px] leading-tight text-gray-400'>
+                          {t('约')} {renderQuota(tier.threshold, 6)}
+                        </span>
+                      )}
                     </div>
                     <div className='flex flex-col gap-1'>
                       <span className='text-xs text-gray-500 md:hidden'>
@@ -349,6 +355,9 @@ export default function SettingsCheckin(props) {
                         }
                         style={{ width: '100%' }}
                       />
+                      <span className='break-words text-[10px] leading-tight text-gray-400'>
+                        {t('约')} {renderQuota(tier.min_quota, 6)}
+                      </span>
                     </div>
                     <div className='flex flex-col gap-1'>
                       <span className='text-xs text-gray-500 md:hidden'>
@@ -363,6 +372,9 @@ export default function SettingsCheckin(props) {
                         }
                         style={{ width: '100%' }}
                       />
+                      <span className='break-words text-[10px] leading-tight text-gray-400'>
+                        {t('约')} {renderQuota(tier.max_quota, 6)}
+                      </span>
                     </div>
                     <div className='col-span-2 flex items-center justify-end md:col-span-1'>
                       <Button

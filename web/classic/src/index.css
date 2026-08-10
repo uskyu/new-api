@@ -1440,18 +1440,55 @@ body[theme-mode='dark']
 
 .anime-tier-row { background: rgba(255, 255, 255, 0.58); }
 
+.anime-tier-summary {
+  padding: 0.5rem 0.75rem;
+  color: #a84670;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--anime-border);
+  background: rgba(255, 244, 249, 0.76);
+}
+
+.anime-tier-summary-empty {
+  color: #956478;
+  background: rgba(250, 246, 249, 0.78);
+}
+
+.anime-tier-achieved {
+  background: linear-gradient(90deg, rgba(255, 247, 250, 0.82), rgba(247, 244, 255, 0.72));
+}
+
 .anime-tier-active {
   background: linear-gradient(90deg, rgba(255, 234, 243, 0.9), rgba(239, 235, 255, 0.84));
 }
 
-.anime-tier-badge {
+.anime-tier-status {
   display: inline-flex;
+  flex: none;
   align-items: center;
   border-radius: 9999px;
   padding: 0.125rem 0.5rem;
-  color: #fff;
   font-size: 10px;
   font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.anime-tier-status-achieved {
+  color: #bd527d;
+  border: 1px solid rgba(221, 117, 158, 0.3);
+  background: rgba(255, 233, 242, 0.72);
+}
+
+.anime-tier-status-pending {
+  color: #8a7b84;
+  border: 1px solid rgba(153, 137, 146, 0.24);
+  background: rgba(247, 243, 246, 0.8);
+}
+
+.anime-tier-badge {
+  color: #fff;
   background: linear-gradient(135deg, #df6f9d, #a582df);
   box-shadow: 0 3px 10px rgba(165, 130, 223, 0.18);
 }
@@ -1492,8 +1529,34 @@ body[theme-mode='dark'] .anime-tier-header {
   background: linear-gradient(90deg, rgba(103, 54, 78, 0.26), rgba(67, 56, 99, 0.24), rgba(46, 81, 75, 0.2));
 }
 
+body[theme-mode='dark'] .anime-tier-summary {
+  color: #f0a3c0;
+  background: rgba(91, 48, 69, 0.25);
+}
+
+body[theme-mode='dark'] .anime-tier-summary-empty {
+  color: #c9a3b3;
+  background: rgba(65, 52, 62, 0.34);
+}
+
+body[theme-mode='dark'] .anime-tier-achieved {
+  background: linear-gradient(90deg, rgba(92, 53, 70, 0.2), rgba(62, 53, 85, 0.18));
+}
+
 body[theme-mode='dark'] .anime-tier-active {
   background: linear-gradient(90deg, rgba(126, 57, 87, 0.32), rgba(79, 62, 119, 0.28));
+}
+
+body[theme-mode='dark'] .anime-tier-status-achieved {
+  color: #f0a0be;
+  border-color: rgba(235, 143, 178, 0.28);
+  background: rgba(122, 58, 83, 0.28);
+}
+
+body[theme-mode='dark'] .anime-tier-status-pending {
+  color: #b9aeb5;
+  border-color: rgba(185, 174, 181, 0.2);
+  background: rgba(69, 63, 68, 0.44);
 }
 
 body[theme-mode='dark'] .anime-note-panel {

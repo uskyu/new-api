@@ -33,18 +33,17 @@ func GetCheckinStatus(c *gin.Context) {
 		return
 	}
 
+	// bonus_enabled 由是否存在档位决定，旧开关（checkin_setting.bonus_enabled）已不再参与计算。
 	data := gin.H{
 		"enabled":         setting.Enabled,
-		"min_quota":       setting.MinQuota,
-		"max_quota":       setting.MaxQuota,
 		"captcha_enabled": setting.CaptchaEnabled,
 		"captcha_kind":    setting.CaptchaKind,
-		"bonus_enabled":   setting.BonusEnabled,
+		"bonus_enabled":   len(setting.ActiveTiers()) > 0,
 		"bonus_metric":    setting.BonusMetric,
-		"bonus_tiers":     setting.ActiveTiers(),
+		"bonus_tiers":     operation_setting.SortedUniqueTiers(setting.ActiveTiers()),
 		"stats":           stats,
 	}
-	if setting.BonusEnabled {
+	if len(setting.ActiveTiers()) > 0 {
 		calls, consumedQuota, err := model.GetYesterdayCheckinUsage(userId)
 		if err == nil {
 			data["yesterday_calls"] = calls
@@ -120,7 +119,11 @@ func DoCheckin(c *gin.Context) {
 		})
 		return
 	}
-	model.RecordLog(userId, model.LogTypeSystem, fmt.Sprintf("用户签到，获得额度 %s", logger.LogQuota(checkin.QuotaAwarded)))
+	if checkin.QuotaAwarded > 0 {
+		model.RecordLog(userId, model.LogTypeSystem, fmt.Sprintf("用户签到，获得额度 %s", logger.LogQuota(checkin.QuotaAwarded)))
+	} else {
+		model.RecordLog(userId, model.LogTypeSystem, "用户签到，昨日活跃度未达标，本次无额度奖励")
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "签到成功",
