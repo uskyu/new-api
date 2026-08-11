@@ -559,7 +559,7 @@ const RechargeCard = ({
             style={{ width: '100%' }}
           />
         </Form>
-        {/* 备用卡网充值入口 */}
+        {/* 备用兑换码充值购买入口 */}
         {topUpLink && (
           <div className='mt-4'>
             <div className='mb-2'>
@@ -574,7 +574,7 @@ const RechargeCard = ({
               icon={<ExternalLink size={18} />}
               onClick={openTopUpLink}
             >
-              {t('备用卡网充值地址')}
+              {t('【备用兑换码】充值购买地址')}
             </Button>
           </div>
         )}
