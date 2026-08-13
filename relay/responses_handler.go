@@ -45,6 +45,12 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			Input:              req.Input,
 			Instructions:       req.Instructions,
 			PreviousResponseID: req.PreviousResponseID,
+			ParallelToolCalls:  req.ParallelToolCalls,
+			ServiceTier:        req.ServiceTier,
+			Tools:              req.Tools,
+			Reasoning:          req.Reasoning,
+			PromptCacheKey:     req.PromptCacheKey,
+			Text:               req.Text,
 		}
 	default:
 		return types.NewErrorWithStatusCode(
@@ -76,6 +82,8 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
+		info.UpstreamRequestBodySize = storage.Size()
+		info.UpstreamRequestGetBody = storage.NewReader
 		requestBody = common.ReaderOnly(storage)
 	} else {
 		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)

@@ -15,7 +15,51 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
+
+func responsesUsageForAccounting(source *dto.Usage) dto.Usage {
+	if source == nil {
+		return dto.Usage{}
+	}
+	usage := *source
+	if source.InputTokensDetails != nil {
+		details := *source.InputTokensDetails
+		usage.InputTokensDetails = &details
+	}
+	if source.OutputTokensDetails != nil {
+		details := *source.OutputTokensDetails
+		usage.OutputTokensDetails = &details
+	}
+	usage.NormalizeResponsesUsage()
+	return usage
+}
+
+func normalizeResponsesPayload(data []byte, response *dto.OpenAIResponsesResponse, prefix string) []byte {
+	if response == nil {
+		return data
+	}
+	normalized := data
+	createdAtPath := prefix + "created_at"
+	if gjson.GetBytes(normalized, createdAtPath).Exists() {
+		if updated, err := sjson.SetBytes(normalized, createdAtPath, int64(response.CreatedAt)); err == nil {
+			normalized = updated
+		}
+	}
+	if response.Usage == nil {
+		return normalized
+	}
+	reasoningTokens := response.Usage.ResponsesReasoningTokens()
+	if reasoningTokens == 0 {
+		return normalized
+	}
+	reasoningPath := prefix + "usage.output_tokens_details.reasoning_tokens"
+	if updated, err := sjson.SetBytes(normalized, reasoningPath, reasoningTokens); err == nil {
+		normalized = updated
+	}
+	return normalized
+}
 
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
@@ -40,19 +84,9 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		c.Set("image_generation_call_size", responsesResponse.GetSize())
 	}
 
-	// 写入新的 response body
+	usage := responsesUsageForAccounting(responsesResponse.Usage)
+	responseBody = normalizeResponsesPayload(responseBody, &responsesResponse, "")
 	service.IOCopyBytesGracefully(c, resp, responseBody)
-
-	// compute usage
-	usage := dto.Usage{}
-	if responsesResponse.Usage != nil {
-		usage.PromptTokens = responsesResponse.Usage.InputTokens
-		usage.CompletionTokens = responsesResponse.Usage.OutputTokens
-		usage.TotalTokens = responsesResponse.Usage.TotalTokens
-		if responsesResponse.Usage.InputTokensDetails != nil {
-			usage.PromptTokensDetails.CachedTokens = responsesResponse.Usage.InputTokensDetails.CachedTokens
-		}
-	}
 	if info == nil || info.ResponsesUsageInfo == nil || info.ResponsesUsageInfo.BuiltInTools == nil {
 		return &usage, nil
 	}
@@ -88,23 +122,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
+		data = string(normalizeResponsesPayload([]byte(data), streamResponse.Response, "response."))
 		sendResponsesStreamData(c, streamResponse, data)
 		switch streamResponse.Type {
-		case "response.completed":
+		case "response.completed", "response.done":
 			if streamResponse.Response != nil {
 				if streamResponse.Response.Usage != nil {
-					if streamResponse.Response.Usage.InputTokens != 0 {
-						usage.PromptTokens = streamResponse.Response.Usage.InputTokens
-					}
-					if streamResponse.Response.Usage.OutputTokens != 0 {
-						usage.CompletionTokens = streamResponse.Response.Usage.OutputTokens
-					}
-					if streamResponse.Response.Usage.TotalTokens != 0 {
-						usage.TotalTokens = streamResponse.Response.Usage.TotalTokens
-					}
-					if streamResponse.Response.Usage.InputTokensDetails != nil {
-						usage.PromptTokensDetails.CachedTokens = streamResponse.Response.Usage.InputTokensDetails.CachedTokens
-					}
+					*usage = responsesUsageForAccounting(streamResponse.Response.Usage)
 				}
 				if streamResponse.Response.HasImageGenerationCall() {
 					c.Set("image_generation_call", true)
@@ -144,7 +168,15 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		usage.PromptTokens = info.GetEstimatePromptTokens()
 	}
 
-	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	if usage.TotalTokens == 0 {
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
 
+	// Emit the terminal sentinel only for streams that ended normally. Truncated
+	// streams (timeout, scanner error, ping failure, client disconnect) must not
+	// look like a clean completion to the client.
+	if info != nil && info.StreamStatus != nil && info.StreamStatus.IsNormalEnd() {
+		helper.Done(c)
+	}
 	return usage, nil
 }

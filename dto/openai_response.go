@@ -228,11 +228,13 @@ type Usage struct {
 	UsageSemantic        string `json:"usage_semantic,omitempty"`
 	UsageSource          string `json:"usage_source,omitempty"`
 
-	PromptTokensDetails    InputTokenDetails  `json:"prompt_tokens_details"`
-	CompletionTokenDetails OutputTokenDetails `json:"completion_tokens_details"`
-	InputTokens            int                `json:"input_tokens"`
-	OutputTokens           int                `json:"output_tokens"`
-	InputTokensDetails     *InputTokenDetails `json:"input_tokens_details"`
+	PromptTokensDetails    InputTokenDetails   `json:"prompt_tokens_details"`
+	CompletionTokenDetails OutputTokenDetails  `json:"completion_tokens_details"`
+	InputTokens            int                 `json:"input_tokens"`
+	OutputTokens           int                 `json:"output_tokens"`
+	InputTokensDetails     *InputTokenDetails  `json:"input_tokens_details"`
+	OutputTokensDetails    *OutputTokenDetails `json:"output_tokens_details,omitempty"`
+	ReasoningTokens        int                 `json:"reasoning_tokens,omitempty"`
 
 	// claude cache 1h
 	ClaudeCacheCreation5mTokens int `json:"claude_cache_creation_5_m_tokens"`
@@ -266,10 +268,70 @@ type OutputTokenDetails struct {
 	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
+// ResponsesReasoningTokens returns reasoning usage using the Responses fields first,
+// with the Chat Completions detail field retained as a legacy fallback.
+func (u *Usage) ResponsesReasoningTokens() int {
+	if u == nil {
+		return 0
+	}
+	if u.ReasoningTokens != 0 {
+		return u.ReasoningTokens
+	}
+	if u.OutputTokensDetails != nil && u.OutputTokensDetails.ReasoningTokens != 0 {
+		return u.OutputTokensDetails.ReasoningTokens
+	}
+	return u.CompletionTokenDetails.ReasoningTokens
+}
+
+// EnsureResponsesOutputTokenDetails fills the Responses-native reasoning detail
+// without adding Chat Completions accounting fields to the upstream payload.
+func (u *Usage) EnsureResponsesOutputTokenDetails() {
+	if u == nil {
+		return
+	}
+	reasoningTokens := u.ResponsesReasoningTokens()
+	if reasoningTokens == 0 {
+		return
+	}
+	if u.OutputTokensDetails == nil {
+		u.OutputTokensDetails = &OutputTokenDetails{}
+	}
+	u.OutputTokensDetails.ReasoningTokens = reasoningTokens
+}
+
+// NormalizeResponsesUsage maps Responses token fields to their Chat Completions
+// equivalents while preserving an upstream total_tokens value when provided.
+func (u *Usage) NormalizeResponsesUsage() {
+	if u == nil {
+		return
+	}
+	if u.InputTokens != 0 {
+		u.PromptTokens = u.InputTokens
+	}
+	if u.OutputTokens != 0 {
+		u.CompletionTokens = u.OutputTokens
+	}
+	if u.InputTokensDetails != nil {
+		u.PromptTokensDetails.CachedTokens = u.InputTokensDetails.CachedTokens
+		u.PromptTokensDetails.CachedCreationTokens = u.InputTokensDetails.CachedCreationTokens
+		u.PromptTokensDetails.TextTokens = u.InputTokensDetails.TextTokens
+		u.PromptTokensDetails.AudioTokens = u.InputTokensDetails.AudioTokens
+		u.PromptTokensDetails.ImageTokens = u.InputTokensDetails.ImageTokens
+	}
+	reasoningTokens := u.ResponsesReasoningTokens()
+	if reasoningTokens != 0 {
+		u.CompletionTokenDetails.ReasoningTokens = reasoningTokens
+	}
+	u.EnsureResponsesOutputTokenDetails()
+	if u.TotalTokens == 0 {
+		u.TotalTokens = u.PromptTokens + u.CompletionTokens
+	}
+}
+
 type OpenAIResponsesResponse struct {
 	ID                 string             `json:"id"`
 	Object             string             `json:"object"`
-	CreatedAt          int                `json:"created_at"`
+	CreatedAt          float64            `json:"created_at"`
 	Status             json.RawMessage    `json:"status"`
 	Error              any                `json:"error,omitempty"`
 	IncompleteDetails  *IncompleteDetails `json:"incomplete_details,omitempty"`

@@ -442,7 +442,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 		case "response.function_call_arguments.done":
 
-		case "response.completed":
+		case "response.completed", "response.done":
 			if streamResp.Response != nil {
 				if streamResp.Response.Model != "" {
 					model = streamResp.Response.Model
@@ -451,28 +451,32 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 					createAt = int64(streamResp.Response.CreatedAt)
 				}
 				if streamResp.Response.Usage != nil {
-					if streamResp.Response.Usage.InputTokens != 0 {
-						usage.PromptTokens = streamResp.Response.Usage.InputTokens
-						usage.InputTokens = streamResp.Response.Usage.InputTokens
+					// Keep the Chat Completions usage shape: map Responses fields
+					// explicitly instead of copying the whole struct, so Responses-only
+					// fields (input_tokens, output_tokens_details, ...) do not leak
+					// into the chat usage chunk.
+					src := streamResp.Response.Usage
+					if src.InputTokens != 0 {
+						usage.PromptTokens = src.InputTokens
+						usage.InputTokens = src.InputTokens
 					}
-					if streamResp.Response.Usage.OutputTokens != 0 {
-						usage.CompletionTokens = streamResp.Response.Usage.OutputTokens
-						usage.OutputTokens = streamResp.Response.Usage.OutputTokens
+					if src.OutputTokens != 0 {
+						usage.CompletionTokens = src.OutputTokens
+						usage.OutputTokens = src.OutputTokens
 					}
-					if streamResp.Response.Usage.TotalTokens != 0 {
-						usage.TotalTokens = streamResp.Response.Usage.TotalTokens
+					if src.TotalTokens != 0 {
+						usage.TotalTokens = src.TotalTokens
 					} else {
 						usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 					}
-					if streamResp.Response.Usage.InputTokensDetails != nil {
-						usage.PromptTokensDetails.CachedTokens = streamResp.Response.Usage.InputTokensDetails.CachedTokens
-						usage.PromptTokensDetails.ImageTokens = streamResp.Response.Usage.InputTokensDetails.ImageTokens
-						usage.PromptTokensDetails.AudioTokens = streamResp.Response.Usage.InputTokensDetails.AudioTokens
+					if src.InputTokensDetails != nil {
+						usage.PromptTokensDetails.CachedTokens = src.InputTokensDetails.CachedTokens
+						usage.PromptTokensDetails.ImageTokens = src.InputTokensDetails.ImageTokens
+						usage.PromptTokensDetails.AudioTokens = src.InputTokensDetails.AudioTokens
 					}
-					if streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens != 0 {
-						usage.CompletionTokenDetails.ReasoningTokens = streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens
-					}
+					usage.CompletionTokenDetails.ReasoningTokens = src.ResponsesReasoningTokens()
 				}
+
 			}
 
 			if !sendStartIfNeeded() {

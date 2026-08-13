@@ -56,27 +56,22 @@ func UsageFromResponsesUsage(src *dto.Usage) *dto.Usage {
 	if src == nil {
 		return usage
 	}
-	if src.InputTokens != 0 {
-		usage.PromptTokens = src.InputTokens
-		usage.InputTokens = src.InputTokens
-	}
-	if src.OutputTokens != 0 {
-		usage.CompletionTokens = src.OutputTokens
-		usage.OutputTokens = src.OutputTokens
-	}
-	if src.TotalTokens != 0 {
-		usage.TotalTokens = src.TotalTokens
-	} else {
+	usage.PromptTokens = src.InputTokens
+	usage.CompletionTokens = src.OutputTokens
+	usage.InputTokens = src.InputTokens
+	usage.OutputTokens = src.OutputTokens
+	usage.TotalTokens = src.TotalTokens
+	if usage.TotalTokens == 0 {
 		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	}
 	if src.InputTokensDetails != nil {
 		usage.PromptTokensDetails.CachedTokens = src.InputTokensDetails.CachedTokens
+		usage.PromptTokensDetails.CachedCreationTokens = src.InputTokensDetails.CachedCreationTokens
 		usage.PromptTokensDetails.ImageTokens = src.InputTokensDetails.ImageTokens
+		usage.PromptTokensDetails.TextTokens = src.InputTokensDetails.TextTokens
 		usage.PromptTokensDetails.AudioTokens = src.InputTokensDetails.AudioTokens
 	}
-	if src.CompletionTokenDetails.ReasoningTokens != 0 {
-		usage.CompletionTokenDetails.ReasoningTokens = src.CompletionTokenDetails.ReasoningTokens
-	}
+	usage.CompletionTokenDetails.ReasoningTokens = src.ResponsesReasoningTokens()
 	return usage
 }
 
@@ -90,7 +85,7 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 
 	usage := UsageFromResponsesUsage(resp.Usage)
 
-	created := resp.CreatedAt
+	created := int64(resp.CreatedAt)
 
 	var toolCalls []dto.ToolCallResponse
 	if len(resp.Output) > 0 {

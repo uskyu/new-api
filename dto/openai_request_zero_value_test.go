@@ -56,7 +56,10 @@ func TestOpenAIResponsesRequestPreserveExplicitZeroValues(t *testing.T) {
 		"max_output_tokens":0,
 		"max_tool_calls":0,
 		"stream":false,
-		"top_p":0
+		"top_p":0,
+		"frequency_penalty":0,
+		"presence_penalty":0,
+		"service_tier":""
 	}`)
 
 	var req OpenAIResponsesRequest
@@ -70,6 +73,66 @@ func TestOpenAIResponsesRequestPreserveExplicitZeroValues(t *testing.T) {
 	require.True(t, gjson.GetBytes(encoded, "max_tool_calls").Exists())
 	require.True(t, gjson.GetBytes(encoded, "stream").Exists())
 	require.True(t, gjson.GetBytes(encoded, "top_p").Exists())
+	require.True(t, gjson.GetBytes(encoded, "frequency_penalty").Exists())
+	require.True(t, gjson.GetBytes(encoded, "presence_penalty").Exists())
+	require.True(t, gjson.GetBytes(encoded, "service_tier").Exists())
+	require.Empty(t, gjson.GetBytes(encoded, "service_tier").String())
+}
+
+func TestCodexResponsesFieldsRoundTrip(t *testing.T) {
+	raw := []byte(`{
+		"model":"gpt-5.1-codex",
+		"client_metadata":{"session_id":"abc"},
+		"reasoning":{"effort":"high","mode":"auto","context":{"turn":2}}
+	}`)
+
+	var req OpenAIResponsesRequest
+	require.NoError(t, common.Unmarshal(raw, &req))
+
+	encoded, err := common.Marshal(req)
+	require.NoError(t, err)
+	require.Equal(t, "abc", gjson.GetBytes(encoded, "client_metadata.session_id").String())
+	require.Equal(t, "auto", gjson.GetBytes(encoded, "reasoning.mode").String())
+	require.Equal(t, int64(2), gjson.GetBytes(encoded, "reasoning.context.turn").Int())
+}
+
+func TestOpenAIResponsesCompactionRequestFieldsRoundTrip(t *testing.T) {
+	raw := []byte(`{
+		"model":"gpt-5.1-codex",
+		"tools":[],
+		"parallel_tool_calls":false,
+		"reasoning":{"mode":"auto"},
+		"service_tier":"priority",
+		"prompt_cache_key":"cache-key",
+		"text":{"format":{"type":"text"}}
+	}`)
+
+	var req OpenAIResponsesCompactionRequest
+	require.NoError(t, common.Unmarshal(raw, &req))
+
+	encoded, err := common.Marshal(req)
+	require.NoError(t, err)
+	require.True(t, gjson.GetBytes(encoded, "parallel_tool_calls").Exists())
+	require.False(t, gjson.GetBytes(encoded, "parallel_tool_calls").Bool())
+	require.Equal(t, "priority", gjson.GetBytes(encoded, "service_tier").String())
+	require.Equal(t, "cache-key", gjson.GetBytes(encoded, "prompt_cache_key").String())
+	require.Equal(t, "auto", gjson.GetBytes(encoded, "reasoning.mode").String())
+	require.Equal(t, "text", gjson.GetBytes(encoded, "text.format.type").String())
+}
+
+func TestOpenAIResponsesCompactionRequestPreservesExplicitEmptyServiceTier(t *testing.T) {
+	var req OpenAIResponsesCompactionRequest
+	require.NoError(t, common.Unmarshal([]byte(`{"model":"gpt-5.1-codex","service_tier":""}`), &req))
+	require.NotNil(t, req.ServiceTier)
+
+	encoded, err := common.Marshal(req)
+	require.NoError(t, err)
+	require.True(t, gjson.GetBytes(encoded, "service_tier").Exists())
+	require.Empty(t, gjson.GetBytes(encoded, "service_tier").String())
+
+	var absent OpenAIResponsesCompactionRequest
+	require.NoError(t, common.Unmarshal([]byte(`{"model":"gpt-5.1-codex"}`), &absent))
+	require.Nil(t, absent.ServiceTier)
 }
 
 func TestGeneralOpenAIRequestGetSystemRoleName(t *testing.T) {

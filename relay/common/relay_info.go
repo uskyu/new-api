@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -153,6 +154,11 @@ type RelayInfo struct {
 	UseRuntimeHeadersOverride             bool
 	ParamOverrideAudit                    []string
 
+	// UpstreamRequestBodySize and UpstreamRequestGetBody describe a replayable
+	// upstream body whose concrete reader type is hidden from net/http.
+	UpstreamRequestBodySize int64
+	UpstreamRequestGetBody  func() (io.ReadCloser, error)
+
 	PriceData types.PriceData
 
 	Request dto.Request
@@ -176,6 +182,11 @@ type RelayInfo struct {
 }
 
 func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
+	// RelayInfo is reused across channel attempts. Body metadata belongs to the
+	// current attempt and may reference storage that has already been closed.
+	info.UpstreamRequestBodySize = 0
+	info.UpstreamRequestGetBody = nil
+
 	channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
 	paramOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelParamOverride)
 	headerOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelHeaderOverride)

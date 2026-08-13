@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -22,6 +23,22 @@ func CloseResponseBodyGracefully(httpResponse *http.Response) {
 	}
 }
 
+// ShouldCopyUpstreamHeader reports whether an upstream response header should
+// be copied to the client. Content-Length is managed locally, and the upstream
+// request ID is captured without overriding this instance's request ID.
+func ShouldCopyUpstreamHeader(c *gin.Context, key string, values []string) bool {
+	if strings.EqualFold(key, "Content-Length") {
+		return false
+	}
+	if strings.EqualFold(key, common.RequestIdKey) {
+		if c != nil && len(values) > 0 {
+			c.Set(common.UpstreamRequestIdKey, values[0])
+		}
+		return false
+	}
+	return true
+}
+
 func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 	if c.Writer == nil {
 		return
@@ -35,8 +52,7 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 	// For example, Postman will report error, and we cannot check the response at all.
 	if src != nil {
 		for k, v := range src.Header {
-			// avoid setting Content-Length
-			if k == "Content-Length" {
+			if !ShouldCopyUpstreamHeader(c, k, v) || len(v) == 0 {
 				continue
 			}
 			c.Writer.Header().Set(k, v[0])

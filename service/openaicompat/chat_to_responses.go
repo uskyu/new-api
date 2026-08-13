@@ -378,6 +378,8 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 		Instructions:      instructionsRaw,
 		Stream:            req.Stream,
 		Temperature:       req.Temperature,
+		FrequencyPenalty:  req.FrequencyPenalty,
+		PresencePenalty:   req.PresencePenalty,
 		Text:              textRaw,
 		ToolChoice:        toolChoiceRaw,
 		Tools:             toolsRaw,
