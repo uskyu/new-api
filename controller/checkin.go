@@ -13,6 +13,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func checkinTierResponse(tier *operation_setting.CheckinBonusTier) gin.H {
+	if tier == nil {
+		return nil
+	}
+	return gin.H{
+		"threshold": tier.Threshold,
+		"min_quota": tier.MinQuota,
+		"max_quota": tier.MaxQuota,
+	}
+}
+
 // GetCheckinStatus 获取用户签到状态和历史记录
 func GetCheckinStatus(c *gin.Context) {
 	setting := operation_setting.GetCheckinSetting()
@@ -21,7 +32,6 @@ func GetCheckinStatus(c *gin.Context) {
 		return
 	}
 	userId := c.GetInt("id")
-	// 获取月份参数，默认为当前月份
 	month := c.DefaultQuery("month", time.Now().Format("2006-01"))
 
 	stats, err := model.GetUserCheckinStats(userId, month)
@@ -33,33 +43,44 @@ func GetCheckinStatus(c *gin.Context) {
 		return
 	}
 
-	// bonus_enabled 由是否存在档位决定，旧开关（checkin_setting.bonus_enabled）已不再参与计算。
 	data := gin.H{
-		"enabled":         setting.Enabled,
-		"captcha_enabled": setting.CaptchaEnabled,
-		"captcha_kind":    setting.CaptchaKind,
-		"bonus_enabled":   len(setting.ActiveTiers()) > 0,
-		"bonus_metric":    setting.BonusMetric,
-		"bonus_tiers":     operation_setting.SortedUniqueTiers(setting.ActiveTiers()),
-		"stats":           stats,
+		"enabled":              setting.Enabled,
+		"captcha_enabled":      setting.CaptchaEnabled,
+		"captcha_kind":         setting.CaptchaKind,
+		"bonus_enabled":        len(setting.RequestCountTiers) > 0 || len(setting.QuotaConsumedTiers) > 0,
+		"bonus_metric":         setting.BonusMetric,
+		"bonus_tiers":          operation_setting.SortedUniqueTiers(setting.ActiveTiers()),
+		"request_count_tiers":  operation_setting.SortedUniqueTiers(setting.RequestCountTiers),
+		"quota_consumed_tiers": operation_setting.SortedUniqueTiers(setting.QuotaConsumedTiers),
+		"stats":                stats,
 	}
-	if len(setting.ActiveTiers()) > 0 {
-		calls, consumedQuota, err := model.GetYesterdayCheckinUsage(userId)
-		if err == nil {
-			data["yesterday_calls"] = calls
-			data["yesterday_quota"] = consumedQuota
-			metric := calls
-			if setting.BonusMetric == "quota_consumed" {
-				metric = consumedQuota
-			}
-			if tier := model.SelectCheckinTier(setting.ActiveTiers(), metric); tier != nil {
-				data["bonus_tier"] = gin.H{
-					"threshold": tier.Threshold,
-					"min_quota": tier.MinQuota,
-					"max_quota": tier.MaxQuota,
-				}
+	if len(setting.RequestCountTiers) > 0 || len(setting.QuotaConsumedTiers) > 0 {
+		calls, consumedQuota, usageErr := model.GetYesterdayCheckinUsage(userId)
+		if usageErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": usageErr.Error(),
+			})
+			return
+		}
+		decision := model.EvaluateCheckinReward(setting, calls, consumedQuota)
+		data["yesterday_calls"] = calls
+		data["yesterday_quota"] = consumedQuota
+		data["request_count_tier"] = checkinTierResponse(decision.RequestCount.Tier)
+		data["quota_consumed_tier"] = checkinTierResponse(decision.QuotaConsumed.Tier)
+		data["selected_bonus_metric"] = decision.Selected.Metric
+		data["selected_bonus_tier"] = checkinTierResponse(decision.Selected.Tier)
+
+		// Preserve legacy fields while mirroring the reward source actually selected.
+		if decision.Selected.Tier != nil {
+			data["bonus_metric"] = decision.Selected.Metric
+			if decision.Selected.Metric == "quota_consumed" {
+				data["bonus_tiers"] = operation_setting.SortedUniqueTiers(setting.QuotaConsumedTiers)
+			} else {
+				data["bonus_tiers"] = operation_setting.SortedUniqueTiers(setting.RequestCountTiers)
 			}
 		}
+		data["bonus_tier"] = checkinTierResponse(decision.Selected.Tier)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

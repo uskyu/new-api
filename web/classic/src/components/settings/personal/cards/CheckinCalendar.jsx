@@ -86,29 +86,14 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
     );
   }, [checkinData.stats?.records]);
 
-  // 状态接口通常已升序去重，这里仍做防御性校验，避免异常配置重复展示。
-  const bonusTiers = useMemo(() => {
-    const tiers = Array.isArray(checkinData?.bonus_tiers)
-      ? checkinData.bonus_tiers
-      : [];
+  const normalizeTiers = (tiers) => {
+    const source = Array.isArray(tiers) ? tiers : [];
     const seenThresholds = new Set();
-
-    return tiers
+    return source
       .filter((tier) => {
-        if (
-          tier?.threshold === null ||
-          tier?.threshold === undefined ||
-          tier?.min_quota === null ||
-          tier?.min_quota === undefined ||
-          tier?.max_quota === null ||
-          tier?.max_quota === undefined
-        ) {
-          return false;
-        }
-
-        const threshold = Number(tier.threshold);
-        const minQuota = Number(tier.min_quota);
-        const maxQuota = Number(tier.max_quota);
+        const threshold = Number(tier?.threshold);
+        const minQuota = Number(tier?.min_quota);
+        const maxQuota = Number(tier?.max_quota);
         if (
           !Number.isFinite(threshold) ||
           !Number.isFinite(minQuota) ||
@@ -120,19 +105,49 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
         ) {
           return false;
         }
-
         seenThresholds.add(threshold);
         return true;
       })
       .sort((a, b) => Number(a.threshold) - Number(b.threshold));
-  }, [checkinData?.bonus_tiers]);
+  };
 
-  const matchedTierThreshold = Number(checkinData?.bonus_tier?.threshold);
-  const matchedBonusTier = Number.isFinite(matchedTierThreshold)
-    ? bonusTiers.find((tier) => Number(tier.threshold) === matchedTierThreshold)
-    : null;
-  const hasMatchedTier = Boolean(matchedBonusTier);
-  const isQuotaMetric = checkinData?.bonus_metric === 'quota_consumed';
+  const isLegacyQuotaMetric = checkinData?.bonus_metric === 'quota_consumed';
+  const requestCountTiers = useMemo(
+    () =>
+      normalizeTiers(
+        checkinData?.request_count_tiers ??
+          (isLegacyQuotaMetric ? [] : checkinData?.bonus_tiers),
+      ),
+    [
+      checkinData?.request_count_tiers,
+      checkinData?.bonus_tiers,
+      isLegacyQuotaMetric,
+    ],
+  );
+  const quotaConsumedTiers = useMemo(
+    () =>
+      normalizeTiers(
+        checkinData?.quota_consumed_tiers ??
+          (isLegacyQuotaMetric ? checkinData?.bonus_tiers : []),
+      ),
+    [
+      checkinData?.quota_consumed_tiers,
+      checkinData?.bonus_tiers,
+      isLegacyQuotaMetric,
+    ],
+  );
+  const requestCountMatchedTier =
+    checkinData?.request_count_tier ??
+    (!isLegacyQuotaMetric ? checkinData?.bonus_tier : null);
+  const quotaConsumedMatchedTier =
+    checkinData?.quota_consumed_tier ??
+    (isLegacyQuotaMetric ? checkinData?.bonus_tier : null);
+  const selectedBonusMetric =
+    checkinData?.selected_bonus_metric ??
+    (checkinData?.bonus_tier ? checkinData?.bonus_metric : '');
+  const selectedBonusTier =
+    checkinData?.selected_bonus_tier ?? checkinData?.bonus_tier;
+  const hasMatchedTier = Boolean(selectedBonusTier);
 
   // 获取签到状态
   const fetchCheckinStatus = async (month) => {
@@ -420,7 +435,7 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
                     t('天')
                   : checkinData?.bonus_enabled
                     ? t('达标后随机获得对应档位奖励')
-                    : t('签到后可获得随机额度奖励')}
+                    : t('当前未配置签到奖励档位')}
             </div>
           </div>
         </div>
@@ -467,103 +482,149 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
           </div>
         </div>
 
-        {/* 活跃阶梯档位展示：始终展示全部有效档位，仅最高命中档发放 */}
-        {checkinData?.bonus_enabled && bonusTiers.length > 0 && (
-          <div className='mb-4 rounded-xl anime-tier-panel overflow-hidden'>
-            <div className='flex flex-col gap-1 px-3 py-2 anime-tier-header sm:flex-row sm:items-center sm:justify-between'>
-              <span className='text-xs font-semibold text-gray-700 dark:text-gray-300'>
-                {t('活跃奖励档位')}
-              </span>
-              <span className='text-[11px] break-words text-gray-500 dark:text-gray-400 sm:text-right'>
-                {isQuotaMetric
-                  ? `${t('昨日消耗额度')} ${renderQuota(checkinData.yesterday_quota ?? 0, 6)}`
-                  : `${t('昨日调用次数')} ${checkinData.yesterday_calls ?? 0} ${t('次')}`}
-              </span>
-            </div>
-
+        {/* 两套指标同时展示：各自取最高命中档，最终只发放奖励上限更高的一套 */}
+        {checkinData?.bonus_enabled && (
+          <div className='mb-4 space-y-4'>
+            {[
+              {
+                key: 'request_count',
+                title: t('按昨日调用次数'),
+                metric: checkinData.yesterday_calls ?? 0,
+                metricText: `${checkinData.yesterday_calls ?? 0} ${t('次')}`,
+                tiers: requestCountTiers,
+                matchedTier: requestCountMatchedTier,
+                isSelected: selectedBonusMetric === 'request_count',
+                formatThreshold: (value) => `${value} ${t('次')}`,
+              },
+              {
+                key: 'quota_consumed',
+                title: t('按昨日消耗额度'),
+                metric: checkinData.yesterday_quota ?? 0,
+                metricText: renderQuota(checkinData.yesterday_quota ?? 0, 6),
+                tiers: quotaConsumedTiers,
+                matchedTier: quotaConsumedMatchedTier,
+                isSelected: selectedBonusMetric === 'quota_consumed',
+                formatThreshold: (value) => renderQuota(value, 6),
+              },
+            ].map((metricConfig) => {
+              const matchedThreshold = Number(
+                metricConfig.matchedTier?.threshold,
+              );
+              const hasMatch = Boolean(metricConfig.matchedTier);
+              return (
+                <div
+                  key={metricConfig.key}
+                  className='rounded-xl anime-tier-panel overflow-hidden'
+                >
+                  <div className='flex flex-col gap-1 px-3 py-2 anime-tier-header sm:flex-row sm:items-center sm:justify-between'>
+                    <span className='text-xs font-semibold text-gray-700 dark:text-gray-300'>
+                      {metricConfig.title}
+                    </span>
+                    <span className='text-[11px] break-words text-gray-500 dark:text-gray-400 sm:text-right'>
+                      {metricConfig.metricText}
+                    </span>
+                  </div>
+                  <div
+                    className={`anime-tier-summary ${
+                      hasMatch ? '' : 'anime-tier-summary-empty'
+                    }`}
+                  >
+                    {hasMatch ? (
+                      <>
+                        <span className='font-semibold'>
+                          {metricConfig.isSelected
+                            ? t('最终采用此规则')
+                            : t('已达标，仅作为候选规则')}
+                        </span>{' '}
+                        <span className='break-words'>
+                          {t('奖励范围')}:{' '}
+                          {renderQuota(metricConfig.matchedTier.min_quota, 6)} -{' '}
+                          {renderQuota(metricConfig.matchedTier.max_quota, 6)}
+                        </span>
+                      </>
+                    ) : (
+                      <span className='font-semibold'>
+                        {metricConfig.tiers.length === 0
+                          ? t('未配置档位')
+                          : t('未达标')}
+                      </span>
+                    )}
+                  </div>
+                  <div className='divide-y divide-gray-100 dark:divide-gray-800'>
+                    {metricConfig.tiers.map((tier) => {
+                      const threshold = Number(tier.threshold);
+                      const isCurrent =
+                        hasMatch && threshold === matchedThreshold;
+                      const isAchieved =
+                        Number(metricConfig.metric) >= threshold;
+                      return (
+                        <div
+                          key={`${metricConfig.key}-${threshold}`}
+                          className={`flex flex-col gap-1.5 px-3 py-2 sm:flex-row sm:items-center sm:justify-between ${
+                            isCurrent
+                              ? 'anime-tier-active'
+                              : isAchieved
+                                ? 'anime-tier-achieved'
+                                : 'anime-tier-row'
+                          }`}
+                        >
+                          <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
+                            <span
+                              className={`text-xs ${
+                                isCurrent
+                                  ? 'font-semibold anime-text-pink'
+                                  : 'text-gray-600 dark:text-gray-400'
+                              }`}
+                            >
+                              ≥ {metricConfig.formatThreshold(threshold)}
+                            </span>
+                            <span
+                              className={`anime-tier-status ${
+                                isCurrent
+                                  ? 'anime-tier-badge'
+                                  : isAchieved
+                                    ? 'anime-tier-status-achieved'
+                                    : 'anime-tier-status-pending'
+                              }`}
+                            >
+                              {isCurrent
+                                ? metricConfig.isSelected
+                                  ? t('已达标 · 最终档位')
+                                  : t('已达标 · 候选档位')
+                                : isAchieved
+                                  ? t('已达标')
+                                  : t('未达标')}
+                            </span>
+                          </span>
+                          <span className='min-w-0 text-xs break-words text-gray-600 dark:text-gray-400 sm:text-right'>
+                            {t('奖励范围')}:{' '}
+                            <span className={isCurrent ? 'font-semibold' : ''}>
+                              {renderQuota(tier.min_quota, 6)} -{' '}
+                              {renderQuota(tier.max_quota, 6)}
+                            </span>
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
             <div
               className={`anime-tier-summary ${
                 hasMatchedTier ? '' : 'anime-tier-summary-empty'
               }`}
             >
-              {hasMatchedTier ? (
-                <>
-                  <span className='font-semibold'>
-                    {t('适用最高档奖励范围')}
-                  </span>{' '}
-                  <span className='break-words'>
-                    {renderQuota(matchedBonusTier.min_quota, 6)} -{' '}
-                    {renderQuota(matchedBonusTier.max_quota, 6)}
-                  </span>
-                </>
-              ) : (
-                <span className='font-semibold'>
-                  {t('昨日未达标，本次签到奖励为 0')}
-                </span>
-              )}
+              {hasMatchedTier
+                ? `${t('最终奖励来源')}: ${
+                    selectedBonusMetric === 'quota_consumed'
+                      ? t('昨日消耗额度')
+                      : t('昨日调用次数')
+                  }`
+                : t('昨日未达标，本次签到奖励为 0')}
               <div className='mt-0.5 text-[10px] font-normal opacity-80'>
-                {t('仅最高命中档发放，各档奖励不叠加')}
+                {t('两套规则只选择一套奖励，不叠加')}
               </div>
-            </div>
-
-            <div className='divide-y divide-gray-100 dark:divide-gray-800'>
-              {bonusTiers.map((tier) => {
-                const threshold = Number(tier.threshold);
-                const isCurrent =
-                  hasMatchedTier && threshold === matchedTierThreshold;
-                const isAchieved =
-                  hasMatchedTier && threshold <= matchedTierThreshold;
-
-                return (
-                  <div
-                    key={threshold}
-                    className={`flex flex-col gap-1.5 px-3 py-2 sm:flex-row sm:items-center sm:justify-between ${
-                      isCurrent
-                        ? 'anime-tier-active'
-                        : isAchieved
-                          ? 'anime-tier-achieved'
-                          : 'anime-tier-row'
-                    }`}
-                  >
-                    <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
-                      <span
-                        className={`text-xs ${
-                          isCurrent
-                            ? 'font-semibold anime-text-pink'
-                            : 'text-gray-600 dark:text-gray-400'
-                        }`}
-                      >
-                        ≥{' '}
-                        {isQuotaMetric
-                          ? renderQuota(tier.threshold, 6)
-                          : `${tier.threshold} ${t('次')}`}
-                      </span>
-                      <span
-                        className={`anime-tier-status ${
-                          isCurrent
-                            ? 'anime-tier-badge'
-                            : isAchieved
-                              ? 'anime-tier-status-achieved'
-                              : 'anime-tier-status-pending'
-                        }`}
-                      >
-                        {isCurrent
-                          ? t('已达标 · 当前档位')
-                          : isAchieved
-                            ? t('已达标')
-                            : t('未达标')}
-                      </span>
-                    </span>
-                    <span className='min-w-0 text-xs break-words text-gray-600 dark:text-gray-400 sm:text-right'>
-                      {t('奖励范围')}:{' '}
-                      <span className={isCurrent ? 'font-semibold' : ''}>
-                        {renderQuota(tier.min_quota, 6)} -{' '}
-                        {renderQuota(tier.max_quota, 6)}
-                      </span>
-                    </span>
-                  </div>
-                );
-              })}
             </div>
           </div>
         )}
@@ -627,8 +688,8 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
             <ul className='list-disc list-inside space-y-0.5'>
               <li>
                 {checkinData?.bonus_enabled
-                  ? t('达标后随机获得对应档位奖励，仅最高档生效且不叠加')
-                  : t('签到后可随机获得管理员设置的额度奖励')}
+                  ? t('两套规则同时判定，最终只发放奖励上限更高的一套')
+                  : t('当前未配置签到奖励档位，签到奖励为 0')}
               </li>
               <li>{t('签到奖励将直接添加到您的账户余额')}</li>
               <li>{t('每日仅可签到一次，请勿重复签到')}</li>

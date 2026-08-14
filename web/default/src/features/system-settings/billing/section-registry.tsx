@@ -189,31 +189,18 @@ const BILLING_SECTIONS = [
   {
     id: 'checkin',
     titleKey: 'Check-in Rewards',
-    build: (settings: BillingSettings) => {
-      const metric = settings['checkin_setting.bonus_metric']
-      const activeTiers =
-        metric === 'quota_consumed'
-          ? settings['checkin_setting.quota_consumed_tiers']
-          : settings['checkin_setting.request_count_tiers']
-      return (
-        <CheckinSettingsSection
-          defaultValues={{
-            enabled: settings['checkin_setting.enabled'],
-            minQuota: settings['checkin_setting.min_quota'],
-            maxQuota: settings['checkin_setting.max_quota'],
-            captchaEnabled: settings['checkin_setting.captcha_enabled'],
-            captchaKind: settings['checkin_setting.captcha_kind'],
-            bonusEnabled: settings['checkin_setting.bonus_enabled'],
-            bonusMetric: settings['checkin_setting.bonus_metric'],
-            bonusTiers: activeTiers,
-            requestCountTiers:
-              settings['checkin_setting.request_count_tiers'],
-            quotaConsumedTiers:
-              settings['checkin_setting.quota_consumed_tiers'],
-          }}
-        />
-      )
-    },
+    build: (settings: BillingSettings) => (
+      <CheckinSettingsSection
+        defaultValues={{
+          enabled: settings['checkin_setting.enabled'],
+          captchaEnabled: settings['checkin_setting.captcha_enabled'],
+          captchaKind: settings['checkin_setting.captcha_kind'],
+          requestCountTiers: settings['checkin_setting.request_count_tiers'],
+          quotaConsumedTiers:
+            settings['checkin_setting.quota_consumed_tiers'],
+        }}
+      />
+    ),
   },
 ] as const
 

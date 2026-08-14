@@ -82,17 +82,76 @@ func SelectCheckinTier(tiers []operation_setting.CheckinBonusTier, metric int64)
 	return selected
 }
 
-// selectCheckinReward 计算签到奖励：奖励全部来自活跃档位。
-// 未命中任何档位时奖励为 0；命中多个档位时仅按 threshold 最高的档位发放，各档奖励不叠加。
-func selectCheckinReward(setting *operation_setting.CheckinSetting, metric int64) int {
-	tier := SelectCheckinTier(setting.ActiveTiers(), metric)
-	if tier == nil || tier.MaxQuota < tier.MinQuota {
+// CheckinRewardCandidate describes the highest matched tier for one metric.
+type CheckinRewardCandidate struct {
+	Metric string
+	Tier   *operation_setting.CheckinBonusTier
+}
+
+// CheckinRewardDecision contains both metric matches and the single selected reward source.
+type CheckinRewardDecision struct {
+	RequestCount  CheckinRewardCandidate
+	QuotaConsumed CheckinRewardCandidate
+	Selected      CheckinRewardCandidate
+}
+
+func validCheckinTier(tier *operation_setting.CheckinBonusTier) bool {
+	return tier != nil && tier.MinQuota >= 0 && tier.MaxQuota >= tier.MinQuota
+}
+
+func selectTierReward(tier *operation_setting.CheckinBonusTier) int {
+	if !validCheckinTier(tier) {
 		return 0
 	}
 	if tier.MinQuota == tier.MaxQuota {
 		return tier.MinQuota
 	}
 	return tier.MinQuota + rand.Intn(tier.MaxQuota-tier.MinQuota+1)
+}
+
+// EvaluateCheckinReward matches both metrics and selects one candidate.
+// Each metric uses only its highest-threshold matched tier. Candidates are
+// compared by max_quota; ties prefer request_count for deterministic behavior.
+func EvaluateCheckinReward(setting *operation_setting.CheckinSetting, calls, consumedQuota int64) CheckinRewardDecision {
+	decision := CheckinRewardDecision{
+		RequestCount:  CheckinRewardCandidate{Metric: "request_count", Tier: nil},
+		QuotaConsumed: CheckinRewardCandidate{Metric: "quota_consumed", Tier: nil},
+	}
+	if setting == nil {
+		return decision
+	}
+	requestTier := SelectCheckinTier(setting.RequestCountTiers, calls)
+	if validCheckinTier(requestTier) {
+		decision.RequestCount.Tier = requestTier
+	}
+	quotaTier := SelectCheckinTier(setting.QuotaConsumedTiers, consumedQuota)
+	if validCheckinTier(quotaTier) {
+		decision.QuotaConsumed.Tier = quotaTier
+	}
+
+	if decision.RequestCount.Tier != nil {
+		decision.Selected = decision.RequestCount
+	}
+	if decision.QuotaConsumed.Tier != nil &&
+		(decision.Selected.Tier == nil || decision.QuotaConsumed.Tier.MaxQuota > decision.Selected.Tier.MaxQuota) {
+		decision.Selected = decision.QuotaConsumed
+	}
+	return decision
+}
+
+// SelectCheckinReward evaluates both active metrics and randomizes exactly once
+// inside the selected tier. Rewards from the two metrics are never added.
+func SelectCheckinReward(setting *operation_setting.CheckinSetting, calls, consumedQuota int64) (int, CheckinRewardDecision) {
+	decision := EvaluateCheckinReward(setting, calls, consumedQuota)
+	return selectTierReward(decision.Selected.Tier), decision
+}
+
+// selectCheckinReward preserves the single-metric helper used by legacy tests.
+func selectCheckinReward(setting *operation_setting.CheckinSetting, metric int64) int {
+	if setting == nil {
+		return 0
+	}
+	return selectTierReward(SelectCheckinTier(setting.ActiveTiers(), metric))
 }
 
 // UserCheckin 执行用户签到
@@ -113,18 +172,15 @@ func UserCheckin(userId int) (*Checkin, error) {
 		return nil, errors.New("今日已签到")
 	}
 
-	// 计算签到奖励：全部来自活跃档位，未命中时奖励为 0。
+	// 计算签到奖励：两套指标同时判定，最终只发放一套奖励。
 	// 不再使用基础签到额度（checkin_setting.min_quota/max_quota）。
 	quotaAwarded := 0
-	if len(setting.ActiveTiers()) > 0 {
+	if len(setting.RequestCountTiers) > 0 || len(setting.QuotaConsumedTiers) > 0 {
 		calls, consumedQuota, usageErr := GetYesterdayCheckinUsage(userId)
-		if usageErr == nil {
-			metric := calls
-			if setting.BonusMetric == "quota_consumed" {
-				metric = consumedQuota
-			}
-			quotaAwarded = selectCheckinReward(setting, metric)
+		if usageErr != nil {
+			return nil, usageErr
 		}
+		quotaAwarded, _ = SelectCheckinReward(setting, calls, consumedQuota)
 	}
 
 	today := time.Now().Format("2006-01-02")

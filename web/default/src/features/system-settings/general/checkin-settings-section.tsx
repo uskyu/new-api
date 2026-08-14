@@ -46,7 +46,6 @@ import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
 import {
   SettingsForm,
-  SettingsFormGrid,
   SettingsFormGridItem,
   SettingsSwitchContent,
   SettingsSwitchItem,
@@ -58,15 +57,8 @@ import { useUpdateOption } from '../hooks/use-update-option'
 
 const checkinSchema = z.object({
   enabled: z.boolean(),
-  minQuota: z.coerce.number().int().min(0),
-  maxQuota: z.coerce.number().int().min(0),
   captchaEnabled: z.boolean(),
   captchaKind: z.string(),
-  bonusEnabled: z.boolean(),
-  bonusMetric: z.string(),
-  // 渲染/编辑载体：始终指向当前指标对应的套
-  bonusTiers: z.string(),
-  // 两套独立档位（按次 / 按额度），各自保存互不覆盖
   requestCountTiers: z.string(),
   quotaConsumedTiers: z.string(),
 })
@@ -80,30 +72,23 @@ type CheckinBonusTier = {
 }
 
 type CheckinSettingsSectionProps = {
-  defaultValues: CheckinFormValues & {
-    requestCountTiers: string
-    quotaConsumedTiers: string
-  }
+  defaultValues: CheckinFormValues
 }
 
 const OPTION_KEY_MAP: Record<string, string> = {
   enabled: 'checkin_setting.enabled',
-  minQuota: 'checkin_setting.min_quota',
-  maxQuota: 'checkin_setting.max_quota',
   captchaEnabled: 'checkin_setting.captcha_enabled',
   captchaKind: 'checkin_setting.captcha_kind',
-  bonusEnabled: 'checkin_setting.bonus_enabled',
-  bonusMetric: 'checkin_setting.bonus_metric',
-  // bonusTiers 仅作渲染载体，不直接保存；保存走下面两个独立键
   requestCountTiers: 'checkin_setting.request_count_tiers',
   quotaConsumedTiers: 'checkin_setting.quota_consumed_tiers',
 }
 
-// 指标 -> 表单字段 映射
-const TIER_FIELD_BY_METRIC: Record<string, keyof CheckinFormValues> = {
+const TIER_FIELD_BY_METRIC = {
   request_count: 'requestCountTiers',
   quota_consumed: 'quotaConsumedTiers',
-}
+} as const
+
+type CheckinMetric = keyof typeof TIER_FIELD_BY_METRIC
 
 function parseBonusTiers(raw: string | undefined): CheckinBonusTier[] {
   if (!raw) return []
@@ -121,11 +106,14 @@ export function CheckinSettingsSection({
 }: CheckinSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-  const [tiers, setTiers] = useState<CheckinBonusTier[]>(() =>
-    parseBonusTiers(defaultValues.bonusTiers)
-  )
+  const [tiersByMetric, setTiersByMetric] = useState<
+    Record<CheckinMetric, CheckinBonusTier[]>
+  >(() => ({
+    request_count: parseBonusTiers(defaultValues.requestCountTiers),
+    quota_consumed: parseBonusTiers(defaultValues.quotaConsumedTiers),
+  }))
 
-  const { form, handleSubmit, handleReset, isDirty, isSubmitting } =
+  const { form, handleSubmit, handleReset: resetForm, isDirty, isSubmitting } =
     useSettingsForm<CheckinFormValues>({
       resolver: zodResolver(checkinSchema) as Resolver<
         CheckinFormValues,
@@ -144,10 +132,13 @@ export function CheckinSettingsSection({
           ) {
             serialized = String(serialized)
           }
-          await updateOption.mutateAsync({
+          const result = await updateOption.mutateAsync({
             key: optionKey,
             value: serialized,
           })
+          if (!result.success) {
+            throw new Error(result.message || t('Failed to update setting'))
+          }
         }
       },
     })
@@ -155,76 +146,65 @@ export function CheckinSettingsSection({
   const enabled = form.watch('enabled') ?? defaultValues.enabled
   const captchaEnabled =
     form.watch('captchaEnabled') ?? defaultValues.captchaEnabled
-  const bonusEnabled = form.watch('bonusEnabled') ?? defaultValues.bonusEnabled
-  const bonusMetric = form.watch('bonusMetric') ?? defaultValues.bonusMetric
 
   useEffect(() => {
-    setTiers(parseBonusTiers(defaultValues.bonusTiers))
-  }, [defaultValues.bonusTiers])
-
-  const currentMetricField = () =>
-    TIER_FIELD_BY_METRIC[bonusMetric] ?? 'requestCountTiers'
-
-  const updateTiers = (next: CheckinBonusTier[]) => {
-    setTiers(next)
-    const serialized = JSON.stringify(next)
-    // 同时写入渲染载体与当前指标对应的独立字段
-    form.setValue('bonusTiers', serialized, {
-      shouldDirty: true,
-      shouldTouch: true,
+    setTiersByMetric({
+      request_count: parseBonusTiers(defaultValues.requestCountTiers),
+      quota_consumed: parseBonusTiers(defaultValues.quotaConsumedTiers),
     })
-    form.setValue(currentMetricField(), serialized, {
-      shouldDirty: true,
-      shouldTouch: true,
+  }, [defaultValues.requestCountTiers, defaultValues.quotaConsumedTiers])
+
+  const handleReset = () => {
+    resetForm()
+    setTiersByMetric({
+      request_count: parseBonusTiers(defaultValues.requestCountTiers),
+      quota_consumed: parseBonusTiers(defaultValues.quotaConsumedTiers),
     })
   }
 
-  // 切换统计口径：先把当前编辑存入原指标字段，再从目标指标字段加载，
-  // 两套数据各自独立，切换互不覆盖、不丢失未保存的编辑。
-  const handleMetricChange = (value: string) => {
-    const oldField = TIER_FIELD_BY_METRIC[bonusMetric] ?? 'requestCountTiers'
-    form.setValue(oldField, form.getValues('bonusTiers'), {
-      shouldDirty: true,
-      shouldTouch: true,
-    })
-    const nextField = TIER_FIELD_BY_METRIC[value] ?? 'requestCountTiers'
-    const nextRaw =
-      form.getValues(nextField) ||
-      (value === 'quota_consumed'
-        ? defaultValues.quotaConsumedTiers
-        : defaultValues.requestCountTiers)
-    const nextTiers = parseBonusTiers(nextRaw)
-    setTiers(nextTiers)
-    form.setValue('bonusTiers', JSON.stringify(nextTiers), {
-      shouldDirty: true,
-      shouldTouch: true,
-    })
-    form.setValue('bonusMetric', value, {
+  const updateTiers = (metric: CheckinMetric, next: CheckinBonusTier[]) => {
+    const sorted = [...next].sort((a, b) => a.threshold - b.threshold)
+    setTiersByMetric((current) => ({ ...current, [metric]: next }))
+    form.setValue(TIER_FIELD_BY_METRIC[metric], JSON.stringify(sorted), {
       shouldDirty: true,
       shouldTouch: true,
     })
   }
 
   const handleTierChange = (
+    metric: CheckinMetric,
     index: number,
     field: keyof CheckinBonusTier,
     raw: string | number
   ) => {
-    const next = tiers.map((tier, tierIndex) =>
+    const next = tiersByMetric[metric].map((tier, tierIndex) =>
       tierIndex === index ? { ...tier, [field]: Number(raw) || 0 } : tier
     )
-    updateTiers(next)
+    updateTiers(metric, next)
   }
 
-  const handleAddTier = () => {
-    updateTiers([
+  const handleAddTier = (metric: CheckinMetric) => {
+    const tiers = tiersByMetric[metric]
+    const maxThreshold = tiers.reduce(
+      (max, tier) => Math.max(max, tier.threshold),
+      0
+    )
+    const step = metric === 'quota_consumed' ? 50000 : 50
+    updateTiers(metric, [
       ...tiers,
-      { threshold: 50, min_quota: 2000, max_quota: 20000 },
+      {
+        threshold: tiers.length === 0 ? step : maxThreshold + step,
+        min_quota: 2000,
+        max_quota: 20000,
+      },
     ])
   }
 
-  const handleRemoveTier = (index: number) => {
-    updateTiers(tiers.filter((_, tierIndex) => tierIndex !== index))
+  const handleRemoveTier = (metric: CheckinMetric, index: number) => {
+    updateTiers(
+      metric,
+      tiersByMetric[metric].filter((_, tierIndex) => tierIndex !== index)
+    )
   }
 
   return (
@@ -264,64 +244,6 @@ export function CheckinSettingsSection({
               </SettingsSwitchItem>
             )}
           />
-
-          {enabled && (
-            <SettingsFormGrid>
-              <FormField
-                control={form.control}
-                name='minQuota'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Minimum check-in quota')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        type='number'
-                        min={0}
-                        value={field.value ?? ''}
-                        onChange={(event) =>
-                          field.onChange(event.target.valueAsNumber)
-                        }
-                        name={field.name}
-                        onBlur={field.onBlur}
-                        ref={field.ref}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t('Minimum quota amount awarded for check-in')}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='maxQuota'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Maximum check-in quota')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        type='number'
-                        min={0}
-                        value={field.value ?? ''}
-                        onChange={(event) =>
-                          field.onChange(event.target.valueAsNumber)
-                        }
-                        name={field.name}
-                        onBlur={field.onBlur}
-                        ref={field.ref}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t('Maximum quota amount awarded for check-in')}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </SettingsFormGrid>
-          )}
 
           {enabled && (
             <>
@@ -386,176 +308,128 @@ export function CheckinSettingsSection({
                 </SettingsFormGridItem>
               )}
 
-              <FormField
-                control={form.control}
-                name='bonusEnabled'
-                render={({ field }) => (
-                  <SettingsSwitchItem>
-                    <SettingsSwitchContent>
-                      <FormLabel>{t('Enable active tier rewards')}</FormLabel>
-                      <FormDescription>
-                        {t(
-                          'Reward users by the matched tier range based on yesterday usage'
-                        )}
-                      </FormDescription>
-                    </SettingsSwitchContent>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                        disabled={updateOption.isPending || isSubmitting}
-                      />
-                    </FormControl>
-                  </SettingsSwitchItem>
-                )}
-              />
+              <SettingsFormGridItem>
+                <FormDescription>
+                  {t(
+                    'Both request count and quota consumption are evaluated. Only the matched tier with the higher maximum reward is used, and rewards are not stacked.'
+                  )}
+                </FormDescription>
+              </SettingsFormGridItem>
 
-              {bonusEnabled && (
-                <>
-                  <SettingsFormGridItem>
-                    <FormField
-                      control={form.control}
-                      name='bonusMetric'
-                      defaultValue={defaultValues.bonusMetric}
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('Metric')}</FormLabel>
-                          <Select
-                            value={field.value}
-                            onValueChange={(value) => {
-                              handleMetricChange(value)
-                              field.onChange(value)
-                            }}
-                          >
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectGroup>
-                                <SelectItem value='request_count'>
-                                  {t('Yesterday Request Count')}
-                                </SelectItem>
-                                <SelectItem value='quota_consumed'>
-                                  {t('Yesterday Quota Consumed')}
-                                </SelectItem>
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
-                          <FormDescription>{t('Metric')}</FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </SettingsFormGridItem>
-
-                  <SettingsFormGridItem>
-                    <div className='space-y-2'>
-                      <div className='text-sm font-medium'>
-                        {t('Active Tier Rewards')}
-                      </div>
-                      <div className='text-muted-foreground hidden grid-cols-4 gap-2 text-xs font-medium md:grid'>
-                        <div>
-                          {bonusMetric === 'quota_consumed'
-                            ? t('Yesterday Quota Threshold')
-                            : t('Yesterday Call Threshold (calls)')}
-                        </div>
-                        <div>{t('Minimum Reward (quota)')}</div>
-                        <div>{t('Maximum Reward (quota)')}</div>
-                        <div>{t('Actions')}</div>
-                      </div>
-                      {tiers.map((tier, index) => (
-                        <div
-                          key={index}
-                          className='bg-muted/30 grid grid-cols-2 gap-2 rounded-lg border p-3 md:grid-cols-4'
-                        >
-                          <div className='flex flex-col gap-1'>
-                            <span className='text-muted-foreground text-xs md:hidden'>
-                              {bonusMetric === 'quota_consumed'
-                                ? t('Threshold (tokens)')
-                                : t('Threshold (calls)')}
-                            </span>
-                            <Input
-                              type='number'
-                              min={0}
-                              value={tier.threshold}
-                              placeholder={
-                                bonusMetric === 'quota_consumed'
-                                  ? t('Quota Threshold')
-                                  : t('Calls Threshold')
-                              }
-                              onChange={(event) =>
-                                handleTierChange(
-                                  index,
-                                  'threshold',
-                                  event.target.valueAsNumber
-                                )
-                              }
-                            />
-                          </div>
-                          <div className='flex flex-col gap-1'>
-                            <span className='text-muted-foreground text-xs md:hidden'>
-                              {t('Minimum Reward (tokens)')}
-                            </span>
-                            <Input
-                              type='number'
-                              min={0}
-                              value={tier.min_quota}
-                              placeholder={t('Minimum (quota)')}
-                              onChange={(event) =>
-                                handleTierChange(
-                                  index,
-                                  'min_quota',
-                                  event.target.valueAsNumber
-                                )
-                              }
-                            />
-                          </div>
-                          <div className='flex flex-col gap-1'>
-                            <span className='text-muted-foreground text-xs md:hidden'>
-                              {t('Maximum Reward (tokens)')}
-                            </span>
-                            <Input
-                              type='number'
-                              min={0}
-                              value={tier.max_quota}
-                              placeholder={t('Maximum (quota)')}
-                              onChange={(event) =>
-                                handleTierChange(
-                                  index,
-                                  'max_quota',
-                                  event.target.valueAsNumber
-                                )
-                              }
-                            />
-                          </div>
-                          <div className='col-span-2 flex items-center justify-end md:col-span-1'>
-                            <Button
-                              type='button'
-                              variant='ghost'
-                              size='icon'
-                              aria-label={t('Delete')}
-                              onClick={() => handleRemoveTier(index)}
-                            >
-                              <Trash2 className='size-4' />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                      <Button
-                        type='button'
-                        variant='outline'
-                        size='sm'
-                        onClick={handleAddTier}
-                      >
-                        <Plus className='size-4' />
-                        {t('Add tier')}
-                      </Button>
+              {(
+                [
+                  {
+                    metric: 'request_count',
+                    title: t('Yesterday Request Count'),
+                    thresholdLabel: t('Yesterday Call Threshold (calls)'),
+                    thresholdPlaceholder: t('Calls Threshold'),
+                  },
+                  {
+                    metric: 'quota_consumed',
+                    title: t('Yesterday Quota Consumed'),
+                    thresholdLabel: t('Yesterday Quota Threshold'),
+                    thresholdPlaceholder: t('Quota Threshold'),
+                  },
+                ] as const
+              ).map((config) => (
+                <SettingsFormGridItem key={config.metric}>
+                  <div className='space-y-2 rounded-lg border p-4'>
+                    <div className='text-sm font-medium'>{config.title}</div>
+                    <div className='text-muted-foreground hidden grid-cols-4 gap-2 text-xs font-medium md:grid'>
+                      <div>{config.thresholdLabel}</div>
+                      <div>{t('Minimum Reward (quota)')}</div>
+                      <div>{t('Maximum Reward (quota)')}</div>
+                      <div>{t('Actions')}</div>
                     </div>
-                  </SettingsFormGridItem>
-                </>
-              )}
+                    {tiersByMetric[config.metric].map((tier, index) => (
+                      <div
+                        key={`${config.metric}-${index}`}
+                        className='bg-muted/30 grid grid-cols-2 gap-2 rounded-lg border p-3 md:grid-cols-4'
+                      >
+                        <div className='space-y-1'>
+                          <div className='text-muted-foreground text-xs md:hidden'>
+                            {config.thresholdLabel}
+                          </div>
+                          <Input
+                            type='number'
+                            min={0}
+                            value={tier.threshold}
+                            placeholder={config.thresholdPlaceholder}
+                            onChange={(event) =>
+                              handleTierChange(
+                                config.metric,
+                                index,
+                                'threshold',
+                                event.target.valueAsNumber
+                              )
+                            }
+                          />
+                        </div>
+                        <div className='space-y-1'>
+                          <div className='text-muted-foreground text-xs md:hidden'>
+                            {t('Minimum Reward (quota)')}
+                          </div>
+                          <Input
+                            type='number'
+                            min={0}
+                            value={tier.min_quota}
+                            placeholder={t('Minimum (quota)')}
+                            onChange={(event) =>
+                              handleTierChange(
+                                config.metric,
+                                index,
+                                'min_quota',
+                                event.target.valueAsNumber
+                              )
+                            }
+                          />
+                        </div>
+                        <div className='space-y-1'>
+                          <div className='text-muted-foreground text-xs md:hidden'>
+                            {t('Maximum Reward (quota)')}
+                          </div>
+                          <Input
+                            type='number'
+                            min={0}
+                            value={tier.max_quota}
+                            placeholder={t('Maximum (quota)')}
+                            onChange={(event) =>
+                              handleTierChange(
+                                config.metric,
+                                index,
+                                'max_quota',
+                                event.target.valueAsNumber
+                              )
+                            }
+                          />
+                        </div>
+                        <div className='col-span-2 flex items-center justify-end md:col-span-1'>
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='icon'
+                            aria-label={t('Delete')}
+                            onClick={() =>
+                              handleRemoveTier(config.metric, index)
+                            }
+                          >
+                            <Trash2 className='size-4' />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={() => handleAddTier(config.metric)}
+                    >
+                      <Plus className='size-4' />
+                      {t('Add tier')}
+                    </Button>
+                  </div>
+                </SettingsFormGridItem>
+              ))}
             </>
           )}
         </SettingsForm>

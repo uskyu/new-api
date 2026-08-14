@@ -75,8 +75,22 @@ export default function SettingsCheckin(props) {
   });
   const refForm = useRef();
 
-  const bonusMetric = inputs['checkin_setting.bonus_metric'] || 'request_count';
-  const currentTiers = tiersByMetric[bonusMetric] || [];
+  const metricConfigs = [
+    {
+      key: 'request_count',
+      title: t('按昨日调用次数'),
+      thresholdLabel: t('昨日调用门槛（次）'),
+      mobileThresholdLabel: t('门槛（次数）'),
+      placeholder: t('次数门槛'),
+    },
+    {
+      key: 'quota_consumed',
+      title: t('按昨日消耗额度'),
+      thresholdLabel: t('昨日消耗额度门槛'),
+      mobileThresholdLabel: t('门槛（token）'),
+      placeholder: t('额度门槛'),
+    },
+  ];
 
   function handleFieldChange(fieldName) {
     return (value) => {
@@ -84,70 +98,81 @@ export default function SettingsCheckin(props) {
     };
   }
 
-  function updateTiers(nextTiers) {
-    const key = TIER_KEY_BY_METRIC[bonusMetric];
-    // 保存时按门槛升序序列化，保证接口与用户端展示顺序稳定
+  function updateTiers(metric, nextTiers) {
+    const key = TIER_KEY_BY_METRIC[metric];
     const sorted = [...nextTiers].sort(
       (a, b) => Number(a.threshold) - Number(b.threshold),
     );
-    setTiersByMetric((prev) => ({ ...prev, [bonusMetric]: nextTiers }));
+    setTiersByMetric((prev) => ({ ...prev, [metric]: nextTiers }));
     setInputs((prev) => ({
       ...prev,
       [key]: JSON.stringify(sorted),
     }));
   }
 
-  function handleTierChange(index, field, value) {
-    const nextTiers = currentTiers.map((tier, i) =>
+  function handleTierChange(metric, index, field, value) {
+    const tiers = tiersByMetric[metric] || [];
+    const nextTiers = tiers.map((tier, i) =>
       i === index ? { ...tier, [field]: Number(value) || 0 } : tier,
     );
-    updateTiers(nextTiers);
+    updateTiers(metric, nextTiers);
   }
 
-  function handleAddTier() {
-    // 基于当前最大门槛递推默认值，避免连续添加完全相同的档位
-    const maxThreshold = currentTiers.reduce(
+  function handleAddTier(metric) {
+    const tiers = tiersByMetric[metric] || [];
+    const step = metric === 'quota_consumed' ? 50000 : 50;
+    const maxThreshold = tiers.reduce(
       (max, tier) => Math.max(max, Number(tier.threshold) || 0),
       0,
     );
-    const nextThreshold =
-      maxThreshold + (bonusMetric === 'quota_consumed' ? 50000 : 50);
-    updateTiers([
-      ...currentTiers,
-      { threshold: nextThreshold, min_quota: 2000, max_quota: 20000 },
+    const nextThreshold = tiers.length === 0 ? step : maxThreshold + step;
+    updateTiers(metric, [
+      ...tiers,
+      {
+        threshold: Math.max(0, nextThreshold),
+        min_quota: 2000,
+        max_quota: 20000,
+      },
     ]);
   }
 
-  function handleRemoveTier(index) {
-    updateTiers(currentTiers.filter((_, i) => i !== index));
+  function handleRemoveTier(metric, index) {
+    const tiers = tiersByMetric[metric] || [];
+    updateTiers(
+      metric,
+      tiers.filter((_, i) => i !== index),
+    );
   }
 
-  // 校验当前统计口径的档位配置：非负、min <= max、门槛唯一
-  function validateTiers(tiers) {
-    if (!Array.isArray(tiers)) return t('档位配置无效');
+  function validateTiers(metric, tiers) {
+    if (!Array.isArray(tiers)) return `${metric}: ${t('档位配置无效')}`;
     const seen = new Set();
     for (const tier of tiers) {
-      if (Number(tier.threshold) < 0) return t('档位门槛不能为负数');
-      if (Number(tier.min_quota) < 0 || Number(tier.max_quota) < 0)
-        return t('档位奖励额度不能为负数');
-      if (Number(tier.min_quota) > Number(tier.max_quota))
-        return t('档位最低奖励不能高于最高奖励');
-      if (seen.has(Number(tier.threshold)))
-        return t('档位门槛不能重复：') + ` ${tier.threshold}`;
-      seen.add(Number(tier.threshold));
+      const threshold = Number(tier?.threshold);
+      const minQuota = Number(tier?.min_quota);
+      const maxQuota = Number(tier?.max_quota);
+      if (![threshold, minQuota, maxQuota].every(Number.isInteger))
+        return `${metric}: ${t('档位必须是整数')}`;
+      if (threshold < 0) return `${metric}: ${t('档位门槛不能为负数')}`;
+      if (minQuota < 0 || maxQuota < 0)
+        return `${metric}: ${t('档位奖励额度不能为负数')}`;
+      if (minQuota > maxQuota)
+        return `${metric}: ${t('档位最低奖励不能高于最高奖励')}`;
+      if (seen.has(threshold))
+        return `${metric}: ${t('档位门槛不能重复：')} ${threshold}`;
+      seen.add(threshold);
     }
     return null;
   }
 
-  // 切换统计口径：只切换展示与编辑目标，两套数据各自独立
-  function handleMetricChange(value) {
-    setInputs((prev) => ({ ...prev, 'checkin_setting.bonus_metric': value }));
-  }
-
   async function onSubmit() {
-    // 保存前校验当前统计口径的档位配置
-    const validateError = validateTiers(currentTiers);
-    if (validateError) return showError(validateError);
+    for (const config of metricConfigs) {
+      const validateError = validateTiers(
+        config.key,
+        tiersByMetric[config.key] || [],
+      );
+      if (validateError) return showError(validateError);
+    }
     const updateArray = compareObjects(inputs, inputsRow);
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
     const requestQueue = updateArray.map((item) =>
@@ -158,12 +183,11 @@ export default function SettingsCheckin(props) {
     );
     setLoading(true);
     Promise.all(requestQueue)
-      .then((res) => {
-        if (requestQueue.length === 1) {
-          if (res.includes(undefined)) return;
-        } else if (requestQueue.length > 1) {
-          if (res.includes(undefined))
-            return showError(t('部分保存失败，请重试'));
+      .then((responses) => {
+        const failed = responses.find((response) => !response?.data?.success);
+        if (failed) {
+          showError(failed.data?.message || t('保存失败，请重试'));
+          return;
         }
         showSuccess(t('保存成功'));
         props.refresh();
@@ -281,127 +305,127 @@ export default function SettingsCheckin(props) {
               style={{ marginBottom: 16, display: 'block' }}
             >
               {t(
-                '按昨日活跃数据命中门槛最高的档位发放该档奖励区间，未达标奖励为 0，各档奖励不叠加',
+                '按调用次数和消耗额度同时判定，每套取命中门槛最高档，比较奖励上限后只发放较高的一套，不叠加',
               )}
             </Typography.Text>
-            <Row gutter={16}>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.Select
-                  field={'checkin_setting.bonus_metric'}
-                  label={t('统计口径')}
-                  optionList={[
-                    { label: t('昨日调用次数'), value: 'request_count' },
-                    { label: t('昨日消耗额度'), value: 'quota_consumed' },
-                  ]}
-                  onChange={handleMetricChange}
-                />
-              </Col>
-            </Row>
             {inputs['checkin_setting.enabled'] && (
-              <div className='mt-3'>
-                <div className='hidden md:grid grid-cols-4 gap-2 mb-2 text-xs font-medium text-gray-500'>
-                  <div>
-                    {inputs['checkin_setting.bonus_metric'] === 'quota_consumed'
-                      ? t('昨日消耗额度门槛')
-                      : t('昨日调用门槛（次）')}
-                  </div>
-                  <div>{t('最低奖励（额度）')}</div>
-                  <div>{t('最高奖励（额度）')}</div>
-                  <div>{t('操作')}</div>
-                </div>
-                {currentTiers.map((tier, index) => (
-                  <div
-                    key={index}
-                    className='grid grid-cols-2 md:grid-cols-4 gap-2 mb-2 p-3 border rounded-lg bg-slate-50 dark:bg-slate-800'
-                  >
-                    <div className='flex flex-col gap-1'>
-                      <span className='text-xs text-gray-500 md:hidden'>
-                        {inputs['checkin_setting.bonus_metric'] ===
-                        'quota_consumed'
-                          ? t('门槛（token）')
-                          : t('门槛（次数）')}
-                      </span>
-                      <InputNumber
-                        value={tier.threshold}
-                        min={0}
-                        placeholder={
-                          inputs['checkin_setting.bonus_metric'] ===
-                          'quota_consumed'
-                            ? t('额度门槛')
-                            : t('次数门槛')
-                        }
-                        onChange={(value) =>
-                          handleTierChange(index, 'threshold', value)
-                        }
-                        style={{ width: '100%' }}
-                      />
-                      {inputs['checkin_setting.bonus_metric'] ===
-                        'quota_consumed' && (
-                        <span className='break-words text-[10px] leading-tight text-gray-400'>
-                          {t('约')} {renderQuota(tier.threshold, 6)}
-                        </span>
-                      )}
-                    </div>
-                    <div className='flex flex-col gap-1'>
-                      <span className='text-xs text-gray-500 md:hidden'>
-                        {t('最低奖励（token）')}
-                      </span>
-                      <InputNumber
-                        value={tier.min_quota}
-                        min={0}
-                        placeholder={t('最低（额度）')}
-                        onChange={(value) =>
-                          handleTierChange(index, 'min_quota', value)
-                        }
-                        style={{ width: '100%' }}
-                      />
-                      <span className='break-words text-[10px] leading-tight text-gray-400'>
-                        {t('约')} {renderQuota(tier.min_quota, 6)}
-                      </span>
-                    </div>
-                    <div className='flex flex-col gap-1'>
-                      <span className='text-xs text-gray-500 md:hidden'>
-                        {t('最高奖励（token）')}
-                      </span>
-                      <InputNumber
-                        value={tier.max_quota}
-                        min={0}
-                        placeholder={t('最高（额度）')}
-                        onChange={(value) =>
-                          handleTierChange(index, 'max_quota', value)
-                        }
-                        style={{ width: '100%' }}
-                      />
-                      <span className='break-words text-[10px] leading-tight text-gray-400'>
-                        {t('约')} {renderQuota(tier.max_quota, 6)}
-                      </span>
-                    </div>
-                    <div className='col-span-2 flex items-center justify-end md:col-span-1'>
+              <div className='mt-3 grid grid-cols-1 gap-5 xl:grid-cols-2'>
+                {metricConfigs.map((config) => {
+                  const tiers = tiersByMetric[config.key] || [];
+                  return (
+                    <div
+                      key={config.key}
+                      className='rounded-xl border border-gray-200 p-3 dark:border-gray-700'
+                    >
+                      <div className='mb-3 flex items-center justify-between gap-2'>
+                        <div className='text-sm font-semibold text-gray-700 dark:text-gray-200'>
+                          {config.title}
+                        </div>
+                      </div>
+                      <div className='hidden grid-cols-4 gap-2 pb-2 text-xs font-medium text-gray-500 md:grid'>
+                        <div>{config.thresholdLabel}</div>
+                        <div>{t('最低奖励（额度）')}</div>
+                        <div>{t('最高奖励（额度）')}</div>
+                        <div>{t('操作')}</div>
+                      </div>
+                      {tiers.map((tier, index) => (
+                        <div
+                          key={`${config.key}-${index}`}
+                          className='mb-2 grid grid-cols-2 gap-2 rounded-lg border bg-slate-50 p-3 dark:bg-slate-800 md:grid-cols-4'
+                        >
+                          <div className='flex flex-col gap-1'>
+                            <span className='text-xs text-gray-500 md:hidden'>
+                              {config.mobileThresholdLabel}
+                            </span>
+                            <InputNumber
+                              value={tier.threshold}
+                              min={0}
+                              placeholder={config.placeholder}
+                              onChange={(value) =>
+                                handleTierChange(
+                                  config.key,
+                                  index,
+                                  'threshold',
+                                  value,
+                                )
+                              }
+                              style={{ width: '100%' }}
+                            />
+                            {config.key === 'quota_consumed' && (
+                              <span className='break-words text-[10px] leading-tight text-gray-400'>
+                                {t('约')} {renderQuota(tier.threshold, 6)}
+                              </span>
+                            )}
+                          </div>
+                          <div className='flex flex-col gap-1'>
+                            <span className='text-xs text-gray-500 md:hidden'>
+                              {t('最低奖励（额度）')}
+                            </span>
+                            <InputNumber
+                              value={tier.min_quota}
+                              min={0}
+                              placeholder={t('最低（额度）')}
+                              onChange={(value) =>
+                                handleTierChange(
+                                  config.key,
+                                  index,
+                                  'min_quota',
+                                  value,
+                                )
+                              }
+                              style={{ width: '100%' }}
+                            />
+                            <span className='break-words text-[10px] leading-tight text-gray-400'>
+                              {t('约')} {renderQuota(tier.min_quota, 6)}
+                            </span>
+                          </div>
+                          <div className='flex flex-col gap-1'>
+                            <span className='text-xs text-gray-500 md:hidden'>
+                              {t('最高奖励（额度）')}
+                            </span>
+                            <InputNumber
+                              value={tier.max_quota}
+                              min={0}
+                              placeholder={t('最高（额度）')}
+                              onChange={(value) =>
+                                handleTierChange(
+                                  config.key,
+                                  index,
+                                  'max_quota',
+                                  value,
+                                )
+                              }
+                              style={{ width: '100%' }}
+                            />
+                            <span className='break-words text-[10px] leading-tight text-gray-400'>
+                              {t('约')} {renderQuota(tier.max_quota, 6)}
+                            </span>
+                          </div>
+                          <div className='col-span-2 flex items-center justify-end md:col-span-1'>
+                            <Button
+                              type='danger'
+                              theme='borderless'
+                              icon={<Trash2 size={16} />}
+                              onClick={() =>
+                                handleRemoveTier(config.key, index)
+                              }
+                            >
+                              {t('删除')}
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
                       <Button
-                        type='danger'
-                        theme='borderless'
-                        icon={<Trash2 size={16} />}
-                        onClick={() => handleRemoveTier(index)}
+                        type='primary'
+                        theme='light'
+                        icon={<Plus size={16} />}
+                        onClick={() => handleAddTier(config.key)}
                       >
-                        {t('删除')}
+                        {t('添加档位')}
                       </Button>
                     </div>
-                  </div>
-                ))}
-                <Button
-                  type='primary'
-                  theme='light'
-                  icon={<Plus size={16} />}
-                  onClick={handleAddTier}
-                >
-                  {t('添加档位')}
-                </Button>
-                <Typography.Text
-                  type='tertiary'
-                  style={{ marginLeft: 12, fontSize: 12 }}
-                >
-                  {t('档位按统计口径独立保存，切换口径不会互相覆盖')}
-                </Typography.Text>
+                  );
+                })}
               </div>
             )}
           </Form.Section>

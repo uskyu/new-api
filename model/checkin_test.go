@@ -60,7 +60,7 @@ func TestSelectCheckinRewardOnlyHighestTierNoStacking(t *testing.T) {
 }
 
 func TestActiveTiersIndependentPerMetric(t *testing.T) {
-	// 两套档位互不干扰：切换指标后各用各的档位
+	// 两套档位互不干扰：旧 ActiveTiers API 仍按 bonus_metric 返回对应档位
 	setting := &operation_setting.CheckinSetting{
 		BonusMetric: "request_count",
 		RequestCountTiers: []operation_setting.CheckinBonusTier{
@@ -77,4 +77,91 @@ func TestActiveTiersIndependentPerMetric(t *testing.T) {
 	require.Equal(t, 100000, setting.ActiveTiers()[0].Threshold)
 	// 按次档位未被按额度档位覆盖
 	require.Equal(t, 20, setting.RequestCountTiers[0].Threshold)
+}
+
+func TestEvaluateCheckinRewardUsesHigherMaxQuota(t *testing.T) {
+	setting := &operation_setting.CheckinSetting{
+		RequestCountTiers: []operation_setting.CheckinBonusTier{
+			{Threshold: 10, MinQuota: 1000, MaxQuota: 5000},
+		},
+		QuotaConsumedTiers: []operation_setting.CheckinBonusTier{
+			{Threshold: 100, MinQuota: 2000, MaxQuota: 20000},
+		},
+	}
+
+	decision := EvaluateCheckinReward(setting, 10, 100)
+	require.Equal(t, 10, decision.RequestCount.Tier.Threshold)
+	require.Equal(t, 100, decision.QuotaConsumed.Tier.Threshold)
+	require.Equal(t, "quota_consumed", decision.Selected.Metric)
+	require.Equal(t, 20000, decision.Selected.Tier.MaxQuota)
+
+	// 两套奖励只选择一套，且固定范围内随机一次；定值档位便于断言。
+	setting.RequestCountTiers[0].MinQuota = 7000
+	setting.RequestCountTiers[0].MaxQuota = 7000
+	setting.QuotaConsumedTiers[0].MinQuota = 9000
+	setting.QuotaConsumedTiers[0].MaxQuota = 9000
+	reward, decision := SelectCheckinReward(setting, 10, 100)
+	require.Equal(t, 9000, reward)
+	require.Equal(t, "quota_consumed", decision.Selected.Metric)
+}
+
+func TestEvaluateCheckinRewardTiePrefersRequestCount(t *testing.T) {
+	setting := &operation_setting.CheckinSetting{
+		RequestCountTiers: []operation_setting.CheckinBonusTier{
+			{Threshold: 20, MinQuota: 1000, MaxQuota: 5000},
+		},
+		QuotaConsumedTiers: []operation_setting.CheckinBonusTier{
+			{Threshold: 100, MinQuota: 3000, MaxQuota: 5000},
+		},
+	}
+	decision := EvaluateCheckinReward(setting, 20, 100)
+	require.Equal(t, "request_count", decision.Selected.Metric)
+}
+
+func TestEvaluateCheckinRewardAllowsZeroQuotaUsage(t *testing.T) {
+	setting := &operation_setting.CheckinSetting{
+		RequestCountTiers: []operation_setting.CheckinBonusTier{
+			{Threshold: 10, MinQuota: 1000, MaxQuota: 1000},
+		},
+		QuotaConsumedTiers: []operation_setting.CheckinBonusTier{
+			{Threshold: 1, MinQuota: 2000, MaxQuota: 2000},
+		},
+	}
+	decision := EvaluateCheckinReward(setting, 10, 0)
+	require.Equal(t, "request_count", decision.Selected.Metric)
+	require.Equal(t, 1000, selectTierReward(decision.Selected.Tier))
+}
+
+func TestSelectCheckinRewardOnlyQuotaConsumedMatches(t *testing.T) {
+	setting := &operation_setting.CheckinSetting{
+		RequestCountTiers: []operation_setting.CheckinBonusTier{
+			{Threshold: 100, MinQuota: 1000, MaxQuota: 5000},
+		},
+		QuotaConsumedTiers: []operation_setting.CheckinBonusTier{
+			{Threshold: 1000, MinQuota: 6000, MaxQuota: 6000},
+		},
+	}
+	reward, decision := SelectCheckinReward(setting, 10, 1000)
+	require.Nil(t, decision.RequestCount.Tier)
+	require.Equal(t, "quota_consumed", decision.Selected.Metric)
+	require.Equal(t, 6000, reward)
+}
+
+func TestSelectCheckinRewardZeroWhenBothMetricsMiss(t *testing.T) {
+	setting := &operation_setting.CheckinSetting{
+		RequestCountTiers: []operation_setting.CheckinBonusTier{
+			{Threshold: 100, MinQuota: 1000, MaxQuota: 5000},
+		},
+		QuotaConsumedTiers: []operation_setting.CheckinBonusTier{
+			{Threshold: 1000, MinQuota: 6000, MaxQuota: 10000},
+		},
+	}
+	reward, decision := SelectCheckinReward(setting, 10, 100)
+	require.Nil(t, decision.Selected.Tier)
+	require.Empty(t, decision.Selected.Metric)
+	require.Zero(t, reward)
+
+	reward, decision = SelectCheckinReward(nil, 1000, 1000)
+	require.Nil(t, decision.Selected.Tier)
+	require.Zero(t, reward)
 }
