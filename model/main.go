@@ -26,7 +26,7 @@ var commonFalseVal string
 var logKeyCol string
 var logGroupCol string
 
-func initCol() {
+func InitCol() {
 	// init common column names
 	if common.UsingPostgreSQL {
 		commonGroupCol = `"group"`
@@ -118,7 +118,7 @@ func CheckSetup() {
 
 func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 	defer func() {
-		initCol()
+		InitCol()
 	}()
 	dsn := os.Getenv(envName)
 	if dsn != "" {
@@ -278,6 +278,7 @@ func migrateDB() error {
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
+		&PerfMetricMinute{},
 		&SelfServiceRefundHistory{},
 		&SelfServiceClaimAttempt{},
 		&SelfServiceUpgradeRule{},
@@ -337,6 +338,7 @@ func migrateDBFast() error {
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
 		{&PerfMetric{}, "PerfMetric"},
+		{&PerfMetricMinute{}, "PerfMetricMinute"},
 		{&SelfServiceRefundHistory{}, "SelfServiceRefundHistory"},
 		{&SelfServiceClaimAttempt{}, "SelfServiceClaimAttempt"},
 		{&SelfServiceUpgradeRule{}, "SelfServiceUpgradeRule"},

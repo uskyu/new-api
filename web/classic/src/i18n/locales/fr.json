@@ -1476,7 +1476,7 @@
     "常见问答": "FAQ",
     "常见问答管理，为用户提供常见问题的答案（最多50个，前端显示最新20条）": "Gestion de la FAQ, fournissant des réponses aux questions courantes des utilisateurs (maximum 50, afficher les 20 dernières sur le front-end)",
     "平台": "plateforme",
-    "最近24小时": "Dernières 24 heures",
+    "最近30分钟": "Dernières 30 minutes",
     "请求数": "Requêtes",
     "无请求": "Aucune requête",
     "平均延迟": "Latence moyenne",

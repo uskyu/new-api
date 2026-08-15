@@ -1448,7 +1448,7 @@
     "常见问答": "Câu hỏi thường gặp",
     "常见问答管理，为用户提供常见问题的答案（最多50个，前端显示最新20条）": "Quản lý câu hỏi thường gặp, cung cấp câu trả lời cho các câu hỏi thường gặp của người dùng (tối đa 50, hiển thị 20 mới nhất ở giao diện người dùng)",
     "平台": "nền tảng",
-    "最近24小时": "24 giờ qua",
+    "最近30分钟": "30 phút qua",
     "请求数": "Số yêu cầu",
     "无请求": "Không có yêu cầu",
     "平均延迟": "Độ trễ trung bình",

@@ -229,7 +229,7 @@ export const useModelPricingData = () => {
   const loadPerfMetrics = async () => {
     try {
       const res = await API.get('/api/perf-metrics/summary', {
-        params: { hours: 24, series: 'hour' },
+        params: { hours: 1, series: 'minute' },
         skipErrorHandler: true,
       });
       const summaries = res.data?.success ? res.data.data?.models : [];

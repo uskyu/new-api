@@ -1500,7 +1500,7 @@
     "常见问答": "FAQ",
     "常见问答管理，为用户提供常见问题的答案（最多50个，前端显示最新20条）": "FAQ management, providing answers to common questions for users (maximum 50, display latest 20 on the front end)",
     "平台": "platform",
-    "最近24小时": "Last 24 hours",
+    "最近30分钟": "Last 30 minutes",
     "请求数": "Requests",
     "无请求": "No requests",
     "平均延迟": "Average latency",

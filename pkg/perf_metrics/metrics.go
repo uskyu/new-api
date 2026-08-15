@@ -20,8 +20,13 @@ var hotBuckets sync.Map
 // hiding fields or making response-only privacy hardening changes.
 const seriesSchema = "dbcd0a3c01b55203"
 
+var initOnce sync.Once
+
 func Init() {
-	go flushLoop()
+	initOnce.Do(func() {
+		go flushLoop()
+		go minuteFlushLoop()
+	})
 }
 
 func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64) {
@@ -66,13 +71,17 @@ func Record(sample Sample) {
 		sample.LatencyMs = 0
 	}
 
+	// A single timestamp anchors the configurable bucket, the minute bucket
+	// and the derived latency fields, so they never straddle a boundary.
+	now := time.Now()
 	key := bucketKey{
 		model:    sample.Model,
 		group:    sample.Group,
-		bucketTs: bucketStart(time.Now().Unix()),
+		bucketTs: bucketStart(now.Unix()),
 	}
 	actual, _ := hotBuckets.LoadOrStore(key, &atomicBucket{})
 	actual.(*atomicBucket).add(sample)
+	recordMinute(sample, now)
 	recordRedis(key, sample)
 }
 
@@ -122,14 +131,41 @@ func Query(params QueryParams) (QueryResult, error) {
 	return buildQueryResult(params.Model, merged), nil
 }
 
+// QuerySummaryAll returns the summary without a series by default; passing
+// true keeps the historical hourly series.
 func QuerySummaryAll(hours int, groups []string, includeSeries ...bool) (SummaryAllResult, error) {
+	seriesMode := ""
+	if len(includeSeries) > 0 && includeSeries[0] {
+		seriesMode = "hour"
+	}
+	return QuerySummaryAllWithSeries(hours, groups, seriesMode)
+}
+
+// QuerySummaryAllWithSeries accepts a series mode: "hour" keeps the historical
+// hourly series, "minute" returns the fixed recent-30-minute one-minute
+// series. Any other value (including the empty default) omits the series.
+func QuerySummaryAllWithSeries(hours int, groups []string, seriesMode string) (SummaryAllResult, error) {
 	if hours <= 0 {
 		hours = 24
 	}
 	if hours > 24*30 {
 		hours = 24 * 30
 	}
+	if seriesMode != "minute" && seriesMode != "hour" {
+		seriesMode = ""
+	}
 	endTs := time.Now().Unix()
+
+	// series=minute is generated purely from the recent-30-minute minute store
+	// (dedicated table + minute hot buckets): models that only exist there must
+	// appear, and totals are the 30-minute window, not the hours-long table.
+	if seriesMode == "minute" {
+		models, err := buildMinuteSummaryModels(groups, endTs)
+		if err != nil {
+			return SummaryAllResult{}, err
+		}
+		return SummaryAllResult{Models: models}, nil
+	}
 	startTs := endTs - int64(hours)*3600
 	allowedGroups := allowedGroupSet(groups)
 
@@ -187,47 +223,55 @@ func QuerySummaryAll(hours int, groups []string, includeSeries ...bool) (Summary
 		})
 	}
 
-	if len(includeSeries) > 0 && includeSeries[0] {
-		buckets, err := model.GetPerfMetricsSummaryBuckets(startTs, endTs, groups)
-		if err != nil {
+	switch seriesMode {
+	case "hour":
+		if err := attachHourlySeries(models, groups, startTs, endTs, allowedGroups); err != nil {
 			return SummaryAllResult{}, err
-		}
-		seriesTotals := map[string]map[int64]counters{}
-		for _, row := range buckets {
-			hourTs := row.BucketTs - row.BucketTs%3600
-			if seriesTotals[row.ModelName] == nil {
-				seriesTotals[row.ModelName] = map[int64]counters{}
-			}
-			mergeCounterValue(seriesTotals[row.ModelName], hourTs, counters{
-				requestCount: row.RequestCount, successCount: row.SuccessCount,
-				totalLatencyMs: row.TotalLatencyMs, outputTokens: row.OutputTokens,
-				generationMs: row.GenerationMs,
-			})
-		}
-		hotBuckets.Range(func(key, value any) bool {
-			k := key.(bucketKey)
-			if k.bucketTs < startTs || k.bucketTs > endTs {
-				return true
-			}
-			if allowedGroups != nil {
-				if _, ok := allowedGroups[k.group]; !ok {
-					return true
-				}
-			}
-			if seriesTotals[k.model] == nil {
-				seriesTotals[k.model] = map[int64]counters{}
-			}
-			hourTs := k.bucketTs - k.bucketTs%3600
-			mergeCounterValue(seriesTotals[k.model], hourTs, value.(*atomicBucket).snapshot())
-			return true
-		})
-		for i := range models {
-			models[i].Series = buildHourlySummarySeries(seriesTotals[models[i].ModelName], endTs)
 		}
 	}
 
 	sort.Slice(models, func(i, j int) bool { return models[i].RequestCount > models[j].RequestCount })
 	return SummaryAllResult{Models: models}, nil
+}
+
+func attachHourlySeries(models []ModelSummary, groups []string, startTs int64, endTs int64, allowedGroups map[string]struct{}) error {
+	buckets, err := model.GetPerfMetricsSummaryBuckets(startTs, endTs, groups)
+	if err != nil {
+		return err
+	}
+	seriesTotals := map[string]map[int64]counters{}
+	for _, row := range buckets {
+		hourTs := row.BucketTs - row.BucketTs%3600
+		if seriesTotals[row.ModelName] == nil {
+			seriesTotals[row.ModelName] = map[int64]counters{}
+		}
+		mergeCounterValue(seriesTotals[row.ModelName], hourTs, counters{
+			requestCount: row.RequestCount, successCount: row.SuccessCount,
+			totalLatencyMs: row.TotalLatencyMs, outputTokens: row.OutputTokens,
+			generationMs: row.GenerationMs,
+		})
+	}
+	hotBuckets.Range(func(key, value any) bool {
+		k := key.(bucketKey)
+		if k.bucketTs < startTs || k.bucketTs > endTs {
+			return true
+		}
+		if allowedGroups != nil {
+			if _, ok := allowedGroups[k.group]; !ok {
+				return true
+			}
+		}
+		if seriesTotals[k.model] == nil {
+			seriesTotals[k.model] = map[int64]counters{}
+		}
+		hourTs := k.bucketTs - k.bucketTs%3600
+		mergeCounterValue(seriesTotals[k.model], hourTs, value.(*atomicBucket).snapshot())
+		return true
+	})
+	for i := range models {
+		models[i].Series = buildHourlySummarySeries(seriesTotals[models[i].ModelName], endTs)
+	}
+	return nil
 }
 
 func buildHourlySummarySeries(values map[int64]counters, endTs int64) []SummaryBucketPoint {
@@ -236,6 +280,30 @@ func buildHourlySummarySeries(values map[int64]counters, endTs int64) []SummaryB
 	points := make([]SummaryBucketPoint, 24)
 	for i := range points {
 		ts := hourStart + int64(i)*3600
+		value := values[ts]
+		points[i] = SummaryBucketPoint{
+			Ts:           ts,
+			RequestCount: value.requestCount,
+			SuccessCount: value.successCount,
+			AvgLatencyMs: avg(value.totalLatencyMs, value.requestCount),
+			SuccessRate:  math.Round(successRate(value)*100) / 100,
+			AvgTps:       math.Round(avgTps(value)*100) / 100,
+		}
+	}
+	return points
+}
+
+// minuteSeriesPoints is the fixed number of one-minute slots returned by the
+// recent-30-minute summary series: exactly one slot per minute, oldest first,
+// ending at the current minute.
+const minuteSeriesPoints = 30
+
+func buildMinuteSummarySeries(values map[int64]counters, endTs int64) []SummaryBucketPoint {
+	minuteEnd := endTs - endTs%60
+	minuteStart := minuteEnd - (minuteSeriesPoints-1)*60
+	points := make([]SummaryBucketPoint, minuteSeriesPoints)
+	for i := range points {
+		ts := minuteStart + int64(i)*60
 		value := values[ts]
 		points[i] = SummaryBucketPoint{
 			Ts:           ts,

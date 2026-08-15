@@ -20,6 +20,8 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Tooltip } from '@douyinfe/semi-ui';
 
+const SERIES_LENGTH = 30;
+
 const formatThroughput = (tps) => {
   if (!Number.isFinite(tps) || tps <= 0) return '—';
   return `${tps.toLocaleString(undefined, { maximumFractionDigits: 2 })} tps`;
@@ -30,7 +32,7 @@ const formatLatency = (milliseconds) => {
   return `${milliseconds.toLocaleString(undefined, { maximumFractionDigits: 0 })} ms`;
 };
 
-const formatHour = (timestamp) =>
+const formatMinute = (timestamp) =>
   new Date(timestamp * 1000).toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -38,54 +40,61 @@ const formatHour = (timestamp) =>
     minute: '2-digit',
   });
 
-const BAR_HEIGHT = '34%';
-
 const getBarStyle = (point) => {
+  const base = { height: '100%' };
   if (!point || point.request_count <= 0) {
-    return {
-      backgroundColor: 'var(--semi-color-fill-2)',
-      height: BAR_HEIGHT,
-    };
+    return { ...base, backgroundColor: 'var(--semi-color-fill-2)' };
   }
   const successRate = Number(point.success_rate);
   if (!Number.isFinite(successRate)) {
-    return {
-      backgroundColor: 'var(--semi-color-fill-2)',
-      height: BAR_HEIGHT,
-    };
+    return { ...base, backgroundColor: 'var(--semi-color-fill-2)' };
   }
   if (successRate >= 99.9) {
-    return { backgroundColor: 'var(--semi-color-success)', height: BAR_HEIGHT };
+    return { ...base, backgroundColor: 'var(--semi-color-success)' };
   }
   if (successRate >= 99) {
-    return { backgroundColor: 'var(--semi-color-warning)', height: BAR_HEIGHT };
+    return { ...base, backgroundColor: 'var(--semi-color-warning)' };
   }
   if (successRate >= 95) {
-    return { backgroundColor: '#f59e0b', height: BAR_HEIGHT };
+    return { ...base, backgroundColor: '#f59e0b' };
   }
   if (successRate >= 90) {
-    return { backgroundColor: '#ea580c', height: BAR_HEIGHT };
+    return { ...base, backgroundColor: '#ea580c' };
   }
-  return { backgroundColor: 'var(--semi-color-danger)', height: BAR_HEIGHT };
+  return { ...base, backgroundColor: 'var(--semi-color-danger)' };
 };
 
 const ModelPerfBadge = ({ className = '', isMobile = false, perf, t }) => {
-  if (!perf?.series || perf.series.length !== 24) return null;
+  if (!perf?.series || perf.series.length !== SERIES_LENGTH) return null;
 
-  const details = `${t('最近24小时')} · ${t('成功率')}: ${Number.isFinite(Number(perf.success_rate)) ? `${Number(perf.success_rate).toFixed(1)}%` : '—'}`;
+  // Header rate is derived from the same 30-minute series so the label always
+  // matches the bars, unlike the hours-wide success_rate field.
+  const totalRequests = perf.series.reduce(
+    (sum, point) => sum + (Number(point.request_count) || 0),
+    0,
+  );
+  const totalSuccess = perf.series.reduce(
+    (sum, point) => sum + (Number(point.success_count) || 0),
+    0,
+  );
+  const overallSuccessRate =
+    totalRequests > 0
+      ? `${((totalSuccess / totalRequests) * 100).toFixed(1)}%`
+      : '—';
+  const details = `${t('最近30分钟')} · ${t('成功率')}: ${overallSuccessRate}`;
   return (
     <div
-      className={`w-[120px] max-w-full shrink-0 ${className}`}
+      className={`w-[150px] max-w-full shrink-0 ${className}`}
       role='img'
       aria-label={details}
     >
-      <div className='flex h-8 min-w-0 items-end gap-px'>
+      <div className='flex h-[18px] min-w-0 items-end gap-px'>
         {perf.series.map((point) => {
           const barStyle = getBarStyle(point);
           const pointDetails =
             point.request_count > 0
-              ? `${formatHour(point.ts)}\n${t('请求数')}: ${point.request_count}\n${t('成功率')}: ${Number(point.success_rate).toFixed(1)}%\n${t('平均延迟')}: ${formatLatency(Number(point.avg_latency_ms))}\n${t('吞吐量')}: ${formatThroughput(Number(point.avg_tps))}`
-              : `${formatHour(point.ts)}\n${t('无请求')}`;
+              ? `${formatMinute(point.ts)}\n${t('请求数')}: ${point.request_count}\n${t('成功率')}: ${Number(point.success_rate).toFixed(1)}%\n${t('平均延迟')}: ${formatLatency(Number(point.avg_latency_ms))}\n${t('吞吐量')}: ${formatThroughput(Number(point.avg_tps))}`
+              : `${formatMinute(point.ts)}\n${t('无请求')}`;
           return (
             <Tooltip
               key={point.ts}
