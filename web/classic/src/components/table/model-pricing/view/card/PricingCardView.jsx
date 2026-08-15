@@ -42,6 +42,7 @@ import {
   getLobeHubIcon,
 } from '../../../../../helpers';
 import PricingCardSkeleton from './PricingCardSkeleton';
+import ModelPerfBadge from './ModelPerfBadge';
 import { useMinimumLoadingTime } from '../../../../../hooks/common/useMinimumLoadingTime';
 import { renderLimitedItems } from '../../../../common/ui/RenderUtils';
 import { useIsMobile } from '../../../../../hooks/common/useIsMobile';
@@ -72,6 +73,7 @@ const PricingCardView = ({
   tokenUnit,
   displayPrice,
   showRatio,
+  perfMetrics = {},
   t,
   selectedRowKeys = [],
   setSelectedRowKeys,
@@ -193,9 +195,9 @@ const PricingCardView = ({
     }
 
     return (
-      <div className='flex items-center justify-between'>
-        <div className='flex items-center gap-2'>{billingTag}</div>
-        <div className='flex items-center gap-1'>
+      <div className='flex min-w-0 items-center justify-between gap-2'>
+        <div className='shrink-0'>{billingTag}</div>
+        <div className='ml-auto flex min-w-0 items-center gap-1'>
           {customTags.length > 0 &&
             renderLimitedItems({
               items: customTags.map((tag, idx) => ({
@@ -203,7 +205,7 @@ const PricingCardView = ({
                 element: tag,
               })),
               renderItem: (item, idx) => item.element,
-              maxDisplay: 3,
+              maxDisplay: isMobile ? 1 : 3,
             })}
         </div>
       </div>
@@ -268,11 +270,13 @@ const PricingCardView = ({
                         {model.model_name}
                       </h3>
                       <div className='flex flex-col gap-1 text-xs mt-1'>
-                        {priceData.isDynamicPricing ? (
-                          formatDynamicPriceSummary(priceData.billingExpr, t, priceData.usedGroupRatio)
-                        ) : (
-                          formatPriceInfo(priceData, t, siteDisplayType)
-                        )}
+                        {priceData.isDynamicPricing
+                          ? formatDynamicPriceSummary(
+                              priceData.billingExpr,
+                              t,
+                              priceData.usedGroupRatio,
+                            )
+                          : formatPriceInfo(priceData, t, siteDisplayType)}
                       </div>
                     </div>
                   </div>
@@ -315,13 +319,19 @@ const PricingCardView = ({
 
                 {/* 底部区域 */}
                 <div className='mt-auto'>
-                  {/* 标签区域 */}
-                  {renderTags(model)}
+                  <div className='grid grid-cols-[minmax(0,1fr)_auto] items-end gap-x-2'>
+                    <div className='min-w-0'>{renderTags(model)}</div>
+                    <ModelPerfBadge
+                      perf={perfMetrics[model.model_name]}
+                      t={t}
+                      isMobile={isMobile}
+                    />
+                  </div>
 
                   {/* 倍率信息（可选） */}
                   {showRatio && (
                     <div className='pt-3'>
-                      <div className='flex items-center space-x-1 mb-2'>
+                      <div className='mb-2 flex items-center space-x-1'>
                         <span className='text-xs font-medium text-gray-700'>
                           {t('倍率信息')}
                         </span>
@@ -329,7 +339,7 @@ const PricingCardView = ({
                           content={t('倍率是为了方便换算不同价格的模型')}
                         >
                           <IconHelpCircle
-                            className='text-blue-500 cursor-pointer'
+                            className='cursor-pointer text-blue-500'
                             size='small'
                             onClick={(e) => {
                               e.stopPropagation();
@@ -340,17 +350,26 @@ const PricingCardView = ({
                         </Tooltip>
                       </div>
                       <div className='grid grid-cols-3 gap-2 text-xs text-gray-600'>
-                        <div>
+                        <div
+                          className='min-w-0 truncate'
+                          title={String(model.model_ratio ?? t('无'))}
+                        >
                           {t('模型')}:{' '}
                           {model.quota_type === 0 ? model.model_ratio : t('无')}
                         </div>
-                        <div>
+                        <div
+                          className='min-w-0 truncate'
+                          title={String(model.completion_ratio ?? t('无'))}
+                        >
                           {t('补全')}:{' '}
                           {model.quota_type === 0
                             ? parseFloat(model.completion_ratio.toFixed(3))
                             : t('无')}
                         </div>
-                        <div>
+                        <div
+                          className='min-w-0 truncate'
+                          title={String(priceData?.usedGroupRatio ?? '-')}
+                        >
                           {t('分组')}: {priceData?.usedGroupRatio ?? '-'}
                         </div>
                       </div>

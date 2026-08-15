@@ -284,7 +284,7 @@ func FindSelfServiceEmptyOutputLogs(userId int, startTimestamp int64, endTimesta
 		Where("user_id = ?", userId).
 		Where("type = ?", LogTypeConsume).
 		Where("quota > ?", 0).
-		Where("completion_tokens = ?", 0).
+		Where("completion_tokens >= ? AND completion_tokens <= ?", 0, 5).
 		Where("created_at >= ? AND created_at <= ?", startTimestamp, endTimestamp)
 
 	for _, pattern := range excludeModels {

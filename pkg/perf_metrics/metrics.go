@@ -122,7 +122,7 @@ func Query(params QueryParams) (QueryResult, error) {
 	return buildQueryResult(params.Model, merged), nil
 }
 
-func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
+func QuerySummaryAll(hours int, groups []string, includeSeries ...bool) (SummaryAllResult, error) {
 	if hours <= 0 {
 		hours = 24
 	}
@@ -178,25 +178,75 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 		if total.requestCount == 0 {
 			continue
 		}
-		avgLatency := total.totalLatencyMs / total.requestCount
-		successRate := float64(total.successCount) / float64(total.requestCount) * 100
-		avgTps := 0.0
-		if total.generationMs > 0 {
-			avgTps = float64(total.outputTokens) / (float64(total.generationMs) / 1000.0)
-		}
 		models = append(models, ModelSummary{
 			ModelName:    name,
-			AvgLatencyMs: avgLatency,
-			SuccessRate:  math.Round(successRate*100) / 100,
-			AvgTps:       math.Round(avgTps*100) / 100,
+			AvgLatencyMs: avg(total.totalLatencyMs, total.requestCount),
+			SuccessRate:  math.Round(successRate(total)*100) / 100,
+			AvgTps:       math.Round(avgTps(total)*100) / 100,
 			RequestCount: total.requestCount,
 		})
 	}
-	sort.Slice(models, func(i, j int) bool {
-		return models[i].RequestCount > models[j].RequestCount
-	})
 
+	if len(includeSeries) > 0 && includeSeries[0] {
+		buckets, err := model.GetPerfMetricsSummaryBuckets(startTs, endTs, groups)
+		if err != nil {
+			return SummaryAllResult{}, err
+		}
+		seriesTotals := map[string]map[int64]counters{}
+		for _, row := range buckets {
+			hourTs := row.BucketTs - row.BucketTs%3600
+			if seriesTotals[row.ModelName] == nil {
+				seriesTotals[row.ModelName] = map[int64]counters{}
+			}
+			mergeCounterValue(seriesTotals[row.ModelName], hourTs, counters{
+				requestCount: row.RequestCount, successCount: row.SuccessCount,
+				totalLatencyMs: row.TotalLatencyMs, outputTokens: row.OutputTokens,
+				generationMs: row.GenerationMs,
+			})
+		}
+		hotBuckets.Range(func(key, value any) bool {
+			k := key.(bucketKey)
+			if k.bucketTs < startTs || k.bucketTs > endTs {
+				return true
+			}
+			if allowedGroups != nil {
+				if _, ok := allowedGroups[k.group]; !ok {
+					return true
+				}
+			}
+			if seriesTotals[k.model] == nil {
+				seriesTotals[k.model] = map[int64]counters{}
+			}
+			hourTs := k.bucketTs - k.bucketTs%3600
+			mergeCounterValue(seriesTotals[k.model], hourTs, value.(*atomicBucket).snapshot())
+			return true
+		})
+		for i := range models {
+			models[i].Series = buildHourlySummarySeries(seriesTotals[models[i].ModelName], endTs)
+		}
+	}
+
+	sort.Slice(models, func(i, j int) bool { return models[i].RequestCount > models[j].RequestCount })
 	return SummaryAllResult{Models: models}, nil
+}
+
+func buildHourlySummarySeries(values map[int64]counters, endTs int64) []SummaryBucketPoint {
+	hourEnd := endTs - endTs%3600
+	hourStart := hourEnd - 23*3600
+	points := make([]SummaryBucketPoint, 24)
+	for i := range points {
+		ts := hourStart + int64(i)*3600
+		value := values[ts]
+		points[i] = SummaryBucketPoint{
+			Ts:           ts,
+			RequestCount: value.requestCount,
+			SuccessCount: value.successCount,
+			AvgLatencyMs: avg(value.totalLatencyMs, value.requestCount),
+			SuccessRate:  math.Round(successRate(value)*100) / 100,
+			AvgTps:       math.Round(avgTps(value)*100) / 100,
+		}
+	}
+	return points
 }
 
 func allowedGroupSet(groups []string) map[string]struct{} {
@@ -219,6 +269,10 @@ func bucketStart(ts int64) int64 {
 }
 
 func mergeCounters(merged map[bucketKey]counters, key bucketKey, value counters) {
+	mergeCounterValue(merged, key, value)
+}
+
+func mergeCounterValue[K comparable](merged map[K]counters, key K, value counters) {
 	if value.requestCount == 0 {
 		return
 	}

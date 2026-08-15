@@ -51,6 +51,7 @@ export const useModelPricingData = () => {
   const [usableGroup, setUsableGroup] = useState({});
   const [endpointMap, setEndpointMap] = useState({});
   const [autoGroups, setAutoGroups] = useState([]);
+  const [perfMetrics, setPerfMetrics] = useState({});
 
   const [statusState] = useContext(StatusContext);
   const [userState] = useContext(UserContext);
@@ -225,6 +226,27 @@ export const useModelPricingData = () => {
     setModels(models);
   };
 
+  const loadPerfMetrics = async () => {
+    try {
+      const res = await API.get('/api/perf-metrics/summary', {
+        params: { hours: 24, series: 'hour' },
+        skipErrorHandler: true,
+      });
+      const summaries = res.data?.success ? res.data.data?.models : [];
+      const metrics = {};
+      if (Array.isArray(summaries)) {
+        summaries.forEach((summary) => {
+          if (summary?.model_name) {
+            metrics[summary.model_name] = summary;
+          }
+        });
+      }
+      setPerfMetrics(metrics);
+    } catch (error) {
+      setPerfMetrics({});
+    }
+  };
+
   const loadPricing = async () => {
     setLoading(true);
     let url = '/api/pricing';
@@ -261,7 +283,7 @@ export const useModelPricingData = () => {
   };
 
   const refresh = async () => {
-    await loadPricing();
+    await Promise.all([loadPricing(), loadPerfMetrics()]);
   };
 
   const copyText = async (text) => {
@@ -374,6 +396,7 @@ export const useModelPricingData = () => {
     usableGroup,
     endpointMap,
     autoGroups,
+    perfMetrics,
 
     // 计算属性
     priceRate,
