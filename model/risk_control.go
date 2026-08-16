@@ -2,6 +2,7 @@ package model
 
 import (
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,6 +64,7 @@ type RiskInviter struct {
 	DirectInviteCount int64              `json:"direct_invite_count"`
 	SharedIPCount     int64              `json:"shared_ip_count"`
 	Suspicious        bool               `json:"suspicious"`
+	LatestInviteAt    int64              `json:"latest_invite_at"`
 	Invitees          []*RiskUserSummary `json:"invitees" gorm:"-"`
 }
 
@@ -278,69 +280,284 @@ func listRiskIPUsers(ip string, source string) ([]*RiskUserSummary, error) {
 	return result, nil
 }
 
-func ListRiskInviters(keyword string, startIdx int, limit int) ([]*RiskInviter, int64, error) {
-	if limit <= 0 {
-		limit = common.ItemsPerPage
+type riskInviterRow struct {
+	InviterId         int
+	Username          string
+	DisplayName       string
+	Group             string
+	DirectInviteCount int64
+	LatestInviteAt    int64
+	SharedIPCount     int64
+}
+
+func chunkInts(ids []int, size int) [][]int {
+	if size <= 0 {
+		size = 500
 	}
-	var inviterIds []int
-	if err := DB.Model(&User{}).Where("inviter_id > 0").Distinct("inviter_id").Pluck("inviter_id", &inviterIds).Error; err != nil {
-		return nil, 0, err
-	}
-	if len(inviterIds) == 0 {
-		return []*RiskInviter{}, 0, nil
-	}
-	tx := DB.Model(&User{}).Where("id IN ?", inviterIds)
-	if keyword != "" {
-		pattern, err := sanitizeLikePattern("%" + keyword + "%")
-		if err != nil {
-			return nil, 0, err
+	var chunks [][]int
+	for start := 0; start < len(ids); start += size {
+		end := start + size
+		if end > len(ids) {
+			end = len(ids)
 		}
-		tx = tx.Where("username LIKE ? ESCAPE '!' OR display_name LIKE ? ESCAPE '!'", pattern, pattern)
+		chunks = append(chunks, ids[start:end])
 	}
-	var total int64
-	if err := tx.Count(&total).Error; err != nil {
-		return nil, 0, err
+	return chunks
+}
+
+// riskInviteeScan holds the invitation graph for a set of inviters.
+type riskInviteeScan struct {
+	memberGroups   map[int][]int // user id -> group (inviter) ids the user belongs to
+	inviteeCount   map[int]int64
+	latestInviteAt map[int]int64
+}
+
+// loadRiskInviteeMembers loads ALL invitees of the given inviters; each
+// invitee joins their inviter's group and each inviter joins their own.
+func loadRiskInviteeMembers(inviterIds []int) (*riskInviteeScan, error) {
+	scan := &riskInviteeScan{
+		memberGroups:   make(map[int][]int, len(inviterIds)*2),
+		inviteeCount:   make(map[int]int64, len(inviterIds)),
+		latestInviteAt: make(map[int]int64, len(inviterIds)),
 	}
-	var inviters []*User
-	if err := tx.Select("id, username, display_name, " + commonGroupCol).Order("id desc").Offset(startIdx).Limit(limit).Find(&inviters).Error; err != nil {
-		return nil, 0, err
+	type inviteeRow struct {
+		Id        int
+		InviterId int
+		CreatedAt int64
 	}
-	result := make([]*RiskInviter, 0, len(inviters))
-	for _, inviter := range inviters {
-		var directInviteCount int64
-		if err := DB.Model(&User{}).Where("inviter_id = ?", inviter.Id).Count(&directInviteCount).Error; err != nil {
-			return nil, 0, err
+	for _, chunk := range chunkInts(inviterIds, 500) {
+		var invitees []inviteeRow
+		if err := DB.Model(&User{}).Select("id, inviter_id, created_at").Where("inviter_id IN ?", chunk).Find(&invitees).Error; err != nil {
+			return nil, err
 		}
+		for _, row := range invitees {
+			scan.memberGroups[row.Id] = append(scan.memberGroups[row.Id], row.InviterId)
+			scan.inviteeCount[row.InviterId]++
+			if row.CreatedAt > scan.latestInviteAt[row.InviterId] {
+				scan.latestInviteAt[row.InviterId] = row.CreatedAt
+			}
+		}
+	}
+	for _, inviterId := range inviterIds {
+		scan.memberGroups[inviterId] = append(scan.memberGroups[inviterId], inviterId)
+	}
+	return scan, nil
+}
+
+// riskSharedIPCounts counts, per inviter, the IPs with records from at least
+// two distinct group members.
+func riskSharedIPCounts(scan *riskInviteeScan) (map[int]int64, error) {
+	memberIds := make([]int, 0, len(scan.memberGroups))
+	for memberId := range scan.memberGroups {
+		memberIds = append(memberIds, memberId)
+	}
+	type ipRecordRow struct {
+		UserId int
+		IP     string
+	}
+	groupIPUsers := make(map[int]map[string]map[int]struct{}, len(scan.memberGroups))
+	for _, chunk := range chunkInts(memberIds, 500) {
+		var records []ipRecordRow
+		if err := DB.Model(&RiskIPRecord{}).Distinct("user_id", "ip").Where("user_id IN ? AND ip <> ''", chunk).Scan(&records).Error; err != nil {
+			return nil, err
+		}
+		for _, record := range records {
+			for _, groupId := range scan.memberGroups[record.UserId] {
+				byIP := groupIPUsers[groupId]
+				if byIP == nil {
+					byIP = make(map[string]map[int]struct{})
+					groupIPUsers[groupId] = byIP
+				}
+				users := byIP[record.IP]
+				if users == nil {
+					users = make(map[int]struct{})
+					byIP[record.IP] = users
+				}
+				users[record.UserId] = struct{}{}
+			}
+		}
+	}
+	sharedIPCount := make(map[int]int64, len(scan.memberGroups))
+	for groupId, byIP := range groupIPUsers {
+		for _, users := range byIP {
+			if len(users) > 1 {
+				sharedIPCount[groupId]++
+			}
+		}
+	}
+	return sharedIPCount, nil
+}
+
+// buildRiskInviters loads the displayed invitees (up to 100 per inviter) and
+// assembles the API result for the given rows.
+func buildRiskInviters(rows []riskInviterRow) ([]*RiskInviter, error) {
+	result := make([]*RiskInviter, 0, len(rows))
+	for _, row := range rows {
 		var invitees []*User
-		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id").Where("inviter_id = ?", inviter.Id).Order("id desc").Limit(100).Find(&invitees).Error; err != nil {
-			return nil, 0, err
-		}
-		ids := make([]int, 0, len(invitees)+1)
-		ids = append(ids, inviter.Id)
-		for _, invitee := range invitees {
-			ids = append(ids, invitee.Id)
-		}
-		sharedIPs, err := countSharedIPsForUsers(ids)
-		if err != nil {
-			return nil, 0, err
+		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id").Where("inviter_id = ?", row.InviterId).Order("id desc").Limit(100).Find(&invitees).Error; err != nil {
+			return nil, err
 		}
 		summaries := make([]*RiskUserSummary, 0, len(invitees))
 		for _, invitee := range invitees {
 			summaries = append(summaries, &RiskUserSummary{UserId: invitee.Id, Username: invitee.Username, DisplayName: invitee.DisplayName, Group: invitee.Group, Role: invitee.Role, InviterId: invitee.InviterId})
 		}
-		result = append(result, &RiskInviter{InviterId: inviter.Id, Username: inviter.Username, DisplayName: inviter.DisplayName, Group: inviter.Group, DirectInviteCount: directInviteCount, SharedIPCount: sharedIPs, Suspicious: sharedIPs > 0, Invitees: summaries})
+		result = append(result, &RiskInviter{
+			InviterId: row.InviterId, Username: row.Username, DisplayName: row.DisplayName, Group: row.Group,
+			DirectInviteCount: row.DirectInviteCount, SharedIPCount: row.SharedIPCount,
+			Suspicious: row.SharedIPCount > 0, LatestInviteAt: row.LatestInviteAt, Invitees: summaries,
+		})
 	}
-	return result, total, nil
+	return result, nil
 }
 
-func countSharedIPsForUsers(userIds []int) (int64, error) {
-	if len(userIds) < 2 {
-		return 0, nil
+// ListRiskInviters lists users who invited others, ordered by the CreatedAt of
+// their most recently invited user (desc) with a stable inviter id (desc)
+// tie-break. riskStatus "all" paginates in the database and only evaluates
+// shared-IP risk for the current page; "review"/"normal" evaluate all
+// candidates first because filtering must run before pagination. Shared IP
+// counts always cover the inviter plus ALL invitees; displayed invitees stay
+// capped at 100. Any riskStatus other than review/normal behaves as "all".
+func ListRiskInviters(keyword string, riskStatus string, startIdx int, limit int) ([]*RiskInviter, int64, error) {
+	if limit <= 0 {
+		limit = common.ItemsPerPage
 	}
-	var count int64
-	err := DB.Model(&RiskIPRecord{}).Where("user_id IN ? AND ip <> ''", userIds).
-		Select("COUNT(DISTINCT ip)").Where("ip IN (?)", DB.Model(&RiskIPRecord{}).Select("ip").Where("user_id IN ? AND ip <> ''", userIds).Group("ip").Having("COUNT(DISTINCT user_id) > 1")).Scan(&count).Error
-	return count, err
+	if riskStatus != "review" && riskStatus != "normal" {
+		riskStatus = "all"
+	}
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	inviterSub := DB.Model(&User{}).Where("inviter_id > 0").Distinct("inviter_id")
+
+	if riskStatus == "all" {
+		statsSub := DB.Model(&User{}).
+			Select("inviter_id, COUNT(*) AS direct_invite_count, MAX(created_at) AS latest_invite_at").
+			Where("inviter_id IN (?)", inviterSub).Group("inviter_id")
+		pageTx := DB.Model(&User{}).
+			Joins("LEFT JOIN (?) AS inv_stats ON inv_stats.inviter_id = users.id", statsSub).
+			Where("users.id IN (?)", inviterSub)
+		if keyword != "" {
+			pattern, err := sanitizeLikePattern("%" + keyword + "%")
+			if err != nil {
+				return nil, 0, err
+			}
+			pageTx = pageTx.Where("users.username LIKE ? ESCAPE '!' OR users.display_name LIKE ? ESCAPE '!'", pattern, pattern)
+		}
+		var total int64
+		if err := pageTx.Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		var rows []riskInviterRow
+		if err := pageTx.Select("users.id AS inviter_id, users.username, users.display_name, users." + commonGroupCol +
+			", COALESCE(inv_stats.direct_invite_count, 0) AS direct_invite_count, COALESCE(inv_stats.latest_invite_at, 0) AS latest_invite_at").
+			Order("inv_stats.latest_invite_at DESC").Order("users.id DESC").
+			Offset(startIdx).Limit(limit).Scan(&rows).Error; err != nil {
+			return nil, 0, err
+		}
+		if len(rows) == 0 {
+			return []*RiskInviter{}, total, nil
+		}
+		pageIds := make([]int, 0, len(rows))
+		for _, row := range rows {
+			pageIds = append(pageIds, row.InviterId)
+		}
+		scan, err := loadRiskInviteeMembers(pageIds)
+		if err != nil {
+			return nil, 0, err
+		}
+		sharedIPCount, err := riskSharedIPCounts(scan)
+		if err != nil {
+			return nil, 0, err
+		}
+		for index := range rows {
+			rows[index].SharedIPCount = sharedIPCount[rows[index].InviterId]
+		}
+		result, err := buildRiskInviters(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		return result, total, nil
+	}
+
+	// review/normal: risk must be known for every candidate before pagination
+	kw := DB.Model(&User{}).Select("id").Where("id IN (?)", inviterSub)
+	if keyword != "" {
+		pattern, err := sanitizeLikePattern("%" + keyword + "%")
+		if err != nil {
+			return nil, 0, err
+		}
+		kw = kw.Where("username LIKE ? ESCAPE '!' OR display_name LIKE ? ESCAPE '!'", pattern, pattern)
+	}
+	var inviterIds []int
+	if err := kw.Pluck("id", &inviterIds).Error; err != nil {
+		return nil, 0, err
+	}
+	if len(inviterIds) == 0 {
+		return []*RiskInviter{}, 0, nil
+	}
+	scan, err := loadRiskInviteeMembers(inviterIds)
+	if err != nil {
+		return nil, 0, err
+	}
+	sharedIPCount, err := riskSharedIPCounts(scan)
+	if err != nil {
+		return nil, 0, err
+	}
+	rows := make([]riskInviterRow, 0, len(inviterIds))
+	for _, inviterId := range inviterIds {
+		rows = append(rows, riskInviterRow{
+			InviterId: inviterId, DirectInviteCount: scan.inviteeCount[inviterId],
+			LatestInviteAt: scan.latestInviteAt[inviterId], SharedIPCount: sharedIPCount[inviterId],
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].LatestInviteAt != rows[j].LatestInviteAt {
+			return rows[i].LatestInviteAt > rows[j].LatestInviteAt
+		}
+		return rows[i].InviterId > rows[j].InviterId
+	})
+	kept := make([]riskInviterRow, 0, len(rows))
+	for _, row := range rows {
+		if (riskStatus == "review" && row.SharedIPCount > 0) || (riskStatus == "normal" && row.SharedIPCount == 0) {
+			kept = append(kept, row)
+		}
+	}
+	rows = kept
+	total := int64(len(rows))
+	if startIdx >= len(rows) {
+		return []*RiskInviter{}, total, nil
+	}
+	pageLen := limit
+	if pageLen > len(rows)-startIdx {
+		pageLen = len(rows) - startIdx
+	}
+	pageRows := rows[startIdx : startIdx+pageLen]
+	pageIds := make([]int, 0, len(pageRows))
+	for _, row := range pageRows {
+		pageIds = append(pageIds, row.InviterId)
+	}
+	if len(pageIds) > 0 {
+		var inviterUsers []*User
+		if err := DB.Select("id, username, display_name, "+commonGroupCol).Where("id IN ?", pageIds).Find(&inviterUsers).Error; err != nil {
+			return nil, 0, err
+		}
+		byID := make(map[int]*User, len(inviterUsers))
+		for _, user := range inviterUsers {
+			byID[user.Id] = user
+		}
+		for index := range pageRows {
+			if user := byID[pageRows[index].InviterId]; user != nil {
+				pageRows[index].Username = user.Username
+				pageRows[index].DisplayName = user.DisplayName
+				pageRows[index].Group = user.Group
+			}
+		}
+	}
+	result, err := buildRiskInviters(pageRows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return result, total, nil
 }
 
 func GetRiskOverview() (*RiskOverview, error) {

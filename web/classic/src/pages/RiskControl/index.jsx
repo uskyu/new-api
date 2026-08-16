@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Card,
@@ -41,7 +41,11 @@ const PAGE_SIZE = 10;
 
 const SourceTag = ({ source, t }) => (
   <Tag color={source === 'login' ? 'blue' : 'cyan'} shape='circle'>
-    {source === 'login' ? t('登录') : source === 'token' ? t('令牌') : t('全部来源')}
+    {source === 'login'
+      ? t('登录')
+      : source === 'token'
+        ? t('令牌')
+        : t('全部来源')}
   </Tag>
 );
 
@@ -59,7 +63,10 @@ function SharedIPCards({ items, t }) {
   return (
     <div className='grid gap-3 md:hidden'>
       {items.map((item) => (
-        <div key={`${item.source}-${item.ip}`} className='rounded-lg border border-[var(--semi-color-border)] p-3'>
+        <div
+          key={`${item.source}-${item.ip}`}
+          className='rounded-lg border border-[var(--semi-color-border)] p-3'
+        >
           <div className='flex items-start justify-between gap-3'>
             <Text strong copyable={{ content: item.ip }} className='break-all'>
               {item.ip}
@@ -68,16 +75,24 @@ function SharedIPCards({ items, t }) {
           </div>
           <div className='mt-3 grid grid-cols-3 gap-2 text-center'>
             <div>
-              <div className='text-xs text-[var(--semi-color-text-2)]'>{t('用户数')}</div>
+              <div className='text-xs text-[var(--semi-color-text-2)]'>
+                {t('用户数')}
+              </div>
               <div className='mt-1 font-medium'>{item.user_count}</div>
             </div>
             <div>
-              <div className='text-xs text-[var(--semi-color-text-2)]'>{t('采样次数')}</div>
+              <div className='text-xs text-[var(--semi-color-text-2)]'>
+                {t('采样次数')}
+              </div>
               <div className='mt-1 font-medium'>{item.event_count}</div>
             </div>
             <div>
-              <div className='text-xs text-[var(--semi-color-text-2)]'>{t('最近出现')}</div>
-              <div className='mt-1 text-xs'>{timestamp2string(item.last_seen_at)}</div>
+              <div className='text-xs text-[var(--semi-color-text-2)]'>
+                {t('最近出现')}
+              </div>
+              <div className='mt-1 text-xs'>
+                {timestamp2string(item.last_seen_at)}
+              </div>
             </div>
           </div>
           <div className='mt-3 border-t border-[var(--semi-color-border)] pt-3'>
@@ -93,20 +108,37 @@ function InviterCards({ items, t }) {
   return (
     <div className='grid gap-3 md:hidden'>
       {items.map((item) => (
-        <div key={item.inviter_id} className='rounded-lg border border-[var(--semi-color-border)] p-3'>
+        <div
+          key={item.inviter_id}
+          className='rounded-lg border border-[var(--semi-color-border)] p-3'
+        >
           <div className='flex items-start justify-between gap-3'>
             <div>
-              <Text strong>#{item.inviter_id} {item.username}</Text>
-              {item.display_name && <div className='text-xs text-[var(--semi-color-text-2)]'>{item.display_name}</div>}
+              <Text strong>
+                #{item.inviter_id} {item.username}
+              </Text>
+              {item.display_name && (
+                <div className='text-xs text-[var(--semi-color-text-2)]'>
+                  {item.display_name}
+                </div>
+              )}
             </div>
             <Tag color={item.suspicious ? 'red' : 'green'} shape='circle'>
               {item.suspicious ? t('需复核') : t('正常')}
             </Tag>
           </div>
           <div className='mt-3 flex flex-wrap gap-2'>
-            <Tag>{t('直接邀请')}: {item.direct_invite_count}</Tag>
+            <Tag>
+              {t('直接邀请')}: {item.direct_invite_count}
+            </Tag>
             <Tag color={item.shared_ip_count ? 'red' : 'white'}>
               {t('关联同 IP')}: {item.shared_ip_count}
+            </Tag>
+            <Tag color='white'>
+              {t('最近邀请')}:{' '}
+              {item.latest_invite_at
+                ? timestamp2string(item.latest_invite_at)
+                : '-'}
             </Tag>
           </div>
           <div className='mt-3 border-t border-[var(--semi-color-border)] pt-3'>
@@ -124,57 +156,141 @@ export default function RiskControl() {
   const [overview, setOverview] = useState({});
   const [tab, setTab] = useState('shared');
   const [source, setSource] = useState('all');
+  const [riskStatus, setRiskStatus] = useState('all');
   const [searchType, setSearchType] = useState('ip');
   const [keyword, setKeyword] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
+  const requestSeq = useRef(0);
+  const loadingSeq = useRef(0);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async ({ silent = false, listOnly = false } = {}) => {
+    const seq = ++requestSeq.current;
+    if (!silent) {
+      loadingSeq.current = seq;
+      setLoading(true);
+    }
     try {
-      const endpoint = tab === 'shared' ? '/api/risk-control/shared-ips' : '/api/risk-control/inviters';
+      const endpoint =
+        tab === 'shared'
+          ? '/api/risk-control/shared-ips'
+          : '/api/risk-control/inviters';
       const params = { p: page, page_size: PAGE_SIZE, keyword: search };
       if (tab === 'shared' && source !== 'all') params.source = source;
       if (tab === 'shared') params.min_users = 2;
       if (tab === 'shared') params.search_type = searchType;
-      const [overviewRes, listRes] = await Promise.all([
-        API.get('/api/risk-control/overview'),
+      if (tab === 'inviters' && riskStatus !== 'all')
+        params.risk_status = riskStatus;
+      const requests = [
         API.get(endpoint, { params }),
-      ]);
-      if (!overviewRes.data.success) throw new Error(overviewRes.data.message);
+        ...(listOnly ? [] : [API.get('/api/risk-control/overview')]),
+      ];
+      const [listRes, overviewRes] = await Promise.all(requests);
+      if (seq !== requestSeq.current) return;
       if (!listRes.data.success) throw new Error(listRes.data.message);
-      setOverview(overviewRes.data.data || {});
       setItems(listRes.data.data?.items || []);
       setTotal(listRes.data.data?.total || 0);
+      if (overviewRes) {
+        if (!overviewRes.data.success)
+          throw new Error(overviewRes.data.message);
+        setOverview(overviewRes.data.data || {});
+      }
     } catch (error) {
+      if (seq !== requestSeq.current) return;
+      if (silent) return;
       showError(error);
     } finally {
-      setLoading(false);
+      if (!silent && loadingSeq.current === seq) setLoading(false);
     }
   };
 
   useEffect(() => {
     loadData();
-  }, [tab, source, searchType, search, page]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, source, searchType, search, page, riskStatus]);
 
-  const sharedColumns = useMemo(() => [
-    { title: t('IP 地址'), dataIndex: 'ip', render: (value) => <Text copyable={{ content: value }}>{value}</Text> },
-    { title: t('来源'), dataIndex: 'source', render: (value) => <SourceTag source={value} t={t} /> },
-    { title: t('关联用户'), dataIndex: 'users', render: (value) => <UserList users={value} /> },
-    { title: t('用户数'), dataIndex: 'user_count', width: 90 },
-    { title: t('采样次数'), dataIndex: 'event_count', width: 100 },
-    { title: t('最近出现'), dataIndex: 'last_seen_at', render: timestamp2string, width: 180 },
-  ], [t]);
+  // Poll the inviter list every 30s on the first page, unfiltered only.
+  useEffect(() => {
+    if (tab !== 'inviters' || page !== 1 || riskStatus !== 'all')
+      return undefined;
+    const timer = setInterval(
+      () => loadData({ silent: true, listOnly: true }),
+      30000,
+    );
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, page, riskStatus, source, searchType, search]);
 
-  const inviterColumns = useMemo(() => [
-    { title: t('邀请人'), render: (_, item) => <Text strong>#{item.inviter_id} {item.username}</Text> },
-    { title: t('直接邀请人数'), dataIndex: 'direct_invite_count', width: 120 },
-    { title: t('关联同 IP'), dataIndex: 'shared_ip_count', width: 110 },
-    { title: t('被邀请用户'), dataIndex: 'invitees', render: (value) => <UserList users={value} /> },
-    { title: t('状态'), render: (_, item) => <Tag color={item.suspicious ? 'red' : 'green'}>{item.suspicious ? t('需复核') : t('正常')}</Tag>, width: 90 },
-  ], [t]);
+  const sharedColumns = useMemo(
+    () => [
+      {
+        title: t('IP 地址'),
+        dataIndex: 'ip',
+        render: (value) => <Text copyable={{ content: value }}>{value}</Text>,
+      },
+      {
+        title: t('来源'),
+        dataIndex: 'source',
+        render: (value) => <SourceTag source={value} t={t} />,
+      },
+      {
+        title: t('关联用户'),
+        dataIndex: 'users',
+        render: (value) => <UserList users={value} />,
+      },
+      { title: t('用户数'), dataIndex: 'user_count', width: 90 },
+      { title: t('采样次数'), dataIndex: 'event_count', width: 100 },
+      {
+        title: t('最近出现'),
+        dataIndex: 'last_seen_at',
+        render: timestamp2string,
+        width: 180,
+      },
+    ],
+    [t],
+  );
+
+  const inviterColumns = useMemo(
+    () => [
+      {
+        title: t('邀请人'),
+        render: (_, item) => (
+          <Text strong>
+            #{item.inviter_id} {item.username}
+          </Text>
+        ),
+      },
+      {
+        title: t('直接邀请人数'),
+        dataIndex: 'direct_invite_count',
+        width: 120,
+      },
+      { title: t('关联同 IP'), dataIndex: 'shared_ip_count', width: 110 },
+      {
+        title: t('最近邀请时间'),
+        dataIndex: 'latest_invite_at',
+        render: (value) => (value ? timestamp2string(value) : '-'),
+        width: 180,
+      },
+      {
+        title: t('被邀请用户'),
+        dataIndex: 'invitees',
+        render: (value) => <UserList users={value} />,
+      },
+      {
+        title: t('状态'),
+        render: (_, item) => (
+          <Tag color={item.suspicious ? 'red' : 'green'}>
+            {item.suspicious ? t('需复核') : t('正常')}
+          </Tag>
+        ),
+        width: 90,
+      },
+    ],
+    [t],
+  );
 
   const stats = [
     [t('已记录用户'), overview.tracked_users || 0],
@@ -188,53 +304,163 @@ export default function RiskControl() {
       <div className='mx-auto max-w-[1500px]'>
         <div className='mb-4 flex flex-wrap items-center justify-between gap-3'>
           <div>
-            <Title heading={3} className='!mb-1 flex items-center gap-2'><ShieldAlert size={22} />{t('风控管理')}</Title>
-            <Text type='secondary'>{t('核对共享 IP 与邀请关联，不自动处置用户')}</Text>
+            <Title heading={3} className='!mb-1 flex items-center gap-2'>
+              <ShieldAlert size={22} />
+              {t('风控管理')}
+            </Title>
+            <Text type='secondary'>
+              {t('核对共享 IP 与邀请关联，不自动处置用户')}
+            </Text>
           </div>
-          <Button icon={<RefreshCw size={16} />} onClick={loadData} loading={loading}>{t('刷新')}</Button>
+          <Button
+            icon={<RefreshCw size={16} />}
+            onClick={() => loadData()}
+            loading={loading}
+          >
+            {t('刷新')}
+          </Button>
         </div>
 
         <div className='mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4'>
           {stats.map(([label, value]) => (
             <Card key={label} bodyStyle={{ padding: 14 }}>
-              <Text type='secondary' size='small'>{label}</Text>
+              <Text type='secondary' size='small'>
+                {label}
+              </Text>
               <div className='mt-1 text-xl font-semibold'>{value}</div>
             </Card>
           ))}
         </div>
 
         <Card bodyStyle={{ padding: 16 }}>
-          <Tabs activeKey={tab} onChange={(value) => { setTab(value); setPage(1); setItems([]); }}>
-            <TabPane tab={<span className='flex items-center gap-2'><ShieldAlert size={16} />{t('同 IP 用户')}</span>} itemKey='shared' />
-            <TabPane tab={<span className='flex items-center gap-2'><Users size={16} />{t('邀请关系')}</span>} itemKey='inviters' />
+          <Tabs
+            activeKey={tab}
+            onChange={(value) => {
+              setTab(value);
+              setPage(1);
+              setItems([]);
+            }}
+          >
+            <TabPane
+              tab={
+                <span className='flex items-center gap-2'>
+                  <ShieldAlert size={16} />
+                  {t('同 IP 用户')}
+                </span>
+              }
+              itemKey='shared'
+            />
+            <TabPane
+              tab={
+                <span className='flex items-center gap-2'>
+                  <Users size={16} />
+                  {t('邀请关系')}
+                </span>
+              }
+              itemKey='inviters'
+            />
           </Tabs>
 
           <div className='my-4 flex flex-col gap-3 sm:flex-row'>
             {tab === 'shared' && (
-              <Select value={source} onChange={(value) => { setSource(value); setPage(1); }} className='w-full sm:w-36'>
+              <Select
+                value={source}
+                onChange={(value) => {
+                  setSource(value);
+                  setPage(1);
+                }}
+                className='w-full sm:w-36'
+              >
                 <Select.Option value='all'>{t('全部来源')}</Select.Option>
                 <Select.Option value='login'>{t('登录')}</Select.Option>
                 <Select.Option value='token'>{t('令牌')}</Select.Option>
               </Select>
             )}
             {tab === 'shared' && (
-              <Select value={searchType} onChange={(value) => { setSearchType(value); setPage(1); }} className='w-full sm:w-32'>
+              <Select
+                value={searchType}
+                onChange={(value) => {
+                  setSearchType(value);
+                  setPage(1);
+                }}
+                className='w-full sm:w-32'
+              >
                 <Select.Option value='ip'>{t('搜索 IP')}</Select.Option>
-                <Select.Option value='username'>{t('搜索用户名/昵称')}</Select.Option>
+                <Select.Option value='username'>
+                  {t('搜索用户名/昵称')}
+                </Select.Option>
                 <Select.Option value='user_id'>{t('搜索用户ID')}</Select.Option>
               </Select>
             )}
-            <Input value={keyword} onChange={setKeyword} prefix={<Search size={16} />} placeholder={tab === 'shared' ? (searchType === 'username' ? t('搜索用户名/昵称') : searchType === 'user_id' ? t('搜索用户ID') : t('搜索 IP')) : t('搜索邀请人')} onEnterPress={() => { setSearch(keyword.trim()); setPage(1); }} />
-            <Button onClick={() => { setSearch(keyword.trim()); setPage(1); }}>{t('查询')}</Button>
+            {tab === 'inviters' && (
+              <Select
+                value={riskStatus}
+                onChange={(value) => {
+                  setRiskStatus(value);
+                  setPage(1);
+                }}
+                className='w-full sm:w-36'
+              >
+                <Select.Option value='all'>{t('全部')}</Select.Option>
+                <Select.Option value='review'>{t('需复核')}</Select.Option>
+                <Select.Option value='normal'>{t('未发现异常')}</Select.Option>
+              </Select>
+            )}
+            <Input
+              value={keyword}
+              onChange={setKeyword}
+              prefix={<Search size={16} />}
+              placeholder={
+                tab === 'shared'
+                  ? searchType === 'username'
+                    ? t('搜索用户名/昵称')
+                    : searchType === 'user_id'
+                      ? t('搜索用户ID')
+                      : t('搜索 IP')
+                  : t('搜索邀请人')
+              }
+              onEnterPress={() => {
+                setSearch(keyword.trim());
+                setPage(1);
+              }}
+            />
+            <Button
+              onClick={() => {
+                setSearch(keyword.trim());
+                setPage(1);
+              }}
+            >
+              {t('查询')}
+            </Button>
           </div>
 
           <Spin spinning={loading}>
-            {tab === 'shared' ? <SharedIPCards items={items} t={t} /> : <InviterCards items={items} t={t} />}
+            {tab === 'shared' ? (
+              <SharedIPCards items={items} t={t} />
+            ) : (
+              <InviterCards items={items} t={t} />
+            )}
             <div className='hidden overflow-x-auto md:block'>
-              <Table columns={tab === 'shared' ? sharedColumns : inviterColumns} dataSource={items} pagination={false} rowKey={tab === 'shared' ? (item) => `${item.source}-${item.ip}` : 'inviter_id'} empty='-' />
+              <Table
+                columns={tab === 'shared' ? sharedColumns : inviterColumns}
+                dataSource={items}
+                pagination={false}
+                rowKey={
+                  tab === 'shared'
+                    ? (item) => `${item.source}-${item.ip}`
+                    : 'inviter_id'
+                }
+                empty='-'
+              />
             </div>
             <div className='mt-4 flex justify-end'>
-              <Pagination currentPage={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} showTotal />
+              <Pagination
+                currentPage={page}
+                pageSize={PAGE_SIZE}
+                total={total}
+                onPageChange={setPage}
+                showTotal
+              />
             </div>
           </Spin>
         </Card>

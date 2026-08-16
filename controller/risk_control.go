@@ -43,6 +43,7 @@ func GetRiskControlInviters(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	items, total, err := model.ListRiskInviters(
 		strings.TrimSpace(c.Query("keyword")),
+		strings.TrimSpace(c.Query("risk_status")),
 		pageInfo.GetStartIdx(),
 		pageInfo.GetPageSize(),
 	)
