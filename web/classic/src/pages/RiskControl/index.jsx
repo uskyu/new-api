@@ -65,11 +65,21 @@ const UserList = ({ users = [] }) => (
   </div>
 );
 
+const getInviteeState = (user) => {
+  const rewardStatus = user.invite_reward_status;
+  const hasCalled = Number(user.first_model_call_at) > 0;
+
+  return {
+    rewardStatus,
+    callStatus:
+      rewardStatus === 0 ? 'unknown' : hasCalled ? 'called' : 'not_called',
+  };
+};
+
 const InviteeList = ({ users = [], t }) => (
   <div className='flex min-w-[300px] flex-col gap-2'>
     {users.map((user) => {
-      const called = user.invite_reward_status === 2;
-      const pending = user.invite_reward_status === 1;
+      const { rewardStatus, callStatus } = getInviteeState(user);
       return (
         <div
           key={user.user_id}
@@ -79,20 +89,35 @@ const InviteeList = ({ users = [], t }) => (
             <Text strong>
               #{user.user_id} {user.username}
             </Text>
-            {called ? (
+            <Text type='tertiary' size='small'>
+              {t('奖励状态')}:
+            </Text>
+            {rewardStatus === 1 ? (
+              <Tag color='orange'>{t('待奖励')}</Tag>
+            ) : rewardStatus === 2 ? (
+              <Tag color='green'>{t('已奖励')}</Tag>
+            ) : rewardStatus === 3 ? (
+              <Tag color='red'>{t('奖励无效')}</Tag>
+            ) : (
+              <Tag color='white'>{t('历史/未纳入')}</Tag>
+            )}
+            <Text type='tertiary' size='small'>
+              {t('调用状态')}:
+            </Text>
+            {callStatus === 'called' ? (
               <Tag color='green' prefixIcon={<Check size={12} />}>
                 {t('已调用')}
               </Tag>
-            ) : pending ? (
+            ) : callStatus === 'not_called' ? (
               <Tag color='grey'>{t('未调用')}</Tag>
             ) : (
-              <Tag color='white'>{t('历史/未纳入')}</Tag>
+              <Tag color='white'>{t('调用未知')}</Tag>
             )}
           </div>
           <div className='mt-1 text-[var(--semi-color-text-2)]'>
             {t('注册时间')}: {timestamp2string(user.created_at)}
           </div>
-          {user.invite_reward_status !== 0 && (
+          {rewardStatus !== 0 && (
             <div className='text-[var(--semi-color-text-2)]'>
               {t('首次调用时间')}:{' '}
               {user.first_model_call_at
@@ -108,13 +133,25 @@ const InviteeList = ({ users = [], t }) => (
 
 const InviteeDetails = ({ item, expanded, onToggle, t }) => {
   const users = item.invitees || [];
-  const calledCount = users.filter(
-    (user) => user.invite_reward_status === 2,
+  const states = users.map(getInviteeState);
+  const calledCount = states.filter(
+    ({ callStatus }) => callStatus === 'called',
   ).length;
-  const pendingCount = users.filter(
-    (user) => user.invite_reward_status === 1,
+  const notCalledCount = states.filter(
+    ({ callStatus }) => callStatus === 'not_called',
   ).length;
-  const historicalCount = users.length - calledCount - pendingCount;
+  const unknownCount = states.filter(
+    ({ callStatus }) => callStatus === 'unknown',
+  ).length;
+  const pendingRewardCount = states.filter(
+    ({ rewardStatus }) => rewardStatus === 1,
+  ).length;
+  const rewardedCount = states.filter(
+    ({ rewardStatus }) => rewardStatus === 2,
+  ).length;
+  const invalidRewardCount = states.filter(
+    ({ rewardStatus }) => rewardStatus === 3,
+  ).length;
 
   return (
     <div className='min-w-[220px]'>
@@ -122,15 +159,41 @@ const InviteeDetails = ({ item, expanded, onToggle, t }) => {
         <Text type='secondary' size='small'>
           {t('共 {{count}} 人', { count: item.direct_invite_count })}
         </Text>
-        <Tag color='green'>
-          {t('已调用 {{count}} 人', { count: calledCount })}
-        </Tag>
-        <Tag color='grey'>
-          {t('未调用 {{count}} 人', { count: pendingCount })}
-        </Tag>
-        <Tag color='white'>
-          {t('历史/未纳入')}: {historicalCount}
-        </Tag>
+        {item.direct_invite_count > users.length && (
+          <Text type='tertiary' size='small'>
+            {t('以下统计为最近 {{count}} 人', { count: users.length })}
+          </Text>
+        )}
+        {calledCount > 0 && (
+          <Tag color='green'>
+            {t('已调用 {{count}} 人', { count: calledCount })}
+          </Tag>
+        )}
+        {notCalledCount > 0 && (
+          <Tag color='grey'>
+            {t('未调用 {{count}} 人', { count: notCalledCount })}
+          </Tag>
+        )}
+        {unknownCount > 0 && (
+          <Tag color='white'>
+            {t('调用未知 {{count}} 人', { count: unknownCount })}
+          </Tag>
+        )}
+        {pendingRewardCount > 0 && (
+          <Tag color='orange'>
+            {t('待奖励 {{count}} 人', { count: pendingRewardCount })}
+          </Tag>
+        )}
+        {rewardedCount > 0 && (
+          <Tag color='green'>
+            {t('已奖励 {{count}} 人', { count: rewardedCount })}
+          </Tag>
+        )}
+        {invalidRewardCount > 0 && (
+          <Tag color='red'>
+            {t('奖励无效 {{count}} 人', { count: invalidRewardCount })}
+          </Tag>
+        )}
         <Button
           size='small'
           theme='borderless'

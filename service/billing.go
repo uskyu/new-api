@@ -86,12 +86,12 @@ func SettleSuccessfulModelCall(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	if err := SettleBilling(ctx, relayInfo, actualQuota); err != nil {
 		return err
 	}
-	inviterId, err := model.ActivatePendingInviteReward(relayInfo.UserId, common.GetTimestamp())
+	inviterId, rewardQuota, err := model.ActivatePendingInviteRewardWithQuota(relayInfo.UserId, common.GetTimestamp())
 	if err != nil {
 		return fmt.Errorf("activate pending invite reward: %w", err)
 	}
-	if inviterId > 0 && common.QuotaForInviter > 0 {
-		model.RecordLog(inviterId, model.LogTypeSystem, fmt.Sprintf("邀请用户首次调用赠送 %s", logger.LogQuota(common.QuotaForInviter)))
+	if inviterId > 0 && rewardQuota > 0 {
+		model.RecordLog(inviterId, model.LogTypeSystem, fmt.Sprintf("邀请用户首次调用赠送 %s", logger.LogQuota(rewardQuota)))
 	}
 	return nil
 }

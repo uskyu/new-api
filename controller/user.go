@@ -23,11 +23,23 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+func resolveRegistrationInviterId(affCode string, lookup func(string) (int, error)) (int, error) {
+	if affCode == "" {
+		return 0, nil
+	}
+	inviterId, err := lookup(affCode)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	return inviterId, err
 }
 
 func Login(c *gin.Context) {
@@ -219,7 +231,12 @@ func Register(c *gin.Context) {
 		return
 	}
 	affCode := user.AffCode // this code is the inviter's code, not the user's own code
-	inviterId, _ := model.GetUserIdByAffCode(affCode)
+	inviterId, err := resolveRegistrationInviterId(affCode, model.GetUserIdByAffCodeIncludingDeleted)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("GetUserIdByAffCodeIncludingDeleted error: %v", err))
+		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+		return
+	}
 	cleanUser := model.User{
 		Username:    user.Username,
 		Password:    user.Password,
@@ -227,13 +244,10 @@ func Register(c *gin.Context) {
 		InviterId:   inviterId,
 		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
 	}
-	if inviterId > 0 && operation_setting.IsPaymentComplianceConfirmed() {
-		cleanUser.InviteRewardStatus = model.InviteRewardStatusPending
-	}
 	if common.EmailVerificationEnabled {
 		cleanUser.Email = user.Email
 	}
-	if err := cleanUser.Insert(inviterId); err != nil {
+	if err := cleanUser.InsertRegular(inviterId); err != nil {
 		common.ApiError(c, err)
 		return
 	}

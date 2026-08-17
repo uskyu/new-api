@@ -36,6 +36,7 @@ export default function SettingsCreditLimit(props) {
     PreConsumedQuota: '',
     QuotaForInviter: '',
     QuotaForInvitee: '',
+    'quota_setting.reward_inviter_after_first_model_call': true,
     'quota_setting.enable_free_model_pre_consume': true,
   });
   const refForm = useRef();
@@ -179,6 +180,24 @@ export default function SettingsCreditLimit(props) {
                     setInputs({
                       ...inputs,
                       QuotaForInvitee: String(value),
+                    })
+                  }
+                />
+              </Col>
+            </Row>
+            <Row>
+              <Col xs={24}>
+                <Form.Switch
+                  label={t('首次模型调用后奖励邀请人')}
+                  field={'quota_setting.reward_inviter_after_first_model_call'}
+                  extraText={t(
+                    '开启后，普通邀请码新用户首次成功调用模型后奖励邀请人；关闭后，新用户注册后立即奖励邀请人。仅影响之后新注册的用户，不批量处理已有待奖励记录，OAuth 邀请不受影响。',
+                  )}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'quota_setting.reward_inviter_after_first_model_call':
+                        value,
                     })
                   }
                 />

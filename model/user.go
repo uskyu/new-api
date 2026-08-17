@@ -333,6 +333,18 @@ func GetUserIdByAffCode(affCode string) (int, error) {
 	return user.Id, err
 }
 
+// GetUserIdByAffCodeIncludingDeleted preserves the inviter identity for regular
+// registration so a concurrently missing or soft-deleted inviter is recorded
+// as an invalid invitation instead of silently becoming ineligible.
+func GetUserIdByAffCodeIncludingDeleted(affCode string) (int, error) {
+	if affCode == "" {
+		return 0, errors.New("affCode 为空！")
+	}
+	var user User
+	err := DB.Unscoped().Select("id").First(&user, "aff_code = ?", affCode).Error
+	return user.Id, err
+}
+
 func DeleteUserById(id int) (err error) {
 	if id == 0 {
 		return errors.New("id 为空！")
@@ -349,27 +361,88 @@ func HardDeleteUserById(id int) error {
 	return err
 }
 
-// ActivatePendingInviteReward marks a regular invitee's first successful model
-// call and atomically grants the inviter reward. Historical and OAuth-created
-// users remain in the ineligible default state and can never enter this flow.
+type inviteRegistrationSnapshot struct {
+	NewUserQuota         int
+	InviterRewardQuota   int
+	InviteeRewardQuota   int
+	ComplianceConfirmed  bool
+	RewardAfterFirstCall bool
+}
+
+func captureInviteRegistrationSnapshot() inviteRegistrationSnapshot {
+	return inviteRegistrationSnapshot{
+		NewUserQuota:         common.QuotaForNewUser,
+		InviterRewardQuota:   common.QuotaForInviter,
+		InviteeRewardQuota:   common.QuotaForInvitee,
+		ComplianceConfirmed:  operation_setting.IsPaymentComplianceConfirmed(),
+		RewardAfterFirstCall: operation_setting.GetQuotaSetting().RewardInviterAfterFirstModelCall,
+	}
+}
+
+func rewardInviterWithTx(tx *gorm.DB, inviterId int, rewardQuota int) (bool, error) {
+	result := tx.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]interface{}{
+		"aff_count":   gorm.Expr("aff_count + ?", 1),
+		"aff_quota":   gorm.Expr("aff_quota + ?", rewardQuota),
+		"aff_history": gorm.Expr("aff_history + ?", rewardQuota),
+	})
+	return result.RowsAffected == 1, result.Error
+}
+
+func rewardInviterForRegistrationWithTx(tx *gorm.DB, user *User, inviterId int, snapshot inviteRegistrationSnapshot) error {
+	rewarded, err := rewardInviterWithTx(tx, inviterId, snapshot.InviterRewardQuota)
+	if err != nil {
+		return err
+	}
+	if rewarded {
+		return nil
+	}
+
+	user.InviteRewardStatus = InviteRewardStatusInvalid
+	user.Quota = snapshot.NewUserQuota
+	return tx.Model(user).Updates(map[string]interface{}{
+		"invite_reward_status": InviteRewardStatusInvalid,
+		"quota":                snapshot.NewUserQuota,
+	}).Error
+}
+
+// ActivatePendingInviteReward records a tracked regular invitee's first
+// successful model call. Pending invitations atomically grant the inviter
+// reward; invitations rewarded during registration only record the call time.
+// Historical and OAuth-created users remain ineligible and are never updated.
 func ActivatePendingInviteReward(userId int, firstCallAt int64) (int, error) {
+	inviterId, _, err := ActivatePendingInviteRewardWithQuota(userId, firstCallAt)
+	return inviterId, err
+}
+
+// ActivatePendingInviteRewardWithQuota also returns the captured reward quota
+// so post-transaction logging cannot observe a different concurrent setting.
+func ActivatePendingInviteRewardWithQuota(userId int, firstCallAt int64) (int, int, error) {
 	if userId <= 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
 	if firstCallAt <= 0 {
 		firstCallAt = common.GetTimestamp()
 	}
+	rewardQuota := common.QuotaForInviter
 
 	const maxAttempts = 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		activatedInviterId := 0
 		err := DB.Transaction(func(tx *gorm.DB) error {
 			var invitee User
-			if err := tx.Select("id, inviter_id, invite_reward_status").First(&invitee, "id = ?", userId).Error; err != nil {
+			if err := tx.Select("id, inviter_id, invite_reward_status, first_model_call_at").First(&invitee, "id = ?", userId).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return nil
 				}
 				return err
+			}
+			if invitee.InviteRewardStatus == InviteRewardStatusRewarded {
+				if invitee.FirstModelCallAt != 0 {
+					return nil
+				}
+				return tx.Model(&User{}).
+					Where("id = ? AND invite_reward_status = ? AND first_model_call_at = ?", userId, InviteRewardStatusRewarded, 0).
+					Update("first_model_call_at", firstCallAt).Error
 			}
 			if invitee.InviterId <= 0 || invitee.InviteRewardStatus != InviteRewardStatusPending {
 				return nil
@@ -395,22 +468,15 @@ func ActivatePendingInviteReward(userId int, firstCallAt int64) (int, error) {
 					"invite_reward_status": InviteRewardStatusRewarded,
 					"first_model_call_at":  firstCallAt,
 				})
-			if result.Error != nil {
+			if result.Error != nil || result.RowsAffected == 0 {
 				return result.Error
-			}
-			if result.RowsAffected == 0 {
-				return nil
 			}
 
-			result = tx.Model(&User{}).Where("id = ?", invitee.InviterId).Updates(map[string]interface{}{
-				"aff_count":   gorm.Expr("aff_count + ?", 1),
-				"aff_quota":   gorm.Expr("aff_quota + ?", common.QuotaForInviter),
-				"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
-			})
-			if result.Error != nil {
-				return result.Error
+			rewarded, err := rewardInviterWithTx(tx, invitee.InviterId, rewardQuota)
+			if err != nil {
+				return err
 			}
-			if result.RowsAffected != 1 {
+			if !rewarded {
 				return tx.Model(&User{}).
 					Where("id = ? AND invite_reward_status = ?", userId, InviteRewardStatusRewarded).
 					Update("invite_reward_status", InviteRewardStatusInvalid).Error
@@ -419,14 +485,14 @@ func ActivatePendingInviteReward(userId int, firstCallAt int64) (int, error) {
 			return nil
 		})
 		if err == nil {
-			return activatedInviterId, nil
+			return activatedInviterId, rewardQuota, nil
 		}
 		if !isRetryableInviteRewardError(err) || attempt == maxAttempts-1 {
-			return 0, err
+			return 0, rewardQuota, err
 		}
 		time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
 	}
-	return 0, nil
+	return 0, rewardQuota, nil
 }
 
 func isRetryableInviteRewardError(err error) bool {
@@ -489,7 +555,83 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	return tx.Commit().Error
 }
 
+// InsertRegular creates a username/password user and applies invitation policy
+// from a single configuration snapshot taken at registration time.
+func (user *User) InsertRegular(inviterId int) error {
+	snapshot := captureInviteRegistrationSnapshot()
+
+	var err error
+	if user.Password != "" {
+		user.Password, err = common.Password2Hash(user.Password)
+		if err != nil {
+			return err
+		}
+	}
+	user.Quota = snapshot.NewUserQuota
+	user.AffCode = common.GetRandomString(4)
+	if user.Setting == "" {
+		user.SetSetting(dto.UserSetting{RecordIpLog: true})
+	}
+
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if inviterId > 0 && snapshot.ComplianceConfirmed {
+			var inviter User
+			if err := lockForUpdate(tx).Select("id").First(&inviter, "id = ?", inviterId).Error; err != nil {
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+				user.InviteRewardStatus = InviteRewardStatusInvalid
+			} else {
+				if snapshot.InviteeRewardQuota > 0 {
+					user.Quota += snapshot.InviteeRewardQuota
+				}
+				if snapshot.RewardAfterFirstCall {
+					user.InviteRewardStatus = InviteRewardStatusPending
+				} else {
+					user.InviteRewardStatus = InviteRewardStatusRewarded
+				}
+			}
+		}
+		if err := tx.Create(user).Error; err != nil {
+			return err
+		}
+		if user.InviteRewardStatus != InviteRewardStatusRewarded || snapshot.RewardAfterFirstCall {
+			return nil
+		}
+		return rewardInviterForRegistrationWithTx(tx, user, inviterId, snapshot)
+	})
+	if err != nil {
+		return err
+	}
+
+	var createdUser User
+	if err := DB.Where("id = ?", user.Id).First(&createdUser).Error; err == nil {
+		defaultSidebarConfig := generateDefaultSidebarConfigForRole(createdUser.Role)
+		if defaultSidebarConfig != "" {
+			currentSetting := createdUser.GetSetting()
+			currentSetting.SidebarModules = defaultSidebarConfig
+			createdUser.SetSetting(currentSetting)
+			createdUser.Update(false)
+			common.SysLog(fmt.Sprintf("为新用户 %s (角色: %d) 初始化边栏配置", createdUser.Username, createdUser.Role))
+		}
+	}
+	if snapshot.NewUserQuota > 0 {
+		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(snapshot.NewUserQuota)))
+	}
+	if user.InviteRewardStatus != InviteRewardStatusInvalid && inviterId > 0 && snapshot.ComplianceConfirmed && snapshot.InviteeRewardQuota > 0 {
+		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(snapshot.InviteeRewardQuota)))
+	}
+	if user.InviteRewardStatus == InviteRewardStatusRewarded && !snapshot.RewardAfterFirstCall && snapshot.InviterRewardQuota > 0 {
+		RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户注册赠送 %s", logger.LogQuota(snapshot.InviterRewardQuota)))
+	}
+	return nil
+}
+
+// Insert creates an OAuth user. OAuth invitations retain the invitee bonus but
+// are always ineligible for inviter rewards.
 func (user *User) Insert(inviterId int) error {
+	user.InviteRewardStatus = InviteRewardStatusIneligible
+	user.FirstModelCallAt = 0
 	var err error
 	if user.Password != "" {
 		user.Password, err = common.Password2Hash(user.Password)
@@ -544,6 +686,8 @@ func (user *User) Insert(inviterId int) error {
 // This is used for OAuth registration where user creation and binding need to be atomic.
 // Post-creation tasks (sidebar config, logs, inviter rewards) are handled after the transaction commits.
 func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
+	user.InviteRewardStatus = InviteRewardStatusIneligible
+	user.FirstModelCallAt = 0
 	var err error
 	if user.Password != "" {
 		user.Password, err = common.Password2Hash(user.Password)
