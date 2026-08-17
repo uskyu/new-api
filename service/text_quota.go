@@ -342,6 +342,10 @@ func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) 
 	return "openai"
 }
 
+func shouldActivateInviteReward(totalTokens int, adminRejectReason string) bool {
+	return totalTokens > 0 && strings.TrimSpace(adminRejectReason) == ""
+}
+
 func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) {
 	originUsage := usage
 	if usage == nil {
@@ -393,7 +397,11 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
 	}
 
-	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
+	settle := SettleBilling
+	if shouldActivateInviteReward(summary.TotalTokens, adminRejectReason) {
+		settle = SettleSuccessfulModelCall
+	}
+	if err := settle(ctx, relayInfo, summary.Quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
 	}
 

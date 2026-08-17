@@ -17,6 +17,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestShouldActivateInviteRewardRejectsBlockedResponses(t *testing.T) {
+	tests := []struct {
+		name        string
+		totalTokens int
+		reason      string
+		want        bool
+	}{
+		{name: "normal success", totalTokens: 10, want: true},
+		{name: "zero usage", totalTokens: 0, want: false},
+		{name: "content filter", totalTokens: 10, reason: "openai_finish_reason=content_filter", want: false},
+		{name: "refusal", totalTokens: 10, reason: "claude_stop_reason=refusal", want: false},
+		{name: "blocked", totalTokens: 10, reason: "gemini_block_reason=SAFETY", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, shouldActivateInviteReward(test.totalTokens, test.reason))
+		})
+	}
+}
+
 func TestCalculateTextQuotaSummaryUnifiedForClaudeSemantic(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

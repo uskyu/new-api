@@ -43,17 +43,20 @@ type RiskSharedIP struct {
 }
 
 type RiskUserSummary struct {
-	UserId      int    `json:"user_id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	Group       string `json:"group"`
-	Role        int    `json:"role"`
-	InviterId   int    `json:"inviter_id"`
-	TokenId     int    `json:"token_id"`
-	Source      string `json:"source"`
-	FirstSeenAt int64  `json:"first_seen_at"`
-	LastSeenAt  int64  `json:"last_seen_at"`
-	EventCount  int64  `json:"event_count"`
+	UserId             int    `json:"user_id"`
+	Username           string `json:"username"`
+	DisplayName        string `json:"display_name"`
+	Group              string `json:"group"`
+	Role               int    `json:"role"`
+	InviterId          int    `json:"inviter_id"`
+	CreatedAt          int64  `json:"created_at"`
+	FirstModelCallAt   int64  `json:"first_model_call_at"`
+	InviteRewardStatus int    `json:"invite_reward_status"`
+	TokenId            int    `json:"token_id"`
+	Source             string `json:"source"`
+	FirstSeenAt        int64  `json:"first_seen_at"`
+	LastSeenAt         int64  `json:"last_seen_at"`
+	EventCount         int64  `json:"event_count"`
 }
 
 type RiskInviter struct {
@@ -243,7 +246,7 @@ func listRiskIPUsers(ip string, source string) ([]*RiskUserSummary, error) {
 	users := make(map[int]*User)
 	if len(ids) > 0 {
 		var list []*User
-		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id").Where("id IN ?", ids).Find(&list).Error; err != nil {
+		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, created_at, first_model_call_at, invite_reward_status").Where("id IN ?", ids).Find(&list).Error; err != nil {
 			return nil, err
 		}
 		for _, user := range list {
@@ -262,9 +265,12 @@ func listRiskIPUsers(ip string, source string) ([]*RiskUserSummary, error) {
 			summary = &RiskUserSummary{
 				UserId: user.Id, Username: user.Username, DisplayName: user.DisplayName,
 				Group: user.Group, Role: user.Role, InviterId: user.InviterId,
-				TokenId: record.TokenId, Source: record.Source, FirstSeenAt: record.FirstSeenAt,
+				CreatedAt: user.CreatedAt, FirstModelCallAt: user.FirstModelCallAt,
+				InviteRewardStatus: user.InviteRewardStatus, TokenId: record.TokenId,
+				Source: record.Source, FirstSeenAt: record.FirstSeenAt,
 				LastSeenAt: record.LastSeenAt, EventCount: record.EventCount,
 			}
+
 			byUser[user.Id] = summary
 			result = append(result, summary)
 			continue
@@ -394,12 +400,18 @@ func buildRiskInviters(rows []riskInviterRow) ([]*RiskInviter, error) {
 	result := make([]*RiskInviter, 0, len(rows))
 	for _, row := range rows {
 		var invitees []*User
-		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id").Where("inviter_id = ?", row.InviterId).Order("id desc").Limit(100).Find(&invitees).Error; err != nil {
+		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, created_at, first_model_call_at, invite_reward_status").Where("inviter_id = ?", row.InviterId).Order("id desc").Limit(100).Find(&invitees).Error; err != nil {
 			return nil, err
 		}
 		summaries := make([]*RiskUserSummary, 0, len(invitees))
 		for _, invitee := range invitees {
-			summaries = append(summaries, &RiskUserSummary{UserId: invitee.Id, Username: invitee.Username, DisplayName: invitee.DisplayName, Group: invitee.Group, Role: invitee.Role, InviterId: invitee.InviterId})
+			summaries = append(summaries, &RiskUserSummary{
+				UserId: invitee.Id, Username: invitee.Username, DisplayName: invitee.DisplayName,
+				Group: invitee.Group, Role: invitee.Role, InviterId: invitee.InviterId,
+				CreatedAt: invitee.CreatedAt, FirstModelCallAt: invitee.FirstModelCallAt,
+				InviteRewardStatus: invitee.InviteRewardStatus,
+			})
+
 		}
 		result = append(result, &RiskInviter{
 			InviterId: row.InviterId, Username: row.Username, DisplayName: row.DisplayName, Group: row.Group,

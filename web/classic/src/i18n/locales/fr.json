@@ -3785,6 +3785,16 @@
     "默认折叠侧边栏": "Réduire la barre latérale par défaut",
     "默认测试模型": "Modèle de test par défaut",
     "默认用户消息": "Bonjour",
-    "默认补全倍率": "Taux de complétion par défaut"
+    "默认补全倍率": "Taux de complétion par défaut",
+    "已调用": "Appelé",
+    "未调用": "Non appelé",
+    "历史/未纳入": "Historique / non inclus",
+    "注册时间": "Date d’inscription",
+    "首次调用时间": "Date du premier appel",
+    "共 {{count}} 人": "{{count}} invités",
+    "已调用 {{count}} 人": "{{count}} ont appelé",
+    "未调用 {{count}} 人": "{{count}} n’ont pas appelé",
+    "查看被邀请用户": "Voir les invités",
+    "收起被邀请用户": "Masquer les invités"
   }
 }

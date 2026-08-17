@@ -3930,6 +3930,16 @@
     "默认折叠侧边栏": "Default collapse sidebar",
     "默认测试模型": "Default Test Model",
     "默认用户消息": "Default User Message",
-    "默认补全倍率": "Default completion ratio"
+    "默认补全倍率": "Default completion ratio",
+    "已调用": "Called",
+    "未调用": "Not called",
+    "历史/未纳入": "Historical / not included",
+    "注册时间": "Registration time",
+    "首次调用时间": "First call time",
+    "共 {{count}} 人": "{{count}} invitees",
+    "已调用 {{count}} 人": "{{count}} called",
+    "未调用 {{count}} 人": "{{count}} not called",
+    "查看被邀请用户": "View invitees",
+    "收起被邀请用户": "Collapse invitees"
   }
 }

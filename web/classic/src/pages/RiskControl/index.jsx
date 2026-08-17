@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Button,
   Card,
@@ -32,7 +38,7 @@ import {
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
-import { RefreshCw, Search, ShieldAlert, Users } from 'lucide-react';
+import { Check, RefreshCw, Search, ShieldAlert, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { API, showError, timestamp2string } from '../../helpers';
 
@@ -58,6 +64,93 @@ const UserList = ({ users = [] }) => (
     ))}
   </div>
 );
+
+const InviteeList = ({ users = [], t }) => (
+  <div className='flex min-w-[300px] flex-col gap-2'>
+    {users.map((user) => {
+      const called = user.invite_reward_status === 2;
+      const pending = user.invite_reward_status === 1;
+      return (
+        <div
+          key={user.user_id}
+          className='rounded border border-[var(--semi-color-border)] px-2 py-1.5 text-xs'
+        >
+          <div className='flex flex-wrap items-center gap-2'>
+            <Text strong>
+              #{user.user_id} {user.username}
+            </Text>
+            {called ? (
+              <Tag color='green' prefixIcon={<Check size={12} />}>
+                {t('已调用')}
+              </Tag>
+            ) : pending ? (
+              <Tag color='grey'>{t('未调用')}</Tag>
+            ) : (
+              <Tag color='white'>{t('历史/未纳入')}</Tag>
+            )}
+          </div>
+          <div className='mt-1 text-[var(--semi-color-text-2)]'>
+            {t('注册时间')}: {timestamp2string(user.created_at)}
+          </div>
+          {user.invite_reward_status !== 0 && (
+            <div className='text-[var(--semi-color-text-2)]'>
+              {t('首次调用时间')}:{' '}
+              {user.first_model_call_at
+                ? timestamp2string(user.first_model_call_at)
+                : '-'}
+            </div>
+          )}
+        </div>
+      );
+    })}
+  </div>
+);
+
+const InviteeDetails = ({ item, expanded, onToggle, t }) => {
+  const users = item.invitees || [];
+  const calledCount = users.filter(
+    (user) => user.invite_reward_status === 2,
+  ).length;
+  const pendingCount = users.filter(
+    (user) => user.invite_reward_status === 1,
+  ).length;
+  const historicalCount = users.length - calledCount - pendingCount;
+
+  return (
+    <div className='min-w-[220px]'>
+      <div className='flex flex-wrap items-center gap-2'>
+        <Text type='secondary' size='small'>
+          {t('共 {{count}} 人', { count: item.direct_invite_count })}
+        </Text>
+        <Tag color='green'>
+          {t('已调用 {{count}} 人', { count: calledCount })}
+        </Tag>
+        <Tag color='grey'>
+          {t('未调用 {{count}} 人', { count: pendingCount })}
+        </Tag>
+        <Tag color='white'>
+          {t('历史/未纳入')}: {historicalCount}
+        </Tag>
+        <Button
+          size='small'
+          theme='borderless'
+          type='primary'
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggle(item.inviter_id);
+          }}
+        >
+          {expanded ? t('收起被邀请用户') : t('查看被邀请用户')}
+        </Button>
+      </div>
+      {expanded && (
+        <div className='mt-2'>
+          <InviteeList users={users} t={t} />
+        </div>
+      )}
+    </div>
+  );
+};
 
 function SharedIPCards({ items, t }) {
   return (
@@ -104,7 +197,7 @@ function SharedIPCards({ items, t }) {
   );
 }
 
-function InviterCards({ items, t }) {
+function InviterCards({ items, expandedInviters, onToggleInvitees, t }) {
   return (
     <div className='grid gap-3 md:hidden'>
       {items.map((item) => (
@@ -142,7 +235,12 @@ function InviterCards({ items, t }) {
             </Tag>
           </div>
           <div className='mt-3 border-t border-[var(--semi-color-border)] pt-3'>
-            <UserList users={item.invitees} />
+            <InviteeDetails
+              item={item}
+              expanded={expandedInviters.has(item.inviter_id)}
+              onToggle={onToggleInvitees}
+              t={t}
+            />
           </div>
         </div>
       ))}
@@ -163,6 +261,7 @@ export default function RiskControl() {
   const [page, setPage] = useState(1);
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
+  const [expandedInviters, setExpandedInviters] = useState(() => new Set());
   const requestSeq = useRef(0);
   const loadingSeq = useRef(0);
 
@@ -207,9 +306,22 @@ export default function RiskControl() {
   };
 
   useEffect(() => {
+    setExpandedInviters(new Set());
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, source, searchType, search, page, riskStatus]);
+
+  const toggleInvitees = useCallback((inviterId) => {
+    setExpandedInviters((current) => {
+      const next = new Set(current);
+      if (next.has(inviterId)) {
+        next.delete(inviterId);
+      } else {
+        next.add(inviterId);
+      }
+      return next;
+    });
+  }, []);
 
   // Poll the inviter list every 30s on the first page, unfiltered only.
   useEffect(() => {
@@ -277,7 +389,14 @@ export default function RiskControl() {
       {
         title: t('被邀请用户'),
         dataIndex: 'invitees',
-        render: (value) => <UserList users={value} />,
+        render: (_, item) => (
+          <InviteeDetails
+            item={item}
+            expanded={expandedInviters.has(item.inviter_id)}
+            onToggle={toggleInvitees}
+            t={t}
+          />
+        ),
       },
       {
         title: t('状态'),
@@ -289,7 +408,7 @@ export default function RiskControl() {
         width: 90,
       },
     ],
-    [t],
+    [expandedInviters, t, toggleInvitees],
   );
 
   const stats = [
@@ -438,7 +557,12 @@ export default function RiskControl() {
             {tab === 'shared' ? (
               <SharedIPCards items={items} t={t} />
             ) : (
-              <InviterCards items={items} t={t} />
+              <InviterCards
+                items={items}
+                expandedInviters={expandedInviters}
+                onToggleInvitees={toggleInvitees}
+                t={t}
+              />
             )}
             <div className='hidden overflow-x-auto md:block'>
               <Table

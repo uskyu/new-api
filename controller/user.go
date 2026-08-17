@@ -227,6 +227,9 @@ func Register(c *gin.Context) {
 		InviterId:   inviterId,
 		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
 	}
+	if inviterId > 0 && operation_setting.IsPaymentComplianceConfirmed() {
+		cleanUser.InviteRewardStatus = model.InviteRewardStatusPending
+	}
 	if common.EmailVerificationEnabled {
 		cleanUser.Email = user.Email
 	}

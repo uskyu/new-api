@@ -3,7 +3,9 @@ package service
 import (
 	"fmt"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -73,6 +75,23 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 	quotaDelta := actualQuota - relayInfo.FinalPreConsumedQuota
 	if quotaDelta != 0 {
 		return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
+	}
+	return nil
+}
+
+// SettleSuccessfulModelCall settles a valid model invocation and then activates
+// any pending regular invitation. The invitation transition lives in the main
+// database and is atomic with the inviter's counters and quota grant.
+func SettleSuccessfulModelCall(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int) error {
+	if err := SettleBilling(ctx, relayInfo, actualQuota); err != nil {
+		return err
+	}
+	inviterId, err := model.ActivatePendingInviteReward(relayInfo.UserId, common.GetTimestamp())
+	if err != nil {
+		return fmt.Errorf("activate pending invite reward: %w", err)
+	}
+	if inviterId > 0 && common.QuotaForInviter > 0 {
+		model.RecordLog(inviterId, model.LogTypeSystem, fmt.Sprintf("邀请用户首次调用赠送 %s", logger.LogQuota(common.QuotaForInviter)))
 	}
 	return nil
 }

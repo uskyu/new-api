@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -18,41 +19,50 @@ import (
 
 const UserNameMaxLength = 20
 
+const (
+	InviteRewardStatusIneligible = 0
+	InviteRewardStatusPending    = 1
+	InviteRewardStatusRewarded   = 2
+	InviteRewardStatusInvalid    = 3
+)
+
 // User if you add sensitive fields, don't forget to clean them in setupLogin function.
 // Otherwise, the sensitive information will be saved on local storage in plain text!
 type User struct {
-	Id               int            `json:"id"`
-	Username         string         `json:"username" gorm:"unique;index" validate:"max=20"`
-	Password         string         `json:"password" gorm:"not null;" validate:"min=8,max=20"`
-	OriginalPassword string         `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
-	DisplayName      string         `json:"display_name" gorm:"index" validate:"max=20"`
-	Role             int            `json:"role" gorm:"type:int;default:1"`   // admin, common
-	Status           int            `json:"status" gorm:"type:int;default:1"` // enabled, disabled
-	Email            string         `json:"email" gorm:"index" validate:"max=50"`
-	GitHubId         string         `json:"github_id" gorm:"column:github_id;index"`
-	DiscordId        string         `json:"discord_id" gorm:"column:discord_id;index"`
-	OidcId           string         `json:"oidc_id" gorm:"column:oidc_id;index"`
-	WeChatId         string         `json:"wechat_id" gorm:"column:wechat_id;index"`
-	TelegramId       string         `json:"telegram_id" gorm:"column:telegram_id;index"`
-	VerificationCode string         `json:"verification_code" gorm:"-:all"`                         // this field is only for Email verification, don't save it to database!
-	AccessToken      *string        `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
-	Quota            int            `json:"quota" gorm:"type:int;default:0"`
-	UsedQuota        int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
-	RequestCount     int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
-	Group            string         `json:"group" gorm:"type:varchar(64);default:'default'"`
-	AffCode          string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
-	AffCount         int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
-	AffQuota         int            `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
-	AffHistoryQuota  int            `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
-	InviterId        int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
-	DeletedAt        gorm.DeletedAt `gorm:"index"`
-	LinuxDOId        string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
-	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
-	Remark           string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
-	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
-	CreatedAt        int64          `json:"created_at" gorm:"autoCreateTime;column:created_at"`
-	LastLoginAt      int64          `json:"last_login_at" gorm:"default:0;column:last_login_at"`
-	LastLoginIp      string         `json:"last_login_ip" gorm:"type:varchar(64);default:'';column:last_login_ip;index"`
+	Id                 int            `json:"id"`
+	Username           string         `json:"username" gorm:"unique;index" validate:"max=20"`
+	Password           string         `json:"password" gorm:"not null;" validate:"min=8,max=20"`
+	OriginalPassword   string         `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
+	DisplayName        string         `json:"display_name" gorm:"index" validate:"max=20"`
+	Role               int            `json:"role" gorm:"type:int;default:1"`   // admin, common
+	Status             int            `json:"status" gorm:"type:int;default:1"` // enabled, disabled
+	Email              string         `json:"email" gorm:"index" validate:"max=50"`
+	GitHubId           string         `json:"github_id" gorm:"column:github_id;index"`
+	DiscordId          string         `json:"discord_id" gorm:"column:discord_id;index"`
+	OidcId             string         `json:"oidc_id" gorm:"column:oidc_id;index"`
+	WeChatId           string         `json:"wechat_id" gorm:"column:wechat_id;index"`
+	TelegramId         string         `json:"telegram_id" gorm:"column:telegram_id;index"`
+	VerificationCode   string         `json:"verification_code" gorm:"-:all"`                         // this field is only for Email verification, don't save it to database!
+	AccessToken        *string        `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
+	Quota              int            `json:"quota" gorm:"type:int;default:0"`
+	UsedQuota          int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
+	RequestCount       int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
+	Group              string         `json:"group" gorm:"type:varchar(64);default:'default'"`
+	AffCode            string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
+	AffCount           int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
+	AffQuota           int            `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
+	AffHistoryQuota    int            `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
+	InviterId          int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
+	InviteRewardStatus int            `json:"invite_reward_status" gorm:"type:int;default:0;column:invite_reward_status"`
+	FirstModelCallAt   int64          `json:"first_model_call_at" gorm:"type:bigint;default:0;column:first_model_call_at"`
+	DeletedAt          gorm.DeletedAt `gorm:"index"`
+	LinuxDOId          string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
+	Setting            string         `json:"setting" gorm:"type:text;column:setting"`
+	Remark             string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
+	StripeCustomer     string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
+	CreatedAt          int64          `json:"created_at" gorm:"autoCreateTime;column:created_at"`
+	LastLoginAt        int64          `json:"last_login_at" gorm:"default:0;column:last_login_at"`
+	LastLoginIp        string         `json:"last_login_ip" gorm:"type:varchar(64);default:'';column:last_login_ip;index"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -339,15 +349,107 @@ func HardDeleteUserById(id int) error {
 	return err
 }
 
-func inviteUser(inviterId int) (err error) {
-	user, err := GetUserById(inviterId, true)
-	if err != nil {
-		return err
+// ActivatePendingInviteReward marks a regular invitee's first successful model
+// call and atomically grants the inviter reward. Historical and OAuth-created
+// users remain in the ineligible default state and can never enter this flow.
+func ActivatePendingInviteReward(userId int, firstCallAt int64) (int, error) {
+	if userId <= 0 {
+		return 0, nil
 	}
-	user.AffCount++
-	user.AffQuota += common.QuotaForInviter
-	user.AffHistoryQuota += common.QuotaForInviter
-	return DB.Save(user).Error
+	if firstCallAt <= 0 {
+		firstCallAt = common.GetTimestamp()
+	}
+
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		activatedInviterId := 0
+		err := DB.Transaction(func(tx *gorm.DB) error {
+			var invitee User
+			if err := tx.Select("id, inviter_id, invite_reward_status").First(&invitee, "id = ?", userId).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil
+				}
+				return err
+			}
+			if invitee.InviterId <= 0 || invitee.InviteRewardStatus != InviteRewardStatusPending {
+				return nil
+			}
+
+			var inviter User
+			inviterErr := tx.Select("id").First(&inviter, "id = ?", invitee.InviterId).Error
+			if errors.Is(inviterErr, gorm.ErrRecordNotFound) {
+				return tx.Model(&User{}).
+					Where("id = ? AND invite_reward_status = ?", userId, InviteRewardStatusPending).
+					Updates(map[string]interface{}{
+						"invite_reward_status": InviteRewardStatusInvalid,
+						"first_model_call_at":  firstCallAt,
+					}).Error
+			}
+			if inviterErr != nil {
+				return inviterErr
+			}
+
+			result := tx.Model(&User{}).
+				Where("id = ? AND invite_reward_status = ?", userId, InviteRewardStatusPending).
+				Updates(map[string]interface{}{
+					"invite_reward_status": InviteRewardStatusRewarded,
+					"first_model_call_at":  firstCallAt,
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return nil
+			}
+
+			result = tx.Model(&User{}).Where("id = ?", invitee.InviterId).Updates(map[string]interface{}{
+				"aff_count":   gorm.Expr("aff_count + ?", 1),
+				"aff_quota":   gorm.Expr("aff_quota + ?", common.QuotaForInviter),
+				"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
+			})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return tx.Model(&User{}).
+					Where("id = ? AND invite_reward_status = ?", userId, InviteRewardStatusRewarded).
+					Update("invite_reward_status", InviteRewardStatusInvalid).Error
+			}
+			activatedInviterId = invitee.InviterId
+			return nil
+		})
+		if err == nil {
+			return activatedInviterId, nil
+		}
+		if !isRetryableInviteRewardError(err) || attempt == maxAttempts-1 {
+			return 0, err
+		}
+		time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
+	}
+	return 0, nil
+}
+
+func isRetryableInviteRewardError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	retryableFragments := []string{
+		"database is locked",
+		"database table is locked",
+		"sqlite_busy",
+		"sqlite_locked",
+		"deadlock found",
+		"deadlock detected",
+		"could not serialize access",
+		"serialization failure",
+	}
+	for _, fragment := range retryableFragments {
+		if strings.Contains(message, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
@@ -434,11 +536,6 @@ func (user *User) Insert(inviterId int) error {
 			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
 			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
 		}
-		if common.QuotaForInviter > 0 {
-			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
-			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
-		}
 	}
 	return nil
 }
@@ -494,10 +591,6 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 		if common.QuotaForInvitee > 0 {
 			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
 			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
-		}
-		if common.QuotaForInviter > 0 {
-			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
 		}
 	}
 }

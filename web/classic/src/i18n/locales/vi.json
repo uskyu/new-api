@@ -4318,6 +4318,16 @@
     "默认折叠侧边栏": "Mặc định thu gọn thanh bên",
     "默认测试模型": "Mô hình kiểm tra mặc định",
     "默认用户消息": "Xin chào",
-    "默认补全倍率": "Tỷ lệ hoàn thành mặc định"
+    "默认补全倍率": "Tỷ lệ hoàn thành mặc định",
+    "已调用": "Đã gọi",
+    "未调用": "Chưa gọi",
+    "历史/未纳入": "Lịch sử / không áp dụng",
+    "注册时间": "Thời gian đăng ký",
+    "首次调用时间": "Thời gian gọi đầu tiên",
+    "共 {{count}} 人": "{{count}} người được mời",
+    "已调用 {{count}} 人": "{{count}} người đã gọi",
+    "未调用 {{count}} 人": "{{count}} người chưa gọi",
+    "查看被邀请用户": "Xem người dùng được mời",
+    "收起被邀请用户": "Thu gọn người dùng được mời"
   }
 }
