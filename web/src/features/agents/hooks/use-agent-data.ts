@@ -31,6 +31,7 @@ import {
   getAgentProfiles,
   getAgentRebateGroups,
   getAgentSelfAdjustments,
+  getAgentSelfLeaderboard,
   getAgentSelfDailyMetrics,
   getAgentSelfDownlines,
   getAgentSelfRebates,
@@ -280,6 +281,30 @@ export function useDecreaseSupportUserQuota() {
         queryKey: ['agents', 'support-users'],
       })
     },
+  })
+}
+
+export function useAgentLeaderboard(params: {
+  startDate: string
+  endDate: string
+  metric: import('../types').AgentLeaderboardMetric
+  page: number
+  pageSize: number
+  enabled: boolean
+}) {
+  return useQuery({
+    queryKey: [
+      'agents',
+      'self',
+      'leaderboard',
+      params.startDate,
+      params.endDate,
+      params.metric,
+      params.page,
+      params.pageSize,
+    ],
+    queryFn: () => getAgentSelfLeaderboard(params),
+    enabled: params.enabled,
   })
 }
 

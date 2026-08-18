@@ -117,6 +117,13 @@ export const STATIC_I18N_KEYS = [
   'Failed to delete user',
   'No user selected',
 
+  // Agent leaderboard metrics
+  'New users in selected period',
+  'Online top-up in selected period',
+  'Second top-up rate in selected period',
+  'Third top-up rate in selected period',
+  'Fourth top-up rate in selected period',
+
   // Redemption codes
   'Unused',
   'Disabled',

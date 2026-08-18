@@ -27,6 +27,8 @@ func registerExtensionApiRoutes(apiRouter *gin.RouterGroup) {
 
 		agentRoute.GET("/self", middleware.UserAuth(), controller.GetAgentSelfSummary)
 		agentRoute.GET("/self/daily-metrics", middleware.UserAuth(), controller.GetAgentSelfDailyMetrics)
+		agentRoute.GET("/self/leaderboard", middleware.UserAuth(), controller.GetAgentSelfLeaderboard)
+
 		agentRoute.GET("/self/downlines", middleware.UserAuth(), controller.GetAgentSelfDownlines)
 		agentRoute.GET("/self/rebates", middleware.UserAuth(), controller.GetAgentSelfRebateRecords)
 		agentRoute.GET("/self/adjustments", middleware.UserAuth(), controller.GetAgentSelfAdjustments)

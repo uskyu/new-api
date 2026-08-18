@@ -34,6 +34,8 @@ import type {
   AgentWithdrawImportResult,
   AgentWithdrawRequest,
   AgentWithdrawStatus,
+  AgentLeaderboardMetric,
+  AgentLeaderboardResult,
   PagedAgentData,
   SupportManagedUser,
 } from './types'
@@ -330,6 +332,31 @@ export async function decreaseSupportUserQuota(payload: {
     quota: payload.quota,
     reason: payload.reason,
   })
+  return response.data
+}
+
+export async function getAgentSelfLeaderboard(params: {
+  startDate: string
+  endDate: string
+  metric: AgentLeaderboardMetric
+  page: number
+  pageSize: number
+}) {
+  const response = await api.get<AgentApiResponse<AgentLeaderboardResult>>(
+    '/api/agent/self/leaderboard',
+    {
+      params: {
+        start_date: params.startDate,
+        end_date: params.endDate,
+        sort_by: params.metric,
+        p: params.page,
+        page_size: params.pageSize,
+      },
+    }
+  )
+  if (!response.data.success) {
+    throw new Error(response.data.message || 'Failed to load agent leaderboard')
+  }
   return response.data
 }
 

@@ -35,6 +35,7 @@ import {
   AgentRebatesTable,
 } from './components/agent-center-tables'
 import { AgentDailyChart } from './components/agent-daily-chart'
+import { AgentLeaderboardCard } from './components/agent-leaderboard-card'
 import { AgentMetricCards } from './components/agent-metric-cards'
 import { AgentPromoLinksTable } from './components/agent-promo-links-table'
 import { useAgentCenterQueries } from './hooks/use-agent-data'
@@ -42,19 +43,102 @@ import { formatAgentAmount, formatAgentRate } from './lib/format'
 
 const PAGE_SIZE = 10
 
+function parseLocalDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return undefined
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3])
+  )
+  if (
+    date.getFullYear() !== Number(match[1]) ||
+    date.getMonth() !== Number(match[2]) - 1 ||
+    date.getDate() !== Number(match[3])
+  ) {
+    return undefined
+  }
+  return date
+}
+
+function addOneCalendarMonthClamped(start: Date) {
+  const nextMonth = new Date(start.getFullYear(), start.getMonth() + 1, 1)
+  const daysInNextMonth = new Date(
+    nextMonth.getFullYear(),
+    nextMonth.getMonth() + 1,
+    0
+  ).getDate()
+  const boundary = new Date(
+    nextMonth.getFullYear(),
+    nextMonth.getMonth(),
+    Math.min(start.getDate(), daysInNextMonth)
+  )
+  if (start.getDate() > daysInNextMonth) {
+    boundary.setDate(boundary.getDate() + 1)
+  }
+  return boundary
+}
+
+function validateLeaderboardDateRange(startValue: string, endValue: string) {
+  const start = parseLocalDate(startValue)
+  const end = parseLocalDate(endValue)
+  if (!start || !end) return 'Select a valid date range'
+  if (start > end) return 'Start date must not be after end date'
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  if (end > today) return 'Dates cannot be in the future'
+
+  const endExclusive = new Date(end)
+  endExclusive.setDate(endExclusive.getDate() + 1)
+  if (endExclusive > addOneCalendarMonthClamped(start)) {
+    return 'The selected period cannot exceed one calendar month'
+  }
+  return undefined
+}
+
 export function AgentCenter() {
   const { t } = useTranslation()
-  const [startDate, setStartDate] = useState(() =>
-    dayjs().subtract(6, 'day').format('YYYY-MM-DD')
-  )
-  const [endDate, setEndDate] = useState(() => dayjs().format('YYYY-MM-DD'))
+  const initialStartDate = dayjs().subtract(6, 'day').format('YYYY-MM-DD')
+  const initialEndDate = dayjs().format('YYYY-MM-DD')
+  const [trendStartDate, setTrendStartDate] = useState(initialStartDate)
+  const [trendEndDate, setTrendEndDate] = useState(initialEndDate)
+  const [leaderboardStartDate, setLeaderboardStartDate] =
+    useState(initialStartDate)
+  const [leaderboardEndDate, setLeaderboardEndDate] = useState(initialEndDate)
+  const [draftStartDate, setDraftStartDate] = useState(initialStartDate)
+  const [draftEndDate, setDraftEndDate] = useState(initialEndDate)
+  const [dateError, setDateError] = useState<string>()
   const [downlinePage, setDownlinePage] = useState(1)
   const [rebatePage, setRebatePage] = useState(1)
   const [adjustmentPage, setAdjustmentPage] = useState(1)
   const [promoLinkPage, setPromoLinkPage] = useState(1)
+  const applyLeaderboardDates = () => {
+    const error = validateLeaderboardDateRange(draftStartDate, draftEndDate)
+    setDateError(error)
+    if (error) return false
+    setLeaderboardStartDate(draftStartDate)
+    setLeaderboardEndDate(draftEndDate)
+    return true
+  }
+
+  const updateDraftStartDate = (value: string) => {
+    setDraftStartDate(value)
+    if (dateError) {
+      setDateError(validateLeaderboardDateRange(value, draftEndDate))
+    }
+  }
+
+  const updateDraftEndDate = (value: string) => {
+    setDraftEndDate(value)
+    if (dateError) {
+      setDateError(validateLeaderboardDateRange(draftStartDate, value))
+    }
+  }
+
   const queries = useAgentCenterQueries({
-    startDate,
-    endDate,
+    startDate: trendStartDate,
+    endDate: trendEndDate,
     downlinePage,
     rebatePage,
     adjustmentPage,
@@ -128,6 +212,18 @@ export function AgentCenter() {
               ]}
             />
 
+            <AgentLeaderboardCard
+              startDate={leaderboardStartDate}
+              endDate={leaderboardEndDate}
+              draftStartDate={draftStartDate}
+              draftEndDate={draftEndDate}
+              onDraftStartDateChange={updateDraftStartDate}
+              onDraftEndDateChange={updateDraftEndDate}
+              onApplyDates={applyLeaderboardDates}
+              dateError={dateError}
+              enabled
+            />
+
             <Card>
               <CardHeader>
                 <CardTitle>{t('My promotion links')}</CardTitle>
@@ -157,9 +253,11 @@ export function AgentCenter() {
                     <Input
                       id='agent-center-start'
                       type='date'
-                      value={startDate}
-                      max={endDate}
-                      onChange={(event) => setStartDate(event.target.value)}
+                      value={trendStartDate}
+                      max={trendEndDate}
+                      onChange={(event) =>
+                        setTrendStartDate(event.target.value)
+                      }
                     />
                   </div>
                   <div className='flex flex-col gap-1.5'>
@@ -167,9 +265,9 @@ export function AgentCenter() {
                     <Input
                       id='agent-center-end'
                       type='date'
-                      value={endDate}
-                      min={startDate}
-                      onChange={(event) => setEndDate(event.target.value)}
+                      value={trendEndDate}
+                      min={trendStartDate}
+                      onChange={(event) => setTrendEndDate(event.target.value)}
                     />
                   </div>
                 </div>

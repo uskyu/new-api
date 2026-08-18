@@ -323,6 +323,16 @@ func GetAgentSelfDailyMetrics(c *gin.Context) {
 	common.ApiSuccess(c, metrics)
 }
 
+func GetAgentSelfLeaderboard(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	leaderboard, err := model.GetAgentLeaderboard(c.GetInt("id"), pageInfo, c.Query("sort_by"), c.Query("start_date"), c.Query("end_date"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, leaderboard)
+}
+
 func GetAgentSelfRebateRecords(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	records, total, err := model.GetAgentRebateRecords(pageInfo, c.GetInt("id"))

@@ -225,3 +225,40 @@ export interface AgentPageParams {
   page: number
   pageSize: number
 }
+
+export type AgentLeaderboardMetric =
+  | 'range_new_user_count'
+  | 'range_topup_amount'
+  | 'range_second_topup_rate'
+  | 'range_third_topup_rate'
+  | 'range_fourth_topup_rate'
+
+export interface AgentLeaderboardEntry {
+  rank: number
+  row_key: string
+  agent_label: string
+  is_self: boolean
+  range_new_user_count: number
+  range_new_user_rank: number
+  range_topup_amount: number
+  range_topup_amount_rank: number
+  range_second_topup_rate: number
+  range_second_topup_rank: number
+  range_third_topup_rate: number
+  range_third_topup_rank: number
+  range_fourth_topup_rate: number
+  range_fourth_topup_rank: number
+}
+
+export interface AgentLeaderboardResult {
+  generated_at: number
+  start_date: string
+  end_date: string
+  end_exclusive_date: string
+  items: AgentLeaderboardEntry[]
+  self?: AgentLeaderboardEntry
+  total: number
+  page: number
+  page_size: number
+  sort_by: AgentLeaderboardMetric
+}
