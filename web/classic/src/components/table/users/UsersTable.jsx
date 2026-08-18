@@ -155,17 +155,25 @@ const UsersTable = (usersData) => {
     showUserSubscriptionsUserModal,
   ]);
 
-  // Handle compact mode by removing fixed positioning
   const tableColumns = useMemo(() => {
-    return compactMode
-      ? columns.map((col) => {
-          if (col.dataIndex === 'operate') {
-            const { fixed, ...rest } = col;
-            return rest;
-          }
-          return col;
-        })
-      : columns;
+    const reordered = columns.map((col) => {
+      if (compactMode && col.dataIndex === 'operate') {
+        const { fixed, ...rest } = col;
+        return rest;
+      }
+      return col;
+    });
+
+    const inviteIdx = reordered.findIndex((col) => col.dataIndex === 'invite');
+    const usernameIdx = reordered.findIndex(
+      (col) => col.dataIndex === 'username',
+    );
+    if (inviteIdx !== -1 && usernameIdx !== -1 && inviteIdx > usernameIdx + 1) {
+      const [inviteCol] = reordered.splice(inviteIdx, 1);
+      reordered.splice(usernameIdx + 1, 0, inviteCol);
+    }
+
+    return reordered;
   }, [compactMode, columns]);
 
   return (

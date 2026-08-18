@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
@@ -35,6 +35,8 @@ export const useUsersData = () => {
   const [searching, setSearching] = useState(false);
   const [groupOptions, setGroupOptions] = useState([]);
   const [userCount, setUserCount] = useState(0);
+
+  const latestRequestId = useRef(0);
 
   // Modal states
   const [showAddUser, setShowAddUser] = useState(false);
@@ -71,18 +73,32 @@ export const useUsersData = () => {
 
   // Load users data
   const loadUsers = async (startIdx, pageSize) => {
+    const requestId = ++latestRequestId.current;
     setLoading(true);
-    const res = await API.get(`/api/user/?p=${startIdx}&page_size=${pageSize}`);
-    const { success, message, data } = res.data;
-    if (success) {
-      const newPageData = data.items;
-      setActivePage(data.page);
-      setUserCount(data.total);
-      setUserFormat(newPageData);
-    } else {
-      showError(message);
+    setSearching(false);
+    try {
+      const res = await API.get(
+        `/api/user/?p=${startIdx}&page_size=${pageSize}`,
+      );
+      if (requestId !== latestRequestId.current) return;
+      const { success, message, data } = res.data;
+      if (success) {
+        const newPageData = data.items;
+        setActivePage(data.page);
+        setUserCount(data.total);
+        setUserFormat(newPageData);
+      } else {
+        showError(message);
+      }
+    } catch (error) {
+      if (requestId === latestRequestId.current) {
+        showError(error.message);
+      }
+    } finally {
+      if (requestId === latestRequestId.current) {
+        setLoading(false);
+      }
     }
-    setLoading(false);
   };
 
   // Search users with keyword and group
@@ -104,20 +120,32 @@ export const useUsersData = () => {
       await loadUsers(startIdx, pageSize);
       return;
     }
+    const requestId = ++latestRequestId.current;
     setSearching(true);
-    const res = await API.get(
-      `/api/user/search?keyword=${searchKeyword}&group=${searchGroup}&p=${startIdx}&page_size=${pageSize}`,
-    );
-    const { success, message, data } = res.data;
-    if (success) {
-      const newPageData = data.items;
-      setActivePage(data.page);
-      setUserCount(data.total);
-      setUserFormat(newPageData);
-    } else {
-      showError(message);
+    setLoading(false);
+    try {
+      const res = await API.get(
+        `/api/user/search?keyword=${searchKeyword}&group=${searchGroup}&p=${startIdx}&page_size=${pageSize}`,
+      );
+      if (requestId !== latestRequestId.current) return;
+      const { success, message, data } = res.data;
+      if (success) {
+        const newPageData = data.items;
+        setActivePage(data.page);
+        setUserCount(data.total);
+        setUserFormat(newPageData);
+      } else {
+        showError(message);
+      }
+    } catch (error) {
+      if (requestId === latestRequestId.current) {
+        showError(error.message);
+      }
+    } finally {
+      if (requestId === latestRequestId.current) {
+        setSearching(false);
+      }
     }
-    setSearching(false);
   };
 
   // Manage user operations (promote, demote, enable, disable, delete)
@@ -204,11 +232,20 @@ export const useUsersData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    loadUsers(activePage, size)
-      .then()
-      .catch((reason) => {
-        showError(reason);
-      });
+    const { searchKeyword, searchGroup } = getFormValues();
+    if (searchKeyword === '' && searchGroup === '') {
+      loadUsers(1, size)
+        .then()
+        .catch((reason) => {
+          showError(reason);
+        });
+    } else {
+      searchUsers(1, size, searchKeyword, searchGroup)
+        .then()
+        .catch((reason) => {
+          showError(reason);
+        });
+    }
   };
 
   // Handle table row styling for disabled/deleted users
@@ -266,7 +303,7 @@ export const useUsersData = () => {
 
   // Initialize data on component mount
   useEffect(() => {
-    loadUsers(0, pageSize)
+    loadUsers(1, pageSize)
       .then()
       .catch((reason) => {
         showError(reason);
