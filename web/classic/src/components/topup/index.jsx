@@ -27,8 +27,11 @@ import {
   renderQuota,
   renderQuotaWithAmount,
   copy,
-  getQuotaPerUnit,
 } from '../../helpers';
+import {
+  quotaToDisplayAmount,
+  displayAmountToQuota,
+} from '../../helpers/quota';
 import { Modal, Toast } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { UserContext } from '../../context/User';
@@ -738,12 +741,18 @@ const TopUp = () => {
 
   // 划转邀请额度
   const transfer = async () => {
-    if (transferAmount < getQuotaPerUnit()) {
-      showError(t('划转金额最低为') + ' ' + renderQuota(getQuotaPerUnit()));
+    const internalQuota = displayAmountToQuota(transferAmount);
+    if (!Number.isSafeInteger(internalQuota) || internalQuota <= 0) {
+      showError(t('额度必须大于0'));
+      return;
+    }
+    const affQuota = userState?.user?.aff_quota || 0;
+    if (internalQuota > affQuota) {
+      showError(t('邀请额度不足！'));
       return;
     }
     const res = await API.post(`/api/user/aff_transfer`, {
-      quota: transferAmount,
+      quota: internalQuota,
     });
     const { success, message } = res.data;
     if (success) {
@@ -773,7 +782,6 @@ const TopUp = () => {
   useEffect(() => {
     // 始终获取最新用户数据，确保余额等统计信息准确
     getUserQuota().then();
-    setTransferAmount(getQuotaPerUnit());
   }, []);
 
   useEffect(() => {
@@ -781,6 +789,13 @@ const TopUp = () => {
     affFetchedRef.current = true;
     getAffLink().then();
   }, []);
+
+  useEffect(() => {
+    if (openTransfer) {
+      const affQuota = userState?.user?.aff_quota || 0;
+      setTransferAmount(quotaToDisplayAmount(affQuota));
+    }
+  }, [openTransfer, userState?.user?.aff_quota]);
 
   // 在 statusState 可用时获取充值信息
   useEffect(() => {
@@ -912,7 +927,6 @@ const TopUp = () => {
         handleTransferCancel={handleTransferCancel}
         userState={userState}
         renderQuota={renderQuota}
-        getQuotaPerUnit={getQuotaPerUnit}
         transferAmount={transferAmount}
         setTransferAmount={setTransferAmount}
       />

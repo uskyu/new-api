@@ -519,9 +519,9 @@ func isRetryableInviteRewardError(err error) bool {
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
-	// 检查quota是否小于最小额度
-	if float64(quota) < common.QuotaPerUnit {
-		return fmt.Errorf("转移额度最小为%s！", logger.LogQuota(int(common.QuotaPerUnit)))
+	// 检查quota是否为正整数
+	if quota <= 0 {
+		return errors.New("划转额度必须为正整数！")
 	}
 
 	// 开始数据库事务
