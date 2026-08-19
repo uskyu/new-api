@@ -55,6 +55,8 @@ type User struct {
 	InviterId          int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
 	InviteRewardStatus int            `json:"invite_reward_status" gorm:"type:int;default:0;column:invite_reward_status"`
 	FirstModelCallAt   int64          `json:"first_model_call_at" gorm:"type:bigint;default:0;column:first_model_call_at"`
+	DirectInviteCount  int64          `json:"direct_invite_count" gorm:"-"`
+
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 	LinuxDOId          string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
 	Setting            string         `json:"setting" gorm:"type:text;column:setting"`
@@ -208,6 +210,50 @@ func GetMaxUserId() int {
 	return user.Id
 }
 
+func enrichUsersWithDirectInviteCount(users []*User, tx *gorm.DB) error {
+	if len(users) == 0 {
+		return nil
+	}
+	ids := make([]int, 0, len(users))
+	for _, user := range users {
+		if user != nil {
+			ids = append(ids, user.Id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	type inviteCountRow struct {
+		InviterId int   `gorm:"column:inviter_id"`
+		Count     int64 `gorm:"column:cnt"`
+	}
+	var rows []inviteCountRow
+	if err := tx.Model(&User{}).Select("inviter_id, COUNT(*) AS cnt").Where("inviter_id IN ?", ids).Group("inviter_id").Scan(&rows).Error; err != nil {
+		return err
+	}
+	mapped := make(map[int]int64, len(rows))
+	for _, row := range rows {
+		mapped[row.InviterId] = row.Count
+	}
+	for _, user := range users {
+		if user != nil {
+			user.DirectInviteCount = mapped[user.Id]
+		}
+	}
+	return nil
+}
+
+func CountDirectInvitesByInviter(inviterId int) (int64, error) {
+	if inviterId <= 0 {
+		return 0, nil
+	}
+	var count int64
+	if err := DB.Model(&User{}).Where("inviter_id = ?", inviterId).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err error) {
 	// Start transaction
 	tx := DB.Begin()
@@ -230,6 +276,10 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 	// Get paginated users within same transaction
 	err = tx.Unscoped().Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("password").Find(&users).Error
 	if err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err := enrichUsersWithDirectInviteCount(users, tx); err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
@@ -298,6 +348,10 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 	// 获取分页数据
 	err = query.Omit("password").Order("id desc").Limit(num).Offset(startIdx).Find(&users).Error
 	if err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err := enrichUsersWithDirectInviteCount(users, tx); err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}

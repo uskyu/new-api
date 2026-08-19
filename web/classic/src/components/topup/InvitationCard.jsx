@@ -104,12 +104,57 @@ const InvitationCard = ({
                   </Text>
                 )}
 
-                {/* 统计数据 */}
-                <div className='grid grid-cols-3 gap-6 mt-4'>
-                  {/* 待使用收益 */}
+                {/* 统计数据：下级人数 / 奖励人数 / 待使用收益 / 总收益 */}
+                <div className='grid grid-cols-2 lg:grid-cols-4 gap-4 mt-4'>
                   <div className='text-center'>
                     <div
-                      className='text-base sm:text-2xl font-bold mb-2'
+                      className='text-base sm:text-xl font-bold mb-1'
+                      style={{ color: 'white' }}
+                    >
+                      {userState?.user?.direct_invite_count ?? 0}
+                    </div>
+                    <div className='flex items-center justify-center text-sm'>
+                      <Users
+                        size={14}
+                        className='mr-1'
+                        style={{ color: 'rgba(255,255,255,0.8)' }}
+                      />
+                      <Text
+                        style={{
+                          color: 'rgba(255,255,255,0.8)',
+                          fontSize: '12px',
+                        }}
+                      >
+                        {t('下级人数')}
+                      </Text>
+                    </div>
+                  </div>
+                  <div className='text-center'>
+                    <div
+                      className='text-base sm:text-xl font-bold mb-1'
+                      style={{ color: 'white' }}
+                    >
+                      {userState?.user?.aff_count ?? 0}
+                    </div>
+                    <div className='flex items-center justify-center text-sm'>
+                      <Gift
+                        size={14}
+                        className='mr-1'
+                        style={{ color: 'rgba(255,255,255,0.8)' }}
+                      />
+                      <Text
+                        style={{
+                          color: 'rgba(255,255,255,0.8)',
+                          fontSize: '12px',
+                        }}
+                      >
+                        {t('奖励人数')}
+                      </Text>
+                    </div>
+                  </div>
+                  <div className='text-center'>
+                    <div
+                      className='text-base sm:text-lg font-bold mb-1'
                       style={{ color: 'white' }}
                     >
                       {renderQuota(userState?.user?.aff_quota || 0)}
@@ -130,11 +175,9 @@ const InvitationCard = ({
                       </Text>
                     </div>
                   </div>
-
-                  {/* 总收益 */}
                   <div className='text-center'>
                     <div
-                      className='text-base sm:text-2xl font-bold mb-2'
+                      className='text-base sm:text-lg font-bold mb-1'
                       style={{ color: 'white' }}
                     >
                       {renderQuota(userState?.user?.aff_history_quota || 0)}
@@ -155,32 +198,16 @@ const InvitationCard = ({
                       </Text>
                     </div>
                   </div>
-
-                  {/* 邀请人数 */}
-                  <div className='text-center'>
-                    <div
-                      className='text-base sm:text-2xl font-bold mb-2'
-                      style={{ color: 'white' }}
-                    >
-                      {userState?.user?.aff_count || 0}
-                    </div>
-                    <div className='flex items-center justify-center text-sm'>
-                      <Users
-                        size={14}
-                        className='mr-1'
-                        style={{ color: 'rgba(255,255,255,0.8)' }}
-                      />
-                      <Text
-                        style={{
-                          color: 'rgba(255,255,255,0.8)',
-                          fontSize: '12px',
-                        }}
-                      >
-                        {t('邀请人数')}
-                      </Text>
-                    </div>
-                  </div>
                 </div>
+                {userState?.user?.inviter_id ? (
+                  <div className='mt-3 text-center'>
+                    <Text
+                      style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12 }}
+                    >
+                      {t('邀请人')}: #{userState.user.inviter_id}
+                    </Text>
+                  </div>
+                ) : null}
               </div>
             </div>
           }

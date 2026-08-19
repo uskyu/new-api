@@ -179,16 +179,22 @@ const renderQuotaUsage = (text, record, t) => {
 
 /**
  * Render invite information
+ * direct_invite_count = real bound invitees (users.inviter_id = this id)
+ * aff_count = rewarded invite count
  */
 const renderInviteInfo = (text, record, t) => {
+  const directCount = record.direct_invite_count ?? 0;
   const affCount = record.aff_count ?? 0;
   const affQuota = record.aff_history_quota ?? 0;
   const inviterId = record.inviter_id ?? 0;
   return (
     <div>
-      <Space spacing={1}>
+      <Space spacing={1} wrap>
         <Tag color='white' shape='circle' className='!text-xs'>
-          {t('邀请')}: {renderNumber(affCount)}
+          {t('下级人数')}: {renderNumber(directCount)}
+        </Tag>
+        <Tag color='white' shape='circle' className='!text-xs'>
+          {t('奖励人数')}: {renderNumber(affCount)}
         </Tag>
         <Tag color='white' shape='circle' className='!text-xs'>
           {t('收益')}: {renderQuota(affQuota)}
@@ -356,7 +362,7 @@ export const getUsersColumns = ({
     {
       title: t('邀请信息'),
       dataIndex: 'invite',
-      width: 280,
+      width: 360,
       render: (text, record, index) => renderInviteInfo(text, record, t),
     },
     {
