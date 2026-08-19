@@ -48,14 +48,13 @@ import { Trophy } from 'lucide-react';
 const { Title, Text } = Typography;
 const DEFAULT_PAGE_SIZE = 10;
 const DAILY_METRIC_PAGE_SIZE = 10;
-const DEFAULT_LEADERBOARD_SORT = 'day_new_user_count';
+const DEFAULT_LEADERBOARD_SORT = 'range_new_user_count';
 const LEADERBOARD_SORT_OPTIONS = [
-  { value: 'day_new_user_count', label: '今日新增' },
-  { value: 'month_new_user_count', label: '本月新增' },
-  { value: 'day_topup_amount', label: '今日在线充值' },
-  { value: 'month_second_topup_rate', label: '本月二次充值率' },
-  { value: 'month_third_topup_rate', label: '本月三次充值率' },
-  { value: 'month_fourth_topup_rate', label: '本月四次充值率' },
+  { value: 'range_new_user_count', label: '所选区间新增用户数' },
+  { value: 'range_topup_amount', label: '所选区间在线充值金额' },
+  { value: 'range_second_topup_rate', label: '所选区间二次充值率' },
+  { value: 'range_third_topup_rate', label: '所选区间三次充值率' },
+  { value: 'range_fourth_topup_rate', label: '所选区间四次充值率' },
 ];
 
 function getLocalDateString(offsetDays = 0) {
@@ -90,6 +89,65 @@ function RankedMetric({ rank, value, active }) {
 
 function formatRankedValue(rank, value) {
   return `#${rank || '-'} / ${value}`;
+}
+
+function parseLocalDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+  if (!match) return null;
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+  );
+  return date.getFullYear() === Number(match[1]) &&
+    date.getMonth() === Number(match[2]) - 1 &&
+    date.getDate() === Number(match[3])
+    ? date
+    : null;
+}
+
+function normalizeDateInput(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  }
+  const text = String(value || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const localized = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text);
+  if (!localized) return '';
+  return `${localized[3]}-${String(localized[1]).padStart(2, '0')}-${String(localized[2]).padStart(2, '0')}`;
+}
+
+function addOneCalendarMonthClamped(start) {
+  const nextMonth = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+  const daysInNextMonth = new Date(
+    nextMonth.getFullYear(),
+    nextMonth.getMonth() + 1,
+    0,
+  ).getDate();
+  const boundary = new Date(
+    nextMonth.getFullYear(),
+    nextMonth.getMonth(),
+    Math.min(start.getDate(), daysInNextMonth),
+  );
+  if (start.getDate() > daysInNextMonth)
+    boundary.setDate(boundary.getDate() + 1);
+  return boundary;
+}
+
+function validateLeaderboardDateRange(startValue, endValue) {
+  const start = parseLocalDate(startValue);
+  const end = parseLocalDate(endValue);
+  if (!start || !end) return '请选择有效的日期范围';
+  if (start > end) return '开始日期不能晚于结束日期';
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (end > today) return '日期范围不能包含未来日期';
+  const endExclusive = new Date(end);
+  endExclusive.setDate(endExclusive.getDate() + 1);
+  if (endExclusive > addOneCalendarMonthClamped(start)) {
+    return '日期范围不能超过一个自然月';
+  }
+  return '';
 }
 
 function MetricStat({ label, value }) {
@@ -171,7 +229,20 @@ export default function AgentCenter() {
   const [leaderboardSortBy, setLeaderboardSortBy] = useState(
     DEFAULT_LEADERBOARD_SORT,
   );
+  const [leaderboardStartDate, setLeaderboardStartDate] = useState(() =>
+    getLocalDateString(-6),
+  );
+  const [leaderboardEndDate, setLeaderboardEndDate] = useState(() =>
+    getLocalDateString(0),
+  );
+  const [leaderboardDraftStartDate, setLeaderboardDraftStartDate] = useState(
+    () => getLocalDateString(-6),
+  );
+  const [leaderboardDraftEndDate, setLeaderboardDraftEndDate] = useState(() =>
+    getLocalDateString(0),
+  );
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardDateError, setLeaderboardDateError] = useState('');
   const [rebates, setRebates] = useState([]);
   const [rebatesTotal, setRebatesTotal] = useState(0);
   const [rebatesPage, setRebatesPage] = useState(1);
@@ -261,7 +332,12 @@ export default function AgentCenter() {
   }, [dailyMetricEndDate, dailyMetricStartDate, summary?.is_agent, t]);
 
   const loadLeaderboard = useCallback(
-    async (page = 1, sortBy = DEFAULT_LEADERBOARD_SORT) => {
+    async (
+      page = 1,
+      sortBy = DEFAULT_LEADERBOARD_SORT,
+      startDate = leaderboardStartDate,
+      endDate = leaderboardEndDate,
+    ) => {
       if (!summary?.is_agent) {
         setLeaderboard(null);
         return;
@@ -273,6 +349,8 @@ export default function AgentCenter() {
             p: page,
             page_size: DEFAULT_PAGE_SIZE,
             sort_by: sortBy,
+            start_date: startDate,
+            end_date: endDate,
           },
         });
         if (!res.data.success) {
@@ -288,7 +366,7 @@ export default function AgentCenter() {
         setLeaderboardLoading(false);
       }
     },
-    [summary?.is_agent, t],
+    [leaderboardEndDate, leaderboardStartDate, summary?.is_agent, t],
   );
 
   const loadRebates = useCallback(
@@ -510,6 +588,36 @@ export default function AgentCenter() {
     [loadLeaderboard],
   );
 
+  const handleLeaderboardDateChange = useCallback((field, value) => {
+    const normalized = normalizeDateInput(value);
+    if (field === 'start') setLeaderboardDraftStartDate(normalized);
+    else setLeaderboardDraftEndDate(normalized);
+    setLeaderboardDateError('');
+  }, []);
+
+  const handleApplyLeaderboardDates = useCallback(() => {
+    const error = validateLeaderboardDateRange(
+      leaderboardDraftStartDate,
+      leaderboardDraftEndDate,
+    );
+    setLeaderboardDateError(error);
+    if (error) return;
+    setLeaderboardStartDate(leaderboardDraftStartDate);
+    setLeaderboardEndDate(leaderboardDraftEndDate);
+    setLeaderboardPage(1);
+    loadLeaderboard(
+      1,
+      leaderboardSortBy,
+      leaderboardDraftStartDate,
+      leaderboardDraftEndDate,
+    );
+  }, [
+    leaderboardDraftEndDate,
+    leaderboardDraftStartDate,
+    leaderboardSortBy,
+    loadLeaderboard,
+  ]);
+
   const handleSearchDownlines = useCallback(() => {
     const keyword = downlineKeyword.trim();
     setDownlineSearchKeyword(keyword);
@@ -687,74 +795,62 @@ export default function AgentCenter() {
         ),
       },
       {
-        title: t('今日新增'),
-        dataIndex: 'day_new_user_count',
-        width: 140,
+        title: t('所选区间新增用户数'),
+        dataIndex: 'range_new_user_count',
+        width: 170,
         render: (value, record) => (
           <RankedMetric
-            rank={record.day_new_user_rank}
+            rank={record.range_new_user_rank}
             value={value || 0}
-            active={leaderboardSortBy === 'day_new_user_count'}
+            active={leaderboardSortBy === 'range_new_user_count'}
           />
         ),
       },
       {
-        title: t('本月新增'),
-        dataIndex: 'month_new_user_count',
-        width: 140,
+        title: t('所选区间在线充值金额'),
+        dataIndex: 'range_topup_amount',
+        width: 190,
         render: (value, record) => (
           <RankedMetric
-            rank={record.month_new_user_rank}
-            value={value || 0}
-            active={leaderboardSortBy === 'month_new_user_count'}
-          />
-        ),
-      },
-      {
-        title: t('今日在线充值'),
-        dataIndex: 'day_topup_amount',
-        width: 175,
-        render: (value, record) => (
-          <RankedMetric
-            rank={record.day_topup_rank}
+            rank={record.range_topup_amount_rank}
             value={formatAmount(value)}
-            active={leaderboardSortBy === 'day_topup_amount'}
+            active={leaderboardSortBy === 'range_topup_amount'}
           />
         ),
       },
       {
-        title: t('本月二次充值率'),
-        dataIndex: 'month_second_topup_rate',
-        width: 170,
+        title: t('所选区间二次充值率'),
+        dataIndex: 'range_second_topup_rate',
+        width: 180,
         render: (value, record) => (
           <RankedMetric
-            rank={record.month_second_topup_rank}
+            rank={record.range_second_topup_rank}
             value={formatRatio(value)}
-            active={leaderboardSortBy === 'month_second_topup_rate'}
+            active={leaderboardSortBy === 'range_second_topup_rate'}
           />
         ),
       },
       {
-        title: t('本月三次充值率'),
-        dataIndex: 'month_third_topup_rate',
-        width: 170,
+        title: t('所选区间三次充值率'),
+        dataIndex: 'range_third_topup_rate',
+        width: 180,
         render: (value, record) => (
           <RankedMetric
-            rank={record.month_third_topup_rank}
+            rank={record.range_third_topup_rank}
             value={formatRatio(value)}
-            active={leaderboardSortBy === 'month_third_topup_rate'}
+            active={leaderboardSortBy === 'range_third_topup_rate'}
           />
         ),
       },
       {
-        title: t('本月四次充值率'),
-        dataIndex: 'month_fourth_topup_rate',
-        width: 170,
+        title: t('所选区间四次充值率'),
+        dataIndex: 'range_fourth_topup_rate',
+        width: 180,
         render: (value, record) => (
           <RankedMetric
-            rank={record.month_fourth_topup_rank}
+            rank={record.range_fourth_topup_rank}
             value={formatRatio(value)}
-            active={leaderboardSortBy === 'month_fourth_topup_rate'}
+            active={leaderboardSortBy === 'range_fourth_topup_rate'}
           />
         ),
       },
@@ -1049,6 +1145,46 @@ export default function AgentCenter() {
                     {t('每项指标独立排名，代理身份已脱敏')}
                   </Text>
                 </div>
+                <div className='flex flex-col gap-2 md:flex-row md:items-center md:justify-between w-full'>
+                  <Space wrap>
+                    <Input
+                      type='date'
+                      value={leaderboardDraftStartDate}
+                      max={leaderboardDraftEndDate}
+                      onChange={(value) =>
+                        handleLeaderboardDateChange('start', value)
+                      }
+                      style={{ width: 150 }}
+                    />
+                    <Text type='secondary'>–</Text>
+                    <Input
+                      type='date'
+                      value={leaderboardDraftEndDate}
+                      min={leaderboardDraftStartDate}
+                      max={getLocalDateString(0)}
+                      onChange={(value) =>
+                        handleLeaderboardDateChange('end', value)
+                      }
+                      style={{ width: 150 }}
+                    />
+                    <Button
+                      onClick={handleApplyLeaderboardDates}
+                      disabled={leaderboardLoading}
+                    >
+                      {t('查询')}
+                    </Button>
+                  </Space>
+                  <Text type='secondary' size='small'>
+                    {t(
+                      '最多选择一个自然月，仅统计已结算的在线充值，不包含卡密兑换',
+                    )}
+                  </Text>
+                </div>
+                {leaderboardDateError ? (
+                  <Text type='danger' size='small'>
+                    {t(leaderboardDateError)}
+                  </Text>
+                ) : null}
                 <div className='w-full overflow-x-auto pb-1'>
                   <RadioGroup
                     type='button'
@@ -1064,52 +1200,45 @@ export default function AgentCenter() {
                   </RadioGroup>
                 </div>
                 {selfOutsideLeaderboard ? (
-                  <div className='grid w-full grid-cols-2 gap-3 border border-solid border-[var(--semi-color-primary-light-default)] bg-[var(--semi-color-primary-light-default)] p-3 md:grid-cols-3 xl:grid-cols-6'>
+                  <div className='grid w-full grid-cols-2 gap-3 border border-solid border-[var(--semi-color-primary-light-default)] bg-[var(--semi-color-primary-light-default)] p-3 md:grid-cols-3 xl:grid-cols-5'>
                     <MetricStat
-                      label={t('今日新增')}
+                      label={t('所选区间新增用户数')}
                       value={formatRankedValue(
-                        selfOutsideLeaderboard.day_new_user_rank,
-                        selfOutsideLeaderboard.day_new_user_count || 0,
+                        selfOutsideLeaderboard.range_new_user_rank,
+                        selfOutsideLeaderboard.range_new_user_count || 0,
                       )}
                     />
                     <MetricStat
-                      label={t('本月新增')}
+                      label={t('所选区间在线充值金额')}
                       value={formatRankedValue(
-                        selfOutsideLeaderboard.month_new_user_rank,
-                        selfOutsideLeaderboard.month_new_user_count || 0,
+                        selfOutsideLeaderboard.range_topup_amount_rank,
+                        formatAmount(selfOutsideLeaderboard.range_topup_amount),
                       )}
                     />
                     <MetricStat
-                      label={t('今日在线充值')}
+                      label={t('所选区间二次充值率')}
                       value={formatRankedValue(
-                        selfOutsideLeaderboard.day_topup_rank,
-                        formatAmount(selfOutsideLeaderboard.day_topup_amount),
-                      )}
-                    />
-                    <MetricStat
-                      label={t('本月二次充值率')}
-                      value={formatRankedValue(
-                        selfOutsideLeaderboard.month_second_topup_rank,
+                        selfOutsideLeaderboard.range_second_topup_rank,
                         formatRatio(
-                          selfOutsideLeaderboard.month_second_topup_rate,
+                          selfOutsideLeaderboard.range_second_topup_rate,
                         ),
                       )}
                     />
                     <MetricStat
-                      label={t('本月三次充值率')}
+                      label={t('所选区间三次充值率')}
                       value={formatRankedValue(
-                        selfOutsideLeaderboard.month_third_topup_rank,
+                        selfOutsideLeaderboard.range_third_topup_rank,
                         formatRatio(
-                          selfOutsideLeaderboard.month_third_topup_rate,
+                          selfOutsideLeaderboard.range_third_topup_rate,
                         ),
                       )}
                     />
                     <MetricStat
-                      label={t('本月四次充值率')}
+                      label={t('所选区间四次充值率')}
                       value={formatRankedValue(
-                        selfOutsideLeaderboard.month_fourth_topup_rank,
+                        selfOutsideLeaderboard.range_fourth_topup_rank,
                         formatRatio(
-                          selfOutsideLeaderboard.month_fourth_topup_rate,
+                          selfOutsideLeaderboard.range_fourth_topup_rate,
                         ),
                       )}
                     />
@@ -1128,12 +1257,17 @@ export default function AgentCenter() {
                   pageSize={DEFAULT_PAGE_SIZE}
                   total={Number(leaderboard?.total || 0)}
                   onPageChange={(page) =>
-                    loadLeaderboard(page, leaderboardSortBy)
+                    loadLeaderboard(
+                      page,
+                      leaderboardSortBy,
+                      leaderboardStartDate,
+                      leaderboardEndDate,
+                    )
                   }
                 />
                 <Text type='tertiary' size='small'>
                   {t(
-                    '今日充值与本月二至四次充值率仅统计已结算的在线充值，不包含卡密兑换。',
+                    '所选区间在线充值金额及二至四次充值率仅统计已结算的在线充值，不包含卡密兑换。',
                   )}
                 </Text>
               </Space>
