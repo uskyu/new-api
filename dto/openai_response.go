@@ -257,9 +257,21 @@ type OpenAIVideoResponse struct {
 type InputTokenDetails struct {
 	CachedTokens         int `json:"cached_tokens"`
 	CachedCreationTokens int `json:"cached_creation_tokens,omitempty"`
+	CacheWriteTokens     int `json:"cache_write_tokens,omitempty"`
 	TextTokens           int `json:"text_tokens"`
 	AudioTokens          int `json:"audio_tokens"`
 	ImageTokens          int `json:"image_tokens"`
+}
+
+func (d InputTokenDetails) CacheCreationTokensTotal() int {
+	total := d.CachedCreationTokens
+	if d.CacheWriteTokens > total {
+		total = d.CacheWriteTokens
+	}
+	if total < 0 {
+		return 0
+	}
+	return total
 }
 
 type OutputTokenDetails struct {
@@ -314,6 +326,7 @@ func (u *Usage) NormalizeResponsesUsage() {
 	if u.InputTokensDetails != nil {
 		u.PromptTokensDetails.CachedTokens = u.InputTokensDetails.CachedTokens
 		u.PromptTokensDetails.CachedCreationTokens = u.InputTokensDetails.CachedCreationTokens
+		u.PromptTokensDetails.CacheWriteTokens = u.InputTokensDetails.CacheWriteTokens
 		u.PromptTokensDetails.TextTokens = u.InputTokensDetails.TextTokens
 		u.PromptTokensDetails.AudioTokens = u.InputTokensDetails.AudioTokens
 		u.PromptTokensDetails.ImageTokens = u.InputTokensDetails.ImageTokens

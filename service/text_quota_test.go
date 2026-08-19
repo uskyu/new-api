@@ -278,6 +278,64 @@ func TestCalculateTextQuotaSummarySeparatesOpenRouterCacheCreationFromPromptBill
 	require.Equal(t, 3012, summary.Quota)
 }
 
+func TestCalculateTextQuotaSummaryUsesResponsesCacheWriteTokens(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-test",
+		PriceData: types.PriceData{
+			ModelRatio:         1,
+			CompletionRatio:    1,
+			CacheRatio:         0.1,
+			CacheCreationRatio: 1.25,
+			GroupRatioInfo:     types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 10,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:     20,
+			CacheWriteTokens: 30,
+		},
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	require.Equal(t, 30, summary.CacheCreationTokens)
+	// (100 - 20 - 30) + 20*0.1 + 30*1.25 + 10 = 99.5, rounded to 100.
+	require.Equal(t, 100, summary.Quota)
+}
+
+func TestCalculateTextQuotaSummaryClampsNegativeBaseTokens(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-test",
+		PriceData: types.PriceData{
+			ModelRatio:         1,
+			CompletionRatio:    1,
+			CacheRatio:         0.1,
+			CacheCreationRatio: 1.25,
+			GroupRatioInfo:     types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+	usage := &dto.Usage{
+		PromptTokens: 10,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:     20,
+			CacheWriteTokens: 30,
+		},
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	// The base input is clamped to zero, while cache read/write are billed normally.
+	require.Equal(t, 40, summary.Quota)
+}
+
 func TestCalculateTextQuotaSummaryKeepsPrePRClaudeOpenRouterBilling(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
