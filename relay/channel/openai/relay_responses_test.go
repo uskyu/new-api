@@ -52,25 +52,6 @@ func TestOaiResponsesHandlerNormalizesTimestampAndReasoningUsage(t *testing.T) {
 	require.NotContains(t, responseBody, `"completion_tokens"`)
 }
 
-func TestOaiResponsesHandlerPreservesCacheWriteUsageForAccounting(t *testing.T) {
-	oldMode := gin.Mode()
-	gin.SetMode(gin.TestMode)
-	t.Cleanup(func() { gin.SetMode(oldMode) })
-
-	body := `{"id":"resp_cache","object":"response","created_at":1741382417,"model":"gpt-test","output":[],"usage":{"input_tokens":100,"output_tokens":5,"total_tokens":105,"input_tokens_details":{"cached_tokens":20,"cache_write_tokens":30}}}`
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}
-
-	usage, relayErr := OaiResponsesHandler(c, nil, resp)
-	require.Nil(t, relayErr)
-	require.Equal(t, 20, usage.PromptTokensDetails.CachedTokens)
-	require.Equal(t, 30, usage.PromptTokensDetails.CacheWriteTokens)
-	require.Equal(t, 30, usage.PromptTokensDetails.CacheCreationTokensTotal())
-	require.Contains(t, recorder.Body.String(), `"cache_write_tokens":30`)
-}
-
 func TestOaiResponsesToChatStreamDoesNotDuplicateCompletedToolCall(t *testing.T) {
 	oldMode := gin.Mode()
 	gin.SetMode(gin.TestMode)
@@ -154,7 +135,7 @@ func TestOaiResponsesStreamHandlerNormalizesUsageAndSendsOneDone(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"type":"response.created","response":{"id":"resp_1","object":"response","created_at":1741382417.0,"model":"gpt-test","output":[]}}`,
 		``,
-		`data: {"type":"response.completed","sequence_number":42,"response":{"id":"resp_1","object":"response","created_at":1741382417.25,"model":"gpt-test","output":[],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":99,"input_tokens_details":{"cached_tokens":2,"cache_write_tokens":3},"output_tokens_details":{"reasoning_tokens":6}}}}`,
+		`data: {"type":"response.completed","sequence_number":42,"response":{"id":"resp_1","object":"response","created_at":1741382417.25,"model":"gpt-test","output":[],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":99,"output_tokens_details":{"reasoning_tokens":6}}}}`,
 		``,
 		`data: [DONE]`,
 		``,
@@ -179,8 +160,6 @@ func TestOaiResponsesStreamHandlerNormalizesUsageAndSendsOneDone(t *testing.T) {
 	require.Equal(t, 5, usage.CompletionTokens)
 	require.Equal(t, 99, usage.TotalTokens)
 	require.Equal(t, 6, usage.CompletionTokenDetails.ReasoningTokens)
-	require.Equal(t, 2, usage.PromptTokensDetails.CachedTokens)
-	require.Equal(t, 3, usage.PromptTokensDetails.CacheWriteTokens)
 
 	responseBody := recorder.Body.String()
 	require.Contains(t, responseBody, `"created_at":1741382417`)

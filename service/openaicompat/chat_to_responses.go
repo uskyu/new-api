@@ -357,11 +357,6 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 
 	textRaw := convertChatResponseFormatToResponsesText(req.ResponseFormat)
 
-	var promptCacheKeyRaw json.RawMessage
-	if req.PromptCacheKey != "" {
-		promptCacheKeyRaw, _ = common.Marshal(req.PromptCacheKey)
-	}
-
 	maxOutputTokens := lo.FromPtrOr(req.MaxTokens, uint(0))
 	maxCompletionTokens := lo.FromPtrOr(req.MaxCompletionTokens, uint(0))
 	if maxCompletionTokens > maxOutputTokens {
@@ -393,7 +388,6 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 		ParallelToolCalls: parallelToolCallsRaw,
 		Store:             req.Store,
 		Metadata:          req.Metadata,
-		PromptCacheKey:    promptCacheKeyRaw,
 	}
 	if req.MaxTokens != nil || req.MaxCompletionTokens != nil {
 		out.MaxOutputTokens = lo.ToPtr(maxOutputTokens)

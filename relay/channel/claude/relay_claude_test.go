@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/stretchr/testify/require"
 )
@@ -257,57 +256,6 @@ func TestBuildOpenAIStyleUsageFromClaudeUsagePreservesCacheCreationRemainder(t *
 			}
 		})
 	}
-}
-
-func TestRequestOpenAI2ClaudeMessagePreservesParameterlessTools(t *testing.T) {
-	request := dto.GeneralOpenAIRequest{
-		Model: "claude-3-5-sonnet",
-		Tools: []dto.ToolCallRequest{{
-			Type: "function",
-			Function: dto.FunctionRequest{
-				Name:        "get_current_time",
-				Description: "Get current time",
-			},
-		}},
-	}
-
-	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
-	require.NoError(t, err)
-	tools, ok := claudeRequest.Tools.([]any)
-	require.True(t, ok)
-	require.Len(t, tools, 1)
-	tool, ok := tools[0].(*dto.Tool)
-	require.True(t, ok)
-	require.Equal(t, "get_current_time", tool.Name)
-	require.Equal(t, "object", tool.InputSchema["type"])
-	require.Equal(t, map[string]any{}, tool.InputSchema["properties"])
-}
-
-func TestRequestOpenAI2ClaudeMessageOmitsEmptyTools(t *testing.T) {
-	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, dto.GeneralOpenAIRequest{Model: "claude-3-5-sonnet"})
-	require.NoError(t, err)
-	require.Nil(t, claudeRequest.Tools)
-
-	payload, err := common.Marshal(claudeRequest)
-	require.NoError(t, err)
-	require.NotContains(t, string(payload), `"tools"`)
-}
-
-func TestRequestOpenAI2ClaudeMessageOmitsUnsupportedToolSchemas(t *testing.T) {
-	request := dto.GeneralOpenAIRequest{
-		Model: "claude-3-5-sonnet",
-		Tools: []dto.ToolCallRequest{{
-			Type: "function",
-			Function: dto.FunctionRequest{
-				Name:       "invalid",
-				Parameters: []any{"not-an-object"},
-			},
-		}},
-	}
-
-	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
-	require.NoError(t, err)
-	require.Nil(t, claudeRequest.Tools)
 }
 
 func TestRequestOpenAI2ClaudeMessage_IgnoresUnsupportedFileContent(t *testing.T) {

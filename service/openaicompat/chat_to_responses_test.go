@@ -44,19 +44,6 @@ func TestChatCompletionsRequestToResponsesRequestPreservesPenalties(t *testing.T
 	}
 }
 
-func TestChatCompletionsRequestToResponsesRequestPreservesPromptCacheKey(t *testing.T) {
-	got, err := ChatCompletionsRequestToResponsesRequest(&dto.GeneralOpenAIRequest{
-		Model:          "gpt-test",
-		PromptCacheKey: "tenant:conversation:123",
-	})
-	require.NoError(t, err)
-	require.JSONEq(t, `"tenant:conversation:123"`, string(got.PromptCacheKey))
-
-	withoutKey, err := ChatCompletionsRequestToResponsesRequest(&dto.GeneralOpenAIRequest{Model: "gpt-test"})
-	require.NoError(t, err)
-	require.Empty(t, withoutKey.PromptCacheKey)
-}
-
 func float64Ptr(value float64) *float64 {
 	return &value
 }
