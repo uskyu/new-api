@@ -70,8 +70,16 @@ func ExtendWriteDeadline(c *gin.Context) {
 	_ = http.NewResponseController(c.Writer).SetWriteDeadline(time.Now().Add(streamWriteTimeout))
 }
 
-func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult)) {
+type StreamScannerOptions struct {
+	FlushHeaders           bool
+	ClientGoneDrainTimeout time.Duration
+}
 
+func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult)) {
+	StreamScannerHandlerWithOptions(c, resp, info, StreamScannerOptions{}, dataHandler)
+}
+
+func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, options StreamScannerOptions, dataHandler func(data string, sr *StreamResult)) {
 	if resp == nil || dataHandler == nil {
 		return
 	}
@@ -81,6 +89,10 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 	ctx, cancel := context.WithCancel(context.Background())
 	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
+	if streamingTimeout <= 0 {
+		streamingTimeout = 300 * time.Second
+		logger.LogError(c, "invalid streaming timeout, fallback to 300s")
+	}
 
 	var (
 		stopChan    = make(chan bool, 3)
@@ -132,20 +144,9 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			if pingTicker != nil {
 				pingTicker.Stop()
 			}
-			// Bound the wait: a writer that does not support write deadlines (e.g.
-			// gzip-wrapped ResponseWriter) could otherwise block forever on a stuck
-			// client and leak the handler. Timeout avoids hanging while still
-			// waiting for the normal case to finish.
-			waitDone := make(chan struct{})
-			go func() {
-				wg.Wait()
-				close(waitDone)
-			}()
-			select {
-			case <-waitDone:
-			case <-time.After(10 * time.Second):
-				logger.LogError(c, "stream cleanup wait timed out; stream goroutines may still be running")
-			}
+			// Wait for all writer goroutines before returning: their callbacks can own
+			// the request usage/error state consumed immediately after the handler.
+			wg.Wait()
 		})
 	}
 	// Do not return the Gin context to its pool while any stream goroutine can use it.
@@ -154,6 +155,14 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	scanner.Split(bufio.ScanLines)
 	copyCodexSSEHeaders(c, resp)
 	SetEventStreamHeaders(c)
+	if options.FlushHeaders {
+		if err := FlushWriter(c); err != nil {
+			logger.LogError(c, "flush stream headers failed: "+err.Error())
+			if !requestContextDone(c) {
+				info.StreamStatus.RecordError("flush stream headers failed: " + err.Error())
+			}
+		}
+	}
 
 	ctx = context.WithValue(ctx, "stop_chan", stopChan)
 
@@ -231,7 +240,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		}()
 		sr := newStreamResult(info.StreamStatus)
 		for data := range dataChan {
-			if requestContextDone(c) {
+			if requestContextDone(c) && options.ClientGoneDrainTimeout <= 0 {
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
 				return
 			}
@@ -239,11 +248,13 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			func() {
 				writeMutex.Lock()
 				defer writeMutex.Unlock()
-				if requestContextDone(c) {
+				if requestContextDone(c) && options.ClientGoneDrainTimeout <= 0 {
 					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
 					return
 				}
-				ExtendWriteDeadline(c)
+				if !requestContextDone(c) {
+					ExtendWriteDeadline(c)
+				}
 				dataHandler(data, sr)
 			}()
 			if sr.IsStopped() {
@@ -276,8 +287,10 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			case <-ctx.Done():
 				return
 			case <-c.Request.Context().Done():
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
-				return
+				if options.ClientGoneDrainTimeout <= 0 {
+					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+					return
+				}
 			default:
 			}
 
@@ -328,13 +341,35 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	})
 
 	// 主循环等待完成或超时
+mainLoop:
 	select {
 	case <-ticker.C:
 		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
 	case <-stopChan:
 		// EndReason already set by the goroutine that triggered stopChan
 	case <-c.Request.Context().Done():
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+		if options.ClientGoneDrainTimeout <= 0 {
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+			break
+		}
+		logger.LogInfo(c, fmt.Sprintf("client gone, draining upstream for %.0fs", options.ClientGoneDrainTimeout.Seconds()))
+		drainTimer := time.NewTimer(options.ClientGoneDrainTimeout)
+		select {
+		case <-stopChan:
+			if !drainTimer.Stop() {
+				select {
+				case <-drainTimer.C:
+				default:
+				}
+			}
+			break mainLoop
+		case <-ticker.C:
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
+			break mainLoop
+		case <-drainTimer.C:
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+			logger.LogWarn(c, fmt.Sprintf("client gone drain timeout after %.0fs", options.ClientGoneDrainTimeout.Seconds()))
+		}
 	}
 
 	cleanup()

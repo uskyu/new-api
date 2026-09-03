@@ -311,6 +311,159 @@ func TestStreamScannerHandler_ClientCancelAbortsUpstreamAndReturns(t *testing.T)
 	assert.NotContains(t, recorder.Body.String(), "second")
 }
 
+func setupStreamTimeout(t *testing.T) {
+	t.Helper()
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+}
+
+func TestStreamScannerHandlerWithOptions_FlushesHeadersBeforeFirstChunk(t *testing.T) {
+	setupStreamTimeout(t)
+	pr, pw := io.Pipe()
+	t.Cleanup(func() {
+		_ = pr.Close()
+		_ = pw.Close()
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	resp := &http.Response{Body: pr}
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	done := make(chan struct{})
+	go func() {
+		StreamScannerHandlerWithOptions(c, resp, info, StreamScannerOptions{FlushHeaders: true}, func(data string, sr *StreamResult) {})
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool { return recorder.Flushed }, time.Second, 10*time.Millisecond)
+	assert.Equal(t, "text/event-stream", recorder.Header().Get("Content-Type"))
+	assert.Empty(t, recorder.Body.String(), "header flush must not inject a data frame")
+
+	_ = pw.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return after upstream closed")
+	}
+}
+
+func TestStreamScannerHandlerWithOptions_ClientGoneDrainsUntilDone(t *testing.T) {
+	setupStreamTimeout(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pr, pw := io.Pipe()
+	t.Cleanup(func() {
+		_ = pr.Close()
+		_ = pw.Close()
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(ctx)
+	resp := &http.Response{Body: pr}
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	var chunks atomic.Int64
+	firstHandled := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		StreamScannerHandlerWithOptions(c, resp, info, StreamScannerOptions{ClientGoneDrainTimeout: time.Second}, func(data string, sr *StreamResult) {
+			chunks.Add(1)
+			if data == "first" {
+				close(firstHandled)
+			}
+		})
+		close(done)
+	}()
+
+	_, err := fmt.Fprint(pw, "data: first\n")
+	require.NoError(t, err)
+	select {
+	case <-firstHandled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first chunk")
+	}
+	cancel()
+	_, err = fmt.Fprint(pw, "data: final-usage\n")
+	require.NoError(t, err)
+	_, err = fmt.Fprint(pw, "data: [DONE]\n")
+	require.NoError(t, err)
+	_ = pw.Close()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler did not finish after drained stream ended")
+	}
+	assert.Equal(t, int64(2), chunks.Load())
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+}
+
+func TestStreamScannerHandlerWithOptions_InvalidStreamingTimeoutFallsBack(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 0
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	c, resp, info := setupStreamTest(t, strings.NewReader(buildSSEBody(1)))
+	require.NotPanics(t, func() {
+		StreamScannerHandlerWithOptions(c, resp, info, StreamScannerOptions{}, func(data string, sr *StreamResult) {})
+	})
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+}
+
+func TestStreamScannerHandlerWithOptions_ClientGoneDrainIsBounded(t *testing.T) {
+	setupStreamTimeout(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pr, pw := io.Pipe()
+	t.Cleanup(func() {
+		_ = pr.Close()
+		_ = pw.Close()
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(ctx)
+	resp := &http.Response{Body: pr}
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	firstHandled := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		StreamScannerHandlerWithOptions(c, resp, info, StreamScannerOptions{ClientGoneDrainTimeout: 100 * time.Millisecond}, func(data string, sr *StreamResult) {
+			select {
+			case <-firstHandled:
+			default:
+				close(firstHandled)
+			}
+		})
+		close(done)
+	}()
+
+	_, err := fmt.Fprint(pw, "data: first\n")
+	require.NoError(t, err)
+	select {
+	case <-firstHandled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first chunk")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return after drain timeout")
+	}
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+	_, err = fmt.Fprint(pw, "data: late\n")
+	require.ErrorIs(t, err, io.ErrClosedPipe)
+}
+
 func TestStreamScannerHandler_CopiesRepeatedCodexHeaders(t *testing.T) {
 	c, resp, info := setupStreamTest(t, strings.NewReader("data: [DONE]\n"))
 	resp.Header = http.Header{}
