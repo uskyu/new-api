@@ -1,6 +1,8 @@
 package model
 
 import (
+	"fmt"
+
 	"github.com/QuantumNous/new-api/common"
 
 	"gorm.io/gorm"
@@ -13,14 +15,16 @@ import (
 // 本表同样遵循 3NF 设计范式
 
 type Vendor struct {
-	Id          int            `json:"id"`
-	Name        string         `json:"name" gorm:"size:128;not null;uniqueIndex:uk_vendor_name_delete_at,priority:1"`
-	Description string         `json:"description,omitempty" gorm:"type:text"`
-	Icon        string         `json:"icon,omitempty" gorm:"type:varchar(128)"`
-	Status      int            `json:"status" gorm:"default:1"`
-	CreatedTime int64          `json:"created_time" gorm:"bigint"`
-	UpdatedTime int64          `json:"updated_time" gorm:"bigint"`
-	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index;uniqueIndex:uk_vendor_name_delete_at,priority:2"`
+	Id          int    `json:"id"`
+	Name        string `json:"name" gorm:"size:128;not null;uniqueIndex:uk_vendor_name_delete_at,priority:1"`
+	Description string `json:"description,omitempty" gorm:"type:text"`
+	Icon        string `json:"icon,omitempty" gorm:"type:varchar(128)"`
+	Status      int    `json:"status" gorm:"default:1"`
+	// MarketplaceQuotaThreshold controls visibility in the model marketplace only.
+	MarketplaceQuotaThreshold int            `json:"marketplace_quota_threshold" gorm:"type:bigint;not null;default:0"`
+	CreatedTime               int64          `json:"created_time" gorm:"bigint"`
+	UpdatedTime               int64          `json:"updated_time" gorm:"bigint"`
+	DeletedAt                 gorm.DeletedAt `json:"-" gorm:"index;uniqueIndex:uk_vendor_name_delete_at,priority:2"`
 }
 
 // Insert 创建新的供应商记录
@@ -41,10 +45,30 @@ func IsVendorNameDuplicated(id int, name string) (bool, error) {
 	return cnt > 0, err
 }
 
-// Update 更新供应商记录
+// Update 更新供应商基础信息，模型广场消费门槛由专用接口维护
 func (v *Vendor) Update() error {
 	v.UpdatedTime = common.GetTimestamp()
-	return DB.Save(v).Error
+	return DB.Model(&Vendor{}).Where("id = ?", v.Id).Updates(map[string]interface{}{
+		"name":         v.Name,
+		"description":  v.Description,
+		"icon":         v.Icon,
+		"status":       v.Status,
+		"updated_time": v.UpdatedTime,
+	}).Error
+}
+
+// UpdateMarketplaceQuotaThreshold 更新模型广场可见消费门槛，不修改供应商其他字段
+func UpdateMarketplaceQuotaThreshold(id int, threshold int) (*Vendor, error) {
+	if threshold < 0 {
+		return nil, fmt.Errorf("模型广场消费门槛不能为负数")
+	}
+	if err := DB.Model(&Vendor{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"marketplace_quota_threshold": threshold,
+		"updated_time":                common.GetTimestamp(),
+	}).Error; err != nil {
+		return nil, err
+	}
+	return GetVendorByID(id)
 }
 
 // Delete 软删除供应商

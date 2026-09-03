@@ -227,7 +227,7 @@ export const useModelPricingData = () => {
 
   const loadPricing = async () => {
     setLoading(true);
-    let url = '/api/pricing';
+    let url = '/api/pricing?marketplace=true';
     const res = await API.get(url);
     const {
       success,

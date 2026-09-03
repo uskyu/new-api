@@ -59,6 +59,7 @@ import Pricing from './pages/Pricing';
 import Task from './pages/Task';
 import ModelPage from './pages/Model';
 import ModelDeploymentPage from './pages/ModelDeployment';
+import MarketplacePermissionPage from './pages/MarketplacePermission';
 import Playground from './pages/Playground';
 import Subscription from './pages/Subscription';
 import Agent from './pages/Agent';
@@ -133,6 +134,14 @@ function App() {
           element={
             <AdminRoute>
               <ModelDeploymentPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/marketplace-permission'
+          element={
+            <AdminRoute>
+              <MarketplacePermissionPage />
             </AdminRoute>
           }
         />

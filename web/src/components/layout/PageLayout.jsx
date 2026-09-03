@@ -61,6 +61,7 @@ const PageLayout = () => {
     '/console/midjourney',
     '/console/task',
     '/console/models',
+    '/console/marketplace-permission',
     '/pricing',
     '/quick-login',
   ];

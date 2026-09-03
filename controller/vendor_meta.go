@@ -65,6 +65,10 @@ func CreateVendorMeta(c *gin.Context) {
 		common.ApiErrorMsg(c, "供应商名称不能为空")
 		return
 	}
+	if v.MarketplaceQuotaThreshold < 0 {
+		common.ApiErrorMsg(c, "模型广场消费门槛不能为负数")
+		return
+	}
 	// 创建前先检查名称
 	if dup, err := model.IsVendorNameDuplicated(0, v.Name); err != nil {
 		common.ApiError(c, err)
@@ -78,6 +82,7 @@ func CreateVendorMeta(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	model.RefreshPricing()
 	common.ApiSuccess(c, &v)
 }
 
@@ -90,6 +95,10 @@ func UpdateVendorMeta(c *gin.Context) {
 	}
 	if v.Id == 0 {
 		common.ApiErrorMsg(c, "缺少供应商 ID")
+		return
+	}
+	if v.MarketplaceQuotaThreshold < 0 {
+		common.ApiErrorMsg(c, "模型广场消费门槛不能为负数")
 		return
 	}
 	// 名称冲突检查
@@ -105,7 +114,31 @@ func UpdateVendorMeta(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	model.RefreshPricing()
 	common.ApiSuccess(c, &v)
+}
+
+// UpdateVendorMarketplaceThreshold 更新供应商的模型广场消费门槛
+func UpdateVendorMarketplaceThreshold(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "供应商 ID 无效")
+		return
+	}
+	var request struct {
+		Threshold int `json:"marketplace_quota_threshold"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	vendor, err := model.UpdateMarketplaceQuotaThreshold(id, request.Threshold)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.RefreshPricing()
+	common.ApiSuccess(c, vendor)
 }
 
 // DeleteVendorMeta 删除供应商
@@ -120,5 +153,6 @@ func DeleteVendorMeta(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	model.RefreshPricing()
 	common.ApiSuccess(c, nil)
 }

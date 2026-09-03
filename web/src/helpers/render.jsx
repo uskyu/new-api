@@ -77,6 +77,7 @@ import {
   Package,
   Server,
   CalendarClock,
+  Eye,
   Video,
 } from 'lucide-react';
 import {
@@ -153,6 +154,8 @@ export function getLucideIcon(key, selected = false) {
       return <User {...commonProps} color={iconColor} />;
     case 'models':
       return <Package {...commonProps} color={iconColor} />;
+    case 'marketplace_permission':
+      return <Eye {...commonProps} color={iconColor} />;
     case 'deployment':
       return <Server {...commonProps} color={iconColor} />;
     case 'subscription':

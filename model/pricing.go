@@ -36,10 +36,11 @@ type Pricing struct {
 }
 
 type PricingVendor struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Icon        string `json:"icon,omitempty"`
+	ID                        int    `json:"id"`
+	Name                      string `json:"name"`
+	Description               string `json:"description,omitempty"`
+	Icon                      string `json:"icon,omitempty"`
+	MarketplaceQuotaThreshold int    `json:"-"`
 }
 
 var (
@@ -169,10 +170,11 @@ func updatePricing() {
 	vendorsList = make([]PricingVendor, 0, len(vendorMap))
 	for _, v := range vendorMap {
 		vendorsList = append(vendorsList, PricingVendor{
-			ID:          v.Id,
-			Name:        v.Name,
-			Description: v.Description,
-			Icon:        v.Icon,
+			ID:                        v.Id,
+			Name:                      v.Name,
+			Description:               v.Description,
+			Icon:                      v.Icon,
+			MarketplaceQuotaThreshold: v.MarketplaceQuotaThreshold,
 		})
 	}
 

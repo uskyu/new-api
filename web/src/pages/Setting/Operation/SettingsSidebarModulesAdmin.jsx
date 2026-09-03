@@ -75,6 +75,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       redemption: true,
       user: true,
       subscription: true,
+      marketplace_permission: true,
       setting: true,
     },
   });
@@ -145,6 +146,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         redemption: true,
         user: true,
         subscription: true,
+        marketplace_permission: true,
         setting: true,
       },
     };
@@ -205,6 +207,8 @@ export default function SettingsSidebarModulesAdmin(props) {
             ...(modules.admin || {}),
             analytics: modules.admin?.analytics ?? true,
             ai_video_logs: modules.admin?.ai_video_logs ?? true,
+            marketplace_permission:
+              modules.admin?.marketplace_permission ?? true,
           },
         }));
       } catch (error) {
@@ -239,6 +243,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             redemption: true,
             user: true,
             subscription: true,
+            marketplace_permission: true,
             setting: true,
           },
         };
@@ -333,6 +338,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           description: t('代理返利与调账'),
         },
         { key: 'models', title: t('模型管理'), description: t('AI模型配置') },
+        {
+          key: 'marketplace_permission',
+          title: t('模型广场权限'),
+          description: t('配置供应商在模型广场中的累计消费显示门槛'),
+        },
         {
           key: 'deployment',
           title: t('模型部署'),

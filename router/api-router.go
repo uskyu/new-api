@@ -470,6 +470,7 @@ func SetApiRouter(router *gin.Engine) {
 			vendorRoute.GET("/:id", controller.GetVendorMeta)
 			vendorRoute.POST("/", controller.CreateVendorMeta)
 			vendorRoute.PUT("/", controller.UpdateVendorMeta)
+			vendorRoute.PUT("/:id/marketplace-threshold", controller.UpdateVendorMarketplaceThreshold)
 			vendorRoute.DELETE("/:id", controller.DeleteVendorMeta)
 		}
 

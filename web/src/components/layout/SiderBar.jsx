@@ -48,6 +48,7 @@ const routerMap = {
   pricing: '/pricing',
   task: '/console/task',
   models: '/console/models',
+  marketplace_permission: '/console/marketplace-permission',
   deployment: '/console/deployment',
   ai_console: '/console/ai',
   ai_image: '/console/ai-image',
@@ -187,6 +188,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('模型管理'),
         itemKey: 'models',
         to: '/console/models',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('模型广场权限'),
+        itemKey: 'marketplace_permission',
+        to: '/console/marketplace-permission',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -8,8 +9,41 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func filterMarketplacePricing(pricing []model.Pricing, vendors []model.PricingVendor, usedQuota int) ([]model.Pricing, []model.PricingVendor) {
+	blockedVendorIDs := make(map[int]struct{})
+	visibleVendors := make([]model.PricingVendor, 0, len(vendors))
+	for _, vendor := range vendors {
+		if vendor.MarketplaceQuotaThreshold > 0 && usedQuota < vendor.MarketplaceQuotaThreshold {
+			blockedVendorIDs[vendor.ID] = struct{}{}
+			continue
+		}
+		visibleVendors = append(visibleVendors, vendor)
+	}
+	visiblePricing := make([]model.Pricing, 0, len(pricing))
+	for _, item := range pricing {
+		if _, blocked := blockedVendorIDs[item.VendorID]; !blocked {
+			visiblePricing = append(visiblePricing, item)
+		}
+	}
+	return visiblePricing, visibleVendors
+}
+
 func GetPricing(c *gin.Context) {
 	pricing := model.GetPricing()
+	vendors := model.GetVendors()
+	if c.Query("marketplace") == "true" {
+		usedQuota := 0
+		if userID, ok := c.Get("id"); ok {
+			if id, ok := userID.(int); ok {
+				if quota, err := model.GetUserUsedQuota(id); err == nil {
+					usedQuota = quota
+				} else {
+					common.SysLog("failed to load user used quota for pricing visibility: " + err.Error())
+				}
+			}
+		}
+		pricing, vendors = filterMarketplacePricing(pricing, vendors, usedQuota)
+	}
 	userId, exists := c.Get("id")
 	usableGroup := map[string]string{}
 	groupRatio := map[string]float64{}
@@ -41,7 +75,7 @@ func GetPricing(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"success":            true,
 		"data":               pricing,
-		"vendors":            model.GetVendors(),
+		"vendors":            vendors,
 		"group_ratio":        groupRatio,
 		"usable_group":       usableGroup,
 		"supported_endpoint": model.GetSupportedEndpointMap(),
