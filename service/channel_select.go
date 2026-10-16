@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -117,6 +118,27 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
 	filters := GetChannelConstraints(param.Ctx).Filters
+	configuredOrder := []int(nil)
+	resourcePool := param.TokenGroup
+	costGroup := param.TokenGroup
+	if requestedGroup := common.GetContextKeyString(param.Ctx, setting.IntelligentRoutingContextKey); requestedGroup != "" {
+		resourcePool = requestedGroup
+		order, orderExists := setting.GetIntelligentRoutingGroupChannelOrder(requestedGroup)
+		if !orderExists {
+			return nil, requestedGroup, errors.New("intelligent routing pool is not configured")
+		}
+		configuredOrder = order
+		group, groupExists := setting.GetIntelligentRoutingCostGroup(requestedGroup)
+		if !groupExists {
+			return nil, requestedGroup, errors.New("intelligent routing cost group is not configured")
+		}
+		costGroup = group
+		channel, err = model.GetRandomSatisfiedChannelWithCostGroup(resourcePool, costGroup, param.ModelName, param.GetRetry(), filters, configuredOrder)
+		if err != nil {
+			return nil, requestedGroup, err
+		}
+		return channel, requestedGroup, nil
+	}
 
 	if param.TokenGroup == "auto" {
 		autoGroups := GetRequestAutoGroups(param.Ctx, userGroup)
@@ -282,7 +304,8 @@ type ChannelSelectError struct {
 // callers. The caller still applies SetupContextForSelectedChannel.
 func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam) (*model.Channel, string, *ChannelSelectError) {
 	constraints := GetChannelConstraints(c)
-	if pin, found, overridden := constraints.ResolvedPin(); found {
+	intelligentRoutingGroup := common.GetContextKeyString(c, setting.IntelligentRoutingContextKey)
+	if pin, found, overridden := constraints.ResolvedPin(); found && intelligentRoutingGroup == "" {
 		for _, lost := range overridden {
 			logger.LogWarn(c, common.LogText(
 				"channel pin overridden: winning_source=%s winning_channel_id=%d overridden_source=%s overridden_channel_id=%d",
@@ -309,7 +332,7 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 	usingGroup := retry.TokenGroup
 	var channel *model.Channel
 	var selectGroup string
-	if retry.GetRetry() == 0 {
+	if retry.GetRetry() == 0 && intelligentRoutingGroup == "" {
 		if preferredChannelID, found := GetPreferredChannelByAffinity(c, modelName, usingGroup); found {
 			affinityUsable := false
 			preferred, err := model.CacheGetChannel(preferredChannelID)

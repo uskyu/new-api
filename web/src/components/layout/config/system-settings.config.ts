@@ -26,6 +26,7 @@ import {
   Shield,
   ShieldAlert,
   Wrench,
+  GitBranch,
 } from 'lucide-react'
 
 import { getAuthSectionNavItems } from '@/features/system-settings/auth/section-registry.tsx'
@@ -91,6 +92,11 @@ function getSystemSettingsNavGroups(t: TFunction): NavGroup[] {
           title: t('Operations'),
           icon: Wrench,
           items: getOperationsSectionNavItems(t),
+        },
+        {
+          title: t('Intelligent routing'),
+          icon: GitBranch,
+          items: [{ title: t('Intelligent routing'), url: '/system-settings/intelligent-routing' }],
         },
       ],
     },

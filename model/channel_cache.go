@@ -216,6 +216,104 @@ func GetRandomSatisfiedChannel(
 	return nil, errors.New("channel not found")
 }
 
+func GetRandomSatisfiedChannelWithOrder(
+	group string,
+	model string,
+	retry int,
+	filters []dto.ChannelFilter,
+	configuredOrder []int,
+) (*Channel, error) {
+	if configuredOrder != nil {
+		return GetRandomSatisfiedChannelWithCostGroup(group, group, model, retry, filters, configuredOrder)
+	}
+	return GetRandomSatisfiedChannel(group, model, retry, filters)
+}
+
+func GetRandomSatisfiedChannelWithCostGroup(
+	resourcePool string,
+	costGroup string,
+	modelName string,
+	retry int,
+	filters []dto.ChannelFilter,
+	configuredOrder []int,
+) (*Channel, error) {
+	if configuredOrder == nil {
+		return GetRandomSatisfiedChannel(costGroup, modelName, retry, filters)
+	}
+	if len(configuredOrder) == 0 {
+		return nil, nil
+	}
+	channels, err := GetChannelsByIds(configuredOrder)
+	if err != nil {
+		return nil, err
+	}
+	channelByID := make(map[int]*Channel, len(channels))
+	for _, channel := range channels {
+		channelByID[channel.Id] = channel
+	}
+	candidates := make([]int, 0, len(configuredOrder))
+	for _, channelID := range configuredOrder {
+		channel := channelByID[channelID]
+		if channel == nil || channel.Status != common.ChannelStatusEnabled {
+			continue
+		}
+		if !channelHasEnabledAbilityInGroup(channelID, costGroup, modelName) {
+			continue
+		}
+		if allowed, _ := ChannelSatisfiesFilters(channel, modelName, filters); !allowed {
+			continue
+		}
+		candidates = append(candidates, channelID)
+	}
+	ordered := configuredChannelOrderIndex(configuredOrder, candidates)
+	if retry >= len(ordered) {
+		retry = len(ordered) - 1
+	}
+	if retry < 0 {
+		return nil, nil
+	}
+	return channelByID[ordered[retry]], nil
+}
+
+func configuredChannelOrderIndex(configuredOrder []int, candidates []int) []int {
+	candidateSet := make(map[int]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidateSet[candidate] = struct{}{}
+	}
+	ordered := make([]int, 0, len(candidates))
+	for _, channelID := range configuredOrder {
+		if _, ok := candidateSet[channelID]; ok {
+			ordered = append(ordered, channelID)
+			delete(candidateSet, channelID)
+		}
+	}
+	return ordered
+}
+
+func channelHasEnabledAbilityInGroup(channelID int, groupID string, modelName string) bool {
+	modelNames := []string{modelName}
+	if normalized := ratio_setting.RoutingMatchModelName(modelName); normalized != modelName {
+		modelNames = append(modelNames, normalized)
+	}
+	var count int64
+	err := DB.Model(&Ability{}).
+		Where(commonGroupCol+" = ? and model IN ? and channel_id = ? and enabled = ?", groupID, modelNames, channelID, true).
+		Count(&count).Error
+	return err == nil && count > 0
+}
+
+func channelServesModel(channelID int, modelName string) bool {
+	modelNames := []string{modelName}
+	if normalizedModel := ratio_setting.RoutingMatchModelName(modelName); normalizedModel != modelName {
+		modelNames = append(modelNames, normalizedModel)
+	}
+	var count int64
+	err := DB.Model(&Ability{}).
+		Where("model IN ? and channel_id = ? and enabled = ?", modelNames, channelID, true).
+		Count(&count).Error
+	return err == nil && count > 0
+}
+
 func CacheGetChannel(id int) (*Channel, error) {
 	if !common.MemoryCacheEnabled {
 		return GetChannelById(id, true)

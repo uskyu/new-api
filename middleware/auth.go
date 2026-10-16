@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
@@ -642,6 +643,20 @@ func TokenAuth() func(c *gin.Context) {
 		if err != nil {
 			return
 		}
+		if requestedGroup := strings.TrimSpace(c.GetHeader("X-Route-Group")); requestedGroup != "" {
+			if token.ModelLimitsEnabled {
+				abortWithOpenAiMessage(c, http.StatusForbidden, "request-level resource pool selection requires a full-model service token", types.ErrorCodeAccessDenied)
+				return
+			}
+			if !setting.TokenHasIntelligentRoutingAccess(token.Id) {
+				abortWithOpenAiMessage(c, http.StatusForbidden, "token is not configured for intelligent routing", types.ErrorCodeAccessDenied)
+				return
+			}
+			if err := applyIntelligentRoutingGroup(c, token, userCache.Group, requestedGroup); err != nil {
+				abortWithOpenAiMessage(c, http.StatusForbidden, err.Error(), types.ErrorCodeAccessDenied)
+				return
+			}
+		}
 		c.Next()
 	}
 }
@@ -668,6 +683,23 @@ func apiKeyFromWebSocketSubprotocol(protocols string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func applyIntelligentRoutingGroup(c *gin.Context, token *model.Token, _ string, requestedGroup string) error {
+	if _, exists := setting.GetIntelligentRoutingGroupChannelOrder(requestedGroup); !exists {
+		return errors.New("requested resource pool is not configured")
+	}
+	if !setting.TokenCanUseIntelligentRoutingGroup(token.Id, requestedGroup) {
+		return errors.New("token is not authorized for the requested resource pool")
+	}
+	costGroup, exists := setting.GetIntelligentRoutingCostGroup(requestedGroup)
+	if !exists || !ratio_setting.ContainsGroupRatio(costGroup) {
+		return errors.New("resource pool cost group is unavailable")
+	}
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, costGroup)
+	common.SetContextKey(c, constant.ContextKeyTokenGroup, costGroup)
+	common.SetContextKey(c, setting.IntelligentRoutingContextKey, requestedGroup)
+	return nil
 }
 
 func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) error {

@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -68,6 +69,25 @@ func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	require.Equal(t, "stream", info.TieredBillingSnapshot.EstimatedTier)
 	require.Equal(t, billing_setting.BillingModeTieredExpr, info.TieredBillingSnapshot.BillingMode)
 	require.Equal(t, common.QuotaPerUnit, info.TieredBillingSnapshot.QuotaPerUnit)
+}
+
+func TestHandleGroupRatioUsesRoutingPoolRatio(t *testing.T) {
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(saved)) })
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"group_ratio_setting.group_ratio":       `{"pool":0.5,"user":1}`,
+		"group_ratio_setting.group_group_ratio": `{"user":{"pool":3}}`,
+	}))
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set(setting.IntelligentRoutingContextKey, "pool")
+	info := &relaycommon.RelayInfo{UserGroup: "user", UsingGroup: "pool"}
+	ratio := HandleGroupRatio(ctx, info)
+	require.Equal(t, 0.5, ratio.GroupRatio)
+	require.False(t, ratio.HasSpecialRatio)
 }
 
 func TestFixedPricePreConsumeAndRealtimeRejection(t *testing.T) {

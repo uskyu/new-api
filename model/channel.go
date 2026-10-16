@@ -1,11 +1,13 @@
 package model
 
 import (
+	"cmp"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 	"sync"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -380,6 +383,45 @@ func GetAllChannels(startIdx int, num int, selectAll bool, idSort bool, sortOpti
 		err = order.Apply(DB).Limit(num).Offset(startIdx).Omit("key").Find(&channels).Error
 	}
 	return channels, err
+}
+
+func GetAllChannelsWithoutKeys() ([]*Channel, error) {
+	var channels []*Channel
+	err := DB.Omit("key").Find(&channels).Error
+	return channels, err
+}
+
+func GetEnabledChannelIDsByModel(modelName string) ([]int, error) {
+	modelNames := []string{modelName}
+	if normalized := ratio_setting.RoutingMatchModelName(modelName); normalized != modelName {
+		modelNames = append(modelNames, normalized)
+	}
+	var channelIDs []int
+	err := DB.Model(&Ability{}).
+		Where("model IN ? and enabled = ?", modelNames, true).
+		Distinct("channel_id").Pluck("channel_id", &channelIDs).Error
+	if err != nil {
+		return nil, err
+	}
+	channels, err := GetChannelsByIds(channelIDs)
+	if err != nil {
+		return nil, err
+	}
+	channelByID := make(map[int]*Channel, len(channels))
+	for _, channel := range channels {
+		channelByID[channel.Id] = channel
+	}
+	slices.SortFunc(channelIDs, func(a, b int) int {
+		left, right := channelByID[a], channelByID[b]
+		if left.GetPriority() > right.GetPriority() {
+			return -1
+		}
+		if left.GetPriority() < right.GetPriority() {
+			return 1
+		}
+		return cmp.Compare(a, b)
+	})
+	return channelIDs, nil
 }
 
 func GetChannelsByTag(tag string, idSort bool, selectAll bool, sortOptions ...ChannelSortOptions) ([]*Channel, error) {

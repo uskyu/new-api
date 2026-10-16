@@ -209,6 +209,12 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)
 		apiRouter.GET("/subscription/epay/return", controller.SubscriptionEpayReturn)
 		apiRouter.POST("/subscription/epay/return", anonymousRequestBodyLimit, controller.SubscriptionEpayReturn)
+		intelligentRoutingRoute := apiRouter.Group("/intelligent-routing", middleware.AdminAuth())
+		handlePermissionRoute(intelligentRoutingRoute, http.MethodGet, "", authz.IntelligentRoutingRead, controller.GetIntelligentRouting)
+		handlePermissionRoute(intelligentRoutingRoute, http.MethodPut, "", authz.IntelligentRoutingWrite, controller.UpdateIntelligentRouting)
+		handlePermissionRoute(intelligentRoutingRoute, http.MethodGet, "/token-access", authz.IntelligentRoutingRead, controller.GetIntelligentRoutingTokenAccess)
+		handlePermissionRoute(intelligentRoutingRoute, http.MethodPut, "/token-access/:id", authz.IntelligentRoutingWrite, controller.UpdateIntelligentRoutingTokenAccess)
+		apiRouter.GET("/harness/catalog", middleware.DisableCache(), middleware.TokenAuth(), controller.GetHarnessCatalog)
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{

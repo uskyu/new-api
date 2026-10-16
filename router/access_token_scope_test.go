@@ -67,16 +67,21 @@ var accessTokenExemptRoutes = []string{
 	"GET /api/subscription/epay/return",
 	"POST /api/subscription/epay/return",
 
-	// API key authentication (TokenAuthReadOnly).
+	// API key authentication (TokenAuthReadOnly/TokenAuth).
 	"GET /api/usage/token/",
 	"GET /api/log/token",
+	"GET /api/harness/catalog",
 }
 
 // accessTokenHelperRoutes are declared through handlePermissionRoute outside
 // channelPermissionRoutes.
 var accessTokenHelperRoutes = map[string]authz.Permission{
-	"GET /api/task_plugin_options": authz.TaskPluginBind,
-	"GET /api/audit":               authz.AuditRead,
+	"GET /api/task_plugin_options":                  authz.TaskPluginBind,
+	"GET /api/audit":                                authz.AuditRead,
+	"GET /api/intelligent-routing":                  authz.IntelligentRoutingRead,
+	"PUT /api/intelligent-routing":                  authz.IntelligentRoutingWrite,
+	"GET /api/intelligent-routing/token-access":     authz.IntelligentRoutingRead,
+	"PUT /api/intelligent-routing/token-access/:id": authz.IntelligentRoutingWrite,
 }
 
 func newAccessTokenScopeTestEngine(t *testing.T) *gin.Engine {

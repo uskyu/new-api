@@ -110,6 +110,16 @@ func GetChannel(
 	retry int,
 	filters []dto.ChannelFilter,
 ) (*Channel, error) {
+	return GetChannelWithOrder(group, model, retry, filters, nil)
+}
+
+func GetChannelWithOrder(
+	group string,
+	model string,
+	retry int,
+	filters []dto.ChannelFilter,
+	configuredOrder []int,
+) (*Channel, error) {
 	var abilities []Ability
 	err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).Order("priority DESC, weight DESC").Find(&abilities).Error
 	if err != nil {
@@ -117,25 +127,44 @@ func GetChannel(
 	}
 	abilities = filterAbilitiesByConstraints(abilities, model, filters)
 	if len(abilities) > 0 {
-		priorities := make([]int64, 0)
-		seen := make(map[int64]bool)
-		for _, ability := range abilities {
-			priority := int64(0)
-			if ability.Priority != nil {
-				priority = *ability.Priority
+		configuredRank := make(map[int]int, len(configuredOrder))
+		for rank, channelID := range configuredOrder {
+			configuredRank[channelID] = rank
+		}
+		type channelRank struct {
+			configured bool
+			value      int64
+		}
+		priorityFor := func(ability Ability) channelRank {
+			if rank, ok := configuredRank[ability.ChannelId]; ok {
+				return channelRank{configured: true, value: -int64(rank)}
 			}
+			if ability.Priority == nil {
+				return channelRank{}
+			}
+			return channelRank{value: *ability.Priority}
+		}
+		priorities := make([]channelRank, 0)
+		seen := make(map[channelRank]bool)
+		for _, ability := range abilities {
+			priority := priorityFor(ability)
 			if !seen[priority] {
 				seen[priority] = true
 				priorities = append(priorities, priority)
 			}
 		}
-		sort.Slice(priorities, func(i, j int) bool { return priorities[i] > priorities[j] })
+		sort.Slice(priorities, func(i, j int) bool {
+			if priorities[i].configured != priorities[j].configured {
+				return priorities[i].configured
+			}
+			return priorities[i].value > priorities[j].value
+		})
 		if retry >= len(priorities) {
 			retry = len(priorities) - 1
 		}
 		targetPriority := priorities[retry]
 		abilities = lo.Filter(abilities, func(ability Ability, _ int) bool {
-			return ability.Priority == nil && targetPriority == 0 || ability.Priority != nil && *ability.Priority == targetPriority
+			return priorityFor(ability) == targetPriority
 		})
 	}
 	channel := Channel{}
