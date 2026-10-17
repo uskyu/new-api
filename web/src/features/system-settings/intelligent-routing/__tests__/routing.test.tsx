@@ -100,6 +100,7 @@ describe('intelligent routing management', () => {
     expect(api.put).toHaveBeenCalledWith('/api/intelligent-routing', {
       global_channel_order: [12, 11],
       groups: [],
+      pricing_group_order: [],
     })
   })
 
@@ -166,6 +167,7 @@ describe('intelligent routing management', () => {
           channel_order: [12, 11],
         },
       ],
+      pricing_group_order: [],
     })
   })
 
@@ -189,5 +191,31 @@ describe('intelligent routing management', () => {
     expect(
       screen.queryByRole('heading', { name: /Pool/ })
     ).not.toBeInTheDocument()
+  })
+})
+
+describe('opt-in pricing group order', () => {
+  it('saves only checked groups in the configured order', async () => {
+    mockGet({
+      global_channel_order: [11],
+      groups: [],
+      pricing_group_order: ['vip'],
+      pricing_group_options: [
+        { id: 'vip', name: 'VIP', ratio: 0.8 },
+        { id: 'supplier', name: 'Supplier', ratio: 0.7 },
+      ],
+      channels: [{ id: 11, name: 'Alpha', models: ['model'], status: 1, priority: 0, enabled_groups: [] }],
+    })
+    vi.mocked(api.put).mockResolvedValue({ data: { success: true, data: {} } })
+    const user = userEvent.setup()
+    renderPage('pricing-groups')
+    await user.click(await screen.findByRole('checkbox', { name: /Supplier/ }))
+    await user.click(screen.getByRole('button', { name: 'Move pricing group supplier up' }))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(api.put).toHaveBeenCalledWith('/api/intelligent-routing', {
+      global_channel_order: [11],
+      groups: [],
+      pricing_group_order: ['supplier', 'vip'],
+    })
   })
 })

@@ -53,8 +53,11 @@ type RoutingGroup = {
   name: string
   channel_order: number[]
 }
+type PricingGroupOption = { id: string; name: string; ratio: number }
 type RoutingConfig = {
   global_channel_order: number[]
+  pricing_group_order: string[]
+  pricing_group_options: PricingGroupOption[]
   groups: RoutingGroup[]
   channels: Channel[]
 }
@@ -69,7 +72,7 @@ async function fetchRouting() {
 }
 
 async function saveRouting(
-  config: Pick<RoutingConfig, 'global_channel_order' | 'groups'>
+  config: Pick<RoutingConfig, 'global_channel_order' | 'groups' | 'pricing_group_order'>
 ) {
   const response = await api.put<ApiResponse<RoutingConfig>>(
     '/api/intelligent-routing',
@@ -187,9 +190,10 @@ export function IntelligentRoutingPage() {
     queryFn: fetchTokenAccess,
   })
   const [config, setConfig] = useState<RoutingConfig | null>(null)
-  const savingSection = useRef<'global' | 'pools' | null>(null)
+  const savingSection = useRef<'global' | 'pools' | 'pricing' | null>(null)
   const [globalDraft, setGlobalDraft] = useState<number[] | null>(null)
   const [poolDrafts, setPoolDrafts] = useState<RoutingGroup[] | null>(null)
+  const [pricingDraft, setPricingDraft] = useState<string[] | null>(null)
   const [tokenIDInput, setTokenIDInput] = useState('')
   const [selectedTokenID, setSelectedTokenID] = useState<number | null>(null)
   const [selectedTokenGroups, setSelectedTokenGroups] = useState<string[]>([])
@@ -205,6 +209,7 @@ export function IntelligentRoutingPage() {
       setConfig(null)
       if (savingSection.current === 'global') setGlobalDraft(null)
       if (savingSection.current === 'pools') setPoolDrafts(null)
+      if (savingSection.current === 'pricing') setPricingDraft(null)
     },
     onError: (error) =>
       handleServerError(error, t('Failed to save intelligent routing')),
@@ -225,6 +230,7 @@ export function IntelligentRoutingPage() {
   const data = config ?? query.data?.data
   const globalOrder = globalDraft ?? data?.global_channel_order ?? []
   const poolGroups = poolDrafts ?? data?.groups ?? []
+  const pricingOrder = pricingDraft ?? data?.pricing_group_order ?? []
   const availableChannels = useMemo(() => {
     const queryText = channelSearch.trim().toLowerCase()
     return (data?.channels ?? []).filter((channel) => {
@@ -255,6 +261,7 @@ export function IntelligentRoutingPage() {
     mutation.mutate({
       global_channel_order: globalOrder,
       groups: data.groups,
+      pricing_group_order: data.pricing_group_order ?? [],
     })
   }
   const savePools = () => {
@@ -262,6 +269,15 @@ export function IntelligentRoutingPage() {
     mutation.mutate({
       global_channel_order: data.global_channel_order,
       groups: poolGroups,
+      pricing_group_order: data.pricing_group_order ?? [],
+    })
+  }
+  const savePricing = () => {
+    savingSection.current = 'pricing'
+    mutation.mutate({
+      global_channel_order: data.global_channel_order,
+      groups: data.groups,
+      pricing_group_order: pricingOrder,
     })
   }
   const reorderGlobal = (ids: number[]) => setGlobalDraft(ids)
@@ -312,11 +328,13 @@ export function IntelligentRoutingPage() {
   }
 
   const showGlobal = section === 'global-priority'
+  const showPools = section === 'resource-pools'
+  const showPricing = section === 'pricing-groups'
   return (
     <main className='flex flex-col gap-6 p-6'>
       <header>
         <h1 className='text-2xl font-semibold'>
-          {t(showGlobal ? '全渠道优先级设置' : '资源池分组')}
+          {t(showGlobal ? '全渠道优先级设置' : showPools ? '资源池分组' : '计价分组优先级')}
         </h1>
         <p className='text-muted-foreground mt-1 text-sm'>
           {t(
@@ -391,7 +409,7 @@ export function IntelligentRoutingPage() {
           )}
         </section>
       ) : null}
-      {!showGlobal ? (
+      {showPools ? (
         <section className='rounded-lg border p-4'>
           <h2 className='mb-3 font-semibold'>{t('Resource pool groups')}</h2>
           <div className='grid gap-2 md:grid-cols-4'>
@@ -532,6 +550,52 @@ export function IntelligentRoutingPage() {
           </div>
           <div className='mt-4 flex justify-end'>
             <Button onClick={savePools} disabled={mutation.isPending}>
+              {mutation.isPending ? t('Saving...') : t('Save changes')}
+            </Button>
+          </div>
+        </section>
+      ) : null}
+      {showPricing ? (
+        <section className='rounded-lg border p-4'>
+          <h2 className='font-semibold'>{t('Pricing group priority')}</h2>
+          <p className='text-muted-foreground my-3 text-sm'>
+            {t('Only checked pricing groups participate. Channels without a matching selected group are skipped.')}
+          </p>
+          <fieldset className='mb-4 space-y-2'>
+            <legend className='text-sm font-medium'>{t('Available pricing groups')}</legend>
+            {(data.pricing_group_options ?? []).map((group) => (
+              <label key={group.id} className='flex items-center gap-2 rounded-md border p-2 text-sm'>
+                <input type='checkbox' checked={pricingOrder.includes(group.id)}
+                  onChange={() => setPricingDraft(pricingOrder.includes(group.id)
+                    ? pricingOrder.filter((id) => id !== group.id)
+                    : [...pricingOrder, group.id])} />
+                <span>{group.name} ({group.id})</span>
+                <span className='text-muted-foreground ml-auto text-xs'>{t('Ratio')}: {group.ratio}</span>
+              </label>
+            ))}
+          </fieldset>
+          <h3 className='mb-2 text-sm font-medium'>{t('Enabled pricing groups, highest first')}</h3>
+          <Reorder.Group axis='y' values={pricingOrder} onReorder={setPricingDraft} className='flex flex-col gap-2'>
+            {pricingOrder.map((groupID, index) => {
+              const group = (data.pricing_group_options ?? []).find((item) => item.id === groupID)
+              return (
+                <Reorder.Item key={groupID} value={groupID} className='flex items-center gap-2 rounded-md border p-2'>
+                  <span className='min-w-0 flex-1'>{index + 1}. {group?.name ?? groupID} ({groupID})</span>
+                  <Button type='button' variant='ghost' size='icon-sm' disabled={index === 0}
+                    aria-label={t('Move pricing group {{group}} up', { group: groupID })}
+                    onClick={() => setPricingDraft(moveItem(pricingOrder, index, 'up'))}>↑</Button>
+                  <Button type='button' variant='ghost' size='icon-sm' disabled={index === pricingOrder.length - 1}
+                    aria-label={t('Move pricing group {{group}} down', { group: groupID })}
+                    onClick={() => setPricingDraft(moveItem(pricingOrder, index, 'down'))}>↓</Button>
+                </Reorder.Item>
+              )
+            })}
+          </Reorder.Group>
+          {pricingOrder.length === 0 ? (
+            <p className='text-muted-foreground mt-3 text-sm'>{t('No pricing groups selected: intelligent routing has no eligible channels.')}</p>
+          ) : null}
+          <div className='mt-4 flex justify-end'>
+            <Button onClick={savePricing} disabled={mutation.isPending}>
               {mutation.isPending ? t('Saving...') : t('Save changes')}
             </Button>
           </div>

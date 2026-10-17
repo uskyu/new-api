@@ -1,5 +1,12 @@
 {
   "translation": {
+    "Pricing group priority": "计价分组优先级",
+    "Only checked pricing groups participate. Channels without a matching selected group are skipped.": "仅勾选的计价分组参与匹配。没有匹配分组的渠道将被跳过。",
+    "Available pricing groups": "可用计价分组",
+    "Enabled pricing groups, highest first": "已启用计价分组（从高到低）",
+    "No pricing groups selected: intelligent routing has no eligible channels.": "尚未勾选任何计价分组，智能路由不会选择任何渠道。",
+    "Move pricing group {{group}} up": "上移计价分组 {{group}}",
+    "Move pricing group {{group}} down": "下移计价分组 {{group}}",
     "Supplier tax rate (%)": "供应商税点（%）",
     "Procurement tax forwarded to Harness in response headers; not charged by New API.": "该渠道税点仅通过响应头交由 Harness 计算，New API 不参与税费核算。",
     "360": "360",

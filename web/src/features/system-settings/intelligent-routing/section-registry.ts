@@ -21,6 +21,7 @@ import { createSectionRegistry } from '../utils/section-registry'
 const ROUTING_SECTIONS = [
   { id: 'global-priority', titleKey: '全渠道优先级设置', build: () => null },
   { id: 'resource-pools', titleKey: '资源池分组', build: () => null },
+  { id: 'pricing-groups', titleKey: '计价分组优先级', build: () => null },
 ] as const
 
 export type IntelligentRoutingSectionId =
