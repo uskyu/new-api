@@ -103,7 +103,7 @@ func GetIntelligentRouting(c *gin.Context) {
 
 type updateIntelligentRoutingRequest struct {
 	GlobalChannelOrder []int                             `json:"global_channel_order"`
-	PricingGroupOrder []string `json:"pricing_group_order"`
+	PricingGroupOrder *[]string `json:"pricing_group_order"`
 	Groups             []setting.IntelligentRoutingGroup `json:"groups"`
 }
 
@@ -113,9 +113,13 @@ func UpdateIntelligentRouting(c *gin.Context) {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid parameters"))
 		return
 	}
+	pricingOrder := setting.GetIntelligentRoutingConfig().PricingGroupOrder
+	if request.PricingGroupOrder != nil {
+		pricingOrder = *request.PricingGroupOrder
+	}
 	config := setting.IntelligentRoutingConfig{
 		GlobalChannelOrder: request.GlobalChannelOrder,
-		PricingGroupOrder: request.PricingGroupOrder,
+		PricingGroupOrder: pricingOrder,
 		Groups:             request.Groups,
 	}
 	if err := setting.ValidateIntelligentRoutingConfig(config); err != nil {
@@ -375,6 +379,10 @@ func GetHarnessCatalog(c *gin.Context) {
 		}
 	}
 	enabledAbilities := model.GetAllEnableAbilities()
+	eligiblePricingGroups := make(map[string]struct{}, len(routing.PricingGroupOrder))
+	for _, groupID := range routing.PricingGroupOrder {
+		if ratio_setting.ContainsGroupRatio(groupID) { eligiblePricingGroups[groupID] = struct{}{} }
+	}
 	groupModels := make(map[string]map[string][]string)
 	groupPricingByGroup := make(map[string]map[string]model.Pricing)
 	collectGroupModels := func(groupID string, channelIDs []int) {
@@ -386,7 +394,7 @@ func GetHarnessCatalog(c *gin.Context) {
 			for _, modelName := range channel.GetModels() {
 				var supportedAbilities []model.Ability
 				for _, ability := range enabledAbilities {
-					if ability.ChannelId == channelID && (ability.Model == modelName || ratio_setting.RoutingMatchModelName(ability.Model) == ratio_setting.RoutingMatchModelName(modelName)) {
+					if _, enabled := eligiblePricingGroups[ability.Group]; enabled && ability.ChannelId == channelID && (ability.Model == modelName || ratio_setting.RoutingMatchModelName(ability.Model) == ratio_setting.RoutingMatchModelName(modelName)) {
 						supportedAbilities = append(supportedAbilities, ability)
 					}
 				}

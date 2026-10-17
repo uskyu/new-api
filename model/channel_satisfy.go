@@ -75,7 +75,7 @@ func GetPreferredPricingGroupForChannelModel(channelID int, modelName string) (s
 	if err != nil { return "", false, err }
 	chosen, lowest, found := "", 0, false
 	for _, group := range groups {
-		if rank, ok := setting.GetIntelligentRoutingPricingGroupRank(group); ok && (!found || rank < lowest) {
+		if rank, ok := setting.GetIntelligentRoutingPricingGroupRank(group); ok && ratio_setting.ContainsGroupRatio(group) && (!found || rank < lowest) {
 			chosen, lowest, found = group, rank, true
 		}
 	}
