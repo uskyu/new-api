@@ -221,6 +221,7 @@ export const channelFormSchema = z
         'Model mapping must be a JSON object with string values'
       ),
     priority: z.number().optional(),
+    supplier_tax_rate_percent: z.number().finite().min(0).max(100),
     weight: z.number().optional(),
     test_model: z.string().optional(),
     auto_ban: z.number().optional(),
@@ -440,6 +441,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   group: ['default'],
   model_mapping: '',
   priority: 0,
+  supplier_tax_rate_percent: 0,
   weight: 0,
   test_model: '',
   auto_ban: 1,
@@ -548,6 +550,7 @@ export function transformChannelToFormDefaults(
   let vertexProjectId = ''
   let azureResponsesVersion = ''
   let isEnterpriseAccount = false
+  let supplierTaxRatePercent = 0
   let awsKeyType: 'ak_sk' | 'api_key' = 'ak_sk'
   let allowServiceTier = false
   let disableStore = false
@@ -570,6 +573,10 @@ export function transformChannelToFormDefaults(
       vertexProjectId = parsed.vertex_project_id || ''
       azureResponsesVersion = parsed.azure_responses_version || ''
       isEnterpriseAccount = parsed.openrouter_enterprise === true
+      supplierTaxRatePercent =
+        typeof parsed.supplier_tax_rate_percent === 'number'
+          ? parsed.supplier_tax_rate_percent
+          : 0
       awsKeyType = parsed.aws_key_type || 'ak_sk'
       allowServiceTier = parsed.allow_service_tier === true
       disableStore = parsed.disable_store === true
@@ -608,6 +615,7 @@ export function transformChannelToFormDefaults(
     group: parseGroups(channel.group || 'default'),
     model_mapping: channel.model_mapping || '',
     priority: channel.priority || 0,
+    supplier_tax_rate_percent: supplierTaxRatePercent,
     weight: channel.weight || 0,
     test_model: channel.test_model || '',
     auto_ban: channel.auto_ban ?? 1,
@@ -709,6 +717,9 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       console.error('Failed to parse existing settings:', error)
     }
   }
+
+  // Forward supplier tax as routing metadata; New API does not apply the tax.
+  settingsObj.supplier_tax_rate_percent = formData.supplier_tax_rate_percent
 
   // Add vertex_key_type for Vertex AI channels (type 41)
   if (formData.type === 41) {

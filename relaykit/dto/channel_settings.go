@@ -2,6 +2,7 @@ package dto
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
 	"slices"
@@ -103,6 +104,8 @@ const (
 )
 
 type ChannelOtherSettings struct {
+	// SupplierTaxRatePercent is supplier procurement tax, forwarded to Harness only.
+	SupplierTaxRatePercent float64 `json:"supplier_tax_rate_percent"`
 	AzureResponsesVersion                 string                `json:"azure_responses_version,omitempty"`
 	VertexKeyType                         VertexKeyType         `json:"vertex_key_type,omitempty"`   // "json" or "api_key"
 	VertexProjectID                       string                `json:"vertex_project_id,omitempty"` // 仅当 vertex_key_type=api_key 时使用；JSON 模式下从 service account 解析
@@ -131,6 +134,17 @@ type ChannelOtherSettings struct {
 	// rejection. Empty follows the default allow policy. Accepted values:
 	// "", "allow", "safe", "strict".
 	ToolLossPolicy string `json:"tool_loss_policy,omitempty"`
+}
+
+func (s *ChannelOtherSettings) ValidateSupplierTaxRate() error {
+	if s == nil {
+		return nil
+	}
+	rate := s.SupplierTaxRatePercent
+	if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 || rate > 100 {
+		return fmt.Errorf("supplier_tax_rate_percent must be between 0 and 100")
+	}
+	return nil
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {

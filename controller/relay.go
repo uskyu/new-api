@@ -197,7 +197,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
-		if routingErr := setIntelligentRoutingResponseHeaders(c, channel.Id, relayInfo.OriginModelName); routingErr != nil {
+		if routingErr := setIntelligentRoutingResponseHeaders(c, channel, relayInfo.OriginModelName); routingErr != nil {
 			newAPIError = routingErr
 			break
 		}
@@ -311,7 +311,7 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	return channel, nil
 }
 
-func setIntelligentRoutingResponseHeaders(c *gin.Context, channelID int, modelName string) *types.NewAPIError {
+func setIntelligentRoutingResponseHeaders(c *gin.Context, channel *model.Channel, modelName string) *types.NewAPIError {
 	if common.GetContextKeyString(c, setting.IntelligentRoutingContextKey) == "" || c.GetBool("websocket_upgraded") {
 		return nil
 	}
@@ -325,7 +325,10 @@ func setIntelligentRoutingResponseHeaders(c *gin.Context, channelID int, modelNa
 	} {
 		c.Writer.Header().Del(name)
 	}
-	groups, err := model.GetEnabledAbilityGroupsForChannelModel(channelID, modelName)
+	if channel == nil {
+		return types.NewError(errors.New("selected channel missing for route pricing"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	groups, err := model.GetEnabledAbilityGroupsForChannelModel(channel.Id, modelName)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
@@ -335,13 +338,14 @@ func setIntelligentRoutingResponseHeaders(c *gin.Context, channelID int, modelNa
 
 	group := groups[0]
 	ratio := ratio_setting.GetGroupRatio(group)
-	taxRate := ratio_setting.GetGroupTaxRate(group)
+	// Tax belongs to the selected upstream channel, not its Ability pricing group.
+	taxRate := channel.GetOtherSettings().SupplierTaxRatePercent
 	for _, candidate := range groups[1:] {
-		if ratio_setting.GetGroupRatio(candidate) != ratio || ratio_setting.GetGroupTaxRate(candidate) != taxRate {
+		if ratio_setting.GetGroupRatio(candidate) != ratio {
 			return types.NewError(errors.New("selected channel has ambiguous pricing groups for the requested model"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 		}
 	}
-	middleware.SetIntelligentRoutingResponseHeaders(c, channelID, ratio, taxRate)
+	middleware.SetIntelligentRoutingResponseHeaders(c, channel.Id, ratio, taxRate)
 	return nil
 }
 

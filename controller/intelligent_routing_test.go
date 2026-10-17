@@ -71,7 +71,7 @@ func TestHarnessCatalogGroupContainsOnlyResourcePoolIdentityAndModels(t *testing
 	require.NotContains(t, json, "tax_rate_percent")
 }
 
-func TestSetIntelligentRoutingResponseHeadersUsesFinalChannelPricingAndRejectsAmbiguity(t *testing.T) {
+func TestSetIntelligentRoutingResponseHeadersUsesSelectedChannelTaxAndRejectsAmbiguousRatios(t *testing.T) {
 	oldDB := model.DB
 	oldMainDatabaseType := common.MainDatabaseType()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -111,13 +111,14 @@ func TestSetIntelligentRoutingResponseHeadersUsesFinalChannelPricingAndRejectsAm
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	common.SetContextKey(c, setting.IntelligentRoutingContextKey, setting.IntelligentRoutingGlobalGroupID)
 
-	apiErr := setIntelligentRoutingResponseHeaders(c, 42, "model-y")
+	channel := &model.Channel{Id: 42, OtherSettings: `{"supplier_tax_rate_percent":6.5}`}
+	apiErr := setIntelligentRoutingResponseHeaders(c, channel, "model-y")
 	require.Nil(t, apiErr)
 	assert.Equal(t, "42", c.Writer.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 	assert.Equal(t, "0.7", c.Writer.Header().Get(setting.IntelligentRoutingGroupRatioHeader))
-	assert.Equal(t, "5", c.Writer.Header().Get(setting.IntelligentRoutingTaxRatePercentHeader))
+	assert.Equal(t, "6.5", c.Writer.Header().Get(setting.IntelligentRoutingTaxRatePercentHeader))
 
-	apiErr = setIntelligentRoutingResponseHeaders(c, 42, "model-x")
+	apiErr = setIntelligentRoutingResponseHeaders(c, channel, "model-x")
 	require.NotNil(t, apiErr)
 	assert.Contains(t, apiErr.Error(), "ambiguous pricing groups")
 
@@ -127,7 +128,8 @@ func TestSetIntelligentRoutingResponseHeadersUsesFinalChannelPricingAndRejectsAm
 	common.SetContextKey(c, setting.IntelligentRoutingContextKey, setting.IntelligentRoutingGlobalGroupID)
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"group-a":0.8,"group-b":0.8,"group-c":0.8}`))
 	require.NoError(t, ratio_setting.UpdateGroupTaxRateByJSONString(`{"group-a":8,"group-b":8,"group-c":8}`))
-	apiErr = setIntelligentRoutingResponseHeaders(c, 42, "model-x")
+	apiErr = setIntelligentRoutingResponseHeaders(c, channel, "model-x")
 	require.Nil(t, apiErr)
 	assert.Equal(t, "42", c.Writer.Header().Get(setting.IntelligentRoutingChannelIDHeader))
+	assert.Equal(t, "6.5", c.Writer.Header().Get(setting.IntelligentRoutingTaxRatePercentHeader))
 }

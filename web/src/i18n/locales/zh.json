@@ -1,5 +1,7 @@
 {
   "translation": {
+    "Supplier tax rate (%)": "供应商税点（%）",
+    "Procurement tax forwarded to Harness in response headers; not charged by New API.": "该渠道税点仅通过响应头交由 Harness 计算，New API 不参与税费核算。",
     "360": "360",
     "1000": "1000",
     "10000": "10000",
