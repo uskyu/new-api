@@ -49,15 +49,15 @@ func TestSetIntelligentRoutingResponseHeadersSkipsNonRoutedAndCommittedResponses
 	assert.Empty(t, recorder.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 
 	common.SetContextKey(c, setting.IntelligentRoutingContextKey, "global")
-	SetIntelligentRoutingResponseHeaders(c, 42, 0.8, 5)
+	SetIntelligentRoutingResponseHeaders(c, 42, "group-a", 0.8, 5)
 	assert.Equal(t, "42", c.Writer.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 	ClearIntelligentRoutingResponseHeaders(c)
 	assert.Empty(t, c.Writer.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 	assert.Empty(t, c.Writer.Header().Get(setting.IntelligentRoutingGroupHeader))
 
-	SetIntelligentRoutingResponseHeaders(c, 42, 0.8, 5)
+	SetIntelligentRoutingResponseHeaders(c, 42, "group-a", 0.8, 5)
 	c.Writer.WriteHeaderNow()
-	SetIntelligentRoutingResponseHeaders(c, 42, 0.8, 5)
+	SetIntelligentRoutingResponseHeaders(c, 42, "group-a", 0.8, 5)
 	assert.Equal(t, "42", recorder.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 }
 
