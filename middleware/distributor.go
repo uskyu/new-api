@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
@@ -123,6 +125,7 @@ func Distribute() func(c *gin.Context) {
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		setIntelligentRoutingResponseHeaders(c)
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
@@ -133,6 +136,56 @@ func Distribute() func(c *gin.Context) {
 // noAvailableChannelMessage explains a 503 for a task-plugin-claimed model.
 // The response tells the caller the model is plugin-claimed without naming the
 // plugin; the candidate plugin keys go to the server log under the request id.
+func setIntelligentRoutingResponseHeaders(c *gin.Context) {
+	groupID := common.GetContextKeyString(c, setting.IntelligentRoutingContextKey)
+	if groupID == "" {
+		return
+	}
+	discountPercent, taxRatePercent, ok := setting.GetIntelligentRoutingGroupPricing(groupID)
+	if !ok {
+		return
+	}
+	setIntelligentRoutingPricingHeaders(c, groupID, discountPercent, taxRatePercent)
+}
+
+func setIntelligentRoutingPricingHeaders(c *gin.Context, groupID string, discountPercent, taxRatePercent float64) {
+	if groupID == "" || c == nil || c.Writer == nil || c.Writer.Written() {
+		return
+	}
+
+	header := c.Writer.Header()
+	header.Set(setting.IntelligentRoutingGroupHeader, groupID)
+	header.Set(setting.IntelligentRoutingDiscountPercentHeader, strconv.FormatFloat(discountPercent, 'f', -1, 64))
+	header.Set(setting.IntelligentRoutingTaxRatePercentHeader, strconv.FormatFloat(taxRatePercent, 'f', -1, 64))
+	if requestID := c.GetString(common.RequestIdKey); requestID != "" {
+		header.Set(common.RequestIdKey, requestID)
+	}
+	exposeHeaders := header.Get("Access-Control-Expose-Headers")
+	for _, name := range []string{
+		setting.IntelligentRoutingGroupHeader,
+		setting.IntelligentRoutingDiscountPercentHeader,
+		setting.IntelligentRoutingTaxRatePercentHeader,
+		common.RequestIdKey,
+	} {
+		if !headerListContains(exposeHeaders, name) {
+			if exposeHeaders != "" {
+				exposeHeaders += ", "
+			}
+			exposeHeaders += name
+		}
+	}
+	header.Set("Access-Control-Expose-Headers", exposeHeaders)
+}
+
+func headerListContains(list, name string) bool {
+	for _, value := range strings.Split(list, ",") {
+		if strings.EqualFold(strings.TrimSpace(value), name) {
+			return true
+		}
+	}
+	return false
+}
+
 func noAvailableChannelMessage(c *gin.Context, group, modelName string) string {
 	value, exists := c.Get(jsplugin.ContextKeyPinnedPlugin)
 	pinned, ok := value.(jsplugin.PinnedPlugin)

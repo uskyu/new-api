@@ -2,6 +2,7 @@ package setting
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,18 +16,22 @@ const (
 	IntelligentRoutingContextKey      = "intelligent_routing_group"
 	IntelligentRoutingGlobalGroupID   = "global"
 	IntelligentRoutingGlobalGroupName = "Global priority"
+
+	IntelligentRoutingGroupHeader           = "X-Route-Group"
+	IntelligentRoutingDiscountPercentHeader = "X-Route-Discount-Percent"
+	IntelligentRoutingTaxRatePercentHeader  = "X-Route-Tax-Rate-Percent"
 )
 
 type IntelligentRoutingGroup struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	CostGroup    string `json:"cost_group"`
-	ChannelOrder []int  `json:"channel_order"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	DiscountPercent float64 `json:"discount_percent"`
+	TaxRatePercent  float64 `json:"tax_rate_percent"`
+	ChannelOrder    []int   `json:"channel_order"`
 }
 
 type IntelligentRoutingConfig struct {
 	GlobalChannelOrder []int                     `json:"global_channel_order"`
-	GlobalCostGroup    string                    `json:"global_cost_group"`
 	Groups             []IntelligentRoutingGroup `json:"groups"`
 	TokenGroupAccess   map[int][]string          `json:"token_group_access,omitempty"`
 }
@@ -57,29 +62,27 @@ func TokenHasIntelligentRoutingAccess(tokenID int) bool {
 func TokenCanUseIntelligentRoutingGroup(tokenID int, groupID string) bool {
 	intelligentRoutingMu.RLock()
 	defer intelligentRoutingMu.RUnlock()
-	for _, allowedGroup := range intelligentRoutingConfig.TokenGroupAccess[tokenID] {
-		if allowedGroup == groupID {
+	return tokenCanUseIntelligentRoutingGroup(intelligentRoutingConfig, tokenID, groupID)
+}
+
+func tokenCanUseIntelligentRoutingGroup(config IntelligentRoutingConfig, tokenID int, groupID string) bool {
+	return slices.Contains(config.TokenGroupAccess[tokenID], groupID) && intelligentRoutingGroupExists(config, groupID)
+}
+
+func TokenCanUseIntelligentRoutingGroupForConfig(config IntelligentRoutingConfig, tokenID int, groupID string) bool {
+	return tokenCanUseIntelligentRoutingGroup(config, tokenID, groupID)
+}
+
+func intelligentRoutingGroupExists(config IntelligentRoutingConfig, groupID string) bool {
+	if groupID == IntelligentRoutingGlobalGroupID {
+		return config.GlobalChannelOrder != nil
+	}
+	for _, group := range config.Groups {
+		if group.ID == groupID {
 			return true
 		}
 	}
 	return false
-}
-
-func GetIntelligentRoutingCostGroup(groupID string) (string, bool) {
-	intelligentRoutingMu.RLock()
-	defer intelligentRoutingMu.RUnlock()
-	if groupID == IntelligentRoutingGlobalGroupID {
-		if intelligentRoutingConfig.GlobalChannelOrder == nil || intelligentRoutingConfig.GlobalCostGroup == "" {
-			return "", false
-		}
-		return intelligentRoutingConfig.GlobalCostGroup, true
-	}
-	for _, group := range intelligentRoutingConfig.Groups {
-		if group.ID == groupID {
-			return group.CostGroup, true
-		}
-	}
-	return "", false
 }
 
 func GetIntelligentRoutingGroupChannelOrder(groupID string) ([]int, bool) {
@@ -101,6 +104,24 @@ func GetIntelligentRoutingGroupChannelOrder(groupID string) ([]int, bool) {
 		}
 	}
 	return nil, false
+}
+
+func GetIntelligentRoutingGroupPricing(groupID string) (float64, float64, bool) {
+	intelligentRoutingMu.RLock()
+	defer intelligentRoutingMu.RUnlock()
+	return intelligentRoutingGroupPricing(intelligentRoutingConfig, groupID)
+}
+
+func intelligentRoutingGroupPricing(config IntelligentRoutingConfig, groupID string) (float64, float64, bool) {
+	if groupID == IntelligentRoutingGlobalGroupID {
+		return 0, 0, config.GlobalChannelOrder != nil
+	}
+	for _, group := range config.Groups {
+		if group.ID == groupID {
+			return group.DiscountPercent, group.TaxRatePercent, true
+		}
+	}
+	return 0, 0, false
 }
 
 func IntelligentRoutingConfig2JSONString(config IntelligentRoutingConfig) (string, error) {
@@ -162,9 +183,6 @@ func IntelligentRoutingGroups(config IntelligentRoutingConfig) map[string]string
 }
 
 func ValidateIntelligentRoutingConfig(config IntelligentRoutingConfig) error {
-	if config.GlobalChannelOrder != nil && strings.TrimSpace(config.GlobalCostGroup) == "" {
-		return fmt.Errorf("global_cost_group must be specified")
-	}
 	if err := validateChannelOrder("global_channel_order", config.GlobalChannelOrder); err != nil {
 		return err
 	}
@@ -208,8 +226,11 @@ func ValidateIntelligentRoutingConfig(config IntelligentRoutingConfig) error {
 			return fmt.Errorf("duplicate routing group id: %s", group.ID)
 		}
 		groupIDs[group.ID] = struct{}{}
-		if strings.TrimSpace(group.CostGroup) == "" {
-			return fmt.Errorf("groups[%d].cost_group must be specified", i)
+		if math.IsNaN(group.DiscountPercent) || math.IsInf(group.DiscountPercent, 0) || group.DiscountPercent < 0 || group.DiscountPercent > 100 {
+			return fmt.Errorf("groups[%d].discount_percent must be between 0 and 100", i)
+		}
+		if math.IsNaN(group.TaxRatePercent) || math.IsInf(group.TaxRatePercent, 0) || group.TaxRatePercent < 0 || group.TaxRatePercent > 100 {
+			return fmt.Errorf("groups[%d].tax_rate_percent must be between 0 and 100", i)
 		}
 		if err := validateChannelOrder(fmt.Sprintf("groups[%d].channel_order", i), group.ChannelOrder); err != nil {
 			return err

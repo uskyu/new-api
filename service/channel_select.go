@@ -128,11 +128,6 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			return nil, requestedGroup, errors.New("intelligent routing pool is not configured")
 		}
 		configuredOrder = order
-		group, groupExists := setting.GetIntelligentRoutingCostGroup(requestedGroup)
-		if !groupExists {
-			return nil, requestedGroup, errors.New("intelligent routing cost group is not configured")
-		}
-		costGroup = group
 		channel, err = model.GetRandomSatisfiedChannelWithCostGroup(resourcePool, costGroup, param.ModelName, param.GetRetry(), filters, configuredOrder)
 		if err != nil {
 			return nil, requestedGroup, err

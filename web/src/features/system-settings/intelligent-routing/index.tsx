@@ -16,9 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Drag01Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useParams } from '@tanstack/react-router'
+import { Reorder, useDragControls } from 'motion/react'
+import {
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
@@ -31,29 +40,58 @@ import { api } from '@/lib/api'
 import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
- type Channel = { id: number; name: string; status: number; models: string[]; priority: number; enabled_cost_groups: Record<string, string[]> }
-type RoutingGroup = { id: string; name: string; cost_group: string; channel_order: number[] }
-type RoutingConfig = { global_channel_order: number[]; global_cost_group: string; groups: RoutingGroup[]; channels: Channel[]; cost_groups: Record<string, number> }
+type Channel = {
+  id: number
+  name: string
+  status: number
+  models: string[]
+  priority: number
+  enabled_groups?: Array<{ id: string; label: string }>
+}
+type RoutingGroup = {
+  id: string
+  name: string
+  discount_percent: number
+  tax_rate_percent: number
+  channel_order: number[]
+}
+type RoutingConfig = {
+  global_channel_order: number[]
+  groups: RoutingGroup[]
+  channels: Channel[]
+}
 type TokenAccess = { token_id: number; token_name: string; groups: string[] }
 type ApiResponse<T> = { success: boolean; message?: string; data: T }
 
 async function fetchRouting() {
-  const response = await api.get<ApiResponse<RoutingConfig>>('/api/intelligent-routing')
+  const response = await api.get<ApiResponse<RoutingConfig>>(
+    '/api/intelligent-routing'
+  )
   return requireServerSuccess(response.data)
 }
 
-async function saveRouting(config: Pick<RoutingConfig, 'global_channel_order' | 'global_cost_group' | 'groups'>) {
-  const response = await api.put<ApiResponse<RoutingConfig>>('/api/intelligent-routing', config)
+async function saveRouting(
+  config: Pick<RoutingConfig, 'global_channel_order' | 'groups'>
+) {
+  const response = await api.put<ApiResponse<RoutingConfig>>(
+    '/api/intelligent-routing',
+    config
+  )
   return requireServerSuccess(response.data)
 }
 
 async function fetchTokenAccess() {
-  const response = await api.get<ApiResponse<{ items: TokenAccess[] }>>('/api/intelligent-routing/token-access')
+  const response = await api.get<ApiResponse<{ items: TokenAccess[] }>>(
+    '/api/intelligent-routing/token-access'
+  )
   return requireServerSuccess(response.data).data.items
 }
 
 async function saveTokenAccess(tokenID: number, groups: string[]) {
-  const response = await api.put<ApiResponse<TokenAccess>>(`/api/intelligent-routing/token-access/${tokenID}`, { groups })
+  const response = await api.put<ApiResponse<TokenAccess>>(
+    `/api/intelligent-routing/token-access/${tokenID}`,
+    { groups }
+  )
   return requireServerSuccess(response.data)
 }
 
@@ -65,124 +103,599 @@ function moveItem<T>(items: T[], index: number, direction: 'up' | 'down') {
   return result
 }
 
+type ChannelOrderRowProps = {
+  id: number
+  channel?: Channel
+  label: string
+  index: number
+  count: number
+  onMove: (direction: 'up' | 'down') => void
+}
+
+function ChannelOrderRow(props: ChannelOrderRowProps) {
+  const { t } = useTranslation()
+  const controls = useDragControls()
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault()
+      props.onMove(event.key === 'ArrowUp' ? 'up' : 'down')
+    }
+  }
+  const handlePointerDown = (event: PointerEvent<HTMLButtonElement>) =>
+    controls.start(event)
+
+  return (
+    <Reorder.Item
+      value={props.id}
+      dragListener={false}
+      dragControls={controls}
+      dragMomentum={false}
+      className='bg-background flex items-center gap-2 rounded-md border p-2'
+    >
+      <Button
+        type='button'
+        variant='ghost'
+        size='icon-sm'
+        aria-label={t('Drag {{channel}} to reorder', { channel: props.label })}
+        onPointerDown={handlePointerDown}
+        onKeyDown={handleKeyDown}
+      >
+        <HugeiconsIcon icon={Drag01Icon} strokeWidth={2} aria-hidden='true' />
+      </Button>
+      <span className='min-w-0 flex-1 font-medium'>{props.label}</span>
+      <span className='flex flex-wrap gap-1'>
+        {(props.channel?.enabled_groups ?? []).map((group) => (
+          <span key={group.id} className='bg-muted rounded px-2 py-0.5 text-xs'>
+            {group.label}
+          </span>
+        ))}
+      </span>
+      <Button
+        type='button'
+        variant='ghost'
+        size='icon-sm'
+        disabled={props.index === 0}
+        aria-label={t('Move {{channel}} up', { channel: props.label })}
+        onClick={() => props.onMove('up')}
+      >
+        ↑
+      </Button>
+      <Button
+        type='button'
+        variant='ghost'
+        size='icon-sm'
+        disabled={props.index === props.count - 1}
+        aria-label={t('Move {{channel}} down', { channel: props.label })}
+        onClick={() => props.onMove('down')}
+      >
+        ↓
+      </Button>
+    </Reorder.Item>
+  )
+}
+
 export function IntelligentRoutingPage() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const query = useQuery({ queryKey: ['intelligent-routing'], queryFn: fetchRouting })
-  const tokenAccessQuery = useQuery({ queryKey: ['intelligent-routing-token-access'], queryFn: fetchTokenAccess })
+  const { section } = useParams({
+    from: '/_authenticated/system-settings/intelligent-routing/$section',
+  })
+  const query = useQuery({
+    queryKey: ['intelligent-routing'],
+    queryFn: fetchRouting,
+  })
+  const tokenAccessQuery = useQuery({
+    queryKey: ['intelligent-routing-token-access'],
+    queryFn: fetchTokenAccess,
+  })
   const [config, setConfig] = useState<RoutingConfig | null>(null)
+  const savingSection = useRef<'global' | 'pools' | null>(null)
+  const [globalDraft, setGlobalDraft] = useState<number[] | null>(null)
+  const [poolDrafts, setPoolDrafts] = useState<RoutingGroup[] | null>(null)
   const [tokenIDInput, setTokenIDInput] = useState('')
   const [selectedTokenID, setSelectedTokenID] = useState<number | null>(null)
   const [selectedTokenGroups, setSelectedTokenGroups] = useState<string[]>([])
   const [groupId, setGroupId] = useState('')
   const [groupName, setGroupName] = useState('')
-  const [costGroup, setCostGroup] = useState('')
-  const [selectedGlobalCostGroup, setSelectedGlobalCostGroup] = useState('')
+  const [discountPercent, setDiscountPercent] = useState(0)
+  const [taxRatePercent, setTaxRatePercent] = useState(0)
   const [selectedChannels, setSelectedChannels] = useState<number[]>([])
   const [channelSearch, setChannelSearch] = useState('')
   const [deleting, setDeleting] = useState<RoutingGroup | null>(null)
   const mutation = useMutation({
     mutationFn: saveRouting,
-    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['intelligent-routing'] }); setConfig(null) },
-    onError: (error) => handleServerError(error, t('Failed to save intelligent routing')),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['intelligent-routing'] })
+      setConfig(null)
+      if (savingSection.current === 'global') setGlobalDraft(null)
+      if (savingSection.current === 'pools') setPoolDrafts(null)
+    },
+    onError: (error) =>
+      handleServerError(error, t('Failed to save intelligent routing')),
   })
   const tokenAccessMutation = useMutation({
-    mutationFn: ({ tokenID, groups }: { tokenID: number; groups: string[] }) => saveTokenAccess(tokenID, groups),
-    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['intelligent-routing-token-access'] }); setSelectedTokenID(null); setSelectedTokenGroups([]) },
-    onError: (error) => handleServerError(error, t('Failed to save token resource pool access')),
+    mutationFn: ({ tokenID, groups }: { tokenID: number; groups: string[] }) =>
+      saveTokenAccess(tokenID, groups),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ['intelligent-routing-token-access'],
+      })
+      setSelectedTokenID(null)
+      setSelectedTokenGroups([])
+    },
+    onError: (error) =>
+      handleServerError(error, t('Failed to save token resource pool access')),
   })
   const data = config ?? query.data?.data
+  const globalOrder = globalDraft ?? data?.global_channel_order ?? []
+  const poolGroups = poolDrafts ?? data?.groups ?? []
   const availableChannels = useMemo(() => {
     const queryText = channelSearch.trim().toLowerCase()
     return (data?.channels ?? []).filter((channel) => {
       if (!queryText) return true
-      return channel.name.toLowerCase().includes(queryText) || channel.models.some((model) => model.toLowerCase().includes(queryText))
+      return (
+        channel.name.toLowerCase().includes(queryText) ||
+        channel.models.some((model) => model.toLowerCase().includes(queryText))
+      )
     })
   }, [channelSearch, data?.channels])
-  const compatibleChannels = useMemo(() => availableChannels.filter((channel) => (channel.enabled_cost_groups?.[costGroup] ?? []).length > 0), [availableChannels, costGroup])
-  const globalCostGroup = selectedGlobalCostGroup || data?.global_cost_group || Object.keys(data?.cost_groups ?? {})[0] || ''
-  const globalCompatibleChannels = useMemo(() => availableChannels.filter((channel) => (channel.enabled_cost_groups?.[globalCostGroup] ?? []).length > 0), [availableChannels, globalCostGroup])
+  const compatibleChannels = availableChannels
 
-  if (query.isLoading) return <LoadingState message={t('Loading intelligent routing...')} />
-  if (query.isError || !data) return <ErrorState title={t('Failed to load intelligent routing')} onRetry={() => void query.refetch()} />
+  if (query.isLoading) {
+    return <LoadingState message={t('Loading intelligent routing...')} />
+  }
+  if (query.isError || !data) {
+    return (
+      <ErrorState
+        title={t('Failed to load intelligent routing')}
+        onRetry={() => void query.refetch()}
+      />
+    )
+  }
 
-  const update = (next: RoutingConfig) => setConfig(next)
-  const save = () => mutation.mutate({ global_channel_order: data.global_channel_order, global_cost_group: selectedGlobalCostGroup || data.global_cost_group || Object.keys(data.cost_groups)[0] || '', groups: data.groups })
+  const updatePools = (groups: RoutingGroup[]) => setPoolDrafts(groups)
+  const saveGlobal = () => {
+    savingSection.current = 'global'
+    mutation.mutate({
+      global_channel_order: globalOrder,
+      groups: data.groups,
+    })
+  }
+  const savePools = () => {
+    savingSection.current = 'pools'
+    mutation.mutate({
+      global_channel_order: data.global_channel_order,
+      groups: poolGroups,
+    })
+  }
+  const reorderGlobal = (ids: number[]) => setGlobalDraft(ids)
+  const reorderPool = (groupID: string, ids: number[]) =>
+    updatePools(
+      poolGroups.map((group) =>
+        group.id === groupID ? { ...group, channel_order: ids } : group
+      )
+    )
   const persistGroup = () => {
-    if (!groupId.trim() || !groupName.trim() || !costGroup || selectedChannels.length === 0) return
+    if (!groupId.trim() || !groupName.trim() || selectedChannels.length === 0) {
+      return
+    }
     const existing = data.groups.find((group) => group.id === groupId.trim())
-    const group: RoutingGroup = { id: groupId.trim(), name: groupName.trim(), cost_group: costGroup, channel_order: selectedChannels }
-    update({ ...data, groups: existing ? data.groups.map((item) => item.id === group.id ? group : item) : [...data.groups, group] })
-    setGroupId(''); setGroupName(''); setCostGroup(''); setSelectedChannels([])
+    const group: RoutingGroup = {
+      id: groupId.trim(),
+      name: groupName.trim(),
+      discount_percent: Math.min(100, Math.max(0, discountPercent)),
+      tax_rate_percent: Math.min(100, Math.max(0, taxRatePercent)),
+      channel_order: selectedChannels,
+    }
+    updatePools(
+      existing
+        ? poolGroups.map((item) => (item.id === group.id ? group : item))
+        : [...poolGroups, group]
+    )
+    setGroupId('')
+    setGroupName('')
+    setDiscountPercent(0)
+    setTaxRatePercent(0)
+    setSelectedChannels([])
   }
   const removeGroup = () => {
     if (!deleting) return
-    update({ ...data, groups: data.groups.filter((group) => group.id !== deleting.id) })
+    updatePools(poolGroups.filter((group) => group.id !== deleting.id))
     setDeleting(null)
   }
   const chooseToken = (tokenID: number) => {
-    const access = tokenAccessQuery.data?.find((item) => item.token_id === tokenID)
+    const access = tokenAccessQuery.data?.find(
+      (item) => item.token_id === tokenID
+    )
     setSelectedTokenID(tokenID)
     setTokenIDInput(String(tokenID))
     setSelectedTokenGroups(access?.groups ?? [])
   }
   const saveSelectedTokenAccess = () => {
     if (selectedTokenID === null) return
-    tokenAccessMutation.mutate({ tokenID: selectedTokenID, groups: selectedTokenGroups })
+    tokenAccessMutation.mutate({
+      tokenID: selectedTokenID,
+      groups: selectedTokenGroups,
+    })
   }
 
+  const showGlobal = section === 'global-priority'
   return (
     <main className='flex flex-col gap-6 p-6'>
-      <header><h1 className='text-2xl font-semibold'>{t('Intelligent routing')}</h1><p className='text-muted-foreground mt-1 text-sm'>{t('Groups are resource pools. Harness sends the group ID in X-Route-Group; channel IDs are not exposed to Harness.')}</p></header>
-      <section className='rounded-lg border p-4'>
-        <h2 className='font-semibold'>{t('Global channel priority')}</h2>
-        <p className='text-muted-foreground mb-3 text-sm'>{t('Channels earlier in the list have higher priority.')}</p>
-        <label className='mb-3 block text-sm'>{t('Global cost group')}<select aria-label={t('Global cost group')} className='mt-1 h-9 w-full rounded-md border bg-background px-3 text-sm' value={selectedGlobalCostGroup || data.global_cost_group || Object.keys(data.cost_groups)[0] || ''} onChange={(event) => setSelectedGlobalCostGroup(event.target.value)}><option value=''>{t('Select cost group')}</option>{Object.entries(data.cost_groups).map(([name, ratio]) => <option key={name} value={name}>{name} — {t('Multiplier')}: {ratio}</option>)}</select></label>
-        {data.global_channel_order.length ? <ol className='flex flex-col gap-2'>{data.global_channel_order.map((id, index) => { const channel = data.channels.find((item) => item.id === id); const label = channel?.name ?? String(id); return <li key={id} className='flex items-center gap-2 rounded-md border p-2'><span className='min-w-0 flex-1'>{label}</span><Button size='icon-sm' variant='ghost' aria-label={t('Move {{group}} up', { group: label })} disabled={index === 0} onClick={() => update({ ...data, global_channel_order: moveItem(data.global_channel_order, index, 'up') })}><ArrowUp aria-hidden='true' /></Button><Button size='icon-sm' variant='ghost' aria-label={t('Move {{group}} down', { group: label })} disabled={index === data.global_channel_order.length - 1} onClick={() => update({ ...data, global_channel_order: moveItem(data.global_channel_order, index, 'down') })}><ArrowDown aria-hidden='true' /></Button><Button size='icon-sm' variant='ghost' aria-label={t('Remove {{group}}', { group: label })} onClick={() => update({ ...data, global_channel_order: data.global_channel_order.filter((item) => item !== id) })}><Trash2 aria-hidden='true' /></Button></li> })}</ol> : <EmptyState title={t('No channels available')} />}
-        <div className='mt-3 flex gap-2'><select aria-label={t('Add channel to global order')} className='h-9 rounded-md border bg-background px-3 text-sm' value='' onChange={(event) => { const id = Number(event.target.value); if (id && !data.global_channel_order.includes(id)) update({ ...data, global_channel_order: [...data.global_channel_order, id] }) }}><option value=''>{t('Add channel')}</option>{globalCompatibleChannels.filter((channel) => !data.global_channel_order.includes(channel.id)).map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</select></div>
-      </section>
-      <section className='rounded-lg border p-4'>
-        <h2 className='mb-3 font-semibold'>{t('Resource pool groups')}</h2>
-        <div className='grid gap-2 md:grid-cols-4'><Input aria-label={t('Group ID')} placeholder={t('Group ID')} value={groupId} onChange={(event) => setGroupId(event.target.value)} /><Input aria-label={t('Group name')} placeholder={t('Group name')} value={groupName} onChange={(event) => setGroupName(event.target.value)} /><select aria-label={t('Cost group')} className='h-9 rounded-md border bg-background px-3 text-sm' value={costGroup} onChange={(event) => setCostGroup(event.target.value)}><option value=''>{t('Select cost group')}</option>{Object.entries(data.cost_groups).map(([name, ratio]) => <option key={name} value={name}>{name} — {t('Multiplier')}: {ratio}</option>)}</select><Button onClick={persistGroup}>{t('Add or update group')}</Button></div>
-        <div className='mt-3 space-y-2'>
-          <label className='block text-sm'>{t('Search channels')}<Input className='mt-1' value={channelSearch} onChange={(event) => setChannelSearch(event.target.value)} /></label>
-          <fieldset className='max-h-64 space-y-1 overflow-y-auto rounded-md border p-2'>
-            <legend className='px-1 text-sm'>{t('Channels in group')}</legend>
-            {compatibleChannels.map((channel) => {
-              const checked = selectedChannels.includes(channel.id)
-              return <label key={channel.id} className='hover:bg-muted/40 flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-sm'>
-                <input type='checkbox' checked={checked} onChange={() => setSelectedChannels(checked ? selectedChannels.filter((id) => id !== channel.id) : [...selectedChannels, channel.id])} />
-                <span><span className='font-medium'>{channel.name}</span><span className='text-muted-foreground ml-2 text-xs'>{channel.models.join(', ')}</span></span>
-              </label>
-            })}
-            {availableChannels.length === 0 ? <p className='text-muted-foreground p-2 text-sm'>{t('No channels match the search.')}</p> : null}
+      <header>
+        <h1 className='text-2xl font-semibold'>
+          {t(showGlobal ? '全渠道优先级设置' : '资源池分组')}
+        </h1>
+        <p className='text-muted-foreground mt-1 text-sm'>
+          {t(
+            'Groups are resource pools. Harness sends the group ID in X-Route-Group; channel IDs are not exposed to Harness.'
+          )}
+        </p>
+      </header>
+      {showGlobal ? (
+        <section className='rounded-lg border p-4'>
+          <h2 className='font-semibold'>{t('Global channel priority')}</h2>
+          <p className='text-muted-foreground mb-3 text-sm'>
+            {t('Channels earlier in the list have higher priority.')}
+          </p>
+          <fieldset className='mb-3 space-y-2'>
+            <legend className='text-sm font-medium'>
+              {t('Available enabled channels')}
+            </legend>
+            <div className='max-h-48 space-y-1 overflow-y-auto rounded-md border p-2'>
+              {availableChannels.map((channel) => (
+                <label
+                  key={channel.id}
+                  className='flex items-center gap-2 text-sm'
+                >
+                  <input
+                    type='checkbox'
+                    checked={globalOrder.includes(channel.id)}
+                    onChange={() =>
+                      reorderGlobal(
+                        globalOrder.includes(channel.id)
+                          ? globalOrder.filter((id) => id !== channel.id)
+                          : [...globalOrder, channel.id]
+                      )
+                    }
+                  />
+                  <span>{channel.name}</span>
+                  <span className='text-muted-foreground text-xs'>
+                    {(channel.enabled_groups ?? [])
+                      .map((group) => group.label)
+                      .join(', ')}
+                  </span>
+                </label>
+              ))}
+            </div>
           </fieldset>
-          <p className='text-muted-foreground text-xs'>{t('Selected channels')}: {selectedChannels.length}</p>
+          {globalOrder.length ? (
+            <Reorder.Group
+              axis='y'
+              values={globalOrder}
+              onReorder={reorderGlobal}
+              className='flex flex-col gap-2'
+            >
+              {globalOrder.map((id, index) => {
+                const channel = data.channels.find((item) => item.id === id)
+                const label = channel?.name ?? String(id)
+                return (
+                  <ChannelOrderRow
+                    key={id}
+                    id={id}
+                    channel={channel}
+                    label={label}
+                    index={index}
+                    count={globalOrder.length}
+                    onMove={(direction) =>
+                      reorderGlobal(moveItem(globalOrder, index, direction))
+                    }
+                  />
+                )
+              })}
+            </Reorder.Group>
+          ) : (
+            <EmptyState title={t('No channels available')} />
+          )}
+        </section>
+      ) : null}
+      {!showGlobal ? (
+        <section className='rounded-lg border p-4'>
+          <h2 className='mb-3 font-semibold'>{t('Resource pool groups')}</h2>
+          <div className='grid gap-2 md:grid-cols-4'>
+            <Input
+              aria-label={t('Group ID')}
+              placeholder={t('Group ID')}
+              value={groupId}
+              onChange={(event) => setGroupId(event.target.value)}
+            />
+            <Input
+              aria-label={t('Group name')}
+              placeholder={t('Group name')}
+              value={groupName}
+              onChange={(event) => setGroupName(event.target.value)}
+            />
+            <label className='flex flex-col gap-1 text-sm'>
+              {t('Discount percentage')}
+              <Input
+                aria-label={t('Discount percentage')}
+                type='number'
+                min={0}
+                max={100}
+                value={discountPercent}
+                onChange={(event) =>
+                  setDiscountPercent(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className='flex flex-col gap-1 text-sm'>
+              {t('Tax rate percentage')}
+              <Input
+                aria-label={t('Tax rate percentage')}
+                type='number'
+                min={0}
+                max={100}
+                value={taxRatePercent}
+                onChange={(event) =>
+                  setTaxRatePercent(Number(event.target.value))
+                }
+              />
+            </label>
+            <Button onClick={persistGroup}>{t('Add or update group')}</Button>
+          </div>
+          <div className='mt-3 space-y-2'>
+            <label className='block text-sm'>
+              {t('Search channels')}
+              <Input
+                className='mt-1'
+                value={channelSearch}
+                onChange={(event) => setChannelSearch(event.target.value)}
+              />
+            </label>
+            <fieldset className='max-h-64 space-y-1 overflow-y-auto rounded-md border p-2'>
+              <legend className='px-1 text-sm'>{t('Channels in group')}</legend>
+              {compatibleChannels.map((channel) => {
+                const checked = selectedChannels.includes(channel.id)
+                return (
+                  <label
+                    key={channel.id}
+                    className='hover:bg-muted/40 flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-sm'
+                  >
+                    <input
+                      type='checkbox'
+                      checked={checked}
+                      onChange={() =>
+                        setSelectedChannels(
+                          checked
+                            ? selectedChannels.filter((id) => id !== channel.id)
+                            : [...selectedChannels, channel.id]
+                        )
+                      }
+                    />
+                    <span>
+                      <span className='font-medium'>{channel.name}</span>
+                      <span className='text-muted-foreground ml-2 text-xs'>
+                        {channel.models.join(', ')}
+                      </span>
+                    </span>
+                  </label>
+                )
+              })}
+              {availableChannels.length === 0 ? (
+                <p className='text-muted-foreground p-2 text-sm'>
+                  {t('No channels match the search.')}
+                </p>
+              ) : null}
+            </fieldset>
+            <p className='text-muted-foreground text-xs'>
+              {t('Selected channels')}: {selectedChannels.length}
+            </p>
+          </div>
+          <div className='mt-4 space-y-3'>
+            {poolGroups.map((group) => (
+              <article key={group.id} className='rounded-md border p-3'>
+                <div className='flex items-center justify-between gap-3'>
+                  <div>
+                    <h3 className='font-medium'>
+                      {group.name}{' '}
+                      <span className='text-muted-foreground'>
+                        ({group.id})
+                      </span>
+                    </h3>
+                    <p className='text-muted-foreground text-sm'>
+                      {t('Discount percentage')}: {group.discount_percent ?? 0}%
+                      · {t('Tax rate percentage')}:{' '}
+                      {group.tax_rate_percent ?? 0}%
+                    </p>
+                  </div>
+                  <div className='flex gap-2'>
+                    <Button
+                      variant='outline'
+                      onClick={() => {
+                        setGroupId(group.id)
+                        setGroupName(group.name)
+                        setDiscountPercent(group.discount_percent ?? 0)
+                        setTaxRatePercent(group.tax_rate_percent ?? 0)
+                        setSelectedChannels(group.channel_order)
+                      }}
+                    >
+                      {t('Edit')}
+                    </Button>
+                    <Button
+                      variant='destructive'
+                      onClick={() => setDeleting(group)}
+                    >
+                      {t('Delete')}
+                    </Button>
+                  </div>
+                </div>
+                <p className='text-muted-foreground mt-2 text-sm'>
+                  {t('Models')}:{' '}
+                  {[
+                    ...new Set(
+                      group.channel_order.flatMap(
+                        (id) =>
+                          data.channels.find((channel) => channel.id === id)
+                            ?.models ?? []
+                      )
+                    ),
+                  ].join(', ') || t('No models listed')}
+                </p>
+                <Reorder.Group
+                  axis='y'
+                  values={group.channel_order}
+                  onReorder={(ids) => reorderPool(group.id, ids)}
+                  className='mt-2 flex flex-col gap-2'
+                >
+                  {group.channel_order.map((id, index) => {
+                    const channel = data.channels.find((item) => item.id === id)
+                    const label = channel?.name ?? String(id)
+                    return (
+                      <ChannelOrderRow
+                        key={id}
+                        id={id}
+                        channel={channel}
+                        label={label}
+                        index={index}
+                        count={group.channel_order.length}
+                        onMove={(direction) =>
+                          reorderPool(
+                            group.id,
+                            moveItem(group.channel_order, index, direction)
+                          )
+                        }
+                      />
+                    )
+                  })}
+                </Reorder.Group>
+              </article>
+            ))}
+          </div>
+          <div className='mt-4 flex justify-end'>
+            <Button onClick={savePools} disabled={mutation.isPending}>
+              {mutation.isPending ? t('Saving...') : t('Save changes')}
+            </Button>
+          </div>
+        </section>
+      ) : null}
+      {showGlobal ? (
+        <section className='rounded-lg border p-4'>
+          <h2 className='font-semibold'>
+            {t('Harness token resource pool access')}
+          </h2>
+          <p className='text-muted-foreground mt-1 text-sm'>
+            {t(
+              'Assign resource pools to a full-model service token. The token key is never displayed here.'
+            )}
+          </p>
+          {tokenAccessQuery.isError ? (
+            <ErrorState
+              title={t('Failed to load token access')}
+              onRetry={() => void tokenAccessQuery.refetch()}
+            />
+          ) : null}
+          {tokenAccessQuery.isLoading ? (
+            <LoadingState message={t('Loading token access...')} />
+          ) : null}
+          <div className='mt-3 flex flex-wrap gap-2'>
+            <Input
+              aria-label={t('Token ID')}
+              placeholder={t('Token ID')}
+              inputMode='numeric'
+              value={tokenIDInput}
+              onChange={(event) => setTokenIDInput(event.target.value)}
+            />
+            <Button
+              variant='outline'
+              onClick={() => {
+                const tokenID = Number(tokenIDInput)
+                if (Number.isSafeInteger(tokenID) && tokenID > 0) {
+                  chooseToken(tokenID)
+                }
+              }}
+            >
+              {t('Load token access')}
+            </Button>
+            {(tokenAccessQuery.data ?? []).map((access) => (
+              <Button
+                key={access.token_id}
+                variant='outline'
+                onClick={() => chooseToken(access.token_id)}
+              >
+                {access.token_name} · {access.token_id}
+              </Button>
+            ))}
+          </div>
+          {selectedTokenID !== null ? (
+            <div className='mt-3 space-y-2'>
+              <p className='text-sm'>
+                {t('Authorized resource pools for token {{id}}', {
+                  id: selectedTokenID,
+                })}
+              </p>
+              {[
+                ...(data.global_channel_order.length ? ['global'] : []),
+                ...poolGroups.map((group) => group.id),
+              ].map((groupID) => {
+                const label =
+                  groupID === 'global'
+                    ? t('Global priority')
+                    : (poolGroups.find((group) => group.id === groupID)?.name ??
+                      groupID)
+                const checked = selectedTokenGroups.includes(groupID)
+                return (
+                  <label
+                    key={groupID}
+                    className='flex items-center gap-2 text-sm'
+                  >
+                    <input
+                      type='checkbox'
+                      checked={checked}
+                      onChange={() =>
+                        setSelectedTokenGroups(
+                          checked
+                            ? selectedTokenGroups.filter(
+                                (item) => item !== groupID
+                              )
+                            : [...selectedTokenGroups, groupID]
+                        )
+                      }
+                    />
+                    {label}{' '}
+                    <span className='text-muted-foreground'>({groupID})</span>
+                  </label>
+                )
+              })}
+              <Button
+                onClick={saveSelectedTokenAccess}
+                disabled={tokenAccessMutation.isPending}
+              >
+                {tokenAccessMutation.isPending
+                  ? t('Saving...')
+                  : t('Save token access')}
+              </Button>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+      {showGlobal ? (
+        <div className='flex justify-end'>
+          <Button onClick={saveGlobal} disabled={mutation.isPending}>
+            {mutation.isPending ? t('Saving...') : t('Save changes')}
+          </Button>
         </div>
-        <div className='mt-4 space-y-3'>{data.groups.map((group) => <article key={group.id} className='rounded-md border p-3'><div className='flex items-center justify-between gap-3'><div><h3 className='font-medium'>{group.name} <span className='text-muted-foreground'>({group.id})</span></h3><p className='text-muted-foreground text-sm'>{t('Cost group')}: {group.cost_group} · {t('Multiplier')}: {data.cost_groups[group.cost_group] ?? '—'}</p></div><div className='flex gap-2'><Button variant='outline' onClick={() => { setGroupId(group.id); setGroupName(group.name); setCostGroup(group.cost_group); setSelectedChannels(group.channel_order) }}>{t('Edit')}</Button><Button variant='destructive' onClick={() => setDeleting(group)}>{t('Delete')}</Button></div></div><p className='text-muted-foreground mt-2 text-sm'>{t('Models')}: {[...new Set(group.channel_order.flatMap((id) => data.channels.find((channel) => channel.id === id)?.models ?? []))].join(', ') || t('No models listed')}</p><ol className='mt-2 flex flex-col gap-2'>{group.channel_order.map((id, index) => { const channel = data.channels.find((item) => item.id === id); const label = channel?.name ?? String(id); return <li key={id} className='flex items-center gap-2 rounded-md border p-2'><span className='min-w-0 flex-1'>{label}</span><Button size='icon-sm' variant='ghost' aria-label={t('Move {{group}} up', { group: label })} disabled={index === 0} onClick={() => update({ ...data, groups: data.groups.map((item) => item.id === group.id ? { ...item, channel_order: moveItem(item.channel_order, index, 'up') } : item) })}><ArrowUp aria-hidden='true' /></Button><Button size='icon-sm' variant='ghost' aria-label={t('Move {{group}} down', { group: label })} disabled={index === group.channel_order.length - 1} onClick={() => update({ ...data, groups: data.groups.map((item) => item.id === group.id ? { ...item, channel_order: moveItem(item.channel_order, index, 'down') } : item) })}><ArrowDown aria-hidden='true' /></Button><Button size='icon-sm' variant='ghost' aria-label={t('Remove {{group}}', { group: label })} onClick={() => update({ ...data, groups: data.groups.map((item) => item.id === group.id ? { ...item, channel_order: item.channel_order.filter((channelId) => channelId !== id) } : item) })}><Trash2 aria-hidden='true' /></Button></li> })}</ol><p className='text-muted-foreground mt-2 text-xs'>{t('Current cost group multiplier; this is not a per-channel currency price.')}</p></article>)}</div>
-      </section>
-      <section className='rounded-lg border p-4'>
-        <h2 className='font-semibold'>{t('Harness token resource pool access')}</h2>
-        <p className='text-muted-foreground mt-1 text-sm'>{t('Assign resource pools to a full-model service token. The token key is never displayed here.')}</p>
-        {tokenAccessQuery.isError ? <ErrorState title={t('Failed to load token access')} onRetry={() => void tokenAccessQuery.refetch()} /> : null}
-        {tokenAccessQuery.isLoading ? <LoadingState message={t('Loading token access...')} /> : null}
-        <div className='mt-3 flex flex-wrap gap-2'>
-          <Input aria-label={t('Token ID')} placeholder={t('Token ID')} inputMode='numeric' value={tokenIDInput} onChange={(event) => setTokenIDInput(event.target.value)} />
-          <Button variant='outline' onClick={() => { const tokenID = Number(tokenIDInput); if (Number.isSafeInteger(tokenID) && tokenID > 0) chooseToken(tokenID) }}>{t('Load token access')}</Button>
-          {(tokenAccessQuery.data ?? []).map((access) => <Button key={access.token_id} variant='outline' onClick={() => chooseToken(access.token_id)}>{access.token_name} · {access.token_id}</Button>)}
-        </div>
-        {selectedTokenID !== null ? <div className='mt-3 space-y-2'>
-          <p className='text-sm'>{t('Authorized resource pools for token {{id}}', { id: selectedTokenID })}</p>
-          {[...(data.global_channel_order.length || data.global_cost_group ? ['global'] : []), ...data.groups.map((group) => group.id)].map((groupID) => {
-            const label = groupID === 'global' ? t('Global priority') : (data.groups.find((group) => group.id === groupID)?.name ?? groupID)
-            const checked = selectedTokenGroups.includes(groupID)
-            return <label key={groupID} className='flex items-center gap-2 text-sm'><input type='checkbox' checked={checked} onChange={() => setSelectedTokenGroups(checked ? selectedTokenGroups.filter((item) => item !== groupID) : [...selectedTokenGroups, groupID])} />{label} <span className='text-muted-foreground'>({groupID})</span></label>
-          })}
-          <Button onClick={saveSelectedTokenAccess} disabled={tokenAccessMutation.isPending}>{tokenAccessMutation.isPending ? t('Saving...') : t('Save token access')}</Button>
-        </div> : null}
-      </section>
-      <div className='flex justify-end'><Button onClick={save} disabled={mutation.isPending}>{mutation.isPending ? t('Saving...') : t('Save changes')}</Button></div>
-      <ConfirmDialog open={!!deleting} onOpenChange={(open) => !open && setDeleting(null)} title={t('Delete resource pool group?')} desc={t('This group will be removed from the pending configuration. Save changes to apply it.')} destructive confirmText={t('Delete')} handleConfirm={removeGroup} />
+      ) : null}
+      <ConfirmDialog
+        open={!!deleting}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title={t('Delete resource pool group?')}
+        desc={t(
+          'This group will be removed from the pending configuration. Save changes to apply it.'
+        )}
+        destructive
+        confirmText={t('Delete')}
+        handleConfirm={removeGroup}
+      />
     </main>
   )
 }

@@ -32,6 +32,7 @@ import {
 import { getAuthSectionNavItems } from '@/features/system-settings/auth/section-registry.tsx'
 import { getBillingSectionNavItems } from '@/features/system-settings/billing/section-registry.tsx'
 import { getContentSectionNavItems } from '@/features/system-settings/content/section-registry.tsx'
+import { getIntelligentRoutingSectionNavItems } from '@/features/system-settings/intelligent-routing/section-registry'
 import { getModelsSectionNavItems } from '@/features/system-settings/models/section-registry.tsx'
 import { getOperationsSectionNavItems } from '@/features/system-settings/operations/section-registry.tsx'
 import { getPolicySectionNavItems } from '@/features/system-settings/request-policies/section-registry'
@@ -96,7 +97,7 @@ function getSystemSettingsNavGroups(t: TFunction): NavGroup[] {
         {
           title: t('Intelligent routing'),
           icon: GitBranch,
-          items: [{ title: t('Intelligent routing'), url: '/system-settings/intelligent-routing' }],
+          items: getIntelligentRoutingSectionNavItems(t),
         },
       ],
     },

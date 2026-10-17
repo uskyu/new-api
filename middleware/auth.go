@@ -643,7 +643,7 @@ func TokenAuth() func(c *gin.Context) {
 		if err != nil {
 			return
 		}
-		if requestedGroup := strings.TrimSpace(c.GetHeader("X-Route-Group")); requestedGroup != "" {
+		if requestedGroup := strings.TrimSpace(c.GetHeader(setting.IntelligentRoutingGroupHeader)); requestedGroup != "" {
 			if token.ModelLimitsEnabled {
 				abortWithOpenAiMessage(c, http.StatusForbidden, "request-level resource pool selection requires a full-model service token", types.ErrorCodeAccessDenied)
 				return
@@ -692,12 +692,6 @@ func applyIntelligentRoutingGroup(c *gin.Context, token *model.Token, _ string, 
 	if !setting.TokenCanUseIntelligentRoutingGroup(token.Id, requestedGroup) {
 		return errors.New("token is not authorized for the requested resource pool")
 	}
-	costGroup, exists := setting.GetIntelligentRoutingCostGroup(requestedGroup)
-	if !exists || !ratio_setting.ContainsGroupRatio(costGroup) {
-		return errors.New("resource pool cost group is unavailable")
-	}
-	common.SetContextKey(c, constant.ContextKeyUsingGroup, costGroup)
-	common.SetContextKey(c, constant.ContextKeyTokenGroup, costGroup)
 	common.SetContextKey(c, setting.IntelligentRoutingContextKey, requestedGroup)
 	return nil
 }

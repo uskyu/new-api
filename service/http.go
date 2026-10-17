@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -28,8 +29,14 @@ func CloseResponseBodyGracefully(httpResponse *http.Response) {
 // (managed separately) and X-Oneapi-Request-Id (to preserve the local instance
 // ID). When the upstream header is X-Oneapi-Request-Id, the value is captured
 // into the Gin context for later logging.
+func isIntelligentRoutingResponseHeader(name string) bool {
+	return strings.EqualFold(name, setting.IntelligentRoutingGroupHeader) ||
+		strings.EqualFold(name, setting.IntelligentRoutingDiscountPercentHeader) ||
+		strings.EqualFold(name, setting.IntelligentRoutingTaxRatePercentHeader)
+}
+
 func ShouldCopyUpstreamHeader(c *gin.Context, k string, v []string) bool {
-	if strings.EqualFold(k, "Content-Length") {
+	if strings.EqualFold(k, "Content-Length") || isIntelligentRoutingResponseHeader(k) {
 		return false
 	}
 	if strings.EqualFold(k, common.RequestIdKey) {

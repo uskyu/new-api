@@ -63,6 +63,7 @@ import { Route as AuthenticatedSystemSettingsBillingIndexRouteImport } from './r
 import { Route as AuthenticatedSystemSettingsBillingSectionRouteImport } from './routes/_authenticated/system-settings/billing/$section'
 import { Route as AuthenticatedSystemSettingsContentIndexRouteImport } from './routes/_authenticated/system-settings/content/index'
 import { Route as AuthenticatedSystemSettingsContentSectionRouteImport } from './routes/_authenticated/system-settings/content/$section'
+import { Route as AuthenticatedSystemSettingsIntelligentRoutingSectionRouteImport } from './routes/_authenticated/system-settings/intelligent-routing/$section'
 import { Route as AuthenticatedSystemSettingsModelsIndexRouteImport } from './routes/_authenticated/system-settings/models/index'
 import { Route as AuthenticatedSystemSettingsModelsSectionRouteImport } from './routes/_authenticated/system-settings/models/$section'
 import { Route as AuthenticatedSystemSettingsOperationsIndexRouteImport } from './routes/_authenticated/system-settings/operations/index'
@@ -368,6 +369,12 @@ const AuthenticatedSystemSettingsContentSectionRoute =
     path: '/content/$section',
     getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
   } as any)
+const AuthenticatedSystemSettingsIntelligentRoutingSectionRoute =
+  AuthenticatedSystemSettingsIntelligentRoutingSectionRouteImport.update({
+    id: '/$section',
+    path: '/$section',
+    getParentRoute: () => AuthenticatedSystemSettingsIntelligentRoutingRoute,
+  } as any)
 const AuthenticatedSystemSettingsModelsIndexRoute =
   AuthenticatedSystemSettingsModelsIndexRouteImport.update({
     id: '/models/',
@@ -457,7 +464,7 @@ export interface FileRoutesByFullPath {
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
-  '/system-settings/intelligent-routing': typeof AuthenticatedSystemSettingsIntelligentRoutingRoute
+  '/system-settings/intelligent-routing': typeof AuthenticatedSystemSettingsIntelligentRoutingRouteWithChildren
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -479,6 +486,7 @@ export interface FileRoutesByFullPath {
   '/system-settings/auth/$section': typeof AuthenticatedSystemSettingsAuthSectionRoute
   '/system-settings/billing/$section': typeof AuthenticatedSystemSettingsBillingSectionRoute
   '/system-settings/content/$section': typeof AuthenticatedSystemSettingsContentSectionRoute
+  '/system-settings/intelligent-routing/$section': typeof AuthenticatedSystemSettingsIntelligentRoutingSectionRoute
   '/system-settings/models/$section': typeof AuthenticatedSystemSettingsModelsSectionRoute
   '/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
   '/system-settings/request-policies/$section': typeof AuthenticatedSystemSettingsRequestPoliciesSectionRoute
@@ -520,7 +528,7 @@ export interface FileRoutesByTo {
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
-  '/system-settings/intelligent-routing': typeof AuthenticatedSystemSettingsIntelligentRoutingRoute
+  '/system-settings/intelligent-routing': typeof AuthenticatedSystemSettingsIntelligentRoutingRouteWithChildren
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
@@ -542,6 +550,7 @@ export interface FileRoutesByTo {
   '/system-settings/auth/$section': typeof AuthenticatedSystemSettingsAuthSectionRoute
   '/system-settings/billing/$section': typeof AuthenticatedSystemSettingsBillingSectionRoute
   '/system-settings/content/$section': typeof AuthenticatedSystemSettingsContentSectionRoute
+  '/system-settings/intelligent-routing/$section': typeof AuthenticatedSystemSettingsIntelligentRoutingSectionRoute
   '/system-settings/models/$section': typeof AuthenticatedSystemSettingsModelsSectionRoute
   '/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
   '/system-settings/request-policies/$section': typeof AuthenticatedSystemSettingsRequestPoliciesSectionRoute
@@ -587,7 +596,7 @@ export interface FileRoutesById {
   '/_authenticated/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
-  '/_authenticated/system-settings/intelligent-routing': typeof AuthenticatedSystemSettingsIntelligentRoutingRoute
+  '/_authenticated/system-settings/intelligent-routing': typeof AuthenticatedSystemSettingsIntelligentRoutingRouteWithChildren
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -609,6 +618,7 @@ export interface FileRoutesById {
   '/_authenticated/system-settings/auth/$section': typeof AuthenticatedSystemSettingsAuthSectionRoute
   '/_authenticated/system-settings/billing/$section': typeof AuthenticatedSystemSettingsBillingSectionRoute
   '/_authenticated/system-settings/content/$section': typeof AuthenticatedSystemSettingsContentSectionRoute
+  '/_authenticated/system-settings/intelligent-routing/$section': typeof AuthenticatedSystemSettingsIntelligentRoutingSectionRoute
   '/_authenticated/system-settings/models/$section': typeof AuthenticatedSystemSettingsModelsSectionRoute
   '/_authenticated/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
   '/_authenticated/system-settings/request-policies/$section': typeof AuthenticatedSystemSettingsRequestPoliciesSectionRoute
@@ -675,6 +685,7 @@ export interface FileRouteTypes {
     | '/system-settings/auth/$section'
     | '/system-settings/billing/$section'
     | '/system-settings/content/$section'
+    | '/system-settings/intelligent-routing/$section'
     | '/system-settings/models/$section'
     | '/system-settings/operations/$section'
     | '/system-settings/request-policies/$section'
@@ -738,6 +749,7 @@ export interface FileRouteTypes {
     | '/system-settings/auth/$section'
     | '/system-settings/billing/$section'
     | '/system-settings/content/$section'
+    | '/system-settings/intelligent-routing/$section'
     | '/system-settings/models/$section'
     | '/system-settings/operations/$section'
     | '/system-settings/request-policies/$section'
@@ -804,6 +816,7 @@ export interface FileRouteTypes {
     | '/_authenticated/system-settings/auth/$section'
     | '/_authenticated/system-settings/billing/$section'
     | '/_authenticated/system-settings/content/$section'
+    | '/_authenticated/system-settings/intelligent-routing/$section'
     | '/_authenticated/system-settings/models/$section'
     | '/_authenticated/system-settings/operations/$section'
     | '/_authenticated/system-settings/request-policies/$section'
@@ -1218,6 +1231,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSystemSettingsContentSectionRouteImport
       parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
     }
+    '/_authenticated/system-settings/intelligent-routing/$section': {
+      id: '/_authenticated/system-settings/intelligent-routing/$section'
+      path: '/$section'
+      fullPath: '/system-settings/intelligent-routing/$section'
+      preLoaderRoute: typeof AuthenticatedSystemSettingsIntelligentRoutingSectionRouteImport
+      parentRoute: typeof AuthenticatedSystemSettingsIntelligentRoutingRoute
+    }
     '/_authenticated/system-settings/models/': {
       id: '/_authenticated/system-settings/models/'
       path: '/models'
@@ -1317,8 +1337,23 @@ const authRouteRouteWithChildren = authRouteRoute._addFileChildren(
   authRouteRouteChildren,
 )
 
+interface AuthenticatedSystemSettingsIntelligentRoutingRouteChildren {
+  AuthenticatedSystemSettingsIntelligentRoutingSectionRoute: typeof AuthenticatedSystemSettingsIntelligentRoutingSectionRoute
+}
+
+const AuthenticatedSystemSettingsIntelligentRoutingRouteChildren: AuthenticatedSystemSettingsIntelligentRoutingRouteChildren =
+  {
+    AuthenticatedSystemSettingsIntelligentRoutingSectionRoute:
+      AuthenticatedSystemSettingsIntelligentRoutingSectionRoute,
+  }
+
+const AuthenticatedSystemSettingsIntelligentRoutingRouteWithChildren =
+  AuthenticatedSystemSettingsIntelligentRoutingRoute._addFileChildren(
+    AuthenticatedSystemSettingsIntelligentRoutingRouteChildren,
+  )
+
 interface AuthenticatedSystemSettingsRouteRouteChildren {
-  AuthenticatedSystemSettingsIntelligentRoutingRoute: typeof AuthenticatedSystemSettingsIntelligentRoutingRoute
+  AuthenticatedSystemSettingsIntelligentRoutingRoute: typeof AuthenticatedSystemSettingsIntelligentRoutingRouteWithChildren
   AuthenticatedSystemSettingsIndexRoute: typeof AuthenticatedSystemSettingsIndexRoute
   AuthenticatedSystemSettingsAuthSectionRoute: typeof AuthenticatedSystemSettingsAuthSectionRoute
   AuthenticatedSystemSettingsBillingSectionRoute: typeof AuthenticatedSystemSettingsBillingSectionRoute
@@ -1341,7 +1376,7 @@ interface AuthenticatedSystemSettingsRouteRouteChildren {
 const AuthenticatedSystemSettingsRouteRouteChildren: AuthenticatedSystemSettingsRouteRouteChildren =
   {
     AuthenticatedSystemSettingsIntelligentRoutingRoute:
-      AuthenticatedSystemSettingsIntelligentRoutingRoute,
+      AuthenticatedSystemSettingsIntelligentRoutingRouteWithChildren,
     AuthenticatedSystemSettingsIndexRoute:
       AuthenticatedSystemSettingsIndexRoute,
     AuthenticatedSystemSettingsAuthSectionRoute:

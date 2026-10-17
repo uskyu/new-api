@@ -8,7 +8,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -18,16 +17,20 @@ type intelligentRoutingResponse struct {
 	GlobalChannelOrder []int                             `json:"global_channel_order"`
 	Groups             []setting.IntelligentRoutingGroup `json:"groups"`
 	Channels           []intelligentRoutingChannel       `json:"channels"`
-	CostGroups         map[string]float64                `json:"cost_groups"`
 }
 
 type intelligentRoutingChannel struct {
-	ID                int                 `json:"id"`
-	Name              string              `json:"name"`
-	Status            int                 `json:"status"`
-	Models            []string            `json:"models"`
-	Priority          int64               `json:"priority"`
-	EnabledCostGroups map[string][]string `json:"enabled_cost_groups"`
+	ID            int                              `json:"id"`
+	Name          string                           `json:"name"`
+	Status        int                              `json:"status"`
+	Models        []string                         `json:"models"`
+	Priority      int64                            `json:"priority"`
+	EnabledGroups []intelligentRoutingAbilityGroup `json:"enabled_groups"`
+}
+
+type intelligentRoutingAbilityGroup struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
 }
 
 func GetIntelligentRouting(c *gin.Context) {
@@ -45,38 +48,38 @@ func GetIntelligentRouting(c *gin.Context) {
 		GlobalChannelOrder: globalOrder,
 		Groups:             routingConfig.Groups,
 		Channels:           make([]intelligentRoutingChannel, 0, len(channels)),
-		CostGroups:         ratio_setting.GetGroupRatioCopy(),
 	}
-	costGroups := make(map[string]struct{})
-	if routingConfig.GlobalChannelOrder != nil {
-		costGroups[routingConfig.GlobalCostGroup] = struct{}{}
+	abilityGroups := make(map[int]map[string]struct{})
+	for _, ability := range model.GetAllEnableAbilities() {
+		if abilityGroups[ability.ChannelId] == nil {
+			abilityGroups[ability.ChannelId] = make(map[string]struct{})
+		}
+		abilityGroups[ability.ChannelId][ability.Group] = struct{}{}
 	}
-	for _, group := range routingConfig.Groups {
-		costGroups[group.CostGroup] = struct{}{}
-	}
-	for name := range ratio_setting.GetGroupRatioCopy() {
-		costGroups[name] = struct{}{}
-	}
+	usableGroups := setting.GetUserUsableGroupsCopy()
 	for _, channel := range channels {
 		if channel == nil || channel.Status != common.ChannelStatusEnabled {
 			continue
 		}
 		models := channel.GetModels()
-		enabledCostGroups := make(map[string][]string)
-		for costGroup := range costGroups {
-			for _, modelName := range models {
-				if model.IsChannelEnabledForGroupModel(costGroup, modelName, channel.Id) {
-					enabledCostGroups[costGroup] = append(enabledCostGroups[costGroup], modelName)
-				}
+		enabledGroups := make([]intelligentRoutingAbilityGroup, 0, len(abilityGroups[channel.Id]))
+		for groupID := range abilityGroups[channel.Id] {
+			label, ok := usableGroups[groupID]
+			if !ok {
+				label = groupID
 			}
+			enabledGroups = append(enabledGroups, intelligentRoutingAbilityGroup{ID: groupID, Label: label})
 		}
+		slices.SortFunc(enabledGroups, func(a, b intelligentRoutingAbilityGroup) int {
+			return strings.Compare(a.ID, b.ID)
+		})
 		response.Channels = append(response.Channels, intelligentRoutingChannel{
-			ID:                channel.Id,
-			Name:              channel.Name,
-			Status:            channel.Status,
-			Models:            models,
-			Priority:          channel.GetPriority(),
-			EnabledCostGroups: enabledCostGroups,
+			ID:            channel.Id,
+			Name:          channel.Name,
+			Status:        channel.Status,
+			Models:        models,
+			Priority:      channel.GetPriority(),
+			EnabledGroups: enabledGroups,
 		})
 	}
 	common.ApiSuccess(c, response)
@@ -84,7 +87,6 @@ func GetIntelligentRouting(c *gin.Context) {
 
 type updateIntelligentRoutingRequest struct {
 	GlobalChannelOrder []int                             `json:"global_channel_order"`
-	GlobalCostGroup    string                            `json:"global_cost_group"`
 	Groups             []setting.IntelligentRoutingGroup `json:"groups"`
 }
 
@@ -96,7 +98,6 @@ func UpdateIntelligentRouting(c *gin.Context) {
 	}
 	config := setting.IntelligentRoutingConfig{
 		GlobalChannelOrder: request.GlobalChannelOrder,
-		GlobalCostGroup:    request.GlobalCostGroup,
 		Groups:             request.Groups,
 	}
 	if err := setting.ValidateIntelligentRoutingConfig(config); err != nil {
@@ -132,16 +133,6 @@ func UpdateIntelligentRouting(c *gin.Context) {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage(err.Error()))
 		return
 	}
-	if config.GlobalChannelOrder != nil && !ratio_setting.ContainsGroupRatio(config.GlobalCostGroup) {
-		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Unknown global cost group: "+config.GlobalCostGroup))
-		return
-	}
-	for _, group := range config.Groups {
-		if !ratio_setting.ContainsGroupRatio(group.CostGroup) {
-			common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Unknown cost group: "+group.CostGroup))
-			return
-		}
-	}
 	if err := model.UpdateOption(setting.IntelligentRoutingOptionKey, string(routingJSON)); err != nil {
 		common.ApiError(c, err)
 		return
@@ -149,10 +140,16 @@ func UpdateIntelligentRouting(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"global_channel_order": config.GlobalChannelOrder, "groups": config.Groups})
 }
 
-func channelHasEnabledGroupModelAbility(channelID int, groupID string, channelModels []string) bool {
-	for _, modelName := range channelModels {
-		if model.IsChannelEnabledForGroupModel(groupID, modelName, channelID) {
-			return true
+func channelHasEnabledModelAbility(channelID int, channelModels []string, abilities []model.Ability) bool {
+	for _, ability := range abilities {
+		if ability.ChannelId != channelID || !ability.Enabled {
+			continue
+		}
+		abilityModel := ratio_setting.RoutingMatchModelName(ability.Model)
+		for _, modelName := range channelModels {
+			if ability.Model == modelName || abilityModel == ratio_setting.RoutingMatchModelName(modelName) {
+				return true
+			}
 		}
 	}
 	return false
@@ -169,6 +166,7 @@ func validateIntelligentRoutingChannels(config setting.IntelligentRoutingConfig)
 			channelByID[channel.Id] = channel
 		}
 	}
+	enabledAbilities := model.GetAllEnableAbilities()
 	for _, channelID := range config.GlobalChannelOrder {
 		channel := channelByID[channelID]
 		if channel == nil {
@@ -177,19 +175,13 @@ func validateIntelligentRoutingChannels(config setting.IntelligentRoutingConfig)
 		if channel.Status != common.ChannelStatusEnabled {
 			return common.NewMessage("Global routing can only use enabled channels")
 		}
-		if !channelHasEnabledGroupModelAbility(channelID, config.GlobalCostGroup, channel.GetModels()) {
-			return common.NewMessage("Global route channel has no enabled model ability in cost group: " + config.GlobalCostGroup)
+		if !channelHasEnabledModelAbility(channelID, channel.GetModels(), enabledAbilities) {
+			return common.NewMessage("Global route channel has no enabled model ability")
 		}
-	}
-	if config.GlobalChannelOrder != nil && !ratio_setting.ContainsGroupRatio(config.GlobalCostGroup) {
-		return common.NewMessage("Global route references an unknown cost group: " + config.GlobalCostGroup)
 	}
 	for _, group := range config.Groups {
 		if len(group.ChannelOrder) == 0 {
 			return common.NewMessage("Each resource pool must contain at least one channel")
-		}
-		if !ratio_setting.ContainsGroupRatio(group.CostGroup) {
-			return common.NewMessage("Resource pool references an unknown cost group: " + group.CostGroup)
 		}
 		for _, channelID := range group.ChannelOrder {
 			channel := channelByID[channelID]
@@ -199,8 +191,8 @@ func validateIntelligentRoutingChannels(config setting.IntelligentRoutingConfig)
 			if channel.Status != common.ChannelStatusEnabled {
 				return common.NewMessage("Resource pools can only use enabled channels")
 			}
-			if !channelHasEnabledGroupModelAbility(channelID, group.CostGroup, channel.GetModels()) {
-				return common.NewMessage("Resource pool channel has no enabled model ability in cost group: " + group.CostGroup)
+			if !channelHasEnabledModelAbility(channelID, channel.GetModels(), enabledAbilities) {
+				return common.NewMessage("Resource pool channel has no enabled model ability")
 			}
 		}
 	}
@@ -241,17 +233,10 @@ func UpdateIntelligentRoutingTokenAccess(c *gin.Context) {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid token ID"))
 		return
 	}
-	token, err := model.GetTokenById(tokenID)
-	if err != nil {
+	if _, err := model.GetTokenById(tokenID); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	owner, err := model.GetUserById(token.UserId, false)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	ownerGroups := service.GetUserUsableGroups(owner.Group)
 	var request updateTokenRoutingAccessRequest
 	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid parameters"))
@@ -263,11 +248,6 @@ func UpdateIntelligentRoutingTokenAccess(c *gin.Context) {
 	for _, group := range request.Groups {
 		if _, allowed := allowedGroups[group]; !allowed {
 			common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Unknown resource pool: "+group))
-			return
-		}
-		costGroup, _ := setting.GetIntelligentRoutingCostGroup(group)
-		if _, usable := ownerGroups[costGroup]; !usable {
-			common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Resource pool cost group is not available to the token owner: "+costGroup))
 			return
 		}
 		if _, duplicate := seen[group]; duplicate {
@@ -311,11 +291,11 @@ type harnessCatalogResponse struct {
 }
 
 type harnessCatalogGroup struct {
-	ID        string                `json:"id"`
-	Name      string                `json:"name"`
-	CostGroup string                `json:"cost_group"`
-	Ratio     float64               `json:"ratio"`
-	Models    []harnessCatalogModel `json:"models"`
+	ID              string                `json:"id"`
+	Name            string                `json:"name"`
+	DiscountPercent float64               `json:"discount_percent"`
+	TaxRatePercent  float64               `json:"tax_rate_percent"`
+	Models          []harnessCatalogModel `json:"models"`
 }
 
 type harnessCatalogModel struct {
@@ -372,7 +352,9 @@ func GetHarnessCatalog(c *gin.Context) {
 			channelByID[channel.Id] = channel
 		}
 	}
+	enabledAbilities := model.GetAllEnableAbilities()
 	groupModels := make(map[string]map[string][]string)
+	groupPricingByGroup := make(map[string]map[string]model.Pricing)
 	collectGroupModels := func(groupID string, channelIDs []int) {
 		for _, channelID := range channelIDs {
 			channel := channelByID[channelID]
@@ -380,21 +362,32 @@ func GetHarnessCatalog(c *gin.Context) {
 				continue
 			}
 			for _, modelName := range channel.GetModels() {
-				costGroup := routing.GlobalCostGroup
-				if groupID != setting.IntelligentRoutingGlobalGroupID {
-					groupConfig := findIntelligentRoutingGroup(routing, groupID)
-					if groupConfig == nil {
-						continue
+				var supportedAbilities []model.Ability
+				for _, ability := range enabledAbilities {
+					if ability.ChannelId == channelID && (ability.Model == modelName || ratio_setting.RoutingMatchModelName(ability.Model) == ratio_setting.RoutingMatchModelName(modelName)) {
+						supportedAbilities = append(supportedAbilities, ability)
 					}
-					costGroup = groupConfig.CostGroup
 				}
-				if !model.IsChannelEnabledForGroupModel(costGroup, modelName, channelID) {
+				if len(supportedAbilities) == 0 {
 					continue
 				}
 				if groupModels[groupID] == nil {
 					groupModels[groupID] = make(map[string][]string)
+					groupPricingByGroup[groupID] = make(map[string]model.Pricing)
 				}
 				groupModels[groupID][modelName] = append(groupModels[groupID][modelName], mappedModelName(channel, modelName))
+				pricing, exists := pricingByModel[modelName]
+				if exists {
+					pricing.SupportedEndpointTypes = nil
+					for _, ability := range supportedAbilities {
+						for _, endpointType := range common.GetEndpointTypesByChannelType(channel.Type, ability.Model) {
+							if !slices.Contains(pricing.SupportedEndpointTypes, endpointType) {
+								pricing.SupportedEndpointTypes = append(pricing.SupportedEndpointTypes, endpointType)
+							}
+						}
+					}
+					groupPricingByGroup[groupID][modelName] = pricing
+				}
 			}
 		}
 	}
@@ -409,11 +402,11 @@ func GetHarnessCatalog(c *gin.Context) {
 		if _, allowed := authorizedSet[setting.IntelligentRoutingGlobalGroupID]; allowed {
 			collectGroupModels(setting.IntelligentRoutingGlobalGroupID, routing.GlobalChannelOrder)
 			globalGroup := harnessCatalogGroup{
-				ID:        setting.IntelligentRoutingGlobalGroupID,
-				Name:      setting.IntelligentRoutingGlobalGroupName,
-				CostGroup: routing.GlobalCostGroup,
-				Ratio:     ratio_setting.GetGroupRatio(routing.GlobalCostGroup),
-				Models:    buildHarnessCatalogModels(groupModels[setting.IntelligentRoutingGlobalGroupID], pricingByModel),
+				ID:              setting.IntelligentRoutingGlobalGroupID,
+				Name:            setting.IntelligentRoutingGlobalGroupName,
+				DiscountPercent: 0,
+				TaxRatePercent:  0,
+				Models:          buildHarnessCatalogModels(groupModels[setting.IntelligentRoutingGlobalGroupID], groupPricingByGroup[setting.IntelligentRoutingGlobalGroupID]),
 			}
 			response.Groups = append(response.Groups, globalGroup)
 		}
@@ -422,32 +415,12 @@ func GetHarnessCatalog(c *gin.Context) {
 		if _, allowed := authorizedSet[group.ID]; !allowed {
 			continue
 		}
-		groupPricing := make(map[string]model.Pricing, len(groupModels[group.ID]))
-		for modelName := range groupModels[group.ID] {
-			pricing, ok := pricingByModel[modelName]
-			if !ok {
-				continue
-			}
-			pricing.SupportedEndpointTypes = nil
-			for _, channelID := range group.ChannelOrder {
-				channel := channelByID[channelID]
-				if channel == nil || channel.Status != common.ChannelStatusEnabled || !slices.Contains(channel.GetModels(), modelName) {
-					continue
-				}
-				for _, endpointType := range common.GetEndpointTypesByChannelType(channel.Type, modelName) {
-					if !slices.Contains(pricing.SupportedEndpointTypes, endpointType) {
-						pricing.SupportedEndpointTypes = append(pricing.SupportedEndpointTypes, endpointType)
-					}
-				}
-			}
-			groupPricing[modelName] = pricing
-		}
 		response.Groups = append(response.Groups, harnessCatalogGroup{
-			ID:        group.ID,
-			Name:      group.Name,
-			CostGroup: group.CostGroup,
-			Ratio:     ratio_setting.GetGroupRatio(group.CostGroup),
-			Models:    buildHarnessCatalogModels(groupModels[group.ID], groupPricing),
+			ID:              group.ID,
+			Name:            group.Name,
+			DiscountPercent: group.DiscountPercent,
+			TaxRatePercent:  group.TaxRatePercent,
+			Models:          buildHarnessCatalogModels(groupModels[group.ID], groupPricingByGroup[group.ID]),
 		})
 	}
 	response.QuotaPerUnit = common.QuotaPerUnit
@@ -488,15 +461,6 @@ func buildHarnessCatalogModels(upstreamNames map[string][]string, pricingByModel
 		return strings.Compare(a.Name, b.Name)
 	})
 	return models
-}
-
-func findIntelligentRoutingGroup(config setting.IntelligentRoutingConfig, groupID string) *setting.IntelligentRoutingGroup {
-	for i := range config.Groups {
-		if config.Groups[i].ID == groupID {
-			return &config.Groups[i]
-		}
-	}
-	return nil
 }
 
 func mappedModelName(channel *model.Channel, modelName string) string {

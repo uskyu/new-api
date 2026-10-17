@@ -257,7 +257,7 @@ func GetRandomSatisfiedChannelWithCostGroup(
 		if channel == nil || channel.Status != common.ChannelStatusEnabled {
 			continue
 		}
-		if !channelHasEnabledAbilityInGroup(channelID, costGroup, modelName) {
+		if !channelServesModel(channelID, modelName) {
 			continue
 		}
 		if allowed, _ := ChannelSatisfiesFilters(channel, modelName, filters); !allowed {
@@ -288,18 +288,6 @@ func configuredChannelOrderIndex(configuredOrder []int, candidates []int) []int 
 		}
 	}
 	return ordered
-}
-
-func channelHasEnabledAbilityInGroup(channelID int, groupID string, modelName string) bool {
-	modelNames := []string{modelName}
-	if normalized := ratio_setting.RoutingMatchModelName(modelName); normalized != modelName {
-		modelNames = append(modelNames, normalized)
-	}
-	var count int64
-	err := DB.Model(&Ability{}).
-		Where(commonGroupCol+" = ? and model IN ? and channel_id = ? and enabled = ?", groupID, modelNames, channelID, true).
-		Count(&count).Error
-	return err == nil && count > 0
 }
 
 func channelServesModel(channelID int, modelName string) bool {

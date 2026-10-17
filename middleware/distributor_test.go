@@ -14,11 +14,44 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSetIntelligentRoutingResponseHeadersReturnsPoolPricingAndRequestIDForStreaming(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Set(common.RequestIdKey, "request-123")
+	common.SetContextKey(c, setting.IntelligentRoutingContextKey, "economy")
+
+	// The helper runs before either a JSON body or an SSE stream commits headers.
+	setIntelligentRoutingPricingHeaders(c, "economy", 18.5, 8)
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.WriteHeaderNow()
+
+	assert.Equal(t, "economy", recorder.Header().Get(setting.IntelligentRoutingGroupHeader))
+	assert.Equal(t, "18.5", recorder.Header().Get(setting.IntelligentRoutingDiscountPercentHeader))
+	assert.Equal(t, "8", recorder.Header().Get(setting.IntelligentRoutingTaxRatePercentHeader))
+	assert.Equal(t, "request-123", recorder.Header().Get(common.RequestIdKey))
+	assert.Contains(t, recorder.Header().Get("Access-Control-Expose-Headers"), setting.IntelligentRoutingDiscountPercentHeader)
+}
+
+func TestSetIntelligentRoutingResponseHeadersSkipsNonRoutedAndCommittedResponses(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	setIntelligentRoutingResponseHeaders(c)
+	assert.Empty(t, recorder.Header().Get(setting.IntelligentRoutingDiscountPercentHeader))
+
+	common.SetContextKey(c, setting.IntelligentRoutingContextKey, "pool")
+	c.Writer.WriteHeaderNow()
+	setIntelligentRoutingPricingHeaders(c, "pool", 20, 5)
+	assert.Empty(t, recorder.Header().Get(setting.IntelligentRoutingDiscountPercentHeader))
+}
 
 func TestChannelMatchesExpectedTaskPluginUsesGenericChannelSetting(t *testing.T) {
 	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin}
