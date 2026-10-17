@@ -5,6 +5,7 @@ import (
   "github.com/QuantumNous/new-api/common"
   "github.com/QuantumNous/new-api/dto"
   "github.com/QuantumNous/new-api/setting"
+  "github.com/QuantumNous/new-api/setting/ratio_setting"
   "github.com/glebarez/sqlite"
   "github.com/stretchr/testify/require"
   "gorm.io/gorm"
@@ -13,6 +14,10 @@ import (
 func TestHarnessPricingGroupOptInAndPriority(t *testing.T) {
  oldDB, oldCache := DB, common.MemoryCacheEnabled
  oldCfg := setting.GetIntelligentRoutingConfig()
+ if oldCfg.GlobalChannelOrder == nil { oldCfg.GlobalChannelOrder = []int{} }
+ oldRatios := ratio_setting.GroupRatio2JSONString()
+ t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(oldRatios)) })
+ require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"a":1,"b":0.8,"c":0.7}`))
  db, err := gorm.Open(sqlite.Open("file:harness-pricing-test?mode=memory&cache=shared"), &gorm.Config{})
  require.NoError(t,err)
  DB = db

@@ -99,6 +99,7 @@ func TestSetIntelligentRoutingResponseHeadersUsesCheckedPricingGroupAndChannelTa
 	})
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"group-a":0.8,"group-b":0.8,"group-c":0.7}`))
 	oldConfig := setting.GetIntelligentRoutingConfig()
+	if oldConfig.GlobalChannelOrder == nil { oldConfig.GlobalChannelOrder = []int{} }
 	t.Cleanup(func() { require.NoError(t, setting.UpdateIntelligentRoutingConfig(oldConfig)) })
 	require.NoError(t, setting.UpdateIntelligentRoutingConfig(setting.IntelligentRoutingConfig{GlobalChannelOrder: []int{}, PricingGroupOrder: []string{"group-c", "group-a"}}))
 	require.NoError(t, ratio_setting.UpdateGroupTaxRateByJSONString(`{"group-a":8,"group-b":8,"group-c":5}`))
