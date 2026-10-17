@@ -96,6 +96,7 @@ type GroupRatioVisualEditorProps = {
   onSectionChange: (section: GroupSettingsSection) => void
   defaultUseAutoGroupField: ReactNode
   groupRatio: string
+  groupTaxRate: string
   topupGroupRatio: string
   userUsableGroups: string
   groupGroupRatio: string
@@ -109,6 +110,7 @@ type GroupPricingRow = {
   _id: string
   name: string
   ratio: string
+  taxRate: string
   topupRatio: string
   selectable: boolean
   description: string
@@ -158,14 +160,17 @@ function parseNestedRatioMap(
 
 function buildGroupPricingRows(
   groupRatio: string,
+  groupTaxRate: string,
   userUsableGroups: string,
   topupGroupRatio: string
 ): GroupPricingRow[] {
   const ratioMap = parseRatioMap(groupRatio)
+  const taxRateMap = parseRatioMap(groupTaxRate)
   const usableMap = parseUsableMap(userUsableGroups)
   const topupMap = parseRatioMap(topupGroupRatio)
   const names = new Set([
     ...Object.keys(ratioMap),
+    ...Object.keys(taxRateMap),
     ...Object.keys(usableMap),
     ...Object.keys(topupMap),
   ])
@@ -174,6 +179,7 @@ function buildGroupPricingRows(
     _id: createGroupPricingId(),
     name,
     ratio: String(normalizeRatio(ratioMap[name])),
+    taxRate: Object.hasOwn(taxRateMap, name) ? String(taxRateMap[name]) : '0',
     topupRatio: Object.hasOwn(topupMap, name) ? String(topupMap[name]) : '',
     selectable: Object.hasOwn(usableMap, name),
     description: String(usableMap[name] ?? ''),
@@ -182,6 +188,7 @@ function buildGroupPricingRows(
 
 function serializeGroupPricingRows(rows: GroupPricingRow[]) {
   const groupRatio: Record<string, number> = {}
+  const groupTaxRate: Record<string, number> = {}
   const userUsableGroups: Record<string, string> = {}
   const topupGroupRatio: Record<string, number> = {}
 
@@ -189,6 +196,8 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
     const name = row.name.trim()
     if (!name) continue
     groupRatio[name] = normalizeRatio(row.ratio)
+    const taxRate = row.taxRate.trim()
+    groupTaxRate[name] = taxRate === '' ? 0 : normalizeRatio(taxRate)
     if (row.selectable) {
       userUsableGroups[name] = row.description
     }
@@ -200,6 +209,7 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
 
   return {
     GroupRatio: JSON.stringify(groupRatio, null, 2),
+    GroupTaxRate: JSON.stringify(groupTaxRate, null, 2),
     UserUsableGroups: JSON.stringify(userUsableGroups, null, 2),
     TopupGroupRatio: JSON.stringify(topupGroupRatio, null, 2),
   }
@@ -209,6 +219,7 @@ function groupPricingSignature(rows: GroupPricingRow[]): string {
   const serialized = serializeGroupPricingRows(rows)
   return JSON.stringify({
     groupRatio: parseRatioMap(serialized.GroupRatio),
+    groupTaxRate: parseRatioMap(serialized.GroupTaxRate),
     userUsableGroups: parseUsableMap(serialized.UserUsableGroups),
     topupGroupRatio: parseRatioMap(serialized.TopupGroupRatio),
   })
@@ -216,14 +227,18 @@ function groupPricingSignature(rows: GroupPricingRow[]): string {
 
 function sourceGroupPricingSignature(
   groupRatio: string,
+  groupTaxRate: string,
   userUsableGroups: string,
   topupGroupRatio: string
 ): string {
-  return JSON.stringify({
-    groupRatio: parseRatioMap(groupRatio),
-    userUsableGroups: parseUsableMap(userUsableGroups),
-    topupGroupRatio: parseRatioMap(topupGroupRatio),
-  })
+  return groupPricingSignature(
+    buildGroupPricingRows(
+      groupRatio,
+      groupTaxRate,
+      userUsableGroups,
+      topupGroupRatio
+    )
+  )
 }
 
 function UnknownGroupBadge() {
@@ -271,6 +286,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   onSectionChange,
   defaultUseAutoGroupField,
   groupRatio,
+  groupTaxRate,
   topupGroupRatio,
   userUsableGroups,
   groupGroupRatio,
@@ -285,10 +301,12 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 
   const registry = useMemo<RegistryEntry[]>(() => {
     const ratioMap = parseRatioMap(groupRatio)
+    const taxRateMap = parseRatioMap(groupTaxRate)
     const usableMap = parseUsableMap(userUsableGroups)
     const topupMap = parseRatioMap(topupGroupRatio)
     const names = new Set([
       ...Object.keys(ratioMap),
+      ...Object.keys(taxRateMap),
       ...Object.keys(usableMap),
       ...Object.keys(topupMap),
     ])
@@ -296,7 +314,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
       name,
       ratio: normalizeRatio(ratioMap[name]),
     }))
-  }, [groupRatio, userUsableGroups, topupGroupRatio])
+  }, [groupRatio, groupTaxRate, userUsableGroups, topupGroupRatio])
 
   const registryNames = useMemo(
     () => registry.map((entry) => entry.name),
@@ -368,6 +386,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
       <TabsContent value='pricing' keepMounted>
         <GroupPricingTable
           groupRatio={groupRatio}
+          groupTaxRate={groupTaxRate}
           userUsableGroups={userUsableGroups}
           topupGroupRatio={topupGroupRatio}
           onChange={onChange}
@@ -473,6 +492,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 
 type GroupPricingTableProps = {
   groupRatio: string
+  groupTaxRate: string
   userUsableGroups: string
   topupGroupRatio: string
   onChange: (field: string, value: string) => void
@@ -481,6 +501,7 @@ type GroupPricingTableProps = {
 
 function GroupPricingTable({
   groupRatio,
+  groupTaxRate,
   userUsableGroups,
   topupGroupRatio,
   onChange,
@@ -489,12 +510,18 @@ function GroupPricingTable({
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [rows, setRows] = useState<GroupPricingRow[]>(() =>
-    buildGroupPricingRows(groupRatio, userUsableGroups, topupGroupRatio)
+    buildGroupPricingRows(
+      groupRatio,
+      groupTaxRate,
+      userUsableGroups,
+      topupGroupRatio
+    )
   )
 
   useEffect(() => {
     const incomingSignature = sourceGroupPricingSignature(
       groupRatio,
+      groupTaxRate,
       userUsableGroups,
       topupGroupRatio
     )
@@ -504,17 +531,19 @@ function GroupPricingTable({
       }
       return buildGroupPricingRows(
         groupRatio,
+        groupTaxRate,
         userUsableGroups,
         topupGroupRatio
       )
     })
-  }, [groupRatio, userUsableGroups, topupGroupRatio])
+  }, [groupRatio, groupTaxRate, userUsableGroups, topupGroupRatio])
 
   const emitRows = useCallback(
     (nextRows: GroupPricingRow[]) => {
       setRows(nextRows)
       const serialized = serializeGroupPricingRows(nextRows)
       onChange('GroupRatio', serialized.GroupRatio)
+      onChange('GroupTaxRate', serialized.GroupTaxRate)
       onChange('UserUsableGroups', serialized.UserUsableGroups)
       onChange('TopupGroupRatio', serialized.TopupGroupRatio)
     },
@@ -548,6 +577,7 @@ function GroupPricingTable({
         _id: createGroupPricingId(),
         name,
         ratio: '1',
+        taxRate: '0',
         topupRatio: '',
         selectable: true,
         description: '',
@@ -582,6 +612,10 @@ function GroupPricingTable({
       row.name.toLowerCase().includes(query) ||
       row.description.toLowerCase().includes(query)
   )
+  const hasInvalidTaxRate = rows.some((row) => {
+    const taxRate = Number(row.taxRate)
+    return !Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100
+  })
 
   return (
     <Card className={sectionCardClassName}>
@@ -626,7 +660,7 @@ function GroupPricingTable({
             )}
           </InputGroup>
           <StaticDataTable
-            tableClassName='min-w-[760px]'
+            tableClassName='min-w-[840px]'
             tableProps={{ 'aria-label': t('Pricing groups') }}
             data={visibleRows}
             getRowKey={(row) => row._id}
@@ -681,6 +715,29 @@ function GroupPricingTable({
                     aria-label={t('Ratio')}
                     onChange={(event) =>
                       updateRow(row._id, 'ratio', event.target.value)
+                    }
+                  />
+                ),
+              },
+              {
+                id: 'tax-rate',
+                header: t('Tax rate (%)'),
+                className: 'w-28',
+                cell: (row) => (
+                  <Input
+                    type='number'
+                    min={0}
+                    max={100}
+                    step={0.01}
+                    value={row.taxRate}
+                    aria-label={t('Tax rate (%)')}
+                    aria-invalid={
+                      !Number.isFinite(Number(row.taxRate)) ||
+                      Number(row.taxRate) < 0 ||
+                      Number(row.taxRate) > 100
+                    }
+                    onChange={(event) =>
+                      updateRow(row._id, 'taxRate', event.target.value)
                     }
                   />
                 ),
@@ -774,6 +831,11 @@ function GroupPricingTable({
               {t('Duplicate group names: {{names}}', {
                 names: duplicateNames.join(', '),
               })}
+            </p>
+          )}
+          {hasInvalidTaxRate && (
+            <p className='text-destructive text-sm'>
+              {t('Tax rates must be between 0 and 100')}
             </p>
           )}
         </div>

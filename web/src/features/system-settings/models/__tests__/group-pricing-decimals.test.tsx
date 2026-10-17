@@ -26,6 +26,7 @@ import { GroupRatioVisualEditor } from '../group-ratio-visual-editor'
 function PricingFixture() {
   const [settings, setSettings] = useState<Record<string, string>>({
     GroupRatio: '{"default":1}',
+    GroupTaxRate: '{}',
     TopupGroupRatio: '{}',
     UserUsableGroups: '{}',
   })
@@ -36,6 +37,7 @@ function PricingFixture() {
         onSectionChange={() => {}}
         defaultUseAutoGroupField={null}
         groupRatio={settings.GroupRatio}
+        groupTaxRate={settings.GroupTaxRate}
         topupGroupRatio={settings.TopupGroupRatio}
         userUsableGroups={settings.UserUsableGroups}
         groupGroupRatio='{}'
@@ -52,11 +54,12 @@ function PricingFixture() {
 }
 
 test.each([
-  ['GroupRatio', 0],
-  ['TopupGroupRatio', 1],
+  ['GroupRatio', 0, '0.0001'],
+  ['GroupTaxRate', 1, '0.01'],
+  ['TopupGroupRatio', 2, '0.0001'],
 ] as const)(
-  '%s preserves typed decimals and accepts them as valid numeric ratios',
-  async (key, index) => {
+  '%s preserves typed decimals and accepts valid values',
+  async (key, index, step) => {
     const user = userEvent.setup()
     render(<PricingFixture />)
     const row = screen.getByDisplayValue('default').closest('tr')
@@ -64,6 +67,7 @@ test.each([
     const input = within(row).getAllByRole('spinbutton')[
       index
     ] as HTMLInputElement
+    expect(input.step).toBe(step)
     fireEvent.change(input, { target: { value: '0.0' } })
     expect(input.value).toBe('0.0')
     await user.clear(input)
@@ -76,11 +80,11 @@ test.each([
     )
     expect(JSON.parse(saved[key])).toEqual({ default: 0.04 })
     await user.clear(input)
-    await user.type(input, '0.0001')
-    expect(input).toHaveValue(0.0001)
+    await user.type(input, step === '0.01' ? '0.01' : '0.0001')
+    expect(input).toHaveValue(step === '0.01' ? 0.01 : 0.0001)
     expect(input.checkValidity()).toBe(true)
     await user.clear(input)
-    await user.type(input, '0.00001')
+    await user.type(input, step === '0.01' ? '0.001' : '0.00001')
     expect(input.validity.stepMismatch).toBe(true)
     await user.clear(input)
     await user.type(input, '-0.04')

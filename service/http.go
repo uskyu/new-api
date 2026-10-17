@@ -31,7 +31,8 @@ func CloseResponseBodyGracefully(httpResponse *http.Response) {
 // into the Gin context for later logging.
 func isIntelligentRoutingResponseHeader(name string) bool {
 	return strings.EqualFold(name, setting.IntelligentRoutingGroupHeader) ||
-		strings.EqualFold(name, setting.IntelligentRoutingDiscountPercentHeader) ||
+		strings.EqualFold(name, setting.IntelligentRoutingChannelIDHeader) ||
+		strings.EqualFold(name, setting.IntelligentRoutingGroupRatioHeader) ||
 		strings.EqualFold(name, setting.IntelligentRoutingTaxRatePercentHeader)
 }
 

@@ -51,8 +51,6 @@ type Channel = {
 type RoutingGroup = {
   id: string
   name: string
-  discount_percent: number
-  tax_rate_percent: number
   channel_order: number[]
 }
 type RoutingConfig = {
@@ -197,8 +195,6 @@ export function IntelligentRoutingPage() {
   const [selectedTokenGroups, setSelectedTokenGroups] = useState<string[]>([])
   const [groupId, setGroupId] = useState('')
   const [groupName, setGroupName] = useState('')
-  const [discountPercent, setDiscountPercent] = useState(0)
-  const [taxRatePercent, setTaxRatePercent] = useState(0)
   const [selectedChannels, setSelectedChannels] = useState<number[]>([])
   const [channelSearch, setChannelSearch] = useState('')
   const [deleting, setDeleting] = useState<RoutingGroup | null>(null)
@@ -283,8 +279,6 @@ export function IntelligentRoutingPage() {
     const group: RoutingGroup = {
       id: groupId.trim(),
       name: groupName.trim(),
-      discount_percent: Math.min(100, Math.max(0, discountPercent)),
-      tax_rate_percent: Math.min(100, Math.max(0, taxRatePercent)),
       channel_order: selectedChannels,
     }
     updatePools(
@@ -294,8 +288,6 @@ export function IntelligentRoutingPage() {
     )
     setGroupId('')
     setGroupName('')
-    setDiscountPercent(0)
-    setTaxRatePercent(0)
     setSelectedChannels([])
   }
   const removeGroup = () => {
@@ -328,7 +320,7 @@ export function IntelligentRoutingPage() {
         </h1>
         <p className='text-muted-foreground mt-1 text-sm'>
           {t(
-            'Groups are resource pools. Harness sends the group ID in X-Route-Group; channel IDs are not exposed to Harness.'
+            'Groups are resource pools. Harness sends the group ID in X-Route-Group, and the actual channel pricing information is returned in the response headers.'
           )}
         </p>
       </header>
@@ -415,32 +407,6 @@ export function IntelligentRoutingPage() {
               value={groupName}
               onChange={(event) => setGroupName(event.target.value)}
             />
-            <label className='flex flex-col gap-1 text-sm'>
-              {t('Discount percentage')}
-              <Input
-                aria-label={t('Discount percentage')}
-                type='number'
-                min={0}
-                max={100}
-                value={discountPercent}
-                onChange={(event) =>
-                  setDiscountPercent(Number(event.target.value))
-                }
-              />
-            </label>
-            <label className='flex flex-col gap-1 text-sm'>
-              {t('Tax rate percentage')}
-              <Input
-                aria-label={t('Tax rate percentage')}
-                type='number'
-                min={0}
-                max={100}
-                value={taxRatePercent}
-                onChange={(event) =>
-                  setTaxRatePercent(Number(event.target.value))
-                }
-              />
-            </label>
             <Button onClick={persistGroup}>{t('Add or update group')}</Button>
           </div>
           <div className='mt-3 space-y-2'>
@@ -502,11 +468,6 @@ export function IntelligentRoutingPage() {
                         ({group.id})
                       </span>
                     </h3>
-                    <p className='text-muted-foreground text-sm'>
-                      {t('Discount percentage')}: {group.discount_percent ?? 0}%
-                      · {t('Tax rate percentage')}:{' '}
-                      {group.tax_rate_percent ?? 0}%
-                    </p>
                   </div>
                   <div className='flex gap-2'>
                     <Button
@@ -514,8 +475,6 @@ export function IntelligentRoutingPage() {
                       onClick={() => {
                         setGroupId(group.id)
                         setGroupName(group.name)
-                        setDiscountPercent(group.discount_percent ?? 0)
-                        setTaxRatePercent(group.tax_rate_percent ?? 0)
                         setSelectedChannels(group.channel_order)
                       }}
                     >

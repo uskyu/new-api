@@ -11,11 +11,12 @@ import (
 func TestShouldCopyUpstreamHeaderPreservesLocalIntelligentRoutingPricing(t *testing.T) {
 	for _, name := range []string{
 		setting.IntelligentRoutingGroupHeader,
-		setting.IntelligentRoutingDiscountPercentHeader,
+		setting.IntelligentRoutingChannelIDHeader,
+		setting.IntelligentRoutingGroupRatioHeader,
 		setting.IntelligentRoutingTaxRatePercentHeader,
 	} {
 		assert.False(t, ShouldCopyUpstreamHeader(nil, name, []string{"upstream-value"}), "upstream must not override %s", name)
 	}
-	assert.False(t, ShouldCopyUpstreamHeader(nil, http.CanonicalHeaderKey(setting.IntelligentRoutingDiscountPercentHeader), nil))
+	assert.False(t, ShouldCopyUpstreamHeader(nil, http.CanonicalHeaderKey(setting.IntelligentRoutingGroupRatioHeader), nil))
 	assert.True(t, ShouldCopyUpstreamHeader(nil, "X-Upstream-Request-ID", []string{"upstream-request"}))
 }

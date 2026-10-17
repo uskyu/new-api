@@ -32,6 +32,28 @@ func IsChannelEnabledForGroupModel(group string, modelName string, channelID int
 	return false
 }
 
+func GetEnabledAbilityGroupsForChannelModel(channelID int, modelName string) ([]string, error) {
+	modelNames := []string{modelName}
+	if normalized := ratio_setting.RoutingMatchModelName(modelName); normalized != "" && normalized != modelName {
+		modelNames = append(modelNames, normalized)
+	}
+	var abilities []Ability
+	if err := DB.Where("channel_id = ? and enabled = ? and model IN ?", channelID, true, modelNames).Find(&abilities).Error; err != nil {
+		return nil, err
+	}
+	groups := make([]string, 0, len(abilities))
+	seen := make(map[string]struct{}, len(abilities))
+	for _, ability := range abilities {
+		if _, exists := seen[ability.Group]; exists {
+			continue
+		}
+		seen[ability.Group] = struct{}{}
+		groups = append(groups, ability.Group)
+	}
+	slices.Sort(groups)
+	return groups, nil
+}
+
 func IsChannelEnabledForAnyGroupModel(groups []string, modelName string, channelID int) bool {
 	if len(groups) == 0 {
 		return false

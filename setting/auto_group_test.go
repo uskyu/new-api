@@ -29,33 +29,18 @@ func TestUpdateMaxTokenAutoGroupsRejectsInvalidValuesWithoutChangingState(t *tes
 	}
 }
 
-func TestIntelligentRoutingPercentValidationAndLegacyCostFields(t *testing.T) {
+func TestIntelligentRoutingConfigIgnoresLegacyPricingAndKeepsTokenAccess(t *testing.T) {
 	var config IntelligentRoutingConfig
-	require.NoError(t, common.UnmarshalJsonStr(`{"global_channel_order":[1],"global_cost_group":"old","groups":[{"id":"pool","name":"Pool","cost_group":"old","discount_percent":100,"tax_rate_percent":0,"channel_order":[2]}]}`, &config))
+	require.NoError(t, common.UnmarshalJsonStr(`{"global_channel_order":[1],"global_cost_group":"old","groups":[{"id":"pool","name":"Pool","cost_group":"old","discount_percent":100,"tax_rate_percent":8,"channel_order":[2]}]}`, &config))
 	require.NoError(t, ValidateIntelligentRoutingConfig(config))
 	assert.Equal(t, "Pool", IntelligentRoutingGroups(config)["pool"])
 	serialized, err := IntelligentRoutingConfig2JSONString(config)
 	require.NoError(t, err)
 	assert.NotContains(t, serialized, "cost_group")
+	assert.NotContains(t, serialized, "discount_percent")
+	assert.NotContains(t, serialized, "tax_rate_percent")
 	config.TokenGroupAccess = map[int][]string{7: {"pool"}}
 	assert.True(t, TokenCanUseIntelligentRoutingGroupForConfig(config, 7, "pool"))
 	assert.False(t, TokenCanUseIntelligentRoutingGroupForConfig(config, 7, "another-pool"))
 	assert.False(t, TokenCanUseIntelligentRoutingGroupForConfig(config, 7, "unknown"))
-
-	for _, tc := range []struct {
-		name  string
-		group IntelligentRoutingGroup
-	}{
-		{name: "negative discount", group: IntelligentRoutingGroup{ID: "pool", Name: "Pool", DiscountPercent: -0.01}},
-		{name: "discount above 100", group: IntelligentRoutingGroup{ID: "pool", Name: "Pool", DiscountPercent: 100.01}},
-		{name: "negative tax", group: IntelligentRoutingGroup{ID: "pool", Name: "Pool", TaxRatePercent: -0.01}},
-		{name: "tax above 100", group: IntelligentRoutingGroup{ID: "pool", Name: "Pool", TaxRatePercent: 100.01}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Error(t, ValidateIntelligentRoutingConfig(IntelligentRoutingConfig{
-				GlobalChannelOrder: []int{1},
-				Groups:             []IntelligentRoutingGroup{tc.group},
-			}))
-		})
-	}
 }

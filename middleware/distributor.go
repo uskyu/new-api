@@ -125,7 +125,6 @@ func Distribute() func(c *gin.Context) {
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
-		setIntelligentRoutingResponseHeaders(c)
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
@@ -136,34 +135,38 @@ func Distribute() func(c *gin.Context) {
 // noAvailableChannelMessage explains a 503 for a task-plugin-claimed model.
 // The response tells the caller the model is plugin-claimed without naming the
 // plugin; the candidate plugin keys go to the server log under the request id.
-func setIntelligentRoutingResponseHeaders(c *gin.Context) {
-	groupID := common.GetContextKeyString(c, setting.IntelligentRoutingContextKey)
-	if groupID == "" {
+func ClearIntelligentRoutingResponseHeaders(c *gin.Context) {
+	if c == nil || c.Writer == nil || c.Writer.Written() {
 		return
 	}
-	discountPercent, taxRatePercent, ok := setting.GetIntelligentRoutingGroupPricing(groupID)
-	if !ok {
-		return
+	for _, name := range []string{
+		setting.IntelligentRoutingGroupHeader,
+		setting.IntelligentRoutingChannelIDHeader,
+		setting.IntelligentRoutingGroupRatioHeader,
+		setting.IntelligentRoutingTaxRatePercentHeader,
+	} {
+		c.Writer.Header().Del(name)
 	}
-	setIntelligentRoutingPricingHeaders(c, groupID, discountPercent, taxRatePercent)
 }
 
-func setIntelligentRoutingPricingHeaders(c *gin.Context, groupID string, discountPercent, taxRatePercent float64) {
-	if groupID == "" || c == nil || c.Writer == nil || c.Writer.Written() {
+func SetIntelligentRoutingResponseHeaders(c *gin.Context, channelID int, groupRatio, taxRate float64) {
+	if c == nil || c.Writer == nil || c.Writer.Written() || common.GetContextKeyString(c, setting.IntelligentRoutingContextKey) == "" {
 		return
 	}
 
 	header := c.Writer.Header()
-	header.Set(setting.IntelligentRoutingGroupHeader, groupID)
-	header.Set(setting.IntelligentRoutingDiscountPercentHeader, strconv.FormatFloat(discountPercent, 'f', -1, 64))
-	header.Set(setting.IntelligentRoutingTaxRatePercentHeader, strconv.FormatFloat(taxRatePercent, 'f', -1, 64))
+	header.Set(setting.IntelligentRoutingGroupHeader, common.GetContextKeyString(c, setting.IntelligentRoutingContextKey))
+	header.Set(setting.IntelligentRoutingChannelIDHeader, strconv.Itoa(channelID))
+	header.Set(setting.IntelligentRoutingGroupRatioHeader, strconv.FormatFloat(groupRatio, 'f', -1, 64))
+	header.Set(setting.IntelligentRoutingTaxRatePercentHeader, strconv.FormatFloat(taxRate, 'f', -1, 64))
 	if requestID := c.GetString(common.RequestIdKey); requestID != "" {
 		header.Set(common.RequestIdKey, requestID)
 	}
 	exposeHeaders := header.Get("Access-Control-Expose-Headers")
 	for _, name := range []string{
 		setting.IntelligentRoutingGroupHeader,
-		setting.IntelligentRoutingDiscountPercentHeader,
+		setting.IntelligentRoutingChannelIDHeader,
+		setting.IntelligentRoutingGroupRatioHeader,
 		setting.IntelligentRoutingTaxRatePercentHeader,
 		common.RequestIdKey,
 	} {

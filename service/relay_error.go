@@ -18,6 +18,9 @@ import (
 // DecideRelayRetry is the single retry decision for relay attempts. The reason
 // is recorded in the request policy decision events of the log details.
 func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) PolicyDecision {
+	if c != nil && c.Writer != nil && c.Writer.Written() && !c.GetBool("websocket_upgraded") {
+		return PolicyDecision{Action: "stop", Reason: "response_committed", Source: "system"}
+	}
 	if err == nil {
 		return PolicyDecision{Action: "stop", Reason: "request_completed", Source: "system"}
 	}

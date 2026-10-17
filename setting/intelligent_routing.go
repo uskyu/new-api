@@ -2,7 +2,6 @@ package setting
 
 import (
 	"fmt"
-	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -17,17 +16,16 @@ const (
 	IntelligentRoutingGlobalGroupID   = "global"
 	IntelligentRoutingGlobalGroupName = "Global priority"
 
-	IntelligentRoutingGroupHeader           = "X-Route-Group"
-	IntelligentRoutingDiscountPercentHeader = "X-Route-Discount-Percent"
-	IntelligentRoutingTaxRatePercentHeader  = "X-Route-Tax-Rate-Percent"
+	IntelligentRoutingGroupHeader          = "X-Route-Group"
+	IntelligentRoutingChannelIDHeader      = "X-Route-Channel-ID"
+	IntelligentRoutingGroupRatioHeader     = "X-Route-Group-Ratio"
+	IntelligentRoutingTaxRatePercentHeader = "X-Route-Tax-Rate-Percent"
 )
 
 type IntelligentRoutingGroup struct {
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	DiscountPercent float64 `json:"discount_percent"`
-	TaxRatePercent  float64 `json:"tax_rate_percent"`
-	ChannelOrder    []int   `json:"channel_order"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	ChannelOrder []int  `json:"channel_order"`
 }
 
 type IntelligentRoutingConfig struct {
@@ -104,24 +102,6 @@ func GetIntelligentRoutingGroupChannelOrder(groupID string) ([]int, bool) {
 		}
 	}
 	return nil, false
-}
-
-func GetIntelligentRoutingGroupPricing(groupID string) (float64, float64, bool) {
-	intelligentRoutingMu.RLock()
-	defer intelligentRoutingMu.RUnlock()
-	return intelligentRoutingGroupPricing(intelligentRoutingConfig, groupID)
-}
-
-func intelligentRoutingGroupPricing(config IntelligentRoutingConfig, groupID string) (float64, float64, bool) {
-	if groupID == IntelligentRoutingGlobalGroupID {
-		return 0, 0, config.GlobalChannelOrder != nil
-	}
-	for _, group := range config.Groups {
-		if group.ID == groupID {
-			return group.DiscountPercent, group.TaxRatePercent, true
-		}
-	}
-	return 0, 0, false
 }
 
 func IntelligentRoutingConfig2JSONString(config IntelligentRoutingConfig) (string, error) {
@@ -226,12 +206,6 @@ func ValidateIntelligentRoutingConfig(config IntelligentRoutingConfig) error {
 			return fmt.Errorf("duplicate routing group id: %s", group.ID)
 		}
 		groupIDs[group.ID] = struct{}{}
-		if math.IsNaN(group.DiscountPercent) || math.IsInf(group.DiscountPercent, 0) || group.DiscountPercent < 0 || group.DiscountPercent > 100 {
-			return fmt.Errorf("groups[%d].discount_percent must be between 0 and 100", i)
-		}
-		if math.IsNaN(group.TaxRatePercent) || math.IsInf(group.TaxRatePercent, 0) || group.TaxRatePercent < 0 || group.TaxRatePercent > 100 {
-			return fmt.Errorf("groups[%d].tax_rate_percent must be between 0 and 100", i)
-		}
 		if err := validateChannelOrder(fmt.Sprintf("groups[%d].channel_order", i), group.ChannelOrder); err != nil {
 			return err
 		}

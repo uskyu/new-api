@@ -291,11 +291,9 @@ type harnessCatalogResponse struct {
 }
 
 type harnessCatalogGroup struct {
-	ID              string                `json:"id"`
-	Name            string                `json:"name"`
-	DiscountPercent float64               `json:"discount_percent"`
-	TaxRatePercent  float64               `json:"tax_rate_percent"`
-	Models          []harnessCatalogModel `json:"models"`
+	ID     string                `json:"id"`
+	Name   string                `json:"name"`
+	Models []harnessCatalogModel `json:"models"`
 }
 
 type harnessCatalogModel struct {
@@ -402,11 +400,9 @@ func GetHarnessCatalog(c *gin.Context) {
 		if _, allowed := authorizedSet[setting.IntelligentRoutingGlobalGroupID]; allowed {
 			collectGroupModels(setting.IntelligentRoutingGlobalGroupID, routing.GlobalChannelOrder)
 			globalGroup := harnessCatalogGroup{
-				ID:              setting.IntelligentRoutingGlobalGroupID,
-				Name:            setting.IntelligentRoutingGlobalGroupName,
-				DiscountPercent: 0,
-				TaxRatePercent:  0,
-				Models:          buildHarnessCatalogModels(groupModels[setting.IntelligentRoutingGlobalGroupID], groupPricingByGroup[setting.IntelligentRoutingGlobalGroupID]),
+				ID:     setting.IntelligentRoutingGlobalGroupID,
+				Name:   setting.IntelligentRoutingGlobalGroupName,
+				Models: buildHarnessCatalogModels(groupModels[setting.IntelligentRoutingGlobalGroupID], groupPricingByGroup[setting.IntelligentRoutingGlobalGroupID]),
 			}
 			response.Groups = append(response.Groups, globalGroup)
 		}
@@ -416,11 +412,9 @@ func GetHarnessCatalog(c *gin.Context) {
 			continue
 		}
 		response.Groups = append(response.Groups, harnessCatalogGroup{
-			ID:              group.ID,
-			Name:            group.Name,
-			DiscountPercent: group.DiscountPercent,
-			TaxRatePercent:  group.TaxRatePercent,
-			Models:          buildHarnessCatalogModels(groupModels[group.ID], groupPricingByGroup[group.ID]),
+			ID:     group.ID,
+			Name:   group.Name,
+			Models: buildHarnessCatalogModels(groupModels[group.ID], groupPricingByGroup[group.ID]),
 		})
 	}
 	response.QuotaPerUnit = common.QuotaPerUnit

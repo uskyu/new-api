@@ -5,7 +5,37 @@ import (
 
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestGroupTaxRateDefaultsToZeroAndSupportsUpdates(t *testing.T) {
+	original := GroupTaxRate2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, UpdateGroupTaxRateByJSONString(original))
+	})
+
+	require.NoError(t, UpdateGroupTaxRateByJSONString(`{"vip":8.5}`))
+	assert.Equal(t, 8.5, GetGroupTaxRate("vip"))
+	assert.Equal(t, 0.0, GetGroupTaxRate("default"))
+	assert.Equal(t, map[string]float64{"vip": 8.5}, GetGroupTaxRateCopy())
+	assert.Equal(t, `{"vip":8.5}`, GroupTaxRate2JSONString())
+}
+
+func TestCheckGroupTaxRateRejectsInvalidRates(t *testing.T) {
+	original := GroupTaxRate2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, UpdateGroupTaxRateByJSONString(original))
+	})
+	require.NoError(t, UpdateGroupTaxRateByJSONString(`{"vip":8.5}`))
+
+	for _, value := range []string{`{"vip":-0.1}`, `{"vip":100.1}`, `[]`, `not-json`} {
+		assert.Error(t, CheckGroupTaxRate(value), value)
+		assert.Error(t, UpdateGroupTaxRateByJSONString(value), value)
+	}
+	assert.NoError(t, CheckGroupTaxRate(`{"vip":0,"svip":100}`))
+	assert.Error(t, UpdateGroupTaxRateByJSONString(`{"vip":101}`))
+	assert.Equal(t, map[string]float64{"vip": 8.5}, GetGroupTaxRateCopy())
+}
 
 func TestFormatMatchingModelNameDoesNotStripBase(t *testing.T) {
 	assert.Equal(t, "qwen3-max@thinking:on", FormatMatchingModelName("qwen3-max@thinking:on"))

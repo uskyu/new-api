@@ -266,13 +266,18 @@ func GetRandomSatisfiedChannelWithCostGroup(
 		candidates = append(candidates, channelID)
 	}
 	ordered := configuredChannelOrderIndex(configuredOrder, candidates)
-	if retry >= len(ordered) {
-		retry = len(ordered) - 1
-	}
-	if retry < 0 {
+	channelID := configuredChannelForRetry(ordered, retry)
+	if channelID == nil {
 		return nil, nil
 	}
-	return channelByID[ordered[retry]], nil
+	return channelByID[*channelID], nil
+}
+
+func configuredChannelForRetry(ordered []int, retry int) *int {
+	if retry < 0 || retry >= len(ordered) {
+		return nil
+	}
+	return &ordered[retry]
 }
 
 func configuredChannelOrderIndex(configuredOrder []int, candidates []int) []int {

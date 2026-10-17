@@ -1,7 +1,6 @@
 package ratio_setting
 
 import (
-	"encoding/json"
 	"errors"
 
 	"github.com/QuantumNous/new-api/common"
@@ -31,6 +30,7 @@ type GroupRatioSetting struct {
 	GroupRatio              *types.RWMap[string, float64]            `json:"group_ratio"`
 	GroupGroupRatio         *types.RWMap[string, map[string]float64] `json:"group_group_ratio"`
 	GroupSpecialUsableGroup *types.RWMap[string, map[string]string]  `json:"group_special_usable_group"`
+	GroupTaxRate            *types.RWMap[string, float64]            `json:"group_tax_rate"`
 }
 
 var groupRatioSetting GroupRatioSetting
@@ -46,6 +46,7 @@ func init() {
 		GroupSpecialUsableGroup: groupSpecialUsableGroup,
 		GroupRatio:              groupRatioMap,
 		GroupGroupRatio:         groupGroupRatioMap,
+		GroupTaxRate:            types.NewRWMap[string, float64](),
 	}
 
 	config.GlobalConfig.Register("group_ratio_setting", &groupRatioSetting)
@@ -56,7 +57,49 @@ func GetGroupRatioSetting() *GroupRatioSetting {
 		groupRatioSetting.GroupSpecialUsableGroup = types.NewRWMap[string, map[string]string]()
 		groupRatioSetting.GroupSpecialUsableGroup.AddAll(defaultGroupSpecialUsableGroup)
 	}
+	if groupRatioSetting.GroupTaxRate == nil {
+		groupRatioSetting.GroupTaxRate = types.NewRWMap[string, float64]()
+	}
 	return &groupRatioSetting
+}
+
+func GetGroupTaxRateCopy() map[string]float64 {
+	return GetGroupRatioSetting().GroupTaxRate.ReadAll()
+}
+
+func GetGroupTaxRate(name string) float64 {
+	taxRate, ok := GetGroupRatioSetting().GroupTaxRate.Get(name)
+	if !ok {
+		return 0
+	}
+	return taxRate
+}
+
+func GroupTaxRate2JSONString() string {
+	return GetGroupRatioSetting().GroupTaxRate.MarshalJSONString()
+}
+
+func UpdateGroupTaxRateByJSONString(jsonStr string) error {
+	if err := CheckGroupTaxRate(jsonStr); err != nil {
+		return err
+	}
+	return types.LoadFromJsonString(GetGroupRatioSetting().GroupTaxRate, jsonStr)
+}
+
+func CheckGroupTaxRate(jsonStr string) error {
+	var taxRates map[string]float64
+	if err := common.Unmarshal([]byte(jsonStr), &taxRates); err != nil {
+		return err
+	}
+	if taxRates == nil {
+		return errors.New("group tax rates must be a JSON object")
+	}
+	for name, taxRate := range taxRates {
+		if taxRate < 0 || taxRate > 100 {
+			return errors.New("group tax rate must be between 0 and 100: " + name)
+		}
+	}
+	return nil
 }
 
 func GetGroupRatioCopy() map[string]float64 {
@@ -107,7 +150,7 @@ func UpdateGroupGroupRatioByJSONString(jsonStr string) error {
 
 func CheckGroupRatio(jsonStr string) error {
 	checkGroupRatio := make(map[string]float64)
-	err := json.Unmarshal([]byte(jsonStr), &checkGroupRatio)
+	err := common.Unmarshal([]byte(jsonStr), &checkGroupRatio)
 	if err != nil {
 		return err
 	}

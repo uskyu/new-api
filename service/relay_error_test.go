@@ -217,6 +217,7 @@ func TestDecideRelayRetryReasons(t *testing.T) {
 			c.Set(ginKeyChannelAffinitySkipRetry, true)
 			RequestPolicy(c).SessionModeSource = "global"
 		}, want: PolicyDecision{Action: "stop", Reason: "strict_session", Source: "global"}},
+		{name: "committed response forces stop", err: upstream(http.StatusTooManyRequests), retries: 1, setup: func(c *gin.Context) { _, _ = c.Writer.Write([]byte("partial")) }, want: PolicyDecision{Action: "stop", Reason: "response_committed", Source: "system"}},
 		{name: "nil error", retries: 1, want: PolicyDecision{Action: "stop", Reason: "request_completed", Source: "system"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

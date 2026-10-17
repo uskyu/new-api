@@ -103,15 +103,13 @@ describe('intelligent routing management', () => {
     })
   })
 
-  it('saves resource pool channels, discount, and tax rate', async () => {
+  it('saves resource pool channel selection and order without pool pricing fields', async () => {
     mockGet({
       global_channel_order: [],
       groups: [
         {
           id: 'pool',
           name: 'Pool',
-          discount_percent: 0,
-          tax_rate_percent: 0,
           channel_order: [11],
         },
       ],
@@ -143,20 +141,12 @@ describe('intelligent routing management', () => {
       await screen.findByRole('heading', { name: 'Resource pool groups' })
     ).toBeVisible()
     await user.click(await screen.findByRole('button', { name: 'Edit' }))
-    await user.clear(
-      screen.getByRole('spinbutton', { name: 'Discount percentage' })
-    )
-    await user.type(
-      screen.getByRole('spinbutton', { name: 'Discount percentage' }),
-      '15'
-    )
-    await user.clear(
-      screen.getByRole('spinbutton', { name: 'Tax rate percentage' })
-    )
-    await user.type(
-      screen.getByRole('spinbutton', { name: 'Tax rate percentage' }),
-      '8'
-    )
+    expect(
+      screen.queryByLabelText('Discount percentage')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByLabelText('Tax rate percentage')
+    ).not.toBeInTheDocument()
     expect(
       screen.queryByRole('combobox', { name: 'Cost group' })
     ).not.toBeInTheDocument()
@@ -173,8 +163,6 @@ describe('intelligent routing management', () => {
         {
           id: 'pool',
           name: 'Pool',
-          discount_percent: 15,
-          tax_rate_percent: 8,
           channel_order: [12, 11],
         },
       ],
@@ -188,8 +176,6 @@ describe('intelligent routing management', () => {
         {
           id: 'pool',
           name: 'Pool',
-          discount_percent: 0,
-          tax_rate_percent: 0,
           channel_order: [],
         },
       ],

@@ -25,7 +25,9 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -85,12 +87,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			return
 		}
 		defer ws.Close()
+		c.Set("websocket_upgraded", true)
 	}
 
 	defer func() {
 		if newAPIError != nil {
 			service.RecordRequestPolicyTermination(c, newAPIError)
 			logger.LogError(c, common.LogText("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
+			if c.Writer.Written() && relayFormat != types.RelayFormatOpenAIRealtime {
+				return
+			}
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			upstreamURLs := common.UpstreamAddresses(c)
 			switch relayFormat {
@@ -158,6 +164,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.LastError = nil
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+		if common.GetContextKeyString(c, setting.IntelligentRoutingContextKey) != "" {
+			middleware.ClearIntelligentRoutingResponseHeaders(c)
+		}
 		relayInfo.StreamStatus = nil
 		relayInfo.PerformanceBusinessRejection = false
 		relayInfo.PerformanceOutputTokens = 0
@@ -173,9 +182,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = billingErr
 			break
 		}
-
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
+			if common.GetContextKeyString(c, setting.IntelligentRoutingContextKey) != "" && c.Writer.Written() {
+				newAPIError = types.NewError(bodyErr, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+				break
+			}
 			// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
 			if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
 				newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
@@ -185,6 +197,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+		if routingErr := setIntelligentRoutingResponseHeaders(c, channel.Id, relayInfo.OriginModelName); routingErr != nil {
+			newAPIError = routingErr
+			break
+		}
 
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:
@@ -293,6 +309,40 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		return nil, newAPIError
 	}
 	return channel, nil
+}
+
+func setIntelligentRoutingResponseHeaders(c *gin.Context, channelID int, modelName string) *types.NewAPIError {
+	if common.GetContextKeyString(c, setting.IntelligentRoutingContextKey) == "" || c.GetBool("websocket_upgraded") {
+		return nil
+	}
+	if c.Writer.Written() {
+		return types.NewError(errors.New("response already committed before route pricing was resolved"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	for _, name := range []string{
+		setting.IntelligentRoutingChannelIDHeader,
+		setting.IntelligentRoutingGroupRatioHeader,
+		setting.IntelligentRoutingTaxRatePercentHeader,
+	} {
+		c.Writer.Header().Del(name)
+	}
+	groups, err := model.GetEnabledAbilityGroupsForChannelModel(channelID, modelName)
+	if err != nil {
+		return types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	if len(groups) == 0 {
+		return types.NewError(errors.New("selected channel has no enabled ability for the requested model"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+
+	group := groups[0]
+	ratio := ratio_setting.GetGroupRatio(group)
+	taxRate := ratio_setting.GetGroupTaxRate(group)
+	for _, candidate := range groups[1:] {
+		if ratio_setting.GetGroupRatio(candidate) != ratio || ratio_setting.GetGroupTaxRate(candidate) != taxRate {
+			return types.NewError(errors.New("selected channel has ambiguous pricing groups for the requested model"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+	}
+	middleware.SetIntelligentRoutingResponseHeaders(c, channelID, ratio, taxRate)
+	return nil
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo) {

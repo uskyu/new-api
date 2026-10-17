@@ -21,36 +21,43 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSetIntelligentRoutingResponseHeadersReturnsPoolPricingAndRequestIDForStreaming(t *testing.T) {
+func TestSetIntelligentRoutingResponseHeadersReturnsFinalChannelPricingForStreaming(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	c.Set(common.RequestIdKey, "request-123")
-	common.SetContextKey(c, setting.IntelligentRoutingContextKey, "economy")
+	common.SetContextKey(c, setting.IntelligentRoutingContextKey, "global")
 
-	// The helper runs before either a JSON body or an SSE stream commits headers.
-	setIntelligentRoutingPricingHeaders(c, "economy", 18.5, 8)
+	SetIntelligentRoutingResponseHeaders(c, 42, 0.8, 8)
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.WriteHeaderNow()
 
-	assert.Equal(t, "economy", recorder.Header().Get(setting.IntelligentRoutingGroupHeader))
-	assert.Equal(t, "18.5", recorder.Header().Get(setting.IntelligentRoutingDiscountPercentHeader))
+	assert.Equal(t, "global", recorder.Header().Get(setting.IntelligentRoutingGroupHeader))
+	assert.Equal(t, "42", recorder.Header().Get(setting.IntelligentRoutingChannelIDHeader))
+	assert.Equal(t, "0.8", recorder.Header().Get(setting.IntelligentRoutingGroupRatioHeader))
 	assert.Equal(t, "8", recorder.Header().Get(setting.IntelligentRoutingTaxRatePercentHeader))
 	assert.Equal(t, "request-123", recorder.Header().Get(common.RequestIdKey))
-	assert.Contains(t, recorder.Header().Get("Access-Control-Expose-Headers"), setting.IntelligentRoutingDiscountPercentHeader)
+	assert.Contains(t, recorder.Header().Get("Access-Control-Expose-Headers"), setting.IntelligentRoutingChannelIDHeader)
 }
 
 func TestSetIntelligentRoutingResponseHeadersSkipsNonRoutedAndCommittedResponses(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	setIntelligentRoutingResponseHeaders(c)
-	assert.Empty(t, recorder.Header().Get(setting.IntelligentRoutingDiscountPercentHeader))
+	SetIntelligentRoutingResponseHeaders(c, 42, 0.8, 5)
+	assert.Empty(t, recorder.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 
-	common.SetContextKey(c, setting.IntelligentRoutingContextKey, "pool")
+	common.SetContextKey(c, setting.IntelligentRoutingContextKey, "global")
+	SetIntelligentRoutingResponseHeaders(c, 42, 0.8, 5)
+	assert.Equal(t, "42", c.Writer.Header().Get(setting.IntelligentRoutingChannelIDHeader))
+	ClearIntelligentRoutingResponseHeaders(c)
+	assert.Empty(t, c.Writer.Header().Get(setting.IntelligentRoutingChannelIDHeader))
+	assert.Empty(t, c.Writer.Header().Get(setting.IntelligentRoutingGroupHeader))
+
+	SetIntelligentRoutingResponseHeaders(c, 42, 0.8, 5)
 	c.Writer.WriteHeaderNow()
-	setIntelligentRoutingPricingHeaders(c, "pool", 20, 5)
-	assert.Empty(t, recorder.Header().Get(setting.IntelligentRoutingDiscountPercentHeader))
+	SetIntelligentRoutingResponseHeaders(c, 42, 0.8, 5)
+	assert.Equal(t, "42", recorder.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 }
 
 func TestChannelMatchesExpectedTaskPluginUsesGenericChannelSetting(t *testing.T) {
