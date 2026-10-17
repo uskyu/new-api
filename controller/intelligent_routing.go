@@ -15,6 +15,8 @@ import (
 
 type intelligentRoutingResponse struct {
 	GlobalChannelOrder []int                             `json:"global_channel_order"`
+	PricingGroupOrder []string `json:"pricing_group_order"`
+	PricingGroupOptions []pricingGroupOption `json:"pricing_group_options"`
 	Groups             []setting.IntelligentRoutingGroup `json:"groups"`
 	Channels           []intelligentRoutingChannel       `json:"channels"`
 }
@@ -26,6 +28,12 @@ type intelligentRoutingChannel struct {
 	Models        []string                         `json:"models"`
 	Priority      int64                            `json:"priority"`
 	EnabledGroups []intelligentRoutingAbilityGroup `json:"enabled_groups"`
+}
+
+type pricingGroupOption struct {
+	ID string `json:"id"`
+	Name string `json:"name"`
+	Ratio float64 `json:"ratio"`
 }
 
 type intelligentRoutingAbilityGroup struct {
@@ -46,6 +54,8 @@ func GetIntelligentRouting(c *gin.Context) {
 	}
 	response := intelligentRoutingResponse{
 		GlobalChannelOrder: globalOrder,
+		PricingGroupOrder: routingConfig.PricingGroupOrder,
+		PricingGroupOptions: make([]pricingGroupOption, 0),
 		Groups:             routingConfig.Groups,
 		Channels:           make([]intelligentRoutingChannel, 0, len(channels)),
 	}
@@ -57,6 +67,12 @@ func GetIntelligentRouting(c *gin.Context) {
 		abilityGroups[ability.ChannelId][ability.Group] = struct{}{}
 	}
 	usableGroups := setting.GetUserUsableGroupsCopy()
+	for id, ratio := range ratio_setting.GetGroupRatioCopy() {
+		name := usableGroups[id]
+		if name == "" { name = id }
+		response.PricingGroupOptions = append(response.PricingGroupOptions, pricingGroupOption{ID:id, Name:name, Ratio:ratio})
+	}
+	slices.SortFunc(response.PricingGroupOptions, func(a,b pricingGroupOption) int { return strings.Compare(a.ID,b.ID) })
 	for _, channel := range channels {
 		if channel == nil || channel.Status != common.ChannelStatusEnabled {
 			continue
@@ -87,6 +103,7 @@ func GetIntelligentRouting(c *gin.Context) {
 
 type updateIntelligentRoutingRequest struct {
 	GlobalChannelOrder []int                             `json:"global_channel_order"`
+	PricingGroupOrder []string `json:"pricing_group_order"`
 	Groups             []setting.IntelligentRoutingGroup `json:"groups"`
 }
 
@@ -98,11 +115,18 @@ func UpdateIntelligentRouting(c *gin.Context) {
 	}
 	config := setting.IntelligentRoutingConfig{
 		GlobalChannelOrder: request.GlobalChannelOrder,
+		PricingGroupOrder: request.PricingGroupOrder,
 		Groups:             request.Groups,
 	}
 	if err := setting.ValidateIntelligentRoutingConfig(config); err != nil {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage(err.Error()))
 		return
+	}
+	for _, id := range config.PricingGroupOrder {
+		if !ratio_setting.ContainsGroupRatio(id) {
+			common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Unknown pricing group: "+id))
+			return
+		}
 	}
 	if config.GlobalChannelOrder == nil {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("global_channel_order must be provided"))
@@ -137,7 +161,7 @@ func UpdateIntelligentRouting(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, gin.H{"global_channel_order": config.GlobalChannelOrder, "groups": config.Groups})
+	common.ApiSuccess(c, gin.H{"global_channel_order": config.GlobalChannelOrder, "pricing_group_order": config.PricingGroupOrder, "groups": config.Groups})
 }
 
 func channelHasEnabledModelAbility(channelID int, channelModels []string, abilities []model.Ability) bool {

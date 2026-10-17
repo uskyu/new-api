@@ -321,6 +321,7 @@ func setIntelligentRoutingResponseHeaders(c *gin.Context, channel *model.Channel
 	for _, name := range []string{
 		setting.IntelligentRoutingChannelIDHeader,
 		setting.IntelligentRoutingGroupRatioHeader,
+		setting.IntelligentRoutingPricingGroupHeader,
 		setting.IntelligentRoutingTaxRatePercentHeader,
 	} {
 		c.Writer.Header().Del(name)
@@ -328,24 +329,13 @@ func setIntelligentRoutingResponseHeaders(c *gin.Context, channel *model.Channel
 	if channel == nil {
 		return types.NewError(errors.New("selected channel missing for route pricing"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
-	groups, err := model.GetEnabledAbilityGroupsForChannelModel(channel.Id, modelName)
-	if err != nil {
-		return types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-	}
-	if len(groups) == 0 {
-		return types.NewError(errors.New("selected channel has no enabled ability for the requested model"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-	}
-
-	group := groups[0]
-	ratio := ratio_setting.GetGroupRatio(group)
-	// Tax belongs to the selected upstream channel, not its Ability pricing group.
-	taxRate := channel.GetOtherSettings().SupplierTaxRatePercent
-	for _, candidate := range groups[1:] {
-		if ratio_setting.GetGroupRatio(candidate) != ratio {
-			return types.NewError(errors.New("selected channel has ambiguous pricing groups for the requested model"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-		}
-	}
-	middleware.SetIntelligentRoutingResponseHeaders(c, channel.Id, ratio, taxRate)
+	group, valid, err := model.GetPreferredPricingGroupForChannelModel(channel.Id, modelName)
+	if err != nil { return types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry()) }
+	if !valid { return types.NewError(errors.New("selected channel has no opted-in pricing group"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry()) }
+	// First channel selection can be a partial stub: always read selected channel settings.
+	actual, err := model.CacheGetChannel(channel.Id)
+	if err != nil { return types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry()) }
+	middleware.SetIntelligentRoutingResponseHeaders(c, channel.Id, group, ratio_setting.GetGroupRatio(group), actual.GetOtherSettings().SupplierTaxRatePercent)
 	return nil
 }
 
