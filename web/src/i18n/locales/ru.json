@@ -4880,7 +4880,7 @@
     "Processed requests": "Обработанные запросы",
     "Processing OAuth response...": "Обработка ответа OAuth...",
     "Processing...": "Обработка...",
-    "Procurement tax forwarded to Harness in response headers; not charged by New API.": "Налог на закупку для этого канала передаётся Harness в заголовках ответа; New API его не рассчитывает.",
+    "Procurement tax rate of this channel, forwarded to Harness in the routed response headers. New API does not charge it.": "Ставка налога на закупку для этого канала передаётся Harness в заголовках ответа маршрута; New API её не взимает.",
     "Product": "Продукт",
     "Product configuration error": "Ошибка настройки продукта",
     "Product does not exist": "Продукт не существует",

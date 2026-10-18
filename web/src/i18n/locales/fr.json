@@ -4880,7 +4880,7 @@
     "Processed requests": "Requêtes traitées",
     "Processing OAuth response...": "Traitement de la réponse OAuth...",
     "Processing...": "Traitement...",
-    "Procurement tax forwarded to Harness in response headers; not charged by New API.": "La taxe d’achat de ce canal est transmise à Harness dans les en-têtes de réponse ; New API ne la calcule pas.",
+    "Procurement tax rate of this channel, forwarded to Harness in the routed response headers. New API does not charge it.": "Taux de taxe d’achat de ce canal, transmis à Harness dans les en-têtes de la réponse routée ; New API ne le facture pas.",
     "Product": "Produit",
     "Product configuration error": "Erreur de configuration du produit",
     "Product does not exist": "Le produit n'existe pas",

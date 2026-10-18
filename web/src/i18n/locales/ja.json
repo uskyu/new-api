@@ -4880,7 +4880,7 @@
     "Processed requests": "処理済みリクエスト",
     "Processing OAuth response...": "OAuth応答を処理中...",
     "Processing...": "処理中...",
-    "Procurement tax forwarded to Harness in response headers; not charged by New API.": "このチャネルの仕入税額はレスポンスヘッダーで Harness に渡され、New API では計算されません。",
+    "Procurement tax rate of this channel, forwarded to Harness in the routed response headers. New API does not charge it.": "このチャネルの仕入税額。ルーティングされたレスポンスヘッダーで Harness に渡され、New API では課金されません。",
     "Product": "商品",
     "Product configuration error": "商品設定エラー",
     "Product does not exist": "商品が存在しません",

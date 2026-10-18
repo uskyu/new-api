@@ -4880,7 +4880,7 @@
     "Processed requests": "Yêu cầu đã xử lý",
     "Processing OAuth response...": "Đang xử lý phản hồi OAuth...",
     "Processing...": "Đang xử lý...",
-    "Procurement tax forwarded to Harness in response headers; not charged by New API.": "Thuế mua hàng của kênh này được chuyển cho Harness qua header phản hồi; New API không tính khoản thuế này.",
+    "Procurement tax rate of this channel, forwarded to Harness in the routed response headers. New API does not charge it.": "Thuế suất mua hàng của kênh này được chuyển cho Harness trong header phản hồi định tuyến; New API không thu khoản này.",
     "Product": "Sản phẩm",
     "Product configuration error": "Lỗi cấu hình sản phẩm",
     "Product does not exist": "Sản phẩm không tồn tại",

@@ -4880,7 +4880,7 @@
     "Processed requests": "已处理请求",
     "Processing OAuth response...": "正在处理 OAuth 响应...",
     "Processing...": "处理中...",
-    "Procurement tax forwarded to Harness in response headers; not charged by New API.": "渠道采购税点通过响应头传递给 Harness 计算，New API 不计算税费。",
+    "Procurement tax rate of this channel, forwarded to Harness in the routed response headers. New API does not charge it.": "该渠道的采购税点，通过路由响应头传给 Harness 计算；New API 不收取此税。",
     "Product": "产品",
     "Product configuration error": "产品配置错误",
     "Product does not exist": "产品不存在",
