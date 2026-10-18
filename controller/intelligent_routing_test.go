@@ -126,6 +126,7 @@ func TestHarnessCatalogExcludesUnpricedModelsAndReturnsDiagnostics(t *testing.T)
 			"priced-model":   {HasBaseRoute: true},
 			"unpriced-model": {HasBaseRoute: true},
 		},
+		jsplugin.DefaultRegistry.Generation(),
 	)
 
 	require.Len(t, models, 1)
@@ -224,7 +225,7 @@ func TestHarnessCatalogIncludesPluginOnlyPricesAndRequiresEveryReachableVariant(
 	pricedRoute := map[string]*harnessRoutePricingProviders{
 		pricing.ModelName: {PluginKeys: map[string]struct{}{"pricing-alpha": {}}},
 	}
-	models, unpriced := buildHarnessCatalogModels(upstreamByModel, pricingByModel, pricedRoute)
+	models, unpriced := buildHarnessCatalogModels(upstreamByModel, pricingByModel, pricedRoute, jsplugin.DefaultRegistry.Generation())
 	require.Len(t, models, 1)
 	require.Empty(t, unpriced)
 	assert.Equal(t, 0.0, models[0].ModelRatio)
@@ -234,7 +235,7 @@ func TestHarnessCatalogIncludesPluginOnlyPricesAndRequiresEveryReachableVariant(
 	allVariantsRoute := map[string]*harnessRoutePricingProviders{
 		pricing.ModelName: {PluginKeys: map[string]struct{}{"pricing-alpha": {}, "pricing-beta": {}}},
 	}
-	models, unpriced = buildHarnessCatalogModels(upstreamByModel, pricingByModel, allVariantsRoute)
+	models, unpriced = buildHarnessCatalogModels(upstreamByModel, pricingByModel, allVariantsRoute, jsplugin.DefaultRegistry.Generation())
 	assert.Empty(t, models)
 	require.Len(t, unpriced, 1)
 }
@@ -246,12 +247,109 @@ func TestHarnessCatalogExportsRelayResolvedAliasPrice(t *testing.T) {
 		map[string][]string{alias: {"upstream-qwen3-max"}},
 		map[string]model.Pricing{alias: {ModelName: alias, ModelRatio: 37.5}},
 		map[string]*harnessRoutePricingProviders{alias: {HasBaseRoute: true}},
+		jsplugin.DefaultRegistry.Generation(),
 	)
 	require.Len(t, models, 1)
 	require.Empty(t, unpriced)
 	assert.Equal(t, 0, models[0].QuotaType)
 	assert.Equal(t, 4.0, models[0].ModelRatio)
 	assert.Zero(t, models[0].ModelPrice)
+}
+
+func TestHarnessCatalogResolvesMappedTaskAliasPluginPrice(t *testing.T) {
+	oldDB := model.DB
+	oldLogDB := model.LOG_DB
+	db, err := gorm.Open(sqlite.Open("file:harness-task-alias-catalog?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	model.DB = db
+	model.LOG_DB = db
+	t.Cleanup(func() {
+		model.DB = oldDB
+		model.LOG_DB = oldLogDB
+		sqlDB, dbErr := db.DB()
+		if dbErr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	require.NoError(t, db.AutoMigrate(&model.Channel{}))
+
+	const pluginKey = "harness-mapped-alias-price"
+	const alias = "harness-task-alias"
+	const declaredModel = "harness-declared-task-model"
+	source := `
+export const meta = {
+  apiVersion: 1, key: "harness-mapped-alias-price", name: "Harness Alias Price", version: "1.0.0",
+  author: {name: "Test"}, models: ["harness-declared-task-model"], fetchMode: "per_task",
+  usageSchema: {seconds: {type: "number", unit: "second"}}
+};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {}; }
+`
+	_, err = jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(pluginKey) })
+
+	oldConfig := config.GlobalConfig.ExportAllConfigs()
+	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(oldConfig)) })
+	expression := `tier("base", u("seconds") * 0.4)`
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		billing_setting.PluginBillingExprOption: `{"harness-mapped-alias-price::harness-declared-task-model":"tier(\"base\", u(\"seconds\") * 0.4)"}`,
+	}))
+
+	settingJSON := `{"task_plugin_key":"harness-mapped-alias-price"}`
+	modelMapping := `{"harness-task-alias":"harness-declared-task-model"}`
+	channel := model.Channel{
+		Type:         constant.ChannelTypeTaskPlugin,
+		Status:       common.ChannelStatusEnabled,
+		Name:         "Harness mapped plugin",
+		Models:       alias,
+		Group:        "default",
+		Setting:      &settingJSON,
+		ModelMapping: &modelMapping,
+	}
+	require.NoError(t, db.Create(&channel).Error)
+
+	pricing := model.Pricing{ModelName: alias, ModelRatio: 37.5}
+	require.Empty(t, pricing.BillingPluginVariants)
+	models, unpriced := buildHarnessCatalogModels(
+		map[string][]string{alias: {declaredModel}},
+		map[string]model.Pricing{alias: pricing},
+		map[string]*harnessRoutePricingProviders{
+			alias: {PluginKeys: map[string]struct{}{pluginKey: {}}},
+		},
+		jsplugin.DefaultRegistry.Generation(),
+	)
+	require.Len(t, models, 1)
+	require.Empty(t, unpriced)
+	assert.Equal(t, 0.0, models[0].ModelRatio)
+	assert.Equal(t, billing_setting.BillingModeRatio, models[0].BillingMode)
+	require.Len(t, models[0].BillingPluginVariants, 1)
+	assert.Equal(t, pluginKey, models[0].BillingPluginVariants[0].PluginKey)
+	assert.Equal(t, expression, models[0].BillingPluginVariants[0].BillingExpr)
+
+	modelExpression := `tier("base", u("seconds") * 0.7)`
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":          `{"harness-declared-task-model":"tiered_expr"}`,
+		"billing_setting.billing_expr":          `{"harness-declared-task-model":"tier(\"base\", u(\"seconds\") * 0.7)"}`,
+		billing_setting.PluginBillingExprOption: `{}`,
+	}))
+	pricing.BillingPluginVariants = nil
+	models, unpriced = buildHarnessCatalogModels(
+		map[string][]string{alias: {declaredModel}},
+		map[string]model.Pricing{alias: pricing},
+		map[string]*harnessRoutePricingProviders{
+			alias: {PluginKeys: map[string]struct{}{pluginKey: {}}},
+		},
+		jsplugin.DefaultRegistry.Generation(),
+	)
+	require.Len(t, models, 1)
+	require.Empty(t, unpriced)
+	assert.Equal(t, billing_setting.BillingModeTieredExpr, models[0].BillingMode)
+	assert.Equal(t, modelExpression, models[0].BillingExpr)
+	require.Len(t, models[0].BillingPluginVariants, 1)
+	assert.Equal(t, modelExpression, models[0].BillingPluginVariants[0].BillingExpr)
 }
 
 func TestSetIntelligentRoutingResponseHeadersUsesCheckedPricingGroupAndChannelTax(t *testing.T) {

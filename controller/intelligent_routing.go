@@ -546,6 +546,7 @@ func GetHarnessCatalog(c *gin.Context) {
 				groupModels[setting.IntelligentRoutingGlobalGroupID],
 				groupPricingByGroup[setting.IntelligentRoutingGlobalGroupID],
 				groupRoutePricingByGroup[setting.IntelligentRoutingGlobalGroupID],
+				pluginGeneration,
 			)
 			response.Groups = append(response.Groups, harnessCatalogGroup{
 				ID:             setting.IntelligentRoutingGlobalGroupID,
@@ -563,6 +564,7 @@ func GetHarnessCatalog(c *gin.Context) {
 			groupModels[group.ID],
 			groupPricingByGroup[group.ID],
 			groupRoutePricingByGroup[group.ID],
+			pluginGeneration,
 		)
 		response.Groups = append(response.Groups, harnessCatalogGroup{
 			ID:             group.ID,
@@ -580,6 +582,7 @@ func buildHarnessCatalogModels(
 	upstreamNames map[string][]string,
 	pricingByModel map[string]model.Pricing,
 	routePricingByModel map[string]*harnessRoutePricingProviders,
+	pluginGeneration *jsplugin.RoutingGeneration,
 ) ([]harnessCatalogModel, []harnessCatalogUnpricedModel) {
 	models := make([]harnessCatalogModel, 0, len(upstreamNames))
 	unpricedModels := make([]harnessCatalogUnpricedModel, 0)
@@ -591,8 +594,10 @@ func buildHarnessCatalogModels(
 		upstreamModels = slices.Clone(upstreamModels)
 		slices.Sort(upstreamModels)
 		upstreamModels = slices.Compact(upstreamModels)
+		pricing = addHarnessTaskAliasPluginPricing(pricing, modelName, pluginGeneration)
 		routePricing := routePricingByModel[modelName]
-		billingName, billable := hasHarnessCatalogPricing(modelName, pricing, routePricing)
+		billingName := harnessCatalogBillingName(modelName, pluginGeneration)
+		billable := hasHarnessCatalogPricing(billingName, pricing, routePricing)
 		if !billable {
 			unpricedModels = append(unpricedModels, harnessCatalogUnpricedModel{
 				Name:           modelName,
@@ -639,37 +644,79 @@ func buildHarnessCatalogModels(
 	return models, unpricedModels
 }
 
-func hasHarnessCatalogPricing(modelName string, pricing model.Pricing, routes *harnessRoutePricingProviders) (string, bool) {
-	billingName := relayhelper.ResolveBillingModelName(modelName)
+func harnessCatalogBillingName(modelName string, generation *jsplugin.RoutingGeneration) string {
+	if target, resolved := model.ResolveTaskModelAlias(generation, modelName); resolved && target.Declared != "" {
+		return relayhelper.ResolveBillingModelName(target.Declared)
+	}
+	return relayhelper.ResolveBillingModelName(modelName)
+}
+
+func addHarnessTaskAliasPluginPricing(pricing model.Pricing, modelName string, generation *jsplugin.RoutingGeneration) model.Pricing {
+	target, resolved := model.ResolveTaskModelAlias(generation, modelName)
+	if !resolved || target.Declared == "" || target.PluginKey == "" {
+		return pricing
+	}
+	if _, exists := harnessPluginPricingVariant(pricing.BillingPluginVariants, target.PluginKey); exists {
+		return pricing
+	}
+	plugin, exists := generation.Get(target.PluginKey)
+	if !exists {
+		return pricing
+	}
+	schema, examples := plugin.Meta.UsageForModels(target.Declared, modelName)
+	if schema == nil {
+		schema = map[string]jsplugin.UsageFieldSchema{}
+	}
+	expression, hasExpression := billing_setting.ResolveTaskBillingExpr(target.PluginKey, modelName, target.Declared)
+	mode := billing_setting.BillingModeRatio
+	if hasExpression || billing_setting.GetBillingMode(modelName) == billing_setting.BillingModeTieredExpr || billing_setting.GetBillingMode(target.Declared) == billing_setting.BillingModeTieredExpr {
+		mode = billing_setting.BillingModeTieredExpr
+	}
+	if mode == billing_setting.BillingModeTieredExpr && !billing_setting.TaskExprCompatible(expression, schema) {
+		expression = ""
+	}
+	pricing.BillingPluginVariants = append(pricing.BillingPluginVariants, model.PricingPluginVariant{
+		PluginKey:            target.PluginKey,
+		PluginName:           plugin.Meta.Name,
+		Icon:                 plugin.Meta.Icon,
+		BillingExpr:          expression,
+		BillingMode:          mode,
+		BillingUsageSchema:   jsplugin.CloneUsageSchema(schema),
+		BillingUsageExamples: jsplugin.CloneUsageExamples(examples),
+	})
+	return pricing
+}
+
+func hasHarnessCatalogPricing(billingName string, pricing model.Pricing, routes *harnessRoutePricingProviders) bool {
 	basePricing := hasHarnessBasePricing(billingName)
 	if routes == nil {
-		return billingName, basePricing
+		return basePricing
 	}
 	if routes.HasUnboundTaskPluginRoute || routes.HasBaseRoute && !basePricing {
-		return billingName, false
+		return false
 	}
 	for pluginKey := range routes.PluginKeys {
 		variant, found := harnessPluginPricingVariant(pricing.BillingPluginVariants, pluginKey)
 		if !found {
 			if !hasHarnessBasePricingForTask(billingName) {
-				return billingName, false
+				return false
 			}
 			continue
 		}
 		if variant.BillingMode == billing_setting.BillingModeTieredExpr {
 			if !hasHarnessPluginExpression(variant) {
-				return billingName, false
+				return false
 			}
 			continue
 		}
 		if !hasHarnessBasePricingForTask(billingName) {
-			return billingName, false
+			return false
 		}
 	}
 	if routes.HasBaseRoute || len(routes.PluginKeys) == 0 {
-		return billingName, basePricing
+		return basePricing
 	}
-	return billingName, true
+	return true
 }
 
 func hasHarnessBasePricing(modelName string) bool {
