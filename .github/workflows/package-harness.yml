@@ -1,0 +1,225 @@
+name: Package harness-api
+
+# Builds downloadable release artifacts for the harness-api branch so a
+# candidate can be tried on a real host without publishing an image.
+#
+# Artifacts only: nothing is pushed to a registry, so the workflow needs no
+# repository secrets. The docker-* workflows publish to the upstream
+# calciumion/new-api namespace and are unrelated to this branch.
+
+on:
+  push:
+    branches:
+      - harness-api
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or commit to package'
+        required: true
+        default: harness-api
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Informational gate: reports whether the branch is healthy. It deliberately
+  # does not block packaging, so a candidate can still be tried when a test is
+  # already known to be red.
+  verify:
+    name: Backend and frontend checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOWORK: 'off'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            relaykit/go.sum
+            tokenkit/go.sum
+
+      - name: Create frontend embed placeholder
+        run: |
+          mkdir -p web/dist
+          touch web/dist/index.html
+
+      - name: Vet root, relaykit, and tokenkit
+        run: |
+          go vet ./...
+          (cd relaykit && go vet ./...)
+          (cd tokenkit && go vet ./...)
+
+      - name: Test root, relaykit, and tokenkit
+        run: make test
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4.0'
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck frontend
+        working-directory: web
+        run: bun run typecheck
+
+      - name: Test frontend
+        working-directory: web
+        run: bun run test
+
+  # The frontend is embedded into the binary, so it is built once and shared
+  # with every target instead of being rebuilt per architecture.
+  web:
+    name: Build frontend bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          fetch-depth: 1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4.0'
+
+      - name: Install dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: web
+        run: bun run build
+
+      - name: Upload frontend bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 7
+          if-no-files-found: error
+
+  build:
+    name: Package ${{ matrix.goos }}-${{ matrix.goarch }}
+    needs: [web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GOWORK: 'off'
+      CGO_ENABLED: '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            binary: new-api
+            artifact: new-api-linux-amd64
+          - goos: linux
+            goarch: arm64
+            binary: new-api
+            artifact: new-api-linux-arm64
+          - goos: windows
+            goarch: amd64
+            binary: new-api.exe
+            artifact: new-api-windows-amd64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          fetch-depth: 1
+
+      - name: Download frontend bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: web-dist
+          path: web/dist
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            relaykit/go.sum
+            tokenkit/go.sum
+
+      - name: Resolve version
+        id: version
+        env:
+          REF_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref_name }}
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          PREFIX=$(printf '%s' "$REF_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^[.-]+//; s/[.-]+$//')
+          if [ -z "$PREFIX" ]; then
+            PREFIX=harness
+          fi
+          VERSION="${PREFIX}-$(date -u +'%Y%m%d')-${SHORT_SHA}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "${VERSION}" > VERSION
+          echo "Packaging ${VERSION} for ${{ matrix.goos }}/${{ matrix.goarch }}"
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          go build \
+            -pgo="$(go list -m -f '{{.Dir}}' github.com/Calcium-Ion/moejs)/default.pgo" \
+            -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=${{ steps.version.outputs.version }}'" \
+            -o "dist/${{ matrix.binary }}" \
+            .
+
+      - name: Assemble archive
+        env:
+          GOOS: ${{ matrix.goos }}
+        run: |
+          ARCHIVE="dist/${{ matrix.artifact }}.tar.gz"
+          tar -czf "$ARCHIVE" \
+            -C dist "${{ matrix.binary }}" \
+            -C "$GITHUB_WORKSPACE" LICENSE NOTICE THIRD-PARTY-LICENSES.md
+          echo "Archive contents:"
+          tar -tzf "$ARCHIVE"
+
+      - name: Upload archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.tar.gz
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Summary
+        run: |
+          {
+            echo "### ${{ matrix.artifact }}"
+            echo '```'
+            echo "version: ${{ steps.version.outputs.version }}"
+            echo "commit : ${{ steps.version.outputs.sha }}"
+            echo "size   : $(du -h dist/${{ matrix.artifact }}.tar.gz | cut -f1)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
