@@ -1,0 +1,112 @@
+name: Publish harness image (GHCR)
+
+# Publishes a runnable image for the harness-api branch to GitHub Container
+# Registry so a host can switch its deployment with a single tag change.
+#
+# Tags: ghcr.io/<owner>/new-api:harness-<date>-<short sha> and :harness-latest.
+
+on:
+  push:
+    branches:
+      - harness-api
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or commit to publish'
+        required: true
+        default: harness-api
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & push image
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          fetch-depth: 1
+
+      - name: Resolve image name and tags
+        id: meta
+        env:
+          REF_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref_name }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          DATE=$(date -u +'%Y%m%d')
+          PREFIX=$(printf '%s' "$REF_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^[.-]+//; s/[.-]+$//')
+          if [ -z "$PREFIX" ]; then
+            PREFIX=harness
+          fi
+          OWNER=$(printf '%s' "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
+          VERSION="${PREFIX}-${DATE}-${SHORT_SHA}"
+          echo "${VERSION}" > VERSION
+          {
+            echo "image=ghcr.io/${OWNER}/new-api"
+            echo "version=${VERSION}"
+            echo "sha=${SHORT_SHA}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Publishing ghcr.io/${OWNER}/new-api:${VERSION}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (labels)
+        id: labels
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.meta.outputs.image }}
+
+      # The Dockerfile builds the frontend and the Go binary itself, so this is
+      # the same artifact a production host runs.
+      - name: Build & push
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.image }}:harness-latest
+          labels: ${{ steps.labels.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      - name: Summary
+        run: |
+          {
+            echo "### harness image"
+            echo '```'
+            echo "image : ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}"
+            echo "alias : ${{ steps.meta.outputs.image }}:harness-latest"
+            echo "commit: ${{ steps.meta.outputs.sha }}"
+            echo "digest: ${{ steps.build.outputs.digest }}"
+            echo '```'
+            echo ''
+            echo 'Switch a deployment to this build:'
+            echo '```bash'
+            echo "docker pull ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}"
+            echo "docker tag ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }} calciumion/new-api:latest"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
