@@ -8,7 +8,9 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
@@ -339,6 +341,24 @@ type harnessCatalogModel struct {
 	ImageRatio           *float64 `json:"image_ratio,omitempty"`
 	AudioRatio           *float64 `json:"audio_ratio,omitempty"`
 	AudioCompletionRatio *float64 `json:"audio_completion_ratio,omitempty"`
+	// Billing expression fields. Harness needs these to price models that are
+	// not billable from a single ratio or fixed price.
+	BillingMode           string                               `json:"billing_mode"`
+	BillingExpr           string                               `json:"billing_expr,omitempty"`
+	BillingUsageSchema    map[string]jsplugin.UsageFieldSchema `json:"billing_usage_schema,omitempty"`
+	BillingUsageExamples  []jsplugin.UsageExample              `json:"billing_usage_examples,omitempty"`
+	BillingPluginVariants []harnessCatalogPluginVariant        `json:"billing_plugin_variants,omitempty"`
+}
+
+// harnessCatalogPluginVariant mirrors the plugin-specific billing of a model
+// that is served by task plugins, where each plugin may bill differently.
+type harnessCatalogPluginVariant struct {
+	PluginKey            string                               `json:"plugin_key"`
+	PluginName           string                               `json:"plugin_name"`
+	BillingMode          string                               `json:"billing_mode"`
+	BillingExpr          string                               `json:"billing_expr,omitempty"`
+	BillingUsageSchema   map[string]jsplugin.UsageFieldSchema `json:"billing_usage_schema,omitempty"`
+	BillingUsageExamples []jsplugin.UsageExample              `json:"billing_usage_examples,omitempty"`
 }
 
 func GetHarnessCatalog(c *gin.Context) {
@@ -473,24 +493,59 @@ func buildHarnessCatalogModels(upstreamNames map[string][]string, pricingByModel
 			capabilities[i] = string(endpointType)
 		}
 		models = append(models, harnessCatalogModel{
-			Name:                 modelName,
-			UpstreamModels:       upstreamModels,
-			Capabilities:         capabilities,
-			QuotaType:            pricing.QuotaType,
-			ModelRatio:           pricing.ModelRatio,
-			ModelPrice:           pricing.ModelPrice,
-			CompletionRatio:      pricing.CompletionRatio,
-			CacheRatio:           pricing.CacheRatio,
-			CreateCacheRatio:     pricing.CreateCacheRatio,
-			ImageRatio:           pricing.ImageRatio,
-			AudioRatio:           pricing.AudioRatio,
-			AudioCompletionRatio: pricing.AudioCompletionRatio,
+			Name:                  modelName,
+			UpstreamModels:        upstreamModels,
+			Capabilities:          capabilities,
+			QuotaType:             pricing.QuotaType,
+			ModelRatio:            pricing.ModelRatio,
+			ModelPrice:            pricing.ModelPrice,
+			CompletionRatio:       pricing.CompletionRatio,
+			CacheRatio:            pricing.CacheRatio,
+			CreateCacheRatio:      pricing.CreateCacheRatio,
+			ImageRatio:            pricing.ImageRatio,
+			AudioRatio:            pricing.AudioRatio,
+			AudioCompletionRatio:  pricing.AudioCompletionRatio,
+			BillingMode:           billing_setting.GetBillingMode(modelName),
+			BillingExpr:           billingExprOrEmpty(modelName),
+			BillingUsageSchema:    pricing.BillingUsageSchema,
+			BillingUsageExamples:  pricing.BillingUsageExamples,
+			BillingPluginVariants: buildHarnessCatalogPluginVariants(pricing.BillingPluginVariants),
 		})
 	}
 	slices.SortFunc(models, func(a, b harnessCatalogModel) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 	return models
+}
+
+// billingExprOrEmpty returns the configured billing expression, if the model
+// uses expression-based billing.
+func billingExprOrEmpty(modelName string) string {
+	expr, ok := billing_setting.GetBillingExpr(modelName)
+	if !ok {
+		return ""
+	}
+	return expr
+}
+
+// buildHarnessCatalogPluginVariants copies plugin billing metadata through the
+// catalog so Harness can price task-plugin models.
+func buildHarnessCatalogPluginVariants(variants []model.PricingPluginVariant) []harnessCatalogPluginVariant {
+	if len(variants) == 0 {
+		return nil
+	}
+	result := make([]harnessCatalogPluginVariant, 0, len(variants))
+	for _, variant := range variants {
+		result = append(result, harnessCatalogPluginVariant{
+			PluginKey:            variant.PluginKey,
+			PluginName:           variant.PluginName,
+			BillingMode:          variant.BillingMode,
+			BillingExpr:          variant.BillingExpr,
+			BillingUsageSchema:   variant.BillingUsageSchema,
+			BillingUsageExamples: variant.BillingUsageExamples,
+		})
+	}
+	return result
 }
 
 func mappedModelName(channel *model.Channel, modelName string) string {

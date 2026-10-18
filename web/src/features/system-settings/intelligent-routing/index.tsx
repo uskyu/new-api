@@ -29,6 +29,7 @@ import {
   type PointerEvent,
 } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { EmptyState } from '@/components/empty-state'
@@ -62,6 +63,14 @@ type RoutingConfig = {
   channels: Channel[]
 }
 type TokenAccess = { token_id: number; token_name: string; groups: string[] }
+type RoutingToken = {
+  id: number
+  name: string
+  status: number
+  group?: string | null
+  model_limits_enabled?: boolean
+  key?: string
+}
 type ApiResponse<T> = { success: boolean; message?: string; data: T }
 
 async function fetchRouting() {
@@ -89,6 +98,23 @@ async function fetchTokenAccess() {
     '/api/intelligent-routing/token-access'
   )
   return requireServerSuccess(response.data).data.items
+}
+
+// The routing page lists only the administrator's own tokens, using the same
+// endpoint the console token page uses.
+async function fetchRoutingTokens() {
+  const response = await api.get<
+    ApiResponse<{ items?: RoutingToken[]; page?: number; page_size?: number }>
+  >('/api/token/?p=1&size=100')
+  const items = requireServerSuccess(response.data).data?.items ?? []
+  return items
+}
+
+async function fetchRoutingTokenKey(tokenID: number) {
+  const response = await api.post<ApiResponse<{ key: string }>>(
+    `/api/token/${tokenID}/key`
+  )
+  return requireServerSuccess(response.data).data.key
 }
 
 async function saveTokenAccess(tokenID: number, groups: string[]) {
@@ -192,14 +218,17 @@ export function IntelligentRoutingPage() {
     queryKey: ['intelligent-routing-token-access'],
     queryFn: fetchTokenAccess,
   })
+  const tokensQuery = useQuery({
+    queryKey: ['intelligent-routing-tokens'],
+    queryFn: fetchRoutingTokens,
+  })
   const [config, setConfig] = useState<RoutingConfig | null>(null)
   const savingSection = useRef<'global' | 'pools' | 'pricing' | null>(null)
   const [globalDraft, setGlobalDraft] = useState<number[] | null>(null)
   const [poolDrafts, setPoolDrafts] = useState<RoutingGroup[] | null>(null)
   const [pricingDraft, setPricingDraft] = useState<string[] | null>(null)
-  const [tokenIDInput, setTokenIDInput] = useState('')
-  const [selectedTokenID, setSelectedTokenID] = useState<number | null>(null)
-  const [selectedTokenGroups, setSelectedTokenGroups] = useState<string[]>([])
+  const [tokenSearch, setTokenSearch] = useState('')
+  const [tokenDraft, setTokenDraft] = useState<number[] | null>(null)
   const [groupId, setGroupId] = useState('')
   const [groupName, setGroupName] = useState('')
   const [selectedChannels, setSelectedChannels] = useState<number[]>([])
@@ -224,16 +253,39 @@ export function IntelligentRoutingPage() {
       await queryClient.invalidateQueries({
         queryKey: ['intelligent-routing-token-access'],
       })
-      setSelectedTokenID(null)
-      setSelectedTokenGroups([])
     },
     onError: (error) =>
       handleServerError(error, t('Failed to save token resource pool access')),
+  })
+  const tokenKeyMutation = useMutation({
+    mutationFn: (tokenID: number) => fetchRoutingTokenKey(tokenID),
+    onError: (error) =>
+      handleServerError(error, t('Failed to load the token key')),
   })
   const data = config ?? query.data?.data
   const globalOrder = globalDraft ?? data?.global_channel_order ?? []
   const poolGroups = poolDrafts ?? data?.groups ?? []
   const pricingOrder = pricingDraft ?? data?.pricing_group_order ?? []
+  const everyRoutingGroup = useMemo(
+    () => ['global', ...(data?.groups ?? []).map((group) => group.id)],
+    [data?.groups]
+  )
+  const accessibleTokenIDs = useMemo(() => {
+    const ids = new Set(
+      (tokenAccessQuery.data ?? []).map((item) => item.token_id)
+    )
+    return ids
+  }, [tokenAccessQuery.data])
+  const tokenCandidates = useMemo(() => {
+    const text = tokenSearch.trim().toLowerCase()
+    return (tokensQuery.data ?? []).filter((token) => {
+      if (!text) return true
+      return (
+        token.name.toLowerCase().includes(text) ||
+        String(token.id).includes(text)
+      )
+    })
+  }, [tokensQuery.data, tokenSearch])
   const availableChannels = useMemo(() => {
     const queryText = channelSearch.trim().toLowerCase()
     return (data?.channels ?? []).filter((channel) => {
@@ -314,20 +366,29 @@ export function IntelligentRoutingPage() {
     updatePools(poolGroups.filter((group) => group.id !== deleting.id))
     setDeleting(null)
   }
-  const chooseToken = (tokenID: number) => {
-    const access = tokenAccessQuery.data?.find(
-      (item) => item.token_id === tokenID
-    )
-    setSelectedTokenID(tokenID)
-    setTokenIDInput(String(tokenID))
-    setSelectedTokenGroups(access?.groups ?? [])
+  // A routing token always receives every routing group: the caller still
+  // chooses the group per request through X-Route-Group.
+  const revokeToken = (tokenID: number) => {
+    tokenAccessMutation.mutate({ tokenID, groups: [] })
   }
-  const saveSelectedTokenAccess = () => {
-    if (selectedTokenID === null) return
-    tokenAccessMutation.mutate({
-      tokenID: selectedTokenID,
-      groups: selectedTokenGroups,
-    })
+  const selectedTokenIDs = tokenDraft ?? []
+  const toggleTokenDraft = (tokenID: number) => {
+    setTokenDraft(
+      selectedTokenIDs.includes(tokenID)
+        ? selectedTokenIDs.filter((id) => id !== tokenID)
+        : [...selectedTokenIDs, tokenID]
+    )
+  }
+  const grantDraftedTokens = () => {
+    for (const tokenID of selectedTokenIDs) {
+      tokenAccessMutation.mutate({ tokenID, groups: everyRoutingGroup })
+    }
+    setTokenDraft([])
+  }
+  const copyTokenKey = async (tokenID: number) => {
+    const key = await tokenKeyMutation.mutateAsync(tokenID)
+    await navigator.clipboard.writeText(`sk-${key}`)
+    toast.success(t('Token key copied to clipboard'))
   }
 
   const showGlobal = section === 'global-priority'
@@ -669,12 +730,10 @@ export function IntelligentRoutingPage() {
       ) : null}
       {showGlobal ? (
         <section className='rounded-lg border p-4'>
-          <h2 className='font-semibold'>
-            {t('Harness token resource pool access')}
-          </h2>
+          <h2 className='font-semibold'>{t('Harness routing tokens')}</h2>
           <p className='text-muted-foreground mt-1 text-sm'>
             {t(
-              'Assign resource pools to a full-model service token. The token key is never displayed here.'
+              'Create the token in Console → Tokens first, then authorize it here. An authorized token may call every routing group; it picks one per request with the X-Route-Group header.'
             )}
           </p>
           {tokenAccessQuery.isError ? (
@@ -686,85 +745,123 @@ export function IntelligentRoutingPage() {
           {tokenAccessQuery.isLoading ? (
             <LoadingState message={t('Loading token access...')} />
           ) : null}
-          <div className='mt-3 flex flex-wrap gap-2'>
-            <Input
-              aria-label={t('Token ID')}
-              placeholder={t('Token ID')}
-              inputMode='numeric'
-              value={tokenIDInput}
-              onChange={(event) => setTokenIDInput(event.target.value)}
-            />
-            <Button
-              variant='outline'
-              onClick={() => {
-                const tokenID = Number(tokenIDInput)
-                if (Number.isSafeInteger(tokenID) && tokenID > 0) {
-                  chooseToken(tokenID)
-                }
-              }}
-            >
-              {t('Load token access')}
-            </Button>
-            {(tokenAccessQuery.data ?? []).map((access) => (
+
+          <div className='mt-4 space-y-3'>
+            <div className='flex flex-wrap items-end gap-2'>
+              <label className='block flex-1 text-sm'>
+                {t('Search tokens')}
+                <Input
+                  className='mt-1'
+                  value={tokenSearch}
+                  onChange={(event) => setTokenSearch(event.target.value)}
+                />
+              </label>
               <Button
-                key={access.token_id}
-                variant='outline'
-                onClick={() => chooseToken(access.token_id)}
+                onClick={grantDraftedTokens}
+                disabled={
+                  selectedTokenIDs.length === 0 || tokenAccessMutation.isPending
+                }
               >
-                {access.token_name} · {access.token_id}
-              </Button>
-            ))}
-          </div>
-          {selectedTokenID !== null ? (
-            <div className='mt-3 space-y-2'>
-              <p className='text-sm'>
-                {t('Authorized resource pools for token {{id}}', {
-                  id: selectedTokenID,
+                {t('Authorize {{count}} token(s)', {
+                  count: selectedTokenIDs.length,
                 })}
+              </Button>
+            </div>
+            {tokensQuery.isError ? (
+              <ErrorState
+                title={t('Failed to load tokens')}
+                onRetry={() => void tokensQuery.refetch()}
+              />
+            ) : null}
+            {tokensQuery.isLoading ? (
+              <LoadingState message={t('Loading tokens...')} />
+            ) : null}
+            {!tokensQuery.isLoading && tokenCandidates.length === 0 ? (
+              <p className='text-muted-foreground text-sm'>
+                {t(
+                  'No tokens found. Create one in Console → Tokens, then reload this page.'
+                )}
               </p>
-              {[
-                ...(data.global_channel_order.length ? ['global'] : []),
-                ...poolGroups.map((group) => group.id),
-              ].map((groupID) => {
-                const label =
-                  groupID === 'global'
-                    ? t('Global priority')
-                    : (poolGroups.find((group) => group.id === groupID)?.name ??
-                      groupID)
-                const checked = selectedTokenGroups.includes(groupID)
+            ) : null}
+            <fieldset className='max-h-64 space-y-1 overflow-y-auto rounded-md border p-2'>
+              <legend className='px-1 text-sm'>
+                {t('Tokens available for routing')}
+              </legend>
+              {tokenCandidates.map((token) => {
+                const authorized = accessibleTokenIDs.has(token.id)
                 return (
                   <label
-                    key={groupID}
-                    className='flex items-center gap-2 text-sm'
+                    key={token.id}
+                    className='hover:bg-muted/40 flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-sm'
                   >
                     <input
                       type='checkbox'
-                      checked={checked}
-                      onChange={() =>
-                        setSelectedTokenGroups(
-                          checked
-                            ? selectedTokenGroups.filter(
-                                (item) => item !== groupID
-                              )
-                            : [...selectedTokenGroups, groupID]
-                        )
-                      }
+                      checked={selectedTokenIDs.includes(token.id)}
+                      onChange={() => toggleTokenDraft(token.id)}
                     />
-                    {label}{' '}
-                    <span className='text-muted-foreground'>({groupID})</span>
+                    <span className='min-w-0 flex-1'>
+                      <span className='font-medium'>{token.name}</span>
+                      <span className='text-muted-foreground ml-2 text-xs'>
+                        #{token.id}
+                      </span>
+                      {token.model_limits_enabled ? (
+                        <span className='ml-2 text-xs text-amber-600'>
+                          {t('Limited model scope can not use routing')}
+                        </span>
+                      ) : null}
+                      {authorized ? (
+                        <span className='text-success ml-2 text-xs'>
+                          {t('Authorized')}
+                        </span>
+                      ) : null}
+                    </span>
                   </label>
                 )
               })}
-              <Button
-                onClick={saveSelectedTokenAccess}
-                disabled={tokenAccessMutation.isPending}
-              >
-                {tokenAccessMutation.isPending
-                  ? t('Saving...')
-                  : t('Save token access')}
-              </Button>
+            </fieldset>
+          </div>
+
+          <h3 className='mt-4 mb-2 text-sm font-medium'>
+            {t('Authorized routing tokens')}
+          </h3>
+          {(tokenAccessQuery.data ?? []).length === 0 ? (
+            <p className='text-muted-foreground text-sm'>
+              {t('No token is authorized for routing yet.')}
+            </p>
+          ) : (
+            <div className='space-y-2'>
+              {(tokenAccessQuery.data ?? []).map((access) => (
+                <div
+                  key={access.token_id}
+                  className='flex flex-wrap items-center gap-2 rounded-md border p-2 text-sm'
+                >
+                  <span className='font-medium'>{access.token_name}</span>
+                  <span className='text-muted-foreground text-xs'>
+                    #{access.token_id}
+                  </span>
+                  <span className='text-muted-foreground text-xs'>
+                    {t('Groups')}: {access.groups.join(', ')}
+                  </span>
+                  <div className='ml-auto flex gap-2'>
+                    <Button
+                      variant='outline'
+                      onClick={() => void copyTokenKey(access.token_id)}
+                      disabled={tokenKeyMutation.isPending}
+                    >
+                      {t('Copy key')}
+                    </Button>
+                    <Button
+                      variant='destructive'
+                      onClick={() => revokeToken(access.token_id)}
+                      disabled={tokenAccessMutation.isPending}
+                    >
+                      {t('Revoke')}
+                    </Button>
+                  </div>
+                </div>
+              ))}
             </div>
-          ) : null}
+          )}
         </section>
       ) : null}
       {showGlobal ? (
