@@ -19,7 +19,7 @@ import (
 
 var group2model2channels map[string]map[string][]int // enabled channel
 var channelModelEnabledGroups map[int]map[string][]string
-var channelsIDM map[int]*Channel                     // all channels include disabled
+var channelsIDM map[int]*Channel // all channels include disabled
 // channel2advancedCustomConfig caches parsed Advanced Custom (type 58) configs so
 // path-aware selection avoids re-parsing JSON per request. Refreshed on full sync.
 var channel2advancedCustomConfig map[int]*kitdto.AdvancedCustomConfig
@@ -49,12 +49,19 @@ func InitChannelCache() {
 	indexedGroups := make(map[int]map[string][]string)
 	for _, ability := range abilities {
 		groups[ability.Group] = true
-		if !ability.Enabled { continue }
-		if indexedGroups[ability.ChannelId] == nil { indexedGroups[ability.ChannelId] = make(map[string][]string) }
-		indexedGroups[ability.ChannelId][ability.Model] = append(indexedGroups[ability.ChannelId][ability.Model],ability.Group)
+		if !ability.Enabled {
+			continue
+		}
+		if indexedGroups[ability.ChannelId] == nil {
+			indexedGroups[ability.ChannelId] = make(map[string][]string)
+		}
+		indexedGroups[ability.ChannelId][ability.Model] = append(indexedGroups[ability.ChannelId][ability.Model], ability.Group)
 	}
 	for _, models := range indexedGroups {
-		for name, ids := range models { sort.Strings(ids); models[name] = ids }
+		for name, ids := range models {
+			sort.Strings(ids)
+			models[name] = ids
+		}
 	}
 	newGroup2model2channels := make(map[string]map[string][]int)
 	for group := range groups {
@@ -242,7 +249,7 @@ func GetRandomSatisfiedChannelWithCostGroup(
 	resourcePool string, costGroup string, modelName string, retry int,
 	filters []dto.ChannelFilter, configuredOrder []int,
 ) (*Channel, error) {
-	return getRandomSatisfiedChannelWithCostGroup(resourcePool,costGroup,modelName,retry,filters,configuredOrder,false)
+	return getRandomSatisfiedChannelWithCostGroup(resourcePool, costGroup, modelName, retry, filters, configuredOrder, false)
 }
 
 // Opt-in pricing groups are mandatory only for intelligent routing.
@@ -250,7 +257,7 @@ func GetRandomSatisfiedChannelWithPricingGroups(
 	resourcePool string, costGroup string, modelName string, retry int,
 	filters []dto.ChannelFilter, configuredOrder []int,
 ) (*Channel, error) {
-	return getRandomSatisfiedChannelWithCostGroup(resourcePool,costGroup,modelName,retry,filters,configuredOrder,true)
+	return getRandomSatisfiedChannelWithCostGroup(resourcePool, costGroup, modelName, retry, filters, configuredOrder, true)
 }
 
 func getRandomSatisfiedChannelWithCostGroup(
@@ -258,7 +265,9 @@ func getRandomSatisfiedChannelWithCostGroup(
 	filters []dto.ChannelFilter, configuredOrder []int, requirePricing bool,
 ) (*Channel, error) {
 	if configuredOrder == nil {
-		if requirePricing { return nil, fmt.Errorf("intelligent routing order is not configured") }
+		if requirePricing {
+			return nil, fmt.Errorf("intelligent routing order is not configured")
+		}
 		return GetRandomSatisfiedChannel(costGroup, modelName, retry, filters)
 	}
 	if len(configuredOrder) == 0 {
@@ -281,8 +290,12 @@ func getRandomSatisfiedChannelWithCostGroup(
 		if requirePricing {
 			if _, eligible, err := GetPreferredPricingGroupForChannelModel(channelID, modelName); err != nil {
 				return nil, err
-			} else if !eligible { continue }
-		} else if !channelServesModel(channelID, modelName) { continue }
+			} else if !eligible {
+				continue
+			}
+		} else if !channelServesModel(channelID, modelName) {
+			continue
+		}
 		if allowed, _ := ChannelSatisfiesFilters(channel, modelName, filters); !allowed {
 			continue
 		}

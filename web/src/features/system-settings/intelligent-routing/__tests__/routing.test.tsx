@@ -204,13 +204,24 @@ describe('opt-in pricing group order', () => {
         { id: 'vip', name: 'VIP', ratio: 0.8 },
         { id: 'supplier', name: 'Supplier', ratio: 0.7 },
       ],
-      channels: [{ id: 11, name: 'Alpha', models: ['model'], status: 1, priority: 0, enabled_groups: [] }],
+      channels: [
+        {
+          id: 11,
+          name: 'Alpha',
+          models: ['model'],
+          status: 1,
+          priority: 0,
+          enabled_groups: [],
+        },
+      ],
     })
     vi.mocked(api.put).mockResolvedValue({ data: { success: true, data: {} } })
     const user = userEvent.setup()
     renderPage('pricing-groups')
     await user.click(await screen.findByRole('checkbox', { name: /Supplier/ }))
-    await user.click(screen.getByRole('button', { name: 'Move pricing group supplier up' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Move pricing group supplier up' })
+    )
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
     expect(api.put).toHaveBeenCalledWith('/api/intelligent-routing', {
       global_channel_order: [11],

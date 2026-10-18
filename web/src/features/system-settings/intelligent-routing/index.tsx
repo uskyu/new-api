@@ -72,7 +72,10 @@ async function fetchRouting() {
 }
 
 async function saveRouting(
-  config: Pick<RoutingConfig, 'global_channel_order' | 'groups' | 'pricing_group_order'>
+  config: Pick<
+    RoutingConfig,
+    'global_channel_order' | 'groups' | 'pricing_group_order'
+  >
 ) {
   const response = await api.put<ApiResponse<RoutingConfig>>(
     '/api/intelligent-routing',
@@ -330,12 +333,16 @@ export function IntelligentRoutingPage() {
   const showGlobal = section === 'global-priority'
   const showPools = section === 'resource-pools'
   const showPricing = section === 'pricing-groups'
+  let sectionTitle = t('Pricing group priority')
+  if (showGlobal) {
+    sectionTitle = t('全渠道优先级设置')
+  } else if (showPools) {
+    sectionTitle = t('资源池分组')
+  }
   return (
     <main className='flex flex-col gap-6 p-6'>
       <header>
-        <h1 className='text-2xl font-semibold'>
-          {t(showGlobal ? '全渠道优先级设置' : showPools ? '资源池分组' : '计价分组优先级')}
-        </h1>
+        <h1 className='text-2xl font-semibold'>{sectionTitle}</h1>
         <p className='text-muted-foreground mt-1 text-sm'>
           {t(
             'Groups are resource pools. Harness sends the group ID in X-Route-Group, and the actual channel pricing information is returned in the response headers.'
@@ -559,40 +566,99 @@ export function IntelligentRoutingPage() {
         <section className='rounded-lg border p-4'>
           <h2 className='font-semibold'>{t('Pricing group priority')}</h2>
           <p className='text-muted-foreground my-3 text-sm'>
-            {t('Only checked pricing groups participate. Channels without a matching selected group are skipped.')}
+            {t(
+              'Only checked pricing groups participate. Channels without a matching selected group are skipped.'
+            )}
           </p>
           <fieldset className='mb-4 space-y-2'>
-            <legend className='text-sm font-medium'>{t('Available pricing groups')}</legend>
+            <legend className='text-sm font-medium'>
+              {t('Available pricing groups')}
+            </legend>
             {(data.pricing_group_options ?? []).map((group) => (
-              <label key={group.id} className='flex items-center gap-2 rounded-md border p-2 text-sm'>
-                <input type='checkbox' checked={pricingOrder.includes(group.id)}
-                  onChange={() => setPricingDraft(pricingOrder.includes(group.id)
-                    ? pricingOrder.filter((id) => id !== group.id)
-                    : [...pricingOrder, group.id])} />
-                <span>{group.name} ({group.id})</span>
-                <span className='text-muted-foreground ml-auto text-xs'>{t('Ratio')}: {group.ratio}</span>
+              <label
+                key={group.id}
+                className='flex items-center gap-2 rounded-md border p-2 text-sm'
+              >
+                <input
+                  type='checkbox'
+                  checked={pricingOrder.includes(group.id)}
+                  onChange={() =>
+                    setPricingDraft(
+                      pricingOrder.includes(group.id)
+                        ? pricingOrder.filter((id) => id !== group.id)
+                        : [...pricingOrder, group.id]
+                    )
+                  }
+                />
+                <span>
+                  {group.name} ({group.id})
+                </span>
+                <span className='text-muted-foreground ml-auto text-xs'>
+                  {t('Ratio')}: {group.ratio}
+                </span>
               </label>
             ))}
           </fieldset>
-          <h3 className='mb-2 text-sm font-medium'>{t('Enabled pricing groups, highest first')}</h3>
-          <Reorder.Group axis='y' values={pricingOrder} onReorder={setPricingDraft} className='flex flex-col gap-2'>
+          <h3 className='mb-2 text-sm font-medium'>
+            {t('Enabled pricing groups, highest first')}
+          </h3>
+          <Reorder.Group
+            axis='y'
+            values={pricingOrder}
+            onReorder={setPricingDraft}
+            className='flex flex-col gap-2'
+          >
             {pricingOrder.map((groupID, index) => {
-              const group = (data.pricing_group_options ?? []).find((item) => item.id === groupID)
+              const group = (data.pricing_group_options ?? []).find(
+                (item) => item.id === groupID
+              )
               return (
-                <Reorder.Item key={groupID} value={groupID} className='flex items-center gap-2 rounded-md border p-2'>
-                  <span className='min-w-0 flex-1'>{index + 1}. {group?.name ?? groupID} ({groupID})</span>
-                  <Button type='button' variant='ghost' size='icon-sm' disabled={index === 0}
-                    aria-label={t('Move pricing group {{group}} up', { group: groupID })}
-                    onClick={() => setPricingDraft(moveItem(pricingOrder, index, 'up'))}>↑</Button>
-                  <Button type='button' variant='ghost' size='icon-sm' disabled={index === pricingOrder.length - 1}
-                    aria-label={t('Move pricing group {{group}} down', { group: groupID })}
-                    onClick={() => setPricingDraft(moveItem(pricingOrder, index, 'down'))}>↓</Button>
+                <Reorder.Item
+                  key={groupID}
+                  value={groupID}
+                  className='flex items-center gap-2 rounded-md border p-2'
+                >
+                  <span className='min-w-0 flex-1'>
+                    {index + 1}. {group?.name ?? groupID} ({groupID})
+                  </span>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon-sm'
+                    disabled={index === 0}
+                    aria-label={t('Move pricing group {{group}} up', {
+                      group: groupID,
+                    })}
+                    onClick={() =>
+                      setPricingDraft(moveItem(pricingOrder, index, 'up'))
+                    }
+                  >
+                    ↑
+                  </Button>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon-sm'
+                    disabled={index === pricingOrder.length - 1}
+                    aria-label={t('Move pricing group {{group}} down', {
+                      group: groupID,
+                    })}
+                    onClick={() =>
+                      setPricingDraft(moveItem(pricingOrder, index, 'down'))
+                    }
+                  >
+                    ↓
+                  </Button>
                 </Reorder.Item>
               )
             })}
           </Reorder.Group>
           {pricingOrder.length === 0 ? (
-            <p className='text-muted-foreground mt-3 text-sm'>{t('No pricing groups selected: intelligent routing has no eligible channels.')}</p>
+            <p className='text-muted-foreground mt-3 text-sm'>
+              {t(
+                'No pricing groups selected: intelligent routing has no eligible channels.'
+              )}
+            </p>
           ) : null}
           <div className='mt-4 flex justify-end'>
             <Button onClick={savePricing} disabled={mutation.isPending}>

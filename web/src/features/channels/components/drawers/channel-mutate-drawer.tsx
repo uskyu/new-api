@@ -2264,7 +2264,11 @@ export function ChannelMutateDrawer({
                 onChange={(e) => field.onChange(Number(e.target.value))}
               />
             </FormControl>
-            <FormDescription>{t('Procurement tax forwarded to Harness in response headers; not charged by New API.')}</FormDescription>
+            <FormDescription>
+              {t(
+                'Procurement tax forwarded to Harness in response headers; not charged by New API.'
+              )}
+            </FormDescription>
             <FormMessage />
           </FormItem>
         )}

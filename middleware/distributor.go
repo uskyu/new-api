@@ -169,6 +169,7 @@ func SetIntelligentRoutingResponseHeaders(c *gin.Context, channelID int, pricing
 		setting.IntelligentRoutingGroupHeader,
 		setting.IntelligentRoutingChannelIDHeader,
 		setting.IntelligentRoutingGroupRatioHeader,
+		setting.IntelligentRoutingPricingGroupHeader,
 		setting.IntelligentRoutingTaxRatePercentHeader,
 		common.RequestIdKey,
 	} {

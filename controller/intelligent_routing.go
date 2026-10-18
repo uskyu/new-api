@@ -14,11 +14,11 @@ import (
 )
 
 type intelligentRoutingResponse struct {
-	GlobalChannelOrder []int                             `json:"global_channel_order"`
-	PricingGroupOrder []string `json:"pricing_group_order"`
-	PricingGroupOptions []pricingGroupOption `json:"pricing_group_options"`
-	Groups             []setting.IntelligentRoutingGroup `json:"groups"`
-	Channels           []intelligentRoutingChannel       `json:"channels"`
+	GlobalChannelOrder  []int                             `json:"global_channel_order"`
+	PricingGroupOrder   []string                          `json:"pricing_group_order"`
+	PricingGroupOptions []pricingGroupOption              `json:"pricing_group_options"`
+	Groups              []setting.IntelligentRoutingGroup `json:"groups"`
+	Channels            []intelligentRoutingChannel       `json:"channels"`
 }
 
 type intelligentRoutingChannel struct {
@@ -31,8 +31,8 @@ type intelligentRoutingChannel struct {
 }
 
 type pricingGroupOption struct {
-	ID string `json:"id"`
-	Name string `json:"name"`
+	ID    string  `json:"id"`
+	Name  string  `json:"name"`
 	Ratio float64 `json:"ratio"`
 }
 
@@ -53,11 +53,11 @@ func GetIntelligentRouting(c *gin.Context) {
 		globalOrder = []int{}
 	}
 	response := intelligentRoutingResponse{
-		GlobalChannelOrder: globalOrder,
-		PricingGroupOrder: routingConfig.PricingGroupOrder,
+		GlobalChannelOrder:  globalOrder,
+		PricingGroupOrder:   routingConfig.PricingGroupOrder,
 		PricingGroupOptions: make([]pricingGroupOption, 0),
-		Groups:             routingConfig.Groups,
-		Channels:           make([]intelligentRoutingChannel, 0, len(channels)),
+		Groups:              routingConfig.Groups,
+		Channels:            make([]intelligentRoutingChannel, 0, len(channels)),
 	}
 	abilityGroups := make(map[int]map[string]struct{})
 	for _, ability := range model.GetAllEnableAbilities() {
@@ -69,10 +69,12 @@ func GetIntelligentRouting(c *gin.Context) {
 	usableGroups := setting.GetUserUsableGroupsCopy()
 	for id, ratio := range ratio_setting.GetGroupRatioCopy() {
 		name := usableGroups[id]
-		if name == "" { name = id }
-		response.PricingGroupOptions = append(response.PricingGroupOptions, pricingGroupOption{ID:id, Name:name, Ratio:ratio})
+		if name == "" {
+			name = id
+		}
+		response.PricingGroupOptions = append(response.PricingGroupOptions, pricingGroupOption{ID: id, Name: name, Ratio: ratio})
 	}
-	slices.SortFunc(response.PricingGroupOptions, func(a,b pricingGroupOption) int { return strings.Compare(a.ID,b.ID) })
+	slices.SortFunc(response.PricingGroupOptions, func(a, b pricingGroupOption) int { return strings.Compare(a.ID, b.ID) })
 	for _, channel := range channels {
 		if channel == nil || channel.Status != common.ChannelStatusEnabled {
 			continue
@@ -103,7 +105,7 @@ func GetIntelligentRouting(c *gin.Context) {
 
 type updateIntelligentRoutingRequest struct {
 	GlobalChannelOrder []int                             `json:"global_channel_order"`
-	PricingGroupOrder *[]string `json:"pricing_group_order"`
+	PricingGroupOrder  *[]string                         `json:"pricing_group_order"`
 	Groups             []setting.IntelligentRoutingGroup `json:"groups"`
 }
 
@@ -119,7 +121,7 @@ func UpdateIntelligentRouting(c *gin.Context) {
 	}
 	config := setting.IntelligentRoutingConfig{
 		GlobalChannelOrder: request.GlobalChannelOrder,
-		PricingGroupOrder: pricingOrder,
+		PricingGroupOrder:  pricingOrder,
 		Groups:             request.Groups,
 	}
 	if err := setting.ValidateIntelligentRoutingConfig(config); err != nil {
@@ -381,7 +383,9 @@ func GetHarnessCatalog(c *gin.Context) {
 	enabledAbilities := model.GetAllEnableAbilities()
 	eligiblePricingGroups := make(map[string]struct{}, len(routing.PricingGroupOrder))
 	for _, groupID := range routing.PricingGroupOrder {
-		if ratio_setting.ContainsGroupRatio(groupID) { eligiblePricingGroups[groupID] = struct{}{} }
+		if ratio_setting.ContainsGroupRatio(groupID) {
+			eligiblePricingGroups[groupID] = struct{}{}
+		}
 	}
 	groupModels := make(map[string]map[string][]string)
 	groupPricingByGroup := make(map[string]map[string]model.Pricing)

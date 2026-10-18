@@ -4,8 +4,8 @@ import (
 	"slices"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
 func IsChannelEnabledForGroupModel(group string, modelName string, channelID int) bool {
@@ -43,10 +43,16 @@ func GetEnabledAbilityGroupsForChannelModel(channelID int, modelName string) ([]
 		if channelModelEnabledGroups != nil {
 			models := channelModelEnabledGroups[channelID]
 			unique := make(map[string]struct{})
-			for _, name := range modelNames { for _, id := range models[name] { unique[id] = struct{}{} } }
+			for _, name := range modelNames {
+				for _, id := range models[name] {
+					unique[id] = struct{}{}
+				}
+			}
 			channelSyncLock.RUnlock()
 			groups := make([]string, 0, len(unique))
-			for id := range unique { groups = append(groups,id) }
+			for id := range unique {
+				groups = append(groups, id)
+			}
 			slices.Sort(groups)
 			return groups, nil
 		}
@@ -72,7 +78,9 @@ func GetEnabledAbilityGroupsForChannelModel(channelID int, modelName string) ([]
 // Only inspect the small, cached list of groups attached to this channel and model.
 func GetPreferredPricingGroupForChannelModel(channelID int, modelName string) (string, bool, error) {
 	groups, err := GetEnabledAbilityGroupsForChannelModel(channelID, modelName)
-	if err != nil { return "", false, err }
+	if err != nil {
+		return "", false, err
+	}
 	chosen, lowest, found := "", 0, false
 	for _, group := range groups {
 		if rank, ok := setting.GetIntelligentRoutingPricingGroupRank(group); ok && ratio_setting.ContainsGroupRatio(group) && (!found || rank < lowest) {

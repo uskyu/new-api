@@ -20,16 +20,22 @@ describe('channel supplier tax configuration', () => {
     expect(channelFormSchema.safeParse(form).success).toBe(true)
     const created = transformFormDataToCreatePayload(form)
     const edited = transformFormDataToUpdatePayload(form, 18)
-    expect(JSON.parse(created.channel.settings ?? '{}').supplier_tax_rate_percent).toBe(6.5)
-    expect(JSON.parse(edited.settings ?? '{}').supplier_tax_rate_percent).toBe(6.5)
+    expect(
+      JSON.parse(created.channel.settings ?? '{}').supplier_tax_rate_percent
+    ).toBe(6.5)
+    expect(JSON.parse(edited.settings ?? '{}').supplier_tax_rate_percent).toBe(
+      6.5
+    )
   })
 
   it('rejects negative, excessive and non-finite tax rates', () => {
-    for (const rate of [-0.1, 100.1, Infinity, NaN]) {
-      expect(channelFormSchema.safeParse({
-        ...form,
-        supplier_tax_rate_percent: rate,
-      }).success).toBe(false)
+    for (const rate of [-0.1, 100.1, Infinity, Number.NaN]) {
+      expect(
+        channelFormSchema.safeParse({
+          ...form,
+          supplier_tax_rate_percent: rate,
+        }).success
+      ).toBe(false)
     }
   })
 })

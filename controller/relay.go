@@ -330,11 +330,17 @@ func setIntelligentRoutingResponseHeaders(c *gin.Context, channel *model.Channel
 		return types.NewError(errors.New("selected channel missing for route pricing"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 	group, valid, err := model.GetPreferredPricingGroupForChannelModel(channel.Id, modelName)
-	if err != nil { return types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry()) }
-	if !valid { return types.NewError(errors.New("selected channel has no opted-in pricing group"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry()) }
+	if err != nil {
+		return types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	if !valid {
+		return types.NewError(errors.New("selected channel has no opted-in pricing group"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
 	// First channel selection can be a partial stub: always read selected channel settings.
 	actual, err := model.CacheGetChannel(channel.Id)
-	if err != nil { return types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry()) }
+	if err != nil {
+		return types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
 	middleware.SetIntelligentRoutingResponseHeaders(c, channel.Id, group, ratio_setting.GetGroupRatio(group), actual.GetOtherSettings().SupplierTaxRatePercent)
 	return nil
 }

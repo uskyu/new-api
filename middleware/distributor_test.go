@@ -39,6 +39,7 @@ func TestSetIntelligentRoutingResponseHeadersReturnsFinalChannelPricingForStream
 	assert.Equal(t, "8", recorder.Header().Get(setting.IntelligentRoutingTaxRatePercentHeader))
 	assert.Equal(t, "request-123", recorder.Header().Get(common.RequestIdKey))
 	assert.Contains(t, recorder.Header().Get("Access-Control-Expose-Headers"), setting.IntelligentRoutingChannelIDHeader)
+	assert.Contains(t, recorder.Header().Get("Access-Control-Expose-Headers"), setting.IntelligentRoutingPricingGroupHeader)
 }
 
 func TestSetIntelligentRoutingResponseHeadersSkipsNonRoutedAndCommittedResponses(t *testing.T) {
