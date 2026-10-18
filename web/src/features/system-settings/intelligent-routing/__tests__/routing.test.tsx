@@ -230,3 +230,55 @@ describe('opt-in pricing group order', () => {
     })
   })
 })
+
+describe('routing token authorization', () => {
+  function mockTokens(tokens: unknown[], routing: unknown) {
+    vi.mocked(api.get).mockImplementation(async (url) => {
+      let data: unknown = routing
+      if (url === '/api/intelligent-routing/token-access') {
+        data = { items: [] }
+      } else if (url === '/api/token/?p=1&size=100') {
+        data = { items: tokens }
+      }
+      return { data: { success: true, data } } as never
+    })
+  }
+
+  it('grants an authorized token every configured routing group', async () => {
+    mockTokens(
+      [{ id: 7, name: 'service', status: 1, model_limits_enabled: false }],
+      {
+        global_channel_order: [11],
+        groups: [{ id: 'pool', name: 'Pool', channel_order: [11] }],
+        channels: [],
+      }
+    )
+    vi.mocked(api.put).mockResolvedValue({ data: { success: true, data: {} } })
+    const user = userEvent.setup()
+    renderPage('global-priority')
+    await user.click(await screen.findByRole('checkbox', { name: /service/ }))
+    await user.click(
+      screen.getByRole('button', { name: 'Authorize 1 token(s)' })
+    )
+    expect(api.put).toHaveBeenCalledWith(
+      '/api/intelligent-routing/token-access/7',
+      { groups: ['global', 'pool'] }
+    )
+  })
+
+  it('omits the global pool while no global channel priority is saved', async () => {
+    mockTokens(
+      [{ id: 8, name: 'bare', status: 1, model_limits_enabled: false }],
+      { global_channel_order: [], groups: [], channels: [] }
+    )
+    vi.mocked(api.put).mockResolvedValue({ data: { success: true, data: {} } })
+    const user = userEvent.setup()
+    renderPage('global-priority')
+    await user.click(await screen.findByRole('checkbox', { name: /bare/ }))
+    await user.click(
+      screen.getByRole('button', { name: 'Authorize 1 token(s)' })
+    )
+    // Saving would otherwise fail with "Unknown resource pool: global".
+    expect(api.put).not.toHaveBeenCalled()
+  })
+})

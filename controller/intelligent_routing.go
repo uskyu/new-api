@@ -265,7 +265,8 @@ func UpdateIntelligentRoutingTokenAccess(c *gin.Context) {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid token ID"))
 		return
 	}
-	if _, err := model.GetTokenById(tokenID); err != nil {
+	token, err := model.GetTokenById(tokenID)
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -311,7 +312,7 @@ func UpdateIntelligentRoutingTokenAccess(c *gin.Context) {
 	params["token_id"] = tokenID
 	params["groups"] = request.Groups
 	recordManageAudit(c, "intelligent-routing.token-access.update", params)
-	common.ApiSuccess(c, tokenRoutingAccessResponse{TokenID: tokenID, Groups: request.Groups})
+	common.ApiSuccess(c, tokenRoutingAccessResponse{TokenID: tokenID, TokenName: token.Name, Groups: request.Groups})
 }
 
 // GetHarnessCatalog returns only the logical model and cost data needed by Harness.

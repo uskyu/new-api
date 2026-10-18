@@ -5509,6 +5509,7 @@
     "Save SMTP settings": "Enregistrer les paramètres SMTP",
     "Save SSRF settings": "Enregistrer les paramètres SSRF",
     "Save Stripe settings": "Enregistrer les paramètres Stripe",
+    "Save the global channel priority or a resource pool first": "Enregistrez d'abord la priorité globale des canaux ou un groupe de ressources",
     "Save these backup codes in a safe place. Each code can only be used once.": "Enregistrez ces codes de secours dans un endroit sûr. Chaque code ne peut être utilisé qu'une seule fois.",
     "Save these codes in a safe place. Each code can only be used once.": "Enregistrez ces codes dans un endroit sûr. Chaque code ne peut être utilisé qu'une seule fois.",
     "Save token access": "Enregistrer les accès du jeton",
