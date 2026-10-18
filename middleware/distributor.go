@@ -143,13 +143,14 @@ func ClearIntelligentRoutingResponseHeaders(c *gin.Context) {
 		setting.IntelligentRoutingGroupHeader,
 		setting.IntelligentRoutingChannelIDHeader,
 		setting.IntelligentRoutingGroupRatioHeader,
+		setting.IntelligentRoutingPricingGroupHeader,
 		setting.IntelligentRoutingTaxRatePercentHeader,
 	} {
 		c.Writer.Header().Del(name)
 	}
 }
 
-func SetIntelligentRoutingResponseHeaders(c *gin.Context, channelID int, groupRatio, taxRate float64) {
+func SetIntelligentRoutingResponseHeaders(c *gin.Context, channelID int, pricingGroup string, groupRatio, taxRate float64) {
 	if c == nil || c.Writer == nil || c.Writer.Written() || common.GetContextKeyString(c, setting.IntelligentRoutingContextKey) == "" {
 		return
 	}
@@ -158,6 +159,7 @@ func SetIntelligentRoutingResponseHeaders(c *gin.Context, channelID int, groupRa
 	header.Set(setting.IntelligentRoutingGroupHeader, common.GetContextKeyString(c, setting.IntelligentRoutingContextKey))
 	header.Set(setting.IntelligentRoutingChannelIDHeader, strconv.Itoa(channelID))
 	header.Set(setting.IntelligentRoutingGroupRatioHeader, strconv.FormatFloat(groupRatio, 'f', -1, 64))
+	header.Set(setting.IntelligentRoutingPricingGroupHeader, pricingGroup)
 	header.Set(setting.IntelligentRoutingTaxRatePercentHeader, strconv.FormatFloat(taxRate, 'f', -1, 64))
 	if requestID := c.GetString(common.RequestIdKey); requestID != "" {
 		header.Set(common.RequestIdKey, requestID)
@@ -167,6 +169,7 @@ func SetIntelligentRoutingResponseHeaders(c *gin.Context, channelID int, groupRa
 		setting.IntelligentRoutingGroupHeader,
 		setting.IntelligentRoutingChannelIDHeader,
 		setting.IntelligentRoutingGroupRatioHeader,
+		setting.IntelligentRoutingPricingGroupHeader,
 		setting.IntelligentRoutingTaxRatePercentHeader,
 		common.RequestIdKey,
 	} {

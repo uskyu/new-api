@@ -18,6 +18,31 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestChannelValidateSettingsRejectsInvalidSupplierTaxRates(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		settings string
+		valid    bool
+	}{
+		{name: "existing channel defaults to zero", settings: "{}", valid: true},
+		{name: "zero rate", settings: `{"supplier_tax_rate_percent":0}`, valid: true},
+		{name: "fractional rate", settings: `{"supplier_tax_rate_percent":6.5}`, valid: true},
+		{name: "hundred percent", settings: `{"supplier_tax_rate_percent":100}`, valid: true},
+		{name: "negative rate", settings: `{"supplier_tax_rate_percent":-1}`, valid: false},
+		{name: "rate above one hundred", settings: `{"supplier_tax_rate_percent":100.01}`, valid: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			channel := &Channel{OtherSettings: tt.settings}
+			err := channel.ValidateSettings()
+			if tt.valid {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, "supplier_tax_rate_percent")
+			}
+		})
+	}
+}
+
 func TestChannelValidateSettingsRejectsInvalidHTTPTransport(t *testing.T) {
 	tests := []struct {
 		name    string

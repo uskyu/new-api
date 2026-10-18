@@ -19,6 +19,7 @@ const (
 	IntelligentRoutingGroupHeader          = "X-Route-Group"
 	IntelligentRoutingChannelIDHeader      = "X-Route-Channel-ID"
 	IntelligentRoutingGroupRatioHeader     = "X-Route-Group-Ratio"
+	IntelligentRoutingPricingGroupHeader   = "X-Route-Pricing-Group-ID"
 	IntelligentRoutingTaxRatePercentHeader = "X-Route-Tax-Rate-Percent"
 )
 
@@ -30,13 +31,15 @@ type IntelligentRoutingGroup struct {
 
 type IntelligentRoutingConfig struct {
 	GlobalChannelOrder []int                     `json:"global_channel_order"`
+	PricingGroupOrder  []string                  `json:"pricing_group_order"`
 	Groups             []IntelligentRoutingGroup `json:"groups"`
 	TokenGroupAccess   map[int][]string          `json:"token_group_access,omitempty"`
 }
 
 var (
-	intelligentRoutingMu     sync.RWMutex
-	intelligentRoutingConfig = IntelligentRoutingConfig{
+	intelligentRoutingMu          sync.RWMutex
+	intelligentRoutingPricingRank = make(map[string]int)
+	intelligentRoutingConfig      = IntelligentRoutingConfig{
 		GlobalChannelOrder: nil,
 		Groups:             []IntelligentRoutingGroup{},
 		TokenGroupAccess:   make(map[int][]string),
@@ -49,6 +52,14 @@ func GetIntelligentRoutingConfig() IntelligentRoutingConfig {
 	defer intelligentRoutingMu.RUnlock()
 
 	return cloneIntelligentRoutingConfig(intelligentRoutingConfig)
+}
+
+// Cached O(1) rank lookup for opt-in procurement pricing groups.
+func GetIntelligentRoutingPricingGroupRank(groupID string) (int, bool) {
+	intelligentRoutingMu.RLock()
+	defer intelligentRoutingMu.RUnlock()
+	rank, ok := intelligentRoutingPricingRank[groupID]
+	return rank, ok
 }
 
 func TokenHasIntelligentRoutingAccess(tokenID int) bool {
@@ -147,6 +158,10 @@ func UpdateIntelligentRoutingConfig(config IntelligentRoutingConfig) error {
 		config.TokenGroupAccess = access
 	}
 	intelligentRoutingConfig = cloneIntelligentRoutingConfig(config)
+	intelligentRoutingPricingRank = make(map[string]int, len(config.PricingGroupOrder))
+	for i, id := range config.PricingGroupOrder {
+		intelligentRoutingPricingRank[id] = i
+	}
 	intelligentRoutingMu.Unlock()
 	return nil
 }
@@ -163,6 +178,16 @@ func IntelligentRoutingGroups(config IntelligentRoutingConfig) map[string]string
 }
 
 func ValidateIntelligentRoutingConfig(config IntelligentRoutingConfig) error {
+	seenPricing := make(map[string]struct{}, len(config.PricingGroupOrder))
+	for _, id := range config.PricingGroupOrder {
+		if strings.TrimSpace(id) == "" {
+			return fmt.Errorf("pricing_group_order contains an empty ID")
+		}
+		if _, ok := seenPricing[id]; ok {
+			return fmt.Errorf("duplicate pricing group ID: %s", id)
+		}
+		seenPricing[id] = struct{}{}
+	}
 	if err := validateChannelOrder("global_channel_order", config.GlobalChannelOrder); err != nil {
 		return err
 	}
@@ -216,6 +241,7 @@ func ValidateIntelligentRoutingConfig(config IntelligentRoutingConfig) error {
 func cloneIntelligentRoutingConfig(config IntelligentRoutingConfig) IntelligentRoutingConfig {
 	cloned := IntelligentRoutingConfig{
 		GlobalChannelOrder: slices.Clone(config.GlobalChannelOrder),
+		PricingGroupOrder:  slices.Clone(config.PricingGroupOrder),
 		Groups:             make([]IntelligentRoutingGroup, len(config.Groups)),
 		TokenGroupAccess:   make(map[int][]string, len(config.TokenGroupAccess)),
 	}

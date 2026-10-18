@@ -288,6 +288,7 @@ const SENSITIVE_FORM_FIELDS = [
   'param_override',
   'header_override',
   'settings',
+  'supplier_tax_rate_percent',
   'setting',
   'advanced_custom',
   'is_enterprise_account',
@@ -2245,6 +2246,33 @@ export function ChannelMutateDrawer({
           )}
         />
       </div>
+
+      <FormField
+        control={form.control}
+        name='supplier_tax_rate_percent'
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t('Supplier tax rate (%)')}</FormLabel>
+            <FormControl>
+              <Input
+                type='number'
+                min={0}
+                max={100}
+                step={0.01}
+                disabled={sensitiveLocked}
+                value={field.value}
+                onChange={(e) => field.onChange(Number(e.target.value))}
+              />
+            </FormControl>
+            <FormDescription>
+              {t(
+                'Procurement tax forwarded to Harness in response headers; not charged by New API.'
+              )}
+            </FormDescription>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
 
       <FormField
         control={form.control}

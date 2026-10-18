@@ -71,17 +71,20 @@ func TestHarnessCatalogGroupContainsOnlyResourcePoolIdentityAndModels(t *testing
 	require.NotContains(t, json, "tax_rate_percent")
 }
 
-func TestSetIntelligentRoutingResponseHeadersUsesFinalChannelPricingAndRejectsAmbiguity(t *testing.T) {
+func TestSetIntelligentRoutingResponseHeadersUsesCheckedPricingGroupAndChannelTax(t *testing.T) {
 	oldDB := model.DB
 	oldMainDatabaseType := common.MainDatabaseType()
+	oldMemoryCache := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	model.DB = db
 	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
-	require.NoError(t, db.AutoMigrate(&model.Ability{}))
+	require.NoError(t, db.AutoMigrate(&model.Ability{}, &model.Channel{}))
 	t.Cleanup(func() {
 		model.DB = oldDB
 		common.SetMainDatabaseType(oldMainDatabaseType)
+		common.MemoryCacheEnabled = oldMemoryCache
 		sqlDB, dbErr := db.DB()
 		if dbErr == nil {
 			_ = sqlDB.Close()
@@ -95,6 +98,12 @@ func TestSetIntelligentRoutingResponseHeadersUsesFinalChannelPricingAndRejectsAm
 		require.NoError(t, ratio_setting.UpdateGroupTaxRateByJSONString(oldTaxRates))
 	})
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"group-a":0.8,"group-b":0.8,"group-c":0.7}`))
+	oldConfig := setting.GetIntelligentRoutingConfig()
+	if oldConfig.GlobalChannelOrder == nil {
+		oldConfig.GlobalChannelOrder = []int{}
+	}
+	t.Cleanup(func() { require.NoError(t, setting.UpdateIntelligentRoutingConfig(oldConfig)) })
+	require.NoError(t, setting.UpdateIntelligentRoutingConfig(setting.IntelligentRoutingConfig{GlobalChannelOrder: []int{}, PricingGroupOrder: []string{"group-c", "group-a"}}))
 	require.NoError(t, ratio_setting.UpdateGroupTaxRateByJSONString(`{"group-a":8,"group-b":8,"group-c":5}`))
 
 	for _, ability := range []model.Ability{
@@ -111,15 +120,18 @@ func TestSetIntelligentRoutingResponseHeadersUsesFinalChannelPricingAndRejectsAm
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	common.SetContextKey(c, setting.IntelligentRoutingContextKey, setting.IntelligentRoutingGlobalGroupID)
 
-	apiErr := setIntelligentRoutingResponseHeaders(c, 42, "model-y")
+	channel := &model.Channel{Id: 42, OtherSettings: `{"supplier_tax_rate_percent":6.5}`}
+	require.NoError(t, db.Create(channel).Error)
+	apiErr := setIntelligentRoutingResponseHeaders(c, channel, "model-y")
 	require.Nil(t, apiErr)
 	assert.Equal(t, "42", c.Writer.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 	assert.Equal(t, "0.7", c.Writer.Header().Get(setting.IntelligentRoutingGroupRatioHeader))
-	assert.Equal(t, "5", c.Writer.Header().Get(setting.IntelligentRoutingTaxRatePercentHeader))
+	assert.Equal(t, "group-c", c.Writer.Header().Get(setting.IntelligentRoutingPricingGroupHeader))
+	assert.Equal(t, "6.5", c.Writer.Header().Get(setting.IntelligentRoutingTaxRatePercentHeader))
 
-	apiErr = setIntelligentRoutingResponseHeaders(c, 42, "model-x")
-	require.NotNil(t, apiErr)
-	assert.Contains(t, apiErr.Error(), "ambiguous pricing groups")
+	apiErr = setIntelligentRoutingResponseHeaders(c, channel, "model-x")
+	require.Nil(t, apiErr)
+	assert.Equal(t, "group-c", c.Writer.Header().Get(setting.IntelligentRoutingPricingGroupHeader))
 
 	recorder = httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(recorder)
@@ -127,7 +139,9 @@ func TestSetIntelligentRoutingResponseHeadersUsesFinalChannelPricingAndRejectsAm
 	common.SetContextKey(c, setting.IntelligentRoutingContextKey, setting.IntelligentRoutingGlobalGroupID)
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"group-a":0.8,"group-b":0.8,"group-c":0.8}`))
 	require.NoError(t, ratio_setting.UpdateGroupTaxRateByJSONString(`{"group-a":8,"group-b":8,"group-c":8}`))
-	apiErr = setIntelligentRoutingResponseHeaders(c, 42, "model-x")
+	apiErr = setIntelligentRoutingResponseHeaders(c, channel, "model-x")
 	require.Nil(t, apiErr)
 	assert.Equal(t, "42", c.Writer.Header().Get(setting.IntelligentRoutingChannelIDHeader))
+	assert.Equal(t, "6.5", c.Writer.Header().Get(setting.IntelligentRoutingTaxRatePercentHeader))
+	assert.Equal(t, "group-c", c.Writer.Header().Get(setting.IntelligentRoutingPricingGroupHeader))
 }
