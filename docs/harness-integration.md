@@ -175,7 +175,8 @@ Authorization: Bearer sk-<token-key>
             "billing_usage_examples": [],
             "billing_plugin_variants": []
           }
-        ]
+        ],
+        "unpriced_models": []
       }
     ]
   }
@@ -200,7 +201,20 @@ Authorization: Bearer sk-<token-key>
 | --- | --- | --- |
 | `id` | string | 分组 ID。`global` 为全局路由，其他为管理员创建的资源池 ID |
 | `name` | string | 分组显示名称 |
-| `models` | array | 该分组下可调用的模型列表 |
+| `models` | array | 该分组下可调用且已配置有效价格的模型列表 |
+| `unpriced_models` | array | 渠道支持但未配置有效价格、因此从 `models` 中排除的诊断列表；不可调用 |
+
+#### 未定价诊断字段 `groups[].unpriced_models[]`
+
+该列表仅供管理和诊断，模型不会出现在 `groups[].models`，Harness 不应向 New API 请求这些模型。缺少价格和显式配置为 `0` 不同：显式 `0` 表示免费，仍会作为有效价格模型出现在 `models` 中。New API 的自用模式回退倍率（例如 `37.5`）不视为已配置价格，不会让模型进入可选列表。
+
+计价按 Relay 实际解析后的模型名计算，避免带推理参数的别名被误报为已定价却返回回退倍率。普通渠道必须有模型级价格；任务插件路由可使用模型级价格，也可使用该插件专属的非空、兼容计费表达式。只有插件变体定价时，当前资源池内所有可选插件路由都必须有有效表达式，模型才会进入 `models`。`billing_plugin_variants` 只列出该资源池可达的插件变体。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `name` | string | 有渠道支持但尚未配置有效价格的逻辑模型名 |
+| `upstream_models` | string[] | 对应渠道映射的上游模型名，去重排序 |
+| `reason` | string | 排除原因；当前为 `pricing_not_configured` |
 
 #### 模型字段 `groups[].models[]`
 
@@ -445,4 +459,5 @@ amount_usd = final_cost / quota_per_unit
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-10-18 | catalog 仅公开有效定价模型，按分组增加未定价模型诊断字段 |
 | 2026-10-18 | 初版。对应构建 `harness-api-20261018-a25f1f5` |
