@@ -102,6 +102,27 @@ func TestNormalizeIntelligentRoutingChannelOrdersKeepsDisabledChannels(t *testin
 	assert.Equal(t, []int{disabled.Id}, normalized.Groups[1].ChannelOrder)
 }
 
+// TestCloneTokenGroupAccessIsolatesLiveConfig guards a save-time aliasing bug:
+// pruning a stale pool must not mutate the live config's map, which previously
+// left the in-memory state disagreeing with the stored option.
+func TestCloneTokenGroupAccessIsolatesLiveConfig(t *testing.T) {
+	live := map[int][]string{
+		7: {"pool-a", "pool-b"},
+		8: {"pool-a"},
+	}
+	cloned := cloneTokenGroupAccess(live)
+	require.Equal(t, live, cloned)
+
+	// Mutating the clone the way a save does must leave the live map intact.
+	delete(cloned, 8)
+	cloned[7] = cloned[7][:1]
+
+	assert.Len(t, live, 2, "deleting a token from the clone must not touch the live map")
+	assert.Equal(t, []string{"pool-a", "pool-b"}, live[7], "truncating the clone must not shrink the live slice")
+	require.Contains(t, live, 8)
+	assert.Nil(t, cloneTokenGroupAccess(nil), "a nil grant map must stay nil")
+}
+
 func TestIntelligentRoutingAPIContractContainsChannelsWithoutPricing(t *testing.T) {
 	response, err := common.Marshal(intelligentRoutingResponse{
 		GlobalChannelOrder: []int{1},
@@ -334,6 +355,36 @@ func TestHarnessCatalogScalesPricesIntoDisplayCurrency(t *testing.T) {
 	scaled := harnessCatalogTokenPricing("harness-price-currency", currency, rate)
 	require.NotNil(t, scaled.Input)
 	assert.InDelta(t, 14.0, *scaled.Input, 1e-9)
+}
+
+// TestHarnessRouteForModelDoesNotTreatOrdinaryRoutesAsPluginBacked pins the fix
+// for a live catalog bug: the bundled sora task plugin registers the
+// general-purpose OpenAI channel type, so every ordinary OpenAI channel was
+// misread as a plugin-only route and its models were reported as unpriced.
+func TestHarnessRouteForModelDoesNotTreatOrdinaryRoutesAsPluginBacked(t *testing.T) {
+	generation := jsplugin.DefaultRegistry.Generation()
+
+	// A plain OpenAI channel is claimed by the sora plugin through channel type 1.
+	channel := &model.Channel{Type: constant.ChannelTypeOpenAI}
+	bindings := harnessChannelPluginBindingsFor(channel, generation)
+	assert.False(t, bindings.RequiresPlugin, "a channel-type claim alone must not make the channel plugin-only")
+	require.Equal(t, "sora", bindings.TypePluginKey)
+
+	// For an ordinary chat model the channel stays a base relay route.
+	ordinary := harnessRouteForModel(bindings, generation, "deepseek-v4.1-flash")
+	assert.False(t, ordinary.RequiresPlugin, "an ordinary model must remain a base relay route")
+	assert.Empty(t, ordinary.PluginKeys)
+
+	// For a model the plugin actually serves the plugin claim applies.
+	pluginRoute := harnessRouteForModel(bindings, generation, "sora-2")
+	assert.True(t, pluginRoute.RequiresPlugin, "the plugin's own model must be treated as plugin-backed")
+	assert.Contains(t, pluginRoute.PluginKeys, "sora")
+
+	// An explicit task-plugin channel keeps requiring a plugin regardless of model.
+	taskChannel := &model.Channel{Type: constant.ChannelTypeTaskPlugin}
+	taskBindings := harnessChannelPluginBindingsFor(taskChannel, generation)
+	assert.True(t, taskBindings.RequiresPlugin)
+	assert.True(t, harnessRouteForModel(taskBindings, generation, "some-model").RequiresPlugin)
 }
 
 func TestHarnessChannelPluginBindingsCaptureOnlyConfiguredProviders(t *testing.T) {

@@ -150,6 +150,19 @@ func keepKnownRoutingChannelIDs(channelIDs []int, known map[int]struct{}) []int 
 	return kept
 }
 
+// cloneTokenGroupAccess deep-copies token routing grants so a save can prune
+// stale pools without mutating the live config the caller handed us.
+func cloneTokenGroupAccess(access map[int][]string) map[int][]string {
+	if access == nil {
+		return nil
+	}
+	cloned := make(map[int][]string, len(access))
+	for tokenID, groups := range access {
+		cloned[tokenID] = slices.Clone(groups)
+	}
+	return cloned
+}
+
 func keepKnownRoutingGroups(groups []setting.IntelligentRoutingGroup, known map[int]struct{}) []setting.IntelligentRoutingGroup {
 	kept := make([]setting.IntelligentRoutingGroup, 0, len(groups))
 	for _, group := range groups {
@@ -229,7 +242,10 @@ func UpdateIntelligentRouting(c *gin.Context) {
 		return
 	}
 	previousConfig := setting.GetIntelligentRoutingConfig()
-	config.TokenGroupAccess = previousConfig.TokenGroupAccess
+	// Clone before filtering: TokenGroupAccess is a map and its slices would
+	// otherwise alias the live config, so deleting a stale pool here would
+	// mutate the in-memory state while the stored option kept the old entries.
+	config.TokenGroupAccess = cloneTokenGroupAccess(previousConfig.TokenGroupAccess)
 	allowedGroups := setting.IntelligentRoutingGroups(config)
 	for tokenID, tokenGroups := range config.TokenGroupAccess {
 		filtered := make([]string, 0, len(tokenGroups))
@@ -397,9 +413,15 @@ type harnessCatalogUnpricedModel struct {
 	Reason         string   `json:"reason"`
 }
 
+// harnessChannelPluginBindings describes how a channel reaches task plugins.
+// TypePluginKey is a plugin that merely *may* serve the channel type: several
+// plugins register a general-purpose channel type (the sora plugin claims
+// OpenAI type 1), so a channel-type hit alone does not make the channel a
+// plugin channel for every model it serves.
 type harnessChannelPluginBindings struct {
 	PluginKeys     []string
 	RequiresPlugin bool
+	TypePluginKey  string
 }
 
 type harnessRoutePricingProviders struct {
@@ -409,23 +431,46 @@ type harnessRoutePricingProviders struct {
 }
 
 func harnessChannelPluginBindingsFor(channel *model.Channel, generation *jsplugin.RoutingGeneration) harnessChannelPluginBindings {
+	typePluginKey := ""
 	if plugin, ok := generation.GetByChannelType(channel.Type); ok {
-		return harnessChannelPluginBindings{PluginKeys: []string{plugin.Meta.Key}, RequiresPlugin: true}
+		typePluginKey = plugin.Meta.Key
 	}
 	if channel.Type != constant.ChannelTypeTaskPlugin && channel.Type != constant.ChannelTypeNewAPI {
-		return harnessChannelPluginBindings{}
+		return harnessChannelPluginBindings{TypePluginKey: typePluginKey}
 	}
 	var channelSettings dto.ChannelSettings
 	if channel.Setting != nil && *channel.Setting != "" {
 		if err := common.Unmarshal([]byte(*channel.Setting), &channelSettings); err != nil {
-			return harnessChannelPluginBindings{RequiresPlugin: channel.Type == constant.ChannelTypeTaskPlugin}
+			return harnessChannelPluginBindings{
+				RequiresPlugin: channel.Type == constant.ChannelTypeTaskPlugin,
+				TypePluginKey:  typePluginKey,
+			}
 		}
 	}
 	pluginKeys := channelSettings.TaskPluginBindings()
 	return harnessChannelPluginBindings{
 		PluginKeys:     pluginKeys,
 		RequiresPlugin: channel.Type == constant.ChannelTypeTaskPlugin || len(pluginKeys) > 0,
+		TypePluginKey:  typePluginKey,
 	}
+}
+
+// harnessRouteForModel narrows plugin bindings to one model. A channel-type
+// plugin applies only when that plugin actually serves the model; otherwise the
+// channel is an ordinary relay route and must be priced from its base config.
+func harnessRouteForModel(bindings harnessChannelPluginBindings, pluginGeneration *jsplugin.RoutingGeneration, modelName string) harnessChannelPluginBindings {
+	if bindings.TypePluginKey == "" || !harnessPluginProvidesModel(pluginGeneration, bindings.TypePluginKey, modelName) {
+		return bindings
+	}
+	resolved := harnessChannelPluginBindings{
+		PluginKeys:     slices.Clone(bindings.PluginKeys),
+		RequiresPlugin: true,
+		TypePluginKey:  bindings.TypePluginKey,
+	}
+	if !slices.Contains(resolved.PluginKeys, bindings.TypePluginKey) {
+		resolved.PluginKeys = append(resolved.PluginKeys, bindings.TypePluginKey)
+	}
+	return resolved
 }
 
 func harnessPluginProvidesModel(generation *jsplugin.RoutingGeneration, pluginKey, modelName string) bool {
@@ -605,7 +650,7 @@ func GetHarnessCatalog(c *gin.Context) {
 					routePricing = &harnessRoutePricingProviders{PluginKeys: make(map[string]struct{})}
 					groupRoutePricingByGroup[groupID][modelName] = routePricing
 				}
-				channelPlugins := channelPluginsByID[channelID]
+				channelPlugins := harnessRouteForModel(channelPluginsByID[channelID], pluginGeneration, modelName)
 				if !channelPlugins.RequiresPlugin {
 					routePricing.HasBaseRoute = true
 				} else if len(channelPlugins.PluginKeys) == 0 {
