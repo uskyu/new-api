@@ -756,7 +756,7 @@ export function IntelligentRoutingPage() {
               <h2 className='font-semibold'>{t('Harness routing tokens')}</h2>
               <p className='text-muted-foreground mt-1 text-sm'>
                 {t(
-                  'Create the token in Console → Tokens first, then authorize it here. An authorized token may call every routing group; it picks one per request with the X-Route-Group header.'
+                  'Tokens authorized here can use all configured routing groups. Routed requests must include X-Route-Group or receive HTTP 403. Browser WebSocket clients can pass openai-insecure-route-group.<group-id> as a subprotocol. Model listing and task-result reads do not require the header; revoking access restores normal routing.'
                 )}
               </p>
               {tokenAccessQuery.isError ? (

@@ -290,16 +290,19 @@ Content-Type: application/json
 
 | 情况 | 行为 |
 | --- | --- |
-| **不携带** | 走原有随机选渠道逻辑。**路由优先级、计价分组、税率全部不生效**，也不返回任何 `X-Route-*` 响应头 |
+| **不携带** | 未授权令牌保持原有普通路由；已授权令牌对需要选择模型/上游渠道的请求返回 403。模型列表和只读任务结果查询无需此头 |
 | 携带 `global` | 使用「全渠道优先级」中配置的渠道顺序 |
 | 携带资源池 ID（如 `pool-fast`） | 使用该资源池中配置的渠道顺序 |
 
-> **这是最关键的一点**：不传 `X-Route-Group`，整套智能路由功能完全不触发。
+浏览器 WebSocket API 无法设置自定义 HTTP 请求头，可在 `Sec-WebSocket-Protocol` 中增加 `openai-insecure-route-group.<group-id>`（例如 `openai-insecure-route-group.global`）。服务端会按普通 `X-Route-Group` 规则验证令牌授权。
+
+> **这是最关键的一点**：已授权令牌漏传路由分组会被拒绝，不会静默回退到普通路由；普通未授权令牌仍保持原有调用行为。
 
 ### 5.3 鉴权失败响应
 
 | 场景 | HTTP | 响应体 `message` |
 | --- | --- | --- |
+| 授权令牌未携带必需的路由分组 | 403 | `this token requires X-Route-Group for routed requests; choose an authorized resource pool` |
 | 令牌限制了模型范围 | 403 | `request-level resource pool selection requires a full-model service token` |
 | 令牌未授权任何路由分组 | 403 | `token is not configured for intelligent routing` |
 | 请求的分组未配置 | 403 | `requested resource pool is not configured` |

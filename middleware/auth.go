@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
@@ -643,7 +644,11 @@ func TokenAuth() func(c *gin.Context) {
 		if err != nil {
 			return
 		}
-		if requestedGroup := strings.TrimSpace(c.GetHeader(setting.IntelligentRoutingGroupHeader)); requestedGroup != "" {
+		requestedGroup := strings.TrimSpace(c.GetHeader(setting.IntelligentRoutingGroupHeader))
+		if !enforceAuthorizedRoutingGroupHeader(c, token.Id, requestedGroup) {
+			return
+		}
+		if requestedGroup != "" {
 			if token.ModelLimitsEnabled {
 				abortWithOpenAiMessage(c, http.StatusForbidden, "request-level resource pool selection requires a full-model service token", types.ErrorCodeAccessDenied)
 				return
@@ -661,13 +666,74 @@ func TokenAuth() func(c *gin.Context) {
 	}
 }
 
+func enforceAuthorizedRoutingGroupHeader(c *gin.Context, tokenID int, requestedGroup string) bool {
+	if !requiresRoutingGroupHeader(c) || !setting.TokenHasIntelligentRoutingAccess(tokenID) || strings.TrimSpace(requestedGroup) != "" {
+		return true
+	}
+	abortWithOpenAiMessage(c, http.StatusForbidden,
+		"this token requires X-Route-Group for routed requests; choose an authorized resource pool",
+		types.ErrorCodeAccessDenied)
+	return false
+}
+
+func requiresRoutingGroupHeader(c *gin.Context) bool {
+	if c == nil || c.Request == nil || c.GetString(RouteTagKey) != "relay" {
+		return false
+	}
+	if value, exists := c.Get(pluginruntime.ContextKeyPinnedRoute); exists {
+		if pinned, ok := value.(pluginruntime.PinnedRoute); ok {
+			switch pinned.Route.Type {
+			case pluginruntime.RouteTypeQuery:
+				return false
+			case pluginruntime.RouteTypeSubmit, pluginruntime.RouteTypeDynamic:
+				return true
+			}
+		}
+	}
+	switch c.Request.Method {
+	case http.MethodGet:
+		return c.Request.URL.Path == "/v1/responses" || c.Request.URL.Path == "/v1/realtime"
+	case http.MethodPost:
+		path := c.Request.URL.Path
+		if path == "/v1/images/variations" || path == "/v1/files" || strings.HasPrefix(path, "/v1/fine-tunes") {
+			return false
+		}
+		return !strings.HasSuffix(path, "/mj/task/list-by-condition")
+	default:
+		return false
+	}
+}
+
 func applyWebSocketSubprotocolAuthorization(header http.Header) bool {
-	key, ok := apiKeyFromWebSocketSubprotocol(strings.Join(header.Values("Sec-WebSocket-Protocol"), ","))
+	protocols := strings.Join(header.Values("Sec-WebSocket-Protocol"), ",")
+	if strings.TrimSpace(header.Get(setting.IntelligentRoutingGroupHeader)) == "" {
+		if group, ok := routingGroupFromWebSocketSubprotocol(protocols); ok {
+			header.Set(setting.IntelligentRoutingGroupHeader, group)
+		}
+	}
+	key, ok := apiKeyFromWebSocketSubprotocol(protocols)
 	if !ok {
 		return false
 	}
 	header.Set("Authorization", "Bearer "+key)
 	return true
+}
+
+func routingGroupFromWebSocketSubprotocol(protocols string) (string, bool) {
+	const routeGroupPrefix = "openai-insecure-route-group."
+	var group string
+	for part := range strings.SplitSeq(protocols, ",") {
+		part = strings.TrimSpace(part)
+		if !strings.HasPrefix(part, routeGroupPrefix) {
+			continue
+		}
+		candidate := strings.TrimPrefix(part, routeGroupPrefix)
+		if candidate == "" || group != "" {
+			return "", false
+		}
+		group = candidate
+	}
+	return group, group != ""
 }
 
 func apiKeyFromWebSocketSubprotocol(protocols string) (string, bool) {

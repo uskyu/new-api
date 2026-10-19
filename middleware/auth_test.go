@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/golang-jwt/jwt/v5"
@@ -533,4 +534,53 @@ func TestApplyWebSocketSubprotocolAuthorizationReadsRepeatedHeaders(t *testing.T
 
 	assert.True(t, applyWebSocketSubprotocolAuthorization(header))
 	assert.Equal(t, "Bearer sk-later-field", header.Get("Authorization"))
+}
+
+func TestApplyWebSocketSubprotocolAuthorizationSetsRoutingGroup(t *testing.T) {
+	header := http.Header{}
+	header.Set("Sec-WebSocket-Protocol", "responses, openai-insecure-api-key.sk-test, openai-insecure-route-group.global")
+
+	assert.True(t, applyWebSocketSubprotocolAuthorization(header))
+	assert.Equal(t, "Bearer sk-test", header.Get("Authorization"))
+	assert.Equal(t, setting.IntelligentRoutingGlobalGroupID, header.Get(setting.IntelligentRoutingGroupHeader))
+}
+
+func TestApplyWebSocketSubprotocolAuthorizationKeepsExplicitRoutingHeader(t *testing.T) {
+	header := http.Header{}
+	header.Set(setting.IntelligentRoutingGroupHeader, "pool")
+	header.Set("Sec-WebSocket-Protocol", "openai-insecure-route-group.global")
+
+	assert.False(t, applyWebSocketSubprotocolAuthorization(header))
+	assert.Equal(t, "pool", header.Get(setting.IntelligentRoutingGroupHeader))
+}
+
+func TestAuthorizedRoutingWebSocketAcceptsGroupSubprotocol(t *testing.T) {
+	setupAuthorizedRoutingHeaderTest(t)
+	previousMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousMode) })
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/realtime", nil)
+	ctx.Request.Header.Set("Sec-WebSocket-Protocol", "realtime, openai-insecure-api-key.sk-test, openai-insecure-route-group.global")
+	ctx.Set(RouteTagKey, "relay")
+
+	assert.True(t, applyWebSocketSubprotocolAuthorization(ctx.Request.Header))
+	requestedGroup := ctx.Request.Header.Get(setting.IntelligentRoutingGroupHeader)
+	require.True(t, enforceAuthorizedRoutingGroupHeader(ctx, 77, requestedGroup))
+	require.NoError(t, applyIntelligentRoutingGroup(ctx, &model.Token{Id: 77}, "default", requestedGroup))
+}
+
+func TestRoutingGroupFromWebSocketSubprotocolRejectsAmbiguousValues(t *testing.T) {
+	for _, protocols := range []string{
+		"openai-insecure-route-group.",
+		"openai-insecure-route-group.global, openai-insecure-route-group.pool",
+	} {
+		t.Run(protocols, func(t *testing.T) {
+			group, ok := routingGroupFromWebSocketSubprotocol(protocols)
+			assert.Empty(t, group)
+			assert.False(t, ok)
+		})
+	}
 }

@@ -232,11 +232,15 @@ describe('opt-in pricing group order', () => {
 })
 
 describe('routing token authorization', () => {
-  function mockTokens(tokens: unknown[], routing: unknown) {
+  function mockTokens(
+    tokens: unknown[],
+    routing: unknown,
+    access: unknown[] = []
+  ) {
     vi.mocked(api.get).mockImplementation(async (url) => {
       let data: unknown = routing
       if (url === '/api/intelligent-routing/token-access') {
-        data = { items: [] }
+        data = { items: access }
       } else if (url === '/api/token/?p=1&size=100') {
         data = { items: tokens }
       }
@@ -280,5 +284,25 @@ describe('routing token authorization', () => {
     )
     // Saving would otherwise fail with "Unknown resource pool: global".
     expect(api.put).not.toHaveBeenCalled()
+  })
+
+  it('revokes an authorized token by clearing its routing groups', async () => {
+    mockTokens(
+      [{ id: 7, name: 'service', status: 1, model_limits_enabled: false }],
+      {
+        global_channel_order: [11],
+        groups: [],
+        channels: [],
+      },
+      [{ token_id: 7, token_name: 'service', groups: ['global'] }]
+    )
+    vi.mocked(api.put).mockResolvedValue({ data: { success: true, data: {} } })
+    const user = userEvent.setup()
+    renderPage('global-priority')
+    await user.click(await screen.findByRole('button', { name: 'Revoke' }))
+    expect(api.put).toHaveBeenCalledWith(
+      '/api/intelligent-routing/token-access/7',
+      { groups: [] }
+    )
   })
 })
