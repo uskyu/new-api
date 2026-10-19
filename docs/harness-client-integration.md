@@ -345,3 +345,105 @@ token 算例：`final_cost = 1.80 × 0.8 × 1.065 = 1.5336 USD`
 4. **自定义展示币种的 `currency` 取值。** 实例可能配置 `CUSTOM` 展示类型，此时 `currency` 是自定义符号而非 ISO 代码；Harness 若需要 ISO 代码，需确认映射方式。
 5. **工具附加费与音频价格的补齐时间。** 见 1.5；本轮不接入，后续版本是否补齐需确认。
 6. **`tiered_expr` 的两种换算语义没有显式字段。** 本文按"`usage_schema` 是否为空 + 表达式是否引用 `u(...)`"判断 token 型 / 任务用量型，这与 New API 当前内部实现一致，但契约里没有专门的判别字段。建议 New API 后续在 `pricing` 中补一个显式标识（例如 `billing_unit: token | request` 或 `expr_kind`），避免 Harness 反推。在此之前，Harness 应按 3.4 的判别表实现，并在无法判断时报错而不是猜。
+
+## 6. 按请求 ID 查询已结算成本（推荐对账方式）
+
+第 3 章的换算方式要求 Harness 自己实现一套与 New API 完全一致的计费表达式求值器。**更省事也更可靠的做法是：调用完成后，直接用请求 ID 向 New API 查询这次调用的已结算成本。**
+
+这样 Harness 不需要解析任何公式，分时计价、阶梯计价、缓存计价、任务计费全部由 New API 负责，官方升级计费规则时 Harness 无需跟着改。
+
+### 6.1 调用流程
+
+```
+① POST /v1/chat/completions            Harness 发起调用
+② 从响应头取 X-Oneapi-Request-Id        每个响应都有，无需自己生成
+③ GET /api/harness/settlements/{id}     查询已结算成本
+④ 读取 billing.total_amount             记入采购账本
+```
+
+`X-Oneapi-Request-Id` 在流式与非流式响应中都存在，且每次调用唯一。**不需要用 token 用量反查**——不同请求的用量可能完全相同，无法唯一匹配。
+
+### 6.2 请求
+
+```bash
+curl --fail-with-body --silent --show-error \
+  -H "Authorization: Bearer ${NEW_API_TOKEN}" \
+  "${NEW_API_BASE_URL}/api/harness/settlements/${REQUEST_ID}"
+```
+
+### 6.3 成功响应
+
+```json
+{
+  "success": true,
+  "data": {
+    "request_id": "202610191614243978040008268d9d6XlnBjmjo",
+    "status": "settled",
+    "model": "deepseek-v4.1-flash",
+    "channel_id": 1,
+    "pricing_group": "default",
+    "usage": {
+      "input_tokens": 37,
+      "output_tokens": 4
+    },
+    "billing": {
+      "base_amount": "0.000106",
+      "group_ratio": 1,
+      "tax_rate_percent": 0,
+      "total_amount": "0.000106",
+      "currency": "USD"
+    },
+    "created_at": 1792426466,
+    "settled_at": 1792426466
+  }
+}
+```
+
+### 6.4 字段说明
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `status` | string | `pending` / `settled` / `refunded` / `failed`，见 6.5 |
+| `model` | string | Harness 请求的模型名（不是上游改写后的名字） |
+| `channel_id` | number | 实际命中的上游渠道 |
+| `pricing_group` | string | 生效的采购计价分组；为空表示该渠道未登记采购分组 |
+| `usage.input_tokens` | number | 本次实际输入 token |
+| `usage.output_tokens` | number | 本次实际输出 token |
+| `usage.cache_read_tokens` | number? | 缓存读取 token，为 0 时省略 |
+| `usage.cache_write_tokens` | number? | 缓存写入 token，为 0 时省略 |
+| `billing.base_amount` | string | 应用采购折扣与税点前的金额 |
+| `billing.group_ratio` | number | 采购倍率快照；为 0 表示未命中采购分组（不等于免费） |
+| `billing.tax_rate_percent` | number | 税点快照 |
+| `billing.total_amount` | string | **本次采购成本，Harness 记账直接用这个字段** |
+| `billing.currency` | string | 结算币种，跟随实例展示币种配置 |
+
+**金额是定点小数字符串，必须按字符串原样保存或转成精确十进制，不要用浮点数解析后再格式化**，否则会丢精度、对不上账。
+
+### 6.5 状态语义
+
+| `status` | 含义 | Harness 处理 |
+| --- | --- | --- |
+| `pending` | 尚未完成结算（异步任务进行中，或结算记录刚写入） | **HTTP 200**，按退避重试，不要当错误 |
+| `settled` | 已完成结算 | 按 `total_amount` 记账 |
+| `refunded` | 任务失败已退款 | 按 `total_amount` 记录净额（通常为 0） |
+| `failed` | 结算异常 | 记录并人工核对 |
+
+### 6.6 重要注意事项
+
+1. **`pending` 是成功响应，不是错误。** 结算记录在响应体发出之后才写入，因此调用完成后立刻查询可能拿到 `pending` 或 404。建议首次查询前留极短延迟，之后按 100ms–1s 退避重试，直至进入终态。
+2. **异步任务全程用同一个 ID 查询。** 提交任务时拿到的 `X-Oneapi-Request-Id` 会一直有效，任务完成或退款后同一行状态会更新。**不需要再保存 `task_id`，也不需要轮询任务表。**
+3. **越权访问返回 404，不是 403。** 服务令牌只能查询自己产生的请求；查询别人的请求与查询不存在的 ID 返回完全相同的结果。
+4. **历史数据不回溯。** 结算表只记录上线之后的请求；上线前的调用查不到。
+5. **金额已包含采购折扣与税点。** `total_amount` 是最终采购成本，Harness **不要再乘 `X-Route-Group-Ratio` 或加税**，否则会重复计算。响应头那组值仅用于展示与核对。
+6. **`total_amount` 与内部扣额是两个概念。** New API 内部扣额按用户分组计费，`total_amount` 按供应商采购分组与税点计费，二者通常不相等，不要混用。
+7. **这是按 New API 已配置的采购规则算出的成本，不自动等于供应商最终账单。** 实际对账仍需与上游账单核对。
+
+### 6.7 错误响应
+
+| HTTP | 含义 | Harness 处理 |
+| --- | --- | --- |
+| `401` | 服务令牌无效 | 检查令牌，不要记录令牌值 |
+| `403` | 使用了模型受限令牌 | 结算查询需要全模型令牌 |
+| `404` | 请求 ID 不存在、不属于本令牌，或尚未写入 | 退避重试；持续 404 则记录并核对 |
+| `400` | 请求 ID 为空 | 修正调用 |
+
