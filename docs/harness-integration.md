@@ -1,8 +1,8 @@
 # Harness ⇄ New API 联调对接文档
 
-> 面向 Harness 团队的接口配置说明。本文所有字段、错误码和响应头均取自当前部署实例的实测结果。
+> 面向 Harness 团队的接口配置说明。本文的字段、错误码与响应头取自当前部署实例的实测结果；catalog 价格契约以第 4 章的说明为准。
 >
-> 文档版本：对应 New API 构建 `harness-api-20261018-a25f1f5`
+> 文档版本：对应 New API 构建 `harness-api-20261018-a25f1f5`；**2026-10-19 起 catalog 改为返回 `pricing` 价格对象**（详见第十章变更记录）。
 
 ---
 
@@ -34,10 +34,10 @@
 ## 二、整体分工
 
 ```
-┌─────────────┐   1. 拉取模型与标准价格      ┌──────────────┐
+┌─────────────┐   1. 拉取模型与采购价格      ┌──────────────┐
 │             │ ───────────────────────────> │              │
 │   Harness   │      GET /api/harness/catalog│              │
-│   （采购侧） │                              │   New API    │
+│   （采购侧） │      返回 pricing 价格对象     │   New API    │
 │             │   2. 发起真实模型调用         │  （网关侧）   │
 │             │ ───────────────────────────> │              │
 │             │      POST /v1/chat/completions│             │
@@ -51,10 +51,10 @@
 
 **职责划分**：
 
-- **New API** 负责：维护渠道、模型标准价格、采购折扣规则（计价分组倍率）、渠道税率；根据优先级选择上游渠道
-- **Harness** 负责：根据 New API 返回的实际渠道、倍率、税点，计算采购成本与税费
+- **New API** 负责：维护渠道、模型标准价格（`pricing`，含 token 单价 / 按次价 / 计费表达式）、采购折扣规则（计价分组倍率）、渠道税率；根据优先级选择上游渠道
+- **Harness** 负责：用 catalog 的基础价格 × 本次响应头返回的实际倍率与税点，计算采购成本与税费
 
-New API **不参与税费核算**，仅把税点作为元数据通过响应头传出。
+New API **不参与税费核算**，仅把税点作为元数据通过响应头传出。catalog **不返回**计价分组倍率与税点，这两项只随每次调用的响应头下发。
 
 ---
 
@@ -143,37 +143,44 @@ Authorization: Bearer sk-<token-key>
 
 ### 4.3 成功响应结构
 
-以下为本地验证环境的实测响应（生产实例配置完成后结构相同）：
+以下为结构示例（模型名与数值由部署实例决定）。catalog 返回的是**采购价格**，不再返回倍率：
 
 ```json
 {
   "success": true,
   "data": {
     "quota_per_unit": 500000,
-    "price_unit": "new_api_quota",
+    "price_unit": "display_currency",
     "groups": [
       {
         "id": "global",
         "name": "Global priority",
         "models": [
           {
+            "name": "deepseek-v4.1-flash",
+            "upstream_models": ["deepseek-chat"],
+            "capabilities": ["openai"],
+            "pricing": {
+              "mode": "token",
+              "currency": "CNY",
+              "unit": "1M_tokens",
+              "input": 2.0,
+              "output": 8.0,
+              "cache_read": 0.2,
+              "cache_write": 2.5,
+              "image_input": 2.0
+            }
+          },
+          {
             "name": "deepseek-v4-flash",
             "upstream_models": ["deepseek-v4-flash"],
             "capabilities": ["openai"],
-            "quota_type": 1,
-            "model_ratio": 0,
-            "model_price": 5,
-            "completion_ratio": 1,
-            "billing_mode": "ratio",
-            "billing_expr": "",
-            "cache_ratio": 0.1,
-            "create_cache_ratio": 1.25,
-            "image_ratio": 2,
-            "audio_ratio": 16,
-            "audio_completion_ratio": 2,
-            "billing_usage_schema": {},
-            "billing_usage_examples": [],
-            "billing_plugin_variants": []
+            "pricing": {
+              "mode": "fixed",
+              "currency": "CNY",
+              "unit": "request",
+              "price": 0.04
+            }
           }
         ],
         "unpriced_models": []
@@ -183,15 +190,48 @@ Authorization: Bearer sk-<token-key>
 }
 ```
 
+Claude 模型会额外给出 1 小时缓存写入价格（`cache_write_1h` 只对名称包含 `claude` 的模型返回）：
+
+```json
+"pricing": {
+  "mode": "token",
+  "currency": "CNY",
+  "unit": "1M_tokens",
+  "input": 3.0,
+  "output": 15.0,
+  "cache_read": 0.3,
+  "cache_write": 3.75,
+  "cache_write_1h": 6.0
+}
+```
+
+任务类（插件计费）模型使用表达式计费，金额恒为美元：
+
+```json
+"pricing": {
+  "mode": "tiered_expr",
+  "currency": "USD",
+  "expression": "tier(\"base\", p * 2 + c * 8)",
+  "usage_schema": { "seconds": { "type": "number", "unit": "second" } },
+  "usage_examples": [ { "label": "5 秒", "facts": { "seconds": 5 } } ]
+}
+```
+
+`usage_examples` 只是界面预览用的样例，`facts` 不参与真实计费，Harness 不应据此推导价格。
+
 ### 4.4 字段说明
 
 #### 顶层字段
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `quota_per_unit` | number | 额度换算基数，当前实例为 `500000`。即 `1 美元 = 500000 quota` |
-| `price_unit` | string | 固定为 `new_api_quota`，表示价格单位为 New API 内部额度 |
+| `quota_per_unit` | number | 仅用于诊断的额度换算基数，当前实例为 `500000`（`1 美元 = 500000 quota`）。新增价格接口**不再需要**用它把价格换算成金额 |
+| `price_unit` | string | 固定为 `display_currency`，表示 `pricing` 中的金额已经是展示币种下的实际价格 |
 | `groups` | array | 分组列表。**每个分组独立计算自己的模型列表** |
+
+> **旧字段变化**：顶层 `price_unit` 过去为 `new_api_quota`（表示价格是内部额度），现在为 `display_currency`（表示价格是货币金额）。若仍收到 `new_api_quota`，说明对接的是旧版构建。
+>
+> `quota_per_unit` 仍然返回，但只作为诊断信息保留，**不再参与价格换算**。不要再用 `价格 / quota_per_unit` 之类的公式推导金额。
 
 > **关键**：`groups` 不是"全量模型列表"，而是**按分组过滤后的模型视图**。`global` 分组和各资源池分组的模型列表可以不同——某模型只被某个池的渠道支持时，它只出现在那个池下面。
 
@@ -223,33 +263,77 @@ Authorization: Bearer sk-<token-key>
 | `name` | string | 逻辑模型名（客户端请求时使用的模型名） |
 | `upstream_models` | string[] | 该模型可能映射到的上游模型名，去重排序 |
 | `capabilities` | string[] | 支持的端点类型，如 `openai`、`anthropic`、`gemini` |
-| `quota_type` | number | 计价类型，见下方说明 |
-| `model_ratio` | number | 模型倍率（仅 `quota_type=0` 有效） |
-| `model_price` | number | 固定单价（仅 `quota_type=1` 有效） |
-| `completion_ratio` | number | 输出 token 相对于输入 token 的倍率 |
-| `billing_mode` | string | `ratio` 或 `tiered_expr` |
-| `billing_expr` | string | 阶梯计费表达式（仅 `billing_mode=tiered_expr` 时有值） |
-| `cache_ratio` | number? | 缓存命中 token 倍率，无则为 `null` |
-| `create_cache_ratio` | number? | 缓存写入 token 倍率 |
-| `image_ratio` | number? | 图片 token 倍率 |
-| `audio_ratio` | number? | 音频输入 token 倍率 |
-| `audio_completion_ratio` | number? | 音频输出 token 倍率 |
-| `billing_usage_schema` | object? | 用量字段定义（插件型计费模型使用） |
-| `billing_usage_examples` | array? | 用量示例 |
-| `billing_plugin_variants` | array? | 插件变体计费配置 |
+| `pricing` | object | 计价配置，见下方「`pricing` 计价对象」 |
+| `billing_plugin_variants` | array? | 插件变体计价配置；每个变体的 `pricing` 与模型级 `pricing` 同构 |
 
-#### `quota_type` 与计价方式
+> **catalog 返回的是价格，不是倍率。** 旧版字段 `model_ratio`、`completion_ratio`、`cache_ratio`、`create_cache_ratio`、`image_ratio`、`audio_ratio`、`audio_completion_ratio`、`quota_type`、`model_price`、`billing_mode`、`billing_expr`、`billing_usage_schema`、`billing_usage_examples` 已全部移除，其信息统一由 `pricing` 表达。收到旧字段说明对接的是旧版构建，应升级而非兼容。
+>
+> 顺带修正旧文档对 `model_price` 的一处错误描述：**`model_price` 的单位是美元/次，不是 quota 次数。** 它表示一次请求的美元价格，内部换算为 `quota = model_price × quota_per_unit × 分组倍率`。旧文档把它写成"固定单价（quota 数）"是错的。现在它被 `pricing.mode = "fixed"` 的 `pricing.price` 取代，且 `price` 已经是展示币种下的金额，不需要再乘 `quota_per_unit`。
 
-| `quota_type` | 含义 | 计价公式 |
-| --- | --- | --- |
-| `0` | 按 token 计费 | `(输入tokens + 输出tokens × completion_ratio + 缓存tokens × cache_ratio + ...) × model_ratio × 分组倍率` |
-| `1` | 按次固定价 | `model_price × 分组倍率` |
+#### `pricing` 计价对象
 
-> 实测：当前实例的 `deepseek-v4-flash` 为 `quota_type=1, model_price=5`（按次计费）；`deepseek-v4.1-flash` 为 `quota_type=0, model_ratio=37.5`（按 token 计费）。
+| 字段 | 类型 | 出现条件 | 说明 |
+| --- | --- | --- | --- |
+| `mode` | string | 恒有 | 计价模式：`token`（按 token）、`fixed`（按次）、`tiered_expr`（表达式） |
+| `currency` | string | 恒有 | 本实例的展示币种。`token`/`fixed` 的价格都以该币种计；`tiered_expr` 恒为 `USD` |
+| `unit` | string | `token`/`fixed` | `token` 为 `1M_tokens`（每百万 token 的价格），`fixed` 为 `request`（每次请求的价格）；`tiered_expr` 不返回该字段 |
+| `input` | number? | `token` | 每百万输入 token 的价格 |
+| `output` | number? | `token` | 每百万输出 token 的价格 |
+| `cache_read` | number? | `token` 且管理员已配置 | 每百万缓存命中（读取）token 的价格 |
+| `cache_write` | number? | `token` 且管理员已配置 | 每百万缓存写入 token 的价格（5 分钟 TTL / 通用） |
+| `cache_write_1h` | number? | `token` 且为 Claude 模型且已配置 | 每百万 1 小时 TTL 缓存写入 token 的价格 |
+| `image_input` | number? | `token` 且管理员已配置 | 每百万图片输入 token 的价格 |
+| `price` | number? | `fixed` | 每次请求的价格 |
+| `expression` | string | `tiered_expr` | 计费表达式，见「表达式计费」 |
+| `usage_schema` | object? | `tiered_expr` | 表达式可用的用量事实定义；非空表示任务用量型结算 |
+| `usage_examples` | object[]? | `tiered_expr` | 用量示例，仅用于展示，不参与计费 |
 
-#### 阶梯计费表达式
+#### 价格缺失的含义（重要）
 
-当 `billing_mode = "tiered_expr"` 时，需按 `billing_expr` 计算。表达式语法示例：
+**价格字段缺失表示「该档价格未配置 / 不适用」，绝不等于 0，也绝不等于免费。**
+
+- `token` 模式下的模型一定有 `input`；`output` 正常情况下也一定存在（New API 对输出有模型族默认倍率）。
+- `cache_read`、`cache_write`、`cache_write_1h`、`image_input` 只在管理员为该模型显式配置后才出现。
+- 缺失某档价格时，**不要按 0 计价，也不要自行用 `input` 折算**。该车道在网关侧仍可能按内置默认倍率计费（例如缓存读取、图片输入未配置时通常等同输入价，缓存写入的默认回退则高于输入价），因此「缺失」绝不等于「免费」；但这些默认倍率**不在本契约内**，Harness 不能自行假设。正确做法是把该车道的费用标记为「价格未暴露」，向 New API 团队确认后再结算。若本次请求没有该车道用量（例如没有缓存命中），缺失与否不影响本次成本。
+- 显式 `0` 与缺失不同：显式 `0` 是管理员配置的零价格，表示该项免费。Harness 必须区分「字段不存在」和「字段值为 `0`」，不能用同一个默认值吞掉差异。
+- `cache_write_1h` 只在模型名包含 `claude`（不区分大小写）且管理员配置了缓存写入价格时出现；其他模型的 1 小时缓存写入不存在独立价格。
+- 上表未列出的价格维度（音频输入/输出、内置工具按次附加费、图片按尺寸/张数的倍率）本轮**不提供**，见 4.5「本轮已知缺口」。
+
+#### 币种与汇率
+
+`pricing.currency` 是**本实例的展示币种**，由 New API 管理端的「额度展示类型」决定：
+
+| 管理端展示类型 | 目录返回的 `currency` |
+| --- | --- |
+| `USD` | `USD`，汇率按 `1` |
+| `CNY` | `CNY`，汇率按管理端配置的美元兑人民币汇率 |
+| `CUSTOM` | 管理员配置的自定义币种符号，汇率按管理端配置 |
+| `TOKENS` / 未识别 | `USD`，汇率按 `1`（无货币展示时回退美元） |
+
+- 价格数值已经按该币种折算完成，Harness **不需要**再做一次币种换算。
+- 当实例配置为 `CNY` 且美元兑人民币汇率为 `1:1` 时，返回的数字与美元数值完全相同。这是常见的本地/联调配置，不代表价格以美元结算。
+- Harness **不得**硬编码币种，也**不得**硬编码汇率。币种必须从 `pricing.currency` 读取，金额必须按该币种原样记账。
+- `CUSTOM` 模式下 `currency` 是符号（例如 `¤`），不是 ISO 代码；若 Harness 需要 ISO 代码，需与 New API 团队确认映射方式。
+- 若 Harness 内部只支持美元账本，请与 New API 团队确认实例币种，不能自动乘以某个汇率来"还原"美元。
+
+#### `tiered_expr` 表达式计费
+
+`mode = "tiered_expr"` 表示价格由 `expression` 求值得到：
+
+- **该模式恒为美元（USD），不受 `currency` 影响，也不做任何币种缩放。** 即使实例展示币种是 `CNY`，`currency` 字段也会返回 `USD`。
+- 表达式系数是真实的美元单价：token 车道上是**每百万 token 的美元价**（`p * 2` 表示每百万输入 token 2 美元），任务用量车道上是**每单位用量的美元价**（`u("seconds") * 0.4` 表示每秒 0.4 美元）。
+- **求值结果换算成美元的方式取决于表达式类型**（这是 New API 内部两种不同的结算语义）：
+  - **token 型表达式**（只使用 `p` / `c` / `cr` / `cc` / `cc1h` / `img` / `ai` / `ao` 等 token 变量）：求值结果是「美元/百万 token 单价 × token 数」的放大值，**需要除以 `1_000_000`** 才是本次请求的美元成本。
+  - **任务用量型表达式**（使用 `u("key")` 读取 `usage_schema` 声明的事实）：求值结果**已经是本次请求的美元成本**，**不需要再除以 `1_000_000`**。
+  - 公式：
+    ```
+    token 型：  base_cost = eval(expression) / 1_000_000   // USD
+    任务用量型：base_cost = eval(expression)               // USD
+    ```
+  - `usage_schema` 非空时基本可以判定为任务用量型。但注意**反向不成立**：`usage_schema` 为空（或某任务模型的 schema 恰好为空）也可能仍是任务用量型。当前契约没有显式的判别字段，最终以 New API 团队的书面说明为准；Harness 在无法判断时应报错而不是猜。
+- `usage_examples` 只是展示样例，不参与计费。
+
+表达式语法示例：
 
 ```
 len <= 128000 ? tier("base", p * 3 + c * 9) : tier("long", p * 5 + c * 15)
@@ -259,12 +343,37 @@ len <= 128000 ? tier("base", p * 3 + c * 9) : tier("long", p * 5 + c * 15)
 
 | 变量 | 含义 |
 | --- | --- |
-| `p` | 输入 token 数 |
-| `c` | 输出 token 数 |
+| `p` | 输入 token 数（已自动排除被单独定价的子类别） |
+| `c` | 输出 token 数（已自动排除被单独定价的子类别） |
 | `cr` | 缓存读取 token 数 |
 | `cc` | 缓存写入 token 数 |
-| `img` | 图片 token 数 |
-| `len` | 输入长度 |
+| `cc1h` | 1 小时 TTL 缓存写入 token 数（Claude） |
+| `img` | 图片输入 token 数 |
+| `ai` / `ao` | 音频输入 / 输出 token 数 |
+| `len` | 输入上下文总长度（用于档位条件判断，不会被缓存扣减） |
+| `u("key")` | `usage_schema` 中声明的任务用量事实 |
+
+#### 插件变体 `groups[].models[].billing_plugin_variants[]`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `plugin_key` | string | 插件标识 |
+| `plugin_name` | string | 插件显示名 |
+| `pricing` | object | 与模型级 `pricing` **同构**；`mode` 可能为 `token` 或 `tiered_expr` |
+
+同一模型可能由多个任务插件承接，每个插件的计费方式可不同。catalog 只列出当前资源池**可达**的插件变体；Harness 不应假定模型只有一个价格。**计费时直接使用变体自己的 `pricing` 对象**：`token` 变体的数值与模型级 token 单价相同（复用同一套 token 车道价），`tiered_expr` 变体必须使用它自己的 `expression` / `usage_schema`，不能用模型级价格代替。
+
+### 4.5 本轮已知缺口
+
+以下价格维度在本次契约中**不暴露**，Harness 不能从 catalog 推导：
+
+| 缺口 | 影响 | 本轮处理建议 |
+| --- | --- | --- |
+| 音频 token 价格 | `pricing` 中没有 `audio_input` / `audio_output`。仅靠 `input`/`output` 无法还原音频价格 | **不要用 catalog 对音频模型计价。** 音频类模型需与 New API 团队单独确认价格，或暂不接入 |
+| 内置工具按次附加费 | 搜索、代码执行等内置工具的每次调用附加费不在 `pricing` 中 | 涉及工具的请求成本可能被低估；需要精确核算时按实际账单核对，或在对接侧显式标注为"不含工具费" |
+| 图片按尺寸/张数的倍率 | `fixed` 模式下的图片价格是**单次基础价**，不含按尺寸、质量的倍率，也不含 `n` 张数的乘数 | 不能仅用 `price × 1` 计算多图或大图请求；需与 New API 团队确认后再计费 |
+
+这些缺口是**已知且已确认**的，不是字段遗漏。遇到上述场景时应显式报错或降级，不能按缺省值静默估算。
 
 ---
 
@@ -322,6 +431,8 @@ Content-Type: application/json
 
 此外还会返回 `X-Oneapi-Request-Id` 用于问题追踪。
 
+> **分工再确认**：`X-Route-Group-Ratio`（采购折扣）和 `X-Route-Tax-Rate-Percent`（税点）**只从本次响应的响应头读取**，catalog 中不返回这两项。catalog 给的是基础价格，响应头给的是本次实际生效的折扣与税率。
+
 以上响应头**均已加入 CORS 暴露列表**（`Access-Control-Expose-Headers`），浏览器端可直接读取。
 
 ### 5.5 实测样例
@@ -357,42 +468,106 @@ Harness 必须按**最终返回的响应头**计价，不能缓存首次选择�
 
 `stream: true` 时，响应头在流开始前写入，行为与非流式一致。
 
+### 5.8 新增问题排查：`pricing` 字段缺失
+
+如果 catalog 返回的模型里 `pricing` 缺少 `cache_read`、`cache_write`、`image_input` 等字段，这是**正常**的：表示管理员没有为该模型配置这一档价格，不代表这些 token 免费。处理方式见 4.4「价格缺失的含义」与 4.5「本轮已知缺口」。
+
 ---
 
 ## 六、计价规则速查
 
-Harness 拿到响应头后，按如下方式计算采购成本：
+Harness 拿到响应头后，按如下方式计算采购成本。**基础价格来自 catalog，折扣与税点来自本次响应的响应头。**
 
-### 6.1 标准成本（来自 catalog）
-
-```
-按 token 计费（quota_type = 0）：
-  cost_quota = (prompt_tokens + completion_tokens × completion_ratio) × model_ratio
-
-按次计费（quota_type = 1）：
-  cost_quota = model_price
-```
-
-### 6.2 应用路由折扣
+### 6.1 统一公式
 
 ```
-routed_cost_quota = cost_quota × X-Route-Group-Ratio
+基础成本 base_cost（见 6.2，单位 = pricing.currency）
+路由后成本 routed_cost = base_cost × X-Route-Group-Ratio
+税费        tax         = routed_cost × (X-Route-Tax-Rate-Percent / 100)
+最终成本    final_cost  = routed_cost + tax
 ```
 
-### 6.3 应用税费
+等价写法：
 
 ```
-tax = routed_cost_quota × (X-Route-Tax-Rate-Percent / 100)
-final_cost = routed_cost_quota + tax
+final_cost = base_cost × X-Route-Group-Ratio × (1 + X-Route-Tax-Rate-Percent / 100)
 ```
 
-### 6.4 换算为货币
+`final_cost` 的币种与 `pricing.currency` 一致（`tiered_expr` 模式下恒为 USD）。
+
+### 6.2 按模式计算基础成本 `base_cost`
+
+**`mode = "token"`**：各条车道分别计价后求和，再除以 1,000,000。
 
 ```
-amount_usd = final_cost / quota_per_unit
+base_cost =
+  ( input_tokens        × pricing.input
+  + output_tokens       × pricing.output
+  + cache_read_tokens   × pricing.cache_read
+  + cache_write_tokens  × pricing.cache_write
+  + cache_1h_tokens     × pricing.cache_write_1h
+  + image_input_tokens  × pricing.image_input
+  ) / 1_000_000
 ```
 
-当前实例 `quota_per_unit = 500000`。
+注意：
+
+- `pricing` 中的价格是**每百万 token** 的价格，所以最后一定要除以 `1_000_000`。
+- `input_tokens` / `output_tokens` 是**已按车道拆分后**的数量：被缓存、图片等单独定价的 token 不应再计入 `input` 车道，否则会重复计费。若某车道价格字段缺失而本次请求又确实产生了该车道用量，说明该车道的价格未暴露，见 4.4「价格缺失的含义」——**不能按 0 计，也不能自行折算**。
+- 只对实际发生的车道求和。某次请求没有缓存命中，就不加 `cache_read` 项。
+- `output` 一般总是存在（New API 对输出有模型族默认价格）；若确实缺失，同样按"价格未暴露"处理。
+
+**`mode = "fixed"`**：
+
+```
+base_cost = pricing.price
+```
+
+按次固定价，与 token 数量无关。
+
+**`mode = "tiered_expr"`**：
+
+```
+token 型表达式（无 usage_schema）：
+  base_cost = eval(pricing.expression) / 1_000_000      // 结果已是 USD
+
+任务用量型表达式（usage_schema 非空）：
+  base_cost = eval(pricing.expression)                  // 结果已是 USD
+```
+
+两种情况都不做币种换算。判别方式与内部两种结算语义的差异见第四章「`tiered_expr` 表达式计费」。
+
+### 6.3 换算为金额
+
+`final_cost` 已经是金额，单位为 `pricing.currency`（`tiered_expr` 为 USD）。
+
+```
+amount = final_cost
+```
+
+**不再需要除以 `quota_per_unit`。** `quota_per_unit` 仅作为诊断字段保留，旧文档中的 `amount_usd = final_cost / quota_per_unit` 已失效。
+
+### 6.4 计算顺序小结
+
+1. 从 catalog 取该模型的 `pricing`
+2. 按 `mode` 与本次实际用量算出 `base_cost`
+3. 乘以本次响应头的 `X-Route-Group-Ratio`
+4. 乘以 `(1 + X-Route-Tax-Rate-Percent / 100)`
+5. 得到最终采购成本，币种按 `pricing.currency`（`tiered_expr` 为 USD）
+
+### 6.5 计算示例（token 模式）
+
+设某模型 `pricing` 为 `{"mode":"token","currency":"CNY","unit":"1M_tokens","input":2.0,"output":8.0,"cache_read":0.2}`，本次用量为输入侧总 token 1,200,000（其中缓存命中 200,000）、输出 300,000，响应头为 `X-Route-Group-Ratio: 0.8`、`X-Route-Tax-Rate-Percent: 6.5`。
+
+```
+# 未命中缓存的输入 = 1,200,000 - 200,000 = 1,000,000
+base_cost = (1,000,000 × 2.0 + 300,000 × 8.0 + 200,000 × 0.2) / 1,000,000
+          = (2,000,000 + 2,400,000 + 40,000) / 1,000,000
+          = 4.44 CNY
+routed_cost = 4.44 × 0.8 = 3.552 CNY
+tax         = 3.552 × 6.5 / 100 = 0.23088 CNY
+final_cost  = 3.552 + 0.23088 = 3.78288 CNY
+```
 
 ---
 
@@ -451,10 +626,12 @@ amount_usd = final_cost / quota_per_unit
 
 1. **确认令牌可用**：用服务令牌调用 `GET /api/harness/catalog`，应返回 200 和分组列表
 2. **确认分组存在**：检查 `groups[].id` 中是否包含 `global` 或目标资源池
-3. **发起一次非流式调用**：带 `X-Route-Group` 调用 `/v1/chat/completions`，检查五个响应头是否齐全
-4. **对照计价**：用响应头中的倍率和税点，与 catalog 中的标准价格核对计算结果
-5. **验证重试**：故意让一个渠道失败，确认切换后响应头反映的是新渠道
-6. **接入流式**：确认 `stream: true` 时响应头仍可正常读取
+3. **确认价格形态**：检查 `models[].pricing.mode` 是否在 `token`/`fixed`/`tiered_expr` 之内，并确认 `pricing.currency` 与 Harness 内部账本币种一致
+4. **发起一次非流式调用**：带 `X-Route-Group` 调用 `/v1/chat/completions`，检查五个响应头是否齐全
+5. **对照计价**：用响应头中的倍率和税点，按第六章公式与 catalog 中的价格核对计算结果
+6. **验证缺失字段**：挑一个没有缓存价格的模型，确认缺字段时按「价格未暴露」处理（不按 0、也不自行折算），并能走通与 New API 团队的确认流程
+7. **验证重试**：故意让一个渠道失败，确认切换后响应头反映的是新渠道
+8. **接入流式**：确认 `stream: true` 时响应头仍可正常读取
 
 ---
 
@@ -462,5 +639,6 @@ amount_usd = final_cost / quota_per_unit
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-10-19 | catalog 改为返回价格（`pricing`），移除全部倍率字段；`price_unit` 改为 `display_currency`；补充价格缺失语义、币种规则、`tiered_expr` 恒为 USD 及其两种换算语义、新的成本公式与三个已知缺口；修正旧文档对 `model_price` 单位的错误描述 |
 | 2026-10-18 | catalog 仅公开有效定价模型，按分组增加未定价模型诊断字段 |
 | 2026-10-18 | 初版。对应构建 `harness-api-20261018-a25f1f5` |
