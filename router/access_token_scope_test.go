@@ -71,6 +71,7 @@ var accessTokenExemptRoutes = []string{
 	"GET /api/usage/token/",
 	"GET /api/log/token",
 	"GET /api/harness/catalog",
+	"GET /api/harness/settlements/:request_id",
 }
 
 // accessTokenHelperRoutes are declared through handlePermissionRoute outside

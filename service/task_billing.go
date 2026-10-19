@@ -90,6 +90,24 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
+
+	// Settlement recording runs after the charge so the ledger mirrors the quota
+	// that was actually consumed. A task that is already terminal at submission
+	// is finalised right here: polling never revisits it, so leaving it pending
+	// would leave the row pending forever. task.Quota is the quota charged at
+	// submission, which is what the ledger has to carry.
+	settlementStatus := model.HarnessSettlementStatusPending
+	settlementQuota := 0
+	if task != nil {
+		settlementQuota = task.Quota
+		if task.Status == model.TaskStatusSuccess {
+			settlementStatus = model.HarnessSettlementStatusSettled
+		} else if task.Status == model.TaskStatusFailure {
+			// The submit path charges nothing for a terminally failed task.
+			settlementStatus, settlementQuota = model.HarnessSettlementStatusRefunded, 0
+		}
+	}
+	recordTaskHarnessSettlement(task, settlementStatus, settlementQuota)
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +281,9 @@ func taskModelName(task *model.Task) string {
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool {
 	quota := task.Quota
 	if quota == 0 {
+		// Nothing was held, so nothing was returned; the ledger still has to leave
+		// pending behind once the task is known to be failed.
+		recordTaskHarnessSettlement(task, model.HarnessSettlementStatusRefunded, 0)
 		return true
 	}
 
@@ -300,6 +321,9 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	if err := task.UpdateQuota(); err != nil {
 		logger.LogError(ctx, common.LogText("refund succeeded but clearing the task quota failed, task %s: %s", task.TaskID, err.Error()))
 	}
+	// The task kept nothing, so its procurement cost is final at zero. A failed
+	// refund above returns before this point and leaves the row for reconciliation.
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusRefunded, 0)
 	return true
 }
 
@@ -317,6 +341,9 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	if quotaDelta == 0 {
 		logger.LogInfo(ctx, common.LogText("task %s pre-consumed quota matches the actual quota (%s, %s)",
 			task.TaskID, logger.LogQuota(actualQuota), reason.Error()))
+		// No money moved, but the billing state is final: the ledger row must not
+		// stay pending just because the reservation already matched.
+		recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, actualQuota)
 		return
 	}
 
@@ -341,6 +368,9 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	if err := task.UpdateQuota(); err != nil {
 		logger.LogError(ctx, common.LogText("failed to write back the settled task quota, task %s: %s", task.TaskID, err.Error()))
 	}
+	// The difference is settled, so the ledger takes the actual amount. Recording
+	// after the write-back keeps the row aligned with the persisted task quota.
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, actualQuota)
 
 	// 提交阶段已经累计过一次请求；结算阶段只调整最终用量。
 	model.UpdateUserUsedQuota(task.UserId, quotaDelta)

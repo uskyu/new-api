@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -247,6 +249,12 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	attachQuotaSaturation(ctx, relayInfo, other)
+	recordRelayHarnessSettlement(ctx, relayInfo, harnessSettlementUsage{
+		PromptTokens:     usage.InputTokens,
+		CompletionTokens: usage.OutputTokens,
+		CacheReadTokens:  usage.InputTokenDetails.CachedTokens,
+		CacheWriteTokens: usage.InputTokenDetails.CacheCreationTokensTotal(),
+	}, quota)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     usage.InputTokens,
@@ -386,6 +394,12 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	attachQuotaSaturation(ctx, relayInfo, other)
+	recordRelayHarnessSettlement(ctx, relayInfo, harnessSettlementUsage{
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		CacheReadTokens:  usage.PromptTokensDetails.CachedTokens,
+		CacheWriteTokens: usage.PromptTokensDetails.CacheCreationTokensTotal(),
+	}, quota)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     usage.PromptTokens,
@@ -553,4 +567,233 @@ func quotaNotifyContent(lang string, notifyType string, prompt string, remaining
 		topUpLink := PaymentReturnURL("/wallet")
 		return i18n.Translate(lang, i18n.MsgNotifyQuotaLowEmail, map[string]any{"Prompt": prompt, "Quota": remaining, "Link": topUpLink}), []any{prompt, remaining, topUpLink, topUpLink}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Harness procurement settlement ledger
+// ---------------------------------------------------------------------------
+
+// harnessSettlementAmountPrecision keeps ledger money at a fixed 10 decimal
+// places, matching the precision reconciliation is expected to tolerate.
+const harnessSettlementAmountPrecision = 10
+
+// harnessSettlementUsage is the token breakdown recorded on a ledger row.
+type harnessSettlementUsage struct {
+	PromptTokens     int
+	CompletionTokens int
+	CacheReadTokens  int
+	CacheWriteTokens int
+}
+
+// harnessSettlementMoney is the resolved procurement cost of one request.
+type harnessSettlementMoney struct {
+	PricingGroup   string
+	GroupRatio     float64
+	TaxRatePercent float64
+	BaseAmount     string
+	TotalAmount    string
+	Currency       string
+}
+
+// harnessSettlementCurrency mirrors harnessCatalogDisplayCurrency in
+// controller/intelligent_routing.go so the ledger reports money in the same
+// display currency the catalog quotes. The controller helper is unexported and
+// service/ must not import controller/ (import cycle), so the switch is
+// duplicated here; keep the two in sync.
+func harnessSettlementCurrency() (string, float64) {
+	switch operation_setting.GetQuotaDisplayType() {
+	case operation_setting.QuotaDisplayTypeCNY:
+		return "CNY", operation_setting.GetUsdToCurrencyRate(operation_setting.USDExchangeRate)
+	case operation_setting.QuotaDisplayTypeCustom:
+		return operation_setting.GetCurrencySymbol(), operation_setting.GetUsdToCurrencyRate(operation_setting.USDExchangeRate)
+	default:
+		return "USD", 1
+	}
+}
+
+// harnessSettlementPricing resolves the procurement pricing group of a
+// channel+model, that group's ratio and the channel's supplier tax. It mirrors
+// setIntelligentRoutingResponseHeaders in controller/relay.go, which is the
+// source of truth for the per-request X-Route-* headers. It never errors: an
+// unresolved group yields zeros and the caller treats the request as having no
+// procurement discount.
+func harnessSettlementPricing(channelId int, modelName string) (pricingGroup string, groupRatio, taxRatePercent float64) {
+	pricingGroup, valid, err := model.GetPreferredPricingGroupForChannelModel(channelId, modelName)
+	if err != nil {
+		common.SysLog(common.LogText("harness settlement: resolving pricing group failed (channel=%d model=%s): %s", channelId, modelName, err.Error()))
+		return "", 0, 0
+	}
+	if !valid {
+		return "", 0, 0
+	}
+	groupRatio = ratio_setting.GetGroupRatio(pricingGroup)
+	// The selected channel can be a partial stub for the first attempt, so read
+	// the cached channel row for the supplier tax, exactly like the controller.
+	channel, err := model.CacheGetChannel(channelId)
+	if err != nil {
+		common.SysLog(common.LogText("harness settlement: reading supplier tax failed (channel=%d): %s", channelId, err.Error()))
+		return pricingGroup, groupRatio, 0
+	}
+	taxRatePercent = channel.GetOtherSettings().SupplierTaxRatePercent
+	if math.IsNaN(taxRatePercent) || math.IsInf(taxRatePercent, 0) || taxRatePercent < 0 {
+		common.SysLog(common.LogText("harness settlement: ignoring invalid supplier tax %v (channel=%d)", taxRatePercent, channelId))
+		taxRatePercent = 0
+	}
+	return pricingGroup, groupRatio, taxRatePercent
+}
+
+// harnessSettlementMoneyForQuota converts a final quota into ledger amounts.
+// base is quota / QuotaPerUnit, i.e. the canonical USD procurement base. A
+// resolved pricing group applies its ratio and the supplier tax; when no group
+// resolved the request has no procurement discount, so the total tracks the base
+// instead of collapsing to zero — "no procurement group" must never read as
+// "free". This function only describes money; it never changes a charge.
+func harnessSettlementMoneyForQuota(quota int, channelId int, modelName string) harnessSettlementMoney {
+	money := harnessSettlementMoney{BaseAmount: "0", TotalAmount: "0", Currency: "USD"}
+	currency, currencyRate := harnessSettlementCurrency()
+	if math.IsNaN(currencyRate) || math.IsInf(currencyRate, 0) || currencyRate <= 0 {
+		common.SysLog(common.LogText("harness settlement: ignoring invalid display currency rate %v, falling back to USD", currencyRate))
+		currency, currencyRate = "USD", 1
+	}
+	money.Currency = currency
+	if quota < 0 {
+		common.SysLog(common.LogText("harness settlement: ignoring negative quota %d (channel=%d model=%s)", quota, channelId, modelName))
+		return money
+	}
+	quotaPerUnit := common.QuotaPerUnit
+	if math.IsNaN(quotaPerUnit) || math.IsInf(quotaPerUnit, 0) || quotaPerUnit <= 0 {
+		common.SysLog(common.LogText("harness settlement: invalid quota per unit %v, ledger amounts stay zero", quotaPerUnit))
+		return money
+	}
+
+	base := decimal.NewFromInt(int64(quota)).Div(decimal.NewFromFloat(quotaPerUnit))
+	pricingGroup, groupRatio, taxRatePercent := harnessSettlementPricing(channelId, modelName)
+	total := base
+	switch {
+	case pricingGroup == "":
+		// No opt-in procurement group: no discount, no tax. Keep the ratio at
+		// zero so the row shows that no procurement group applied.
+		groupRatio, taxRatePercent = 0, 0
+	case math.IsNaN(groupRatio) || math.IsInf(groupRatio, 0) || groupRatio < 0:
+		common.SysLog(common.LogText("harness settlement: ignoring invalid group ratio %v (group=%s), no discount applied", groupRatio, pricingGroup))
+		groupRatio, taxRatePercent = 0, 0
+	default:
+		total = base.Mul(decimal.NewFromFloat(groupRatio)).
+			Mul(decimal.NewFromFloat(1 + taxRatePercent/100))
+	}
+	total = total.Mul(decimal.NewFromFloat(currencyRate))
+	if total.IsNegative() {
+		common.SysLog(common.LogText("harness settlement: clamping negative total to zero (channel=%d model=%s)", channelId, modelName))
+		total = decimal.Zero
+	}
+
+	money.PricingGroup = pricingGroup
+	money.GroupRatio = groupRatio
+	money.TaxRatePercent = taxRatePercent
+	money.BaseAmount = base.Round(harnessSettlementAmountPrecision).String()
+	money.TotalAmount = total.Round(harnessSettlementAmountPrecision).String()
+	return money
+}
+
+// recordHarnessSettlement upserts one procurement ledger row. It never returns
+// an error and never panics: a settlement write must never break, slow or fail a
+// relay, so a failure only reaches the server log and the request continues.
+func recordHarnessSettlement(settlement *model.HarnessSettlement, money harnessSettlementMoney) {
+	if settlement == nil {
+		return
+	}
+	if settlement.RequestId == "" {
+		common.SysLog(common.LogText("harness settlement skipped: empty request id (task=%s model=%s)", settlement.TaskId, settlement.ModelName))
+		return
+	}
+	settlement.PricingGroup = money.PricingGroup
+	settlement.GroupRatio = money.GroupRatio
+	settlement.TaxRatePercent = money.TaxRatePercent
+	settlement.BaseAmount = money.BaseAmount
+	settlement.TotalAmount = money.TotalAmount
+	settlement.Currency = money.Currency
+	if settlement.Status != model.HarnessSettlementStatusPending && settlement.SettledAt == 0 {
+		settlement.SettledAt = common.GetTimestamp()
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			common.SysLog(common.LogText("harness settlement panicked (request=%s task=%s): %v", settlement.RequestId, settlement.TaskId, recovered))
+		}
+	}()
+	if err := model.UpsertHarnessSettlement(settlement); err != nil {
+		common.SysLog(common.LogText("harness settlement write failed (request=%s task=%s status=%s): %s", settlement.RequestId, settlement.TaskId, settlement.Status, err.Error()))
+	}
+}
+
+// recordRelayHarnessSettlement records the settled cost of one synchronous
+// relay. Call it only once the final quota is known. The deferred recovery makes
+// the "never break a relay" guarantee cover the pricing lookups and the decimal
+// math too, not just the database write.
+func recordRelayHarnessSettlement(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage harnessSettlementUsage, quota int) {
+	if relayInfo == nil {
+		return
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			common.SysLog(common.LogText("harness settlement panicked while pricing a relay: %v", recovered))
+		}
+	}()
+	requestId := ""
+	if ctx != nil {
+		requestId = ctx.GetString(common.RequestIdKey)
+	}
+	if requestId == "" {
+		requestId = relayInfo.RequestId
+	}
+	settlement := &model.HarnessSettlement{
+		RequestId:        requestId,
+		TokenId:          relayInfo.TokenId,
+		UserId:           relayInfo.UserId,
+		Status:           model.HarnessSettlementStatusSettled,
+		ModelName:        relayInfo.GetBillingModelName(),
+		ChannelId:        relayInfo.ChannelId,
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		CacheReadTokens:  usage.CacheReadTokens,
+		CacheWriteTokens: usage.CacheWriteTokens,
+	}
+	// The pricing group is resolved against the client-facing model name, which
+	// is what the channel's abilities and the response headers are keyed by.
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(quota, relayInfo.ChannelId, relayInfo.OriginModelName))
+}
+
+// recordTaskHarnessSettlement moves the ledger row of an async task to its final
+// billing state. The row is looked up by task id so a row written at submission
+// keeps its request id and creation time; when no row exists one is created.
+// It never returns an error: task billing continues regardless.
+func recordTaskHarnessSettlement(task *model.Task, status string, quota int) {
+	if task == nil || task.TaskID == "" {
+		return
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			common.SysLog(common.LogText("harness settlement panicked while settling a task: %v", recovered))
+		}
+	}()
+	settlement, err := model.GetHarnessSettlementByTaskId(task.TaskID)
+	if err != nil {
+		common.SysLog(common.LogText("harness settlement: loading task settlement failed (task=%s): %s", task.TaskID, err.Error()))
+		return
+	}
+	if settlement == nil {
+		settlement = &model.HarnessSettlement{
+			RequestId: "task:" + task.TaskID,
+			TaskId:    task.TaskID,
+			TokenId:   task.PrivateData.TokenId,
+			UserId:    task.UserId,
+			ModelName: taskModelName(task),
+			ChannelId: task.ChannelId,
+			CreatedAt: task.SubmitTime,
+		}
+		if task.PrivateData.Execution != nil && task.PrivateData.Execution.RequestID != "" {
+			settlement.RequestId = task.PrivateData.Execution.RequestID
+		}
+	}
+	settlement.Status = status
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(quota, task.ChannelId, taskModelName(task)))
 }

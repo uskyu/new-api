@@ -108,8 +108,17 @@ func sweepTimedOutTasks(ctx context.Context) {
 			continue
 		}
 		timedOutCount++
-		if !isLegacy && task.Quota != 0 {
+		if isLegacy {
+			// Legacy tasks predate the settlement ledger and are failed without a
+			// refund; they have no row to close and must not get one created.
+			continue
+		}
+		if task.Quota != 0 {
 			RefundTaskQuota(ctx, task, reason)
+		} else {
+			// A zero-quota task returns early from RefundTaskQuota; close the
+			// ledger here so the row cannot stay pending after the terminal state.
+			recordTaskHarnessSettlement(task, model.HarnessSettlementStatusRefunded, 0)
 		}
 	}
 
@@ -630,12 +639,25 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 }
 
 // finalizeTerminalTask 终态统一收尾（状态 CAS 赢家调用，恰好一次）：采样 + 结算 + 失败兜底退款。
+// Every terminal task passes through here, so this is also where the Harness
+// settlement ledger is closed whenever no billing-adjustment path did it.
 func finalizeTerminalTask(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
 	perfmetrics.RecordTaskResult(task, taskResult)
 	billingSettled := settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
-	if task.Status == model.TaskStatusFailure && !billingSettled && task.Quota != 0 {
-		RefundTaskQuota(ctx, task, task.FailReason)
+	if billingSettled {
+		// RecalculateTaskQuota already closed the ledger with the actual amount.
+		return
 	}
+	if task.Status == model.TaskStatusFailure {
+		// Failure with no usage-based settlement means nothing is owed: refund
+		// whatever was held, which also closes the ledger as refunded. This also
+		// covers a zero reservation, where only the ledger write happens.
+		RefundTaskQuota(ctx, task, task.FailReason)
+		return
+	}
+	// Success without a usage settlement (per-request billing, or a task whose
+	// completion carries no billable usage): the reservation is the final cost.
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota)
 }
 
 func redactVideoResponseBody(body []byte) []byte {
@@ -686,6 +708,10 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		result, usageFacts, err := EvaluateTaskCompletionUsage(bc.TieredSnapshot, taskResult.UsageFacts)
 		if err != nil {
 			logger.LogWarn(ctx, common.LogText("task %s expression settlement failed, keeping the pre-consumed quota: %v", task.TaskID, err))
+			// Nothing was refunded: the pre-consumed quota is what this task
+			// actually costs, so the ledger settles at task.Quota rather than
+			// staying pending until reconciliation.
+			recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota)
 			return true
 		}
 		if result.Clamp != nil {
@@ -699,6 +725,9 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 	// 按次计费的成功任务保持预扣；失败任务由调用方全额退款。
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.PerCallBilling {
 		logger.LogInfo(ctx, common.LogText("task %s is billed per request, skipping difference settlement", task.TaskID))
+		// The reservation is the final cost. It is closed as settled on success
+		// and as refunded on failure by finalizeTerminalTask, which is the single
+		// place that knows the terminal status.
 		return false
 	}
 	// 优先让 adaptor 决定最终额度。
