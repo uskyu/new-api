@@ -1642,7 +1642,7 @@
     "Create request parameter override rules without editing raw JSON.": "无需编辑原始 JSON 即可创建请求参数覆盖规则。",
     "Create reusable bundles of models, tags, endpoints, and user groups to speed up configuration elsewhere in the console.": "创建模型、标签、端点和用户分组的可重用捆绑包，以加快控制台中其他地方的配置速度。",
     "Create succeeded": "创建成功",
-    "Create the token in Console → Tokens first, then authorize it here. An authorized token may call every routing group; it picks one per request with the X-Route-Group header.": "请先在「控制台 → 令牌」创建令牌，再回到此处授权。授权后可访问全部路由分组，调用时通过 X-Route-Group 请求头指定本次使用哪个分组。",
+    "Create the token in Console → Tokens, then authorize it here. Authorized tokens must send X-Route-Group on every model generation request or receive HTTP 403. Model listing and task-result reads do not require this header. Revoking authorization restores normal token routing.": "请先在「控制台 → 令牌」创建令牌并在此授权。授权后的令牌调用模型时必须携带 X-Route-Group，否则返回 HTTP 403；模型列表与任务结果查询无需此请求头。取消授权后恢复普通路由。",
     "Create Vendor": "创建供应商",
     "Create your first group to reuse model, tag, or endpoint selections anywhere in the dashboard.": "创建您的第一个分组，以便在仪表板的任何位置重用模型、标签或端点选择。",
     "Create, edit, and delete API keys.": "创建、编辑和删除 API 密钥。",
