@@ -43,6 +43,67 @@ func legacyInputPricePerMillion(ratio float64) (decimal.Decimal, error) {
 	return decimal.NewFromFloat(ratio).Mul(decimal.NewFromInt(1_000_000)).Div(decimal.NewFromFloat(common.QuotaPerUnit)), nil
 }
 
+// ModelUnitPrices holds canonical USD prices per million tokens for one
+// billing name. A nil field means "not configured" and MUST NOT be serialized
+// as 0; currency conversion happens in the caller, never here.
+type ModelUnitPrices struct {
+	Input        *float64 `json:"input,omitempty"`
+	Output       *float64 `json:"output,omitempty"`
+	CacheRead    *float64 `json:"cache_read,omitempty"`
+	CacheWrite   *float64 `json:"cache_write,omitempty"`
+	CacheWrite1h *float64 `json:"cache_write_1h,omitempty"`
+	ImageInput   *float64 `json:"image_input,omitempty"`
+}
+
+// usdPricePerMillion applies a configured ratio to a per-million base price and
+// keeps the result only when it is finite and non-negative; an unusable ratio
+// leaves the category unpublished instead of surfacing NaN/Inf to clients.
+func usdPricePerMillion(base decimal.Decimal, ratio float64) *float64 {
+	if ratio < 0 || math.IsNaN(ratio) || math.IsInf(ratio, 0) {
+		return nil
+	}
+	value := base.Mul(decimal.NewFromFloat(ratio)).InexactFloat64()
+	if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return nil
+	}
+	return &value
+}
+
+// DescribeModelUnitPrices returns the USD unit prices implied by the configured
+// ratios for billingName. Unconfigured categories stay nil: the legacy self-use
+// fallback ratio is never reported as a real price.
+func DescribeModelUnitPrices(billingName string) ModelUnitPrices {
+	if !ratio_setting.HasConfiguredModelRatio(billingName) {
+		return ModelUnitPrices{}
+	}
+	ratio, success, _ := ratio_setting.GetModelRatio(billingName)
+	if !success {
+		return ModelUnitPrices{}
+	}
+	base, err := legacyInputPricePerMillion(ratio)
+	if err != nil {
+		return ModelUnitPrices{}
+	}
+	prices := ModelUnitPrices{
+		Input:  usdPricePerMillion(base, 1),
+		Output: usdPricePerMillion(base, ratio_setting.GetCompletionRatio(billingName)),
+	}
+	if cacheRead, configured := ratio_setting.GetCacheRatio(billingName); configured {
+		prices.CacheRead = usdPricePerMillion(base, cacheRead)
+	}
+	if cacheWrite, configured := ratio_setting.GetCreateCacheRatio(billingName); configured {
+		// Same 1h/5m split as relay/helper: Claude names inherit 6 / 3.75.
+		prices.CacheWrite = usdPricePerMillion(base, cacheWrite)
+		if strings.Contains(strings.ToLower(billingName), "claude") {
+			prices.CacheWrite1h = usdPricePerMillion(base, cacheWrite*(6.0/3.75))
+		}
+	}
+	if image, configured := ratio_setting.GetImageRatio(billingName); configured {
+		prices.ImageInput = usdPricePerMillion(base, image)
+	}
+	return prices
+}
+
 type LegacyPricingRule struct {
 	Condition  string  `json:"condition"`
 	Multiplier float64 `json:"multiplier"`

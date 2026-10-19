@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
@@ -55,15 +56,12 @@ func GetIntelligentRouting(c *gin.Context) {
 		return
 	}
 	routingConfig := setting.GetIntelligentRoutingConfig()
-	globalOrder := routingConfig.GlobalChannelOrder
-	if globalOrder == nil {
-		globalOrder = []int{}
-	}
+	inventory := newIntelligentRoutingChannelInventory(channels)
 	response := intelligentRoutingResponse{
-		GlobalChannelOrder:  globalOrder,
+		GlobalChannelOrder:  keepKnownRoutingChannelIDs(routingConfig.GlobalChannelOrder, inventory.known),
 		PricingGroupOrder:   routingConfig.PricingGroupOrder,
 		PricingGroupOptions: make([]pricingGroupOption, 0),
-		Groups:              routingConfig.Groups,
+		Groups:              keepKnownRoutingGroups(routingConfig.Groups, inventory.known),
 		Channels:            make([]intelligentRoutingChannel, 0, len(channels)),
 	}
 	abilityGroups := make(map[int]map[string]struct{})
@@ -83,7 +81,7 @@ func GetIntelligentRouting(c *gin.Context) {
 	}
 	slices.SortFunc(response.PricingGroupOptions, func(a, b pricingGroupOption) int { return strings.Compare(a.ID, b.ID) })
 	for _, channel := range channels {
-		if channel == nil || channel.Status != common.ChannelStatusEnabled {
+		if _, ok := inventory.selectable[channel.Id]; !ok {
 			continue
 		}
 		models := channel.GetModels()
@@ -108,6 +106,81 @@ func GetIntelligentRouting(c *gin.Context) {
 		})
 	}
 	common.ApiSuccess(c, response)
+}
+
+// intelligentRoutingChannelInventory captures which channel IDs the stored
+// routing option may still reference and which ones an administrator can pick
+// right now. A channel is known while its row exists in any status, so a
+// temporarily disabled channel keeps its priority slot; it is selectable only
+// while it is enabled and still exposes an enabled model ability.
+type intelligentRoutingChannelInventory struct {
+	known      map[int]struct{}
+	selectable map[int]struct{}
+}
+
+func newIntelligentRoutingChannelInventory(channels []*model.Channel) intelligentRoutingChannelInventory {
+	inventory := intelligentRoutingChannelInventory{
+		known:      make(map[int]struct{}, len(channels)),
+		selectable: make(map[int]struct{}, len(channels)),
+	}
+	enabled := make(map[int]bool)
+	for _, ability := range model.GetAllEnableAbilities() {
+		enabled[ability.ChannelId] = true
+	}
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		inventory.known[channel.Id] = struct{}{}
+		if channel.Status != common.ChannelStatusEnabled || !enabled[channel.Id] {
+			continue
+		}
+		inventory.selectable[channel.Id] = struct{}{}
+	}
+	return inventory
+}
+
+func keepKnownRoutingChannelIDs(channelIDs []int, known map[int]struct{}) []int {
+	kept := make([]int, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		if _, ok := known[channelID]; ok {
+			kept = append(kept, channelID)
+		}
+	}
+	return kept
+}
+
+func keepKnownRoutingGroups(groups []setting.IntelligentRoutingGroup, known map[int]struct{}) []setting.IntelligentRoutingGroup {
+	kept := make([]setting.IntelligentRoutingGroup, 0, len(groups))
+	for _, group := range groups {
+		group.ChannelOrder = keepKnownRoutingChannelIDs(group.ChannelOrder, known)
+		kept = append(kept, group)
+	}
+	return kept
+}
+
+// normalizeIntelligentRoutingChannelOrders prunes only channel IDs whose
+// channel row no longer exists. A disabled or otherwise temporarily unusable
+// channel keeps its slot so re-enabling it restores the administrator's
+// configured priority. A resource pool is removed only when every channel in it
+// was deleted; a pool submitted without any channel keeps its identity so
+// validation can report it.
+func normalizeIntelligentRoutingChannelOrders(config setting.IntelligentRoutingConfig, inventory intelligentRoutingChannelInventory) setting.IntelligentRoutingConfig {
+	if config.GlobalChannelOrder != nil {
+		config.GlobalChannelOrder = keepKnownRoutingChannelIDs(config.GlobalChannelOrder, inventory.known)
+	}
+	keptGroups := make([]setting.IntelligentRoutingGroup, 0, len(config.Groups))
+	for _, group := range config.Groups {
+		if len(group.ChannelOrder) > 0 {
+			group.ChannelOrder = keepKnownRoutingChannelIDs(group.ChannelOrder, inventory.known)
+			if len(group.ChannelOrder) == 0 {
+				continue
+			}
+		}
+		keptGroups = append(keptGroups, group)
+	}
+	config.Groups = keptGroups
+	return config
 }
 
 type updateIntelligentRoutingRequest struct {
@@ -145,6 +218,12 @@ func UpdateIntelligentRouting(c *gin.Context) {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("global_channel_order must be provided"))
 		return
 	}
+	channels, err := model.GetAllChannelsWithoutKeys()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	config = normalizeIntelligentRoutingChannelOrders(config, newIntelligentRoutingChannelInventory(channels))
 	if err := validateIntelligentRoutingChannels(config); err != nil {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage(err.Error()))
 		return
@@ -177,43 +256,27 @@ func UpdateIntelligentRouting(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"global_channel_order": config.GlobalChannelOrder, "pricing_group_order": config.PricingGroupOrder, "groups": config.Groups})
 }
 
-func channelHasEnabledModelAbility(channelID int, channelModels []string, abilities []model.Ability) bool {
-	for _, ability := range abilities {
-		if ability.ChannelId != channelID || !ability.Enabled {
-			continue
-		}
-		abilityModel := ratio_setting.RoutingMatchModelName(ability.Model)
-		for _, modelName := range channelModels {
-			if ability.Model == modelName || abilityModel == ratio_setting.RoutingMatchModelName(modelName) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
+// validateIntelligentRoutingChannels rejects stored orders that reference a
+// channel row that no longer exists. Availability is deliberately NOT checked
+// here: a channel's enabled status and model abilities are volatile, so a
+// temporarily disabled channel keeps its configured priority slot and is
+// filtered out later, at read time and at channel-selection time
+// (model.GetRandomSatisfiedChannelWithPricingGroups). Rejecting it here would
+// make every later save fail until the administrator removes the channel.
 func validateIntelligentRoutingChannels(config setting.IntelligentRoutingConfig) error {
 	channels, err := model.GetAllChannelsWithoutKeys()
 	if err != nil {
 		return err
 	}
-	channelByID := make(map[int]*model.Channel, len(channels))
+	channelByID := make(map[int]struct{}, len(channels))
 	for _, channel := range channels {
 		if channel != nil {
-			channelByID[channel.Id] = channel
+			channelByID[channel.Id] = struct{}{}
 		}
 	}
-	enabledAbilities := model.GetAllEnableAbilities()
 	for _, channelID := range config.GlobalChannelOrder {
-		channel := channelByID[channelID]
-		if channel == nil {
+		if _, exists := channelByID[channelID]; !exists {
 			return common.NewMessage("Global order contains an unknown channel ID")
-		}
-		if channel.Status != common.ChannelStatusEnabled {
-			return common.NewMessage("Global routing can only use enabled channels")
-		}
-		if !channelHasEnabledModelAbility(channelID, channel.GetModels(), enabledAbilities) {
-			return common.NewMessage("Global route channel has no enabled model ability")
 		}
 	}
 	for _, group := range config.Groups {
@@ -221,15 +284,8 @@ func validateIntelligentRoutingChannels(config setting.IntelligentRoutingConfig)
 			return common.NewMessage("Each resource pool must contain at least one channel")
 		}
 		for _, channelID := range group.ChannelOrder {
-			channel := channelByID[channelID]
-			if channel == nil {
+			if _, exists := channelByID[channelID]; !exists {
 				return common.NewMessage("Resource pool contains an unknown channel ID")
-			}
-			if channel.Status != common.ChannelStatusEnabled {
-				return common.NewMessage("Resource pools can only use enabled channels")
-			}
-			if !channelHasEnabledModelAbility(channelID, channel.GetModels(), enabledAbilities) {
-				return common.NewMessage("Resource pool channel has no enabled model ability")
 			}
 		}
 	}
@@ -382,37 +438,92 @@ func harnessPluginProvidesModel(generation *jsplugin.RoutingGeneration, pluginKe
 	return resolved && target.PluginKey == pluginKey
 }
 
+// harnessCatalogPricing is the price view Harness bills from. It replaces the
+// former ratio fields: prices are absolute money amounts in the instance
+// display currency, and an absent field means "not configured", never "free".
+type harnessCatalogPricing struct {
+	Mode          string                               `json:"mode"`
+	Currency      string                               `json:"currency"`
+	Unit          string                               `json:"unit,omitempty"`
+	Input         *float64                             `json:"input,omitempty"`
+	Output        *float64                             `json:"output,omitempty"`
+	CacheRead     *float64                             `json:"cache_read,omitempty"`
+	CacheWrite    *float64                             `json:"cache_write,omitempty"`
+	CacheWrite1h  *float64                             `json:"cache_write_1h,omitempty"`
+	ImageInput    *float64                             `json:"image_input,omitempty"`
+	Price         *float64                             `json:"price,omitempty"`
+	Expression    string                               `json:"expression,omitempty"`
+	UsageSchema   map[string]jsplugin.UsageFieldSchema `json:"usage_schema,omitempty"`
+	UsageExamples []jsplugin.UsageExample              `json:"usage_examples,omitempty"`
+}
+
 type harnessCatalogModel struct {
-	Name                 string   `json:"name"`
-	UpstreamModels       []string `json:"upstream_models"`
-	Capabilities         []string `json:"capabilities"`
-	QuotaType            int      `json:"quota_type"`
-	ModelRatio           float64  `json:"model_ratio"`
-	ModelPrice           float64  `json:"model_price"`
-	CompletionRatio      float64  `json:"completion_ratio"`
-	CacheRatio           *float64 `json:"cache_ratio,omitempty"`
-	CreateCacheRatio     *float64 `json:"create_cache_ratio,omitempty"`
-	ImageRatio           *float64 `json:"image_ratio,omitempty"`
-	AudioRatio           *float64 `json:"audio_ratio,omitempty"`
-	AudioCompletionRatio *float64 `json:"audio_completion_ratio,omitempty"`
-	// Billing expression fields. Harness needs these to price models that are
-	// not billable from a single ratio or fixed price.
-	BillingMode           string                               `json:"billing_mode"`
-	BillingExpr           string                               `json:"billing_expr,omitempty"`
-	BillingUsageSchema    map[string]jsplugin.UsageFieldSchema `json:"billing_usage_schema,omitempty"`
-	BillingUsageExamples  []jsplugin.UsageExample              `json:"billing_usage_examples,omitempty"`
-	BillingPluginVariants []harnessCatalogPluginVariant        `json:"billing_plugin_variants,omitempty"`
+	Name           string                `json:"name"`
+	UpstreamModels []string              `json:"upstream_models"`
+	Capabilities   []string              `json:"capabilities"`
+	Pricing        harnessCatalogPricing `json:"pricing"`
+	// Plugin variants reuse the same price shape per reachable task plugin.
+	BillingPluginVariants []harnessCatalogPluginVariant `json:"billing_plugin_variants,omitempty"`
 }
 
 // harnessCatalogPluginVariant mirrors the plugin-specific billing of a model
 // that is served by task plugins, where each plugin may bill differently.
 type harnessCatalogPluginVariant struct {
-	PluginKey            string                               `json:"plugin_key"`
-	PluginName           string                               `json:"plugin_name"`
-	BillingMode          string                               `json:"billing_mode"`
-	BillingExpr          string                               `json:"billing_expr,omitempty"`
-	BillingUsageSchema   map[string]jsplugin.UsageFieldSchema `json:"billing_usage_schema,omitempty"`
-	BillingUsageExamples []jsplugin.UsageExample              `json:"billing_usage_examples,omitempty"`
+	PluginKey  string                `json:"plugin_key"`
+	PluginName string                `json:"plugin_name"`
+	Pricing    harnessCatalogPricing `json:"pricing"`
+}
+
+const (
+	harnessCatalogPricingModeToken      = "token"
+	harnessCatalogPricingModeFixed      = "fixed"
+	harnessCatalogPricingModeTieredExpr = "tiered_expr"
+)
+
+const (
+	harnessCatalogTokenPriceUnit   = "1M_tokens"
+	harnessCatalogRequestPriceUnit = "request"
+)
+
+// harnessCatalogDisplayCurrency returns the instance display currency and the
+// rate that converts the canonical USD price into it. It mirrors the admin
+// pricing UI and model marketplace so catalog numbers match what an operator
+// sees there. TOKENS mode has no monetary display, so prices stay in USD.
+func harnessCatalogDisplayCurrency() (string, float64) {
+	switch operation_setting.GetQuotaDisplayType() {
+	case operation_setting.QuotaDisplayTypeCNY:
+		return "CNY", operation_setting.GetUsdToCurrencyRate(operation_setting.USDExchangeRate)
+	case operation_setting.QuotaDisplayTypeCustom:
+		return operation_setting.GetCurrencySymbol(), operation_setting.GetUsdToCurrencyRate(operation_setting.USDExchangeRate)
+	default:
+		return "USD", 1
+	}
+}
+
+// harnessCatalogTokenPricing reports per-1M-token prices in the display
+// currency. Lanes the operator did not configure stay nil so Harness can tell
+// "not applicable" apart from an explicit free price.
+func harnessCatalogTokenPricing(billingName, currency string, rate float64) harnessCatalogPricing {
+	unitPrices := model.DescribeModelUnitPrices(billingName)
+	return harnessCatalogPricing{
+		Mode:         harnessCatalogPricingModeToken,
+		Currency:     currency,
+		Unit:         harnessCatalogTokenPriceUnit,
+		Input:        scaleHarnessCatalogPrice(unitPrices.Input, rate),
+		Output:       scaleHarnessCatalogPrice(unitPrices.Output, rate),
+		CacheRead:    scaleHarnessCatalogPrice(unitPrices.CacheRead, rate),
+		CacheWrite:   scaleHarnessCatalogPrice(unitPrices.CacheWrite, rate),
+		CacheWrite1h: scaleHarnessCatalogPrice(unitPrices.CacheWrite1h, rate),
+		ImageInput:   scaleHarnessCatalogPrice(unitPrices.ImageInput, rate),
+	}
+}
+
+func scaleHarnessCatalogPrice(value *float64, rate float64) *float64 {
+	if value == nil || rate == 1 {
+		return value
+	}
+	scaled := *value * rate
+	return &scaled
 }
 
 func GetHarnessCatalog(c *gin.Context) {
@@ -574,7 +685,7 @@ func GetHarnessCatalog(c *gin.Context) {
 		})
 	}
 	response.QuotaPerUnit = common.QuotaPerUnit
-	response.PriceUnit = "new_api_quota"
+	response.PriceUnit = "display_currency"
 	common.ApiSuccess(c, response)
 }
 
@@ -597,8 +708,7 @@ func buildHarnessCatalogModels(
 		pricing = addHarnessTaskAliasPluginPricing(pricing, modelName, pluginGeneration)
 		routePricing := routePricingByModel[modelName]
 		billingName := harnessCatalogBillingName(modelName, pluginGeneration)
-		billable := hasHarnessCatalogPricing(billingName, pricing, routePricing)
-		if !billable {
+		if !hasHarnessCatalogPricing(billingName, pricing, routePricing) {
 			unpricedModels = append(unpricedModels, harnessCatalogUnpricedModel{
 				Name:           modelName,
 				UpstreamModels: upstreamModels,
@@ -606,7 +716,6 @@ func buildHarnessCatalogModels(
 			})
 			continue
 		}
-		pricing = resolveHarnessCatalogPricing(pricing, billingName)
 		capabilities := make([]string, len(pricing.SupportedEndpointTypes))
 		for i, endpointType := range pricing.SupportedEndpointTypes {
 			capabilities[i] = string(endpointType)
@@ -619,20 +728,8 @@ func buildHarnessCatalogModels(
 			Name:                  modelName,
 			UpstreamModels:        upstreamModels,
 			Capabilities:          capabilities,
-			QuotaType:             pricing.QuotaType,
-			ModelRatio:            pricing.ModelRatio,
-			ModelPrice:            pricing.ModelPrice,
-			CompletionRatio:       pricing.CompletionRatio,
-			CacheRatio:            pricing.CacheRatio,
-			CreateCacheRatio:      pricing.CreateCacheRatio,
-			ImageRatio:            pricing.ImageRatio,
-			AudioRatio:            pricing.AudioRatio,
-			AudioCompletionRatio:  pricing.AudioCompletionRatio,
-			BillingMode:           pricing.BillingMode,
-			BillingExpr:           pricing.BillingExpr,
-			BillingUsageSchema:    pricing.BillingUsageSchema,
-			BillingUsageExamples:  pricing.BillingUsageExamples,
-			BillingPluginVariants: buildHarnessCatalogPluginVariants(pricing.BillingPluginVariants, pluginKeys),
+			Pricing:               resolveHarnessCatalogPricing(pricing, billingName),
+			BillingPluginVariants: buildHarnessCatalogPluginVariants(pricing.BillingPluginVariants, pluginKeys, billingName),
 		})
 	}
 	slices.SortFunc(models, func(a, b harnessCatalogModel) int {
@@ -759,55 +856,33 @@ func harnessPluginPricingVariant(variants []model.PricingPluginVariant, pluginKe
 	return model.PricingPluginVariant{}, false
 }
 
-func resolveHarnessCatalogPricing(pricing model.Pricing, billingName string) model.Pricing {
-	pricing.BillingMode = billing_setting.GetBillingMode(billingName)
-	pricing.BillingExpr = ""
-	if pricing.BillingMode == billing_setting.BillingModeTieredExpr {
-		pricing.BillingExpr = billingExprOrEmpty(billingName)
-		pricing.QuotaType = 0
-		pricing.ModelRatio = 0
-		pricing.ModelPrice = 0
-	} else if price, configured := ratio_setting.GetModelPrice(billingName, false); configured {
-		pricing.QuotaType = 1
-		pricing.ModelPrice = price
-		pricing.ModelRatio = 0
-	} else {
-		pricing.QuotaType = 0
-		pricing.ModelPrice = 0
-		pricing.ModelRatio = 0
-		if ratio_setting.HasConfiguredModelRatio(billingName) {
-			pricing.ModelRatio, _, _ = ratio_setting.GetModelRatio(billingName)
+// resolveHarnessCatalogPricing selects the model's billing mode with the
+// precedence tiered expression > fixed price > token ratio and returns the
+// prices Harness bills from. Token and fixed prices are converted into the
+// instance display currency; a tiered expression already yields USD, so its
+// output is passed through unscaled.
+func resolveHarnessCatalogPricing(pricing model.Pricing, billingName string) harnessCatalogPricing {
+	currency, rate := harnessCatalogDisplayCurrency()
+	if billing_setting.GetBillingMode(billingName) == billing_setting.BillingModeTieredExpr {
+		// The expression engine prices lanes in USD (see pkg/billingexpr/expr.md),
+		// so the expression output is never scaled by the display-currency rate.
+		return harnessCatalogPricing{
+			Mode:          harnessCatalogPricingModeTieredExpr,
+			Currency:      "USD",
+			Expression:    billingExprOrEmpty(billingName),
+			UsageSchema:   pricing.BillingUsageSchema,
+			UsageExamples: pricing.BillingUsageExamples,
 		}
 	}
-	pricing.CompletionRatio = ratio_setting.GetCompletionRatio(billingName)
-	if value, configured := ratio_setting.GetCacheRatio(billingName); configured {
-		pricing.CacheRatio = &value
-	} else {
-		pricing.CacheRatio = nil
+	if price, configured := ratio_setting.GetModelPrice(billingName, false); configured {
+		return harnessCatalogPricing{
+			Mode:     harnessCatalogPricingModeFixed,
+			Currency: currency,
+			Unit:     harnessCatalogRequestPriceUnit,
+			Price:    scaleHarnessCatalogPrice(&price, rate),
+		}
 	}
-	if value, configured := ratio_setting.GetCreateCacheRatio(billingName); configured {
-		pricing.CreateCacheRatio = &value
-	} else {
-		pricing.CreateCacheRatio = nil
-	}
-	if value, configured := ratio_setting.GetImageRatio(billingName); configured {
-		pricing.ImageRatio = &value
-	} else {
-		pricing.ImageRatio = nil
-	}
-	if ratio_setting.ContainsAudioRatio(billingName) {
-		value := ratio_setting.GetAudioRatio(billingName)
-		pricing.AudioRatio = &value
-	} else {
-		pricing.AudioRatio = nil
-	}
-	if ratio_setting.ContainsAudioCompletionRatio(billingName) {
-		value := ratio_setting.GetAudioCompletionRatio(billingName)
-		pricing.AudioCompletionRatio = &value
-	} else {
-		pricing.AudioCompletionRatio = nil
-	}
-	return pricing
+	return harnessCatalogTokenPricing(billingName, currency, rate)
 }
 
 func isValidHarnessPrice(value float64) bool {
@@ -825,26 +900,38 @@ func billingExprOrEmpty(modelName string) string {
 }
 
 // buildHarnessCatalogPluginVariants exposes only providers reachable through
-// the current resource pool so Harness sees the matching plugin prices.
+// the current resource pool so Harness sees the matching plugin prices. A
+// ratio-mode variant bills the model's token lanes, so it carries the model's
+// token unit prices; an expression variant carries its own expression and usage
+// schema.
 func buildHarnessCatalogPluginVariants(
 	variants []model.PricingPluginVariant,
 	pluginKeys map[string]struct{},
+	billingName string,
 ) []harnessCatalogPluginVariant {
 	if len(variants) == 0 || len(pluginKeys) == 0 {
 		return nil
 	}
+	currency, rate := harnessCatalogDisplayCurrency()
 	result := make([]harnessCatalogPluginVariant, 0, len(pluginKeys))
 	for _, variant := range variants {
 		if _, reachable := pluginKeys[variant.PluginKey]; !reachable {
 			continue
 		}
+		variantPricing := harnessCatalogTokenPricing(billingName, currency, rate)
+		if variant.BillingMode == billing_setting.BillingModeTieredExpr {
+			variantPricing = harnessCatalogPricing{
+				Mode:          harnessCatalogPricingModeTieredExpr,
+				Currency:      "USD",
+				Expression:    variant.BillingExpr,
+				UsageSchema:   variant.BillingUsageSchema,
+				UsageExamples: variant.BillingUsageExamples,
+			}
+		}
 		result = append(result, harnessCatalogPluginVariant{
-			PluginKey:            variant.PluginKey,
-			PluginName:           variant.PluginName,
-			BillingMode:          variant.BillingMode,
-			BillingExpr:          variant.BillingExpr,
-			BillingUsageSchema:   variant.BillingUsageSchema,
-			BillingUsageExamples: variant.BillingUsageExamples,
+			PluginKey:  variant.PluginKey,
+			PluginName: variant.PluginName,
+			Pricing:    variantPricing,
 		})
 	}
 	slices.SortFunc(result, func(a, b harnessCatalogPluginVariant) int {
