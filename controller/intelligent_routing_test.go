@@ -50,6 +50,58 @@ func TestValidateIntelligentRoutingChannelsUsesAnyEnabledAbilityGroup(t *testing
 	require.NoError(t, err)
 }
 
+// TestNormalizeIntelligentRoutingChannelOrdersKeepsDisabledChannels pins the
+// routing order cleanup contract: a channel that was deleted is pruned from the
+// stored order, while a temporarily disabled channel keeps its slot so that
+// re-enabling it restores the administrator's priority order.
+func TestNormalizeIntelligentRoutingChannelOrdersKeepsDisabledChannels(t *testing.T) {
+	oldDB := model.DB
+	oldLogDB := model.LOG_DB
+	oldMemoryCacheEnabled := common.MemoryCacheEnabled
+	db, err := gorm.Open(sqlite.Open("file:intelligent-routing-normalize-test?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	model.DB = db
+	model.LOG_DB = db
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		model.DB = oldDB
+		model.LOG_DB = oldLogDB
+		common.MemoryCacheEnabled = oldMemoryCacheEnabled
+		sqlDB, dbErr := db.DB()
+		if dbErr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+
+	enabled := model.Channel{Type: 1, Key: "enabled-key", Status: common.ChannelStatusEnabled, Name: "enabled", Models: "model-a"}
+	disabled := model.Channel{Type: 1, Key: "disabled-key", Status: common.ChannelStatusManuallyDisabled, Name: "disabled", Models: "model-a"}
+	require.NoError(t, db.Create(&enabled).Error)
+	require.NoError(t, db.Create(&disabled).Error)
+	require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "model-a", ChannelId: enabled.Id, Enabled: true}).Error)
+	require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "model-a", ChannelId: disabled.Id, Enabled: true}).Error)
+
+	const deletedChannelID = 4040
+	channels, err := model.GetAllChannelsWithoutKeys()
+	require.NoError(t, err)
+	normalized := normalizeIntelligentRoutingChannelOrders(setting.IntelligentRoutingConfig{
+		GlobalChannelOrder: []int{deletedChannelID, disabled.Id, enabled.Id},
+		Groups: []setting.IntelligentRoutingGroup{
+			{ID: "mixed", Name: "Mixed", ChannelOrder: []int{deletedChannelID, enabled.Id}},
+			{ID: "disabled-only", Name: "Disabled only", ChannelOrder: []int{disabled.Id}},
+		},
+	}, newIntelligentRoutingChannelInventory(channels))
+
+	// The deleted channel is gone; the disabled one keeps its position.
+	assert.Equal(t, []int{disabled.Id, enabled.Id}, normalized.GlobalChannelOrder)
+	require.Len(t, normalized.Groups, 2)
+	assert.Equal(t, "mixed", normalized.Groups[0].ID)
+	assert.Equal(t, []int{enabled.Id}, normalized.Groups[0].ChannelOrder)
+	// A pool whose channels all still exist survives even though none is selectable.
+	assert.Equal(t, "disabled-only", normalized.Groups[1].ID)
+	assert.Equal(t, []int{disabled.Id}, normalized.Groups[1].ChannelOrder)
+}
+
 func TestIntelligentRoutingAPIContractContainsChannelsWithoutPricing(t *testing.T) {
 	response, err := common.Marshal(intelligentRoutingResponse{
 		GlobalChannelOrder: []int{1},
@@ -143,7 +195,8 @@ func TestHarnessCatalogExcludesUnpricedModelsAndReturnsDiagnostics(t *testing.T)
 	})
 	require.NoError(t, err)
 	assert.Contains(t, string(response), `"unpriced_models":[{"name":"unpriced-model"`)
-	assert.NotContains(t, string(response), `"model_ratio":37.5`)
+	// An unpriced model must not leak any price at all.
+	assert.NotContains(t, string(response), `"input":75`)
 }
 
 func TestHarnessCatalogPricingRequiresConfiguredBilling(t *testing.T) {
@@ -188,6 +241,101 @@ func TestHarnessCatalogPricingRequiresConfiguredBilling(t *testing.T) {
 	assert.True(t, hasHarnessBasePricing("harness-custom-tiered"))
 }
 
+// TestHarnessCatalogExposesUnitPricesFromConfiguredRatios pins the catalog price
+// contract: ratios are converted with 1e6 / quota_per_unit (never a hardcoded
+// factor), lanes the operator did not configure stay absent, and a Claude cache
+// write additionally publishes its 1h tier.
+func TestHarnessCatalogExposesUnitPricesFromConfiguredRatios(t *testing.T) {
+	previousQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = previousQuotaPerUnit })
+
+	configureHarnessTestPricing(t, nil, map[string]float64{
+		"harness-price-plain":  1,
+		"harness-price-claude": 1.5,
+	}, []string{"harness-price-plain", "harness-price-claude"})
+
+	// Only input/output are configured for this name.
+	ordinary := harnessCatalogTokenPricing("harness-price-plain", "USD", 1)
+	require.NotNil(t, ordinary.Input)
+	assert.InDelta(t, 2.0, *ordinary.Input, 1e-9, "ratio 1 at quota_per_unit 500000 is 2 USD per 1M")
+	require.NotNil(t, ordinary.Output)
+	assert.InDelta(t, 2.0, *ordinary.Output, 1e-9)
+	// Unconfigured lanes must be absent rather than zero.
+	assert.Nil(t, ordinary.CacheRead)
+	assert.Nil(t, ordinary.CacheWrite)
+	assert.Nil(t, ordinary.CacheWrite1h)
+	assert.Nil(t, ordinary.ImageInput)
+
+	// The conversion factor follows the configured quota unit, not a constant.
+	previousQuotaPerUnit = common.QuotaPerUnit
+	common.QuotaPerUnit = 1_000_000
+	doubled := harnessCatalogTokenPricing("harness-price-plain", "USD", 1)
+	require.NotNil(t, doubled.Input)
+	assert.InDelta(t, 1.0, *doubled.Input, 1e-9, "ratio 1 at quota_per_unit 1000000 is 1 USD per 1M")
+	common.QuotaPerUnit = previousQuotaPerUnit
+
+	// Claude cache write publishes both the 5m price and the 1h tier.
+	oldCacheRatios := ratio_setting.CreateCacheRatio2JSONString()
+	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateCreateCacheRatioByJSONString(oldCacheRatios)) })
+	cacheRatios := ratio_setting.GetCreateCacheRatioCopy()
+	cacheRatios["harness-price-claude"] = 1.25
+	cacheJSON, err := common.Marshal(cacheRatios)
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateCreateCacheRatioByJSONString(string(cacheJSON)))
+
+	claude := harnessCatalogTokenPricing("harness-price-claude", "USD", 1)
+	require.NotNil(t, claude.Input)
+	require.NotNil(t, claude.CacheWrite)
+	assert.InDelta(t, 3.0, *claude.Input, 1e-9)
+	assert.InDelta(t, 3.75, *claude.CacheWrite, 1e-9)
+	require.NotNil(t, claude.CacheWrite1h)
+	assert.InDelta(t, 6.0, *claude.CacheWrite1h, 1e-9, "1h cache write is the 5m price times 6/3.75")
+}
+
+// TestHarnessCatalogScalesPricesIntoDisplayCurrency pins method A: catalog prices
+// are reported in the instance display currency so they match the admin pricing
+// UI and the model marketplace, while a tiered expression stays USD because the
+// expression engine already prices in USD.
+func TestHarnessCatalogScalesPricesIntoDisplayCurrency(t *testing.T) {
+	previousQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 500000
+	t.Cleanup(func() { common.QuotaPerUnit = previousQuotaPerUnit })
+
+	configureHarnessTestPricing(t, nil, map[string]float64{"harness-price-currency": 1}, []string{"harness-price-currency"})
+
+	general := operation_setting.GetGeneralSetting()
+	previousDisplayType := general.QuotaDisplayType
+	previousExchangeRate := operation_setting.USDExchangeRate
+	t.Cleanup(func() {
+		general.QuotaDisplayType = previousDisplayType
+		operation_setting.USDExchangeRate = previousExchangeRate
+	})
+
+	general.QuotaDisplayType = operation_setting.QuotaDisplayTypeUSD
+	usd := harnessCatalogTokenPricing("harness-price-currency", "USD", 1)
+	require.NotNil(t, usd.Input)
+	assert.InDelta(t, 2.0, *usd.Input, 1e-9)
+
+	// CNY with a 1:1 rate keeps the same numbers, which is the planned setup.
+	general.QuotaDisplayType = operation_setting.QuotaDisplayTypeCNY
+	operation_setting.USDExchangeRate = 1
+	currency, rate := harnessCatalogDisplayCurrency()
+	assert.Equal(t, "CNY", currency)
+	assert.InDelta(t, 1.0, rate, 1e-9)
+	cny := harnessCatalogTokenPricing("harness-price-currency", currency, rate)
+	require.NotNil(t, cny.Input)
+	assert.InDelta(t, 2.0, *cny.Input, 1e-9)
+
+	// A non-1 rate actually scales, proving the rate is applied.
+	operation_setting.USDExchangeRate = 7
+	currency, rate = harnessCatalogDisplayCurrency()
+	assert.Equal(t, "CNY", currency)
+	assert.InDelta(t, 7.0, rate, 1e-9)
+	scaled := harnessCatalogTokenPricing("harness-price-currency", currency, rate)
+	require.NotNil(t, scaled.Input)
+	assert.InDelta(t, 14.0, *scaled.Input, 1e-9)
+}
+
 func TestHarnessChannelPluginBindingsCaptureOnlyConfiguredProviders(t *testing.T) {
 	channelSettings := `{"task_plugin_key":"pricing-alpha","task_extend_plugin_keys":["pricing-beta","pricing-alpha"]}`
 	channel := &model.Channel{Type: constant.ChannelTypeNewAPI, Setting: &channelSettings}
@@ -228,7 +376,9 @@ func TestHarnessCatalogIncludesPluginOnlyPricesAndRequiresEveryReachableVariant(
 	models, unpriced := buildHarnessCatalogModels(upstreamByModel, pricingByModel, pricedRoute, jsplugin.DefaultRegistry.Generation())
 	require.Len(t, models, 1)
 	require.Empty(t, unpriced)
-	assert.Equal(t, 0.0, models[0].ModelRatio)
+	// A plugin-only model has no base price, so the base pricing carries no lanes.
+	assert.Equal(t, harnessCatalogPricingModeToken, models[0].Pricing.Mode)
+	assert.Nil(t, models[0].Pricing.Input)
 	require.Len(t, models[0].BillingPluginVariants, 1)
 	assert.Equal(t, "pricing-alpha", models[0].BillingPluginVariants[0].PluginKey)
 
@@ -251,9 +401,11 @@ func TestHarnessCatalogExportsRelayResolvedAliasPrice(t *testing.T) {
 	)
 	require.Len(t, models, 1)
 	require.Empty(t, unpriced)
-	assert.Equal(t, 0, models[0].QuotaType)
-	assert.Equal(t, 4.0, models[0].ModelRatio)
-	assert.Zero(t, models[0].ModelPrice)
+	// The alias resolves to qwen3-max's configured ratio of 4, i.e. 8 USD per
+	// million input tokens at the default quota unit.
+	assert.Equal(t, harnessCatalogPricingModeToken, models[0].Pricing.Mode)
+	require.NotNil(t, models[0].Pricing.Input)
+	assert.InDelta(t, 8.0, *models[0].Pricing.Input, 1e-9)
 }
 
 func TestHarnessCatalogResolvesMappedTaskAliasPluginPrice(t *testing.T) {
@@ -323,11 +475,12 @@ export function parseTaskResult() { return {}; }
 	)
 	require.Len(t, models, 1)
 	require.Empty(t, unpriced)
-	assert.Equal(t, 0.0, models[0].ModelRatio)
-	assert.Equal(t, billing_setting.BillingModeRatio, models[0].BillingMode)
+	// The model has no base price; its reachable plugin bills by expression.
+	assert.Nil(t, models[0].Pricing.Input)
 	require.Len(t, models[0].BillingPluginVariants, 1)
 	assert.Equal(t, pluginKey, models[0].BillingPluginVariants[0].PluginKey)
-	assert.Equal(t, expression, models[0].BillingPluginVariants[0].BillingExpr)
+	assert.Equal(t, harnessCatalogPricingModeTieredExpr, models[0].BillingPluginVariants[0].Pricing.Mode)
+	assert.Equal(t, expression, models[0].BillingPluginVariants[0].Pricing.Expression)
 
 	modelExpression := `tier("base", u("seconds") * 0.7)`
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
@@ -346,10 +499,10 @@ export function parseTaskResult() { return {}; }
 	)
 	require.Len(t, models, 1)
 	require.Empty(t, unpriced)
-	assert.Equal(t, billing_setting.BillingModeTieredExpr, models[0].BillingMode)
-	assert.Equal(t, modelExpression, models[0].BillingExpr)
+	assert.Equal(t, harnessCatalogPricingModeTieredExpr, models[0].Pricing.Mode)
+	assert.Equal(t, modelExpression, models[0].Pricing.Expression)
 	require.Len(t, models[0].BillingPluginVariants, 1)
-	assert.Equal(t, modelExpression, models[0].BillingPluginVariants[0].BillingExpr)
+	assert.Equal(t, modelExpression, models[0].BillingPluginVariants[0].Pricing.Expression)
 }
 
 func TestSetIntelligentRoutingResponseHeadersUsesCheckedPricingGroupAndChannelTax(t *testing.T) {
