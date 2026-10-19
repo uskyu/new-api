@@ -668,7 +668,7 @@ func TokenAuth() func(c *gin.Context) {
 // Authorized routing tokens must not fall back to ordinary channels when
 // an inference request omits the resource pool header.
 func enforceAuthorizedRoutingGroupHeader(c *gin.Context, tokenID int, requestedGroup string) bool {
-	if !requiresRoutingGroupHeader(c) || !setting.TokenHasIntelligentRoutingAccess(tokenID) || requestedGroup != "" {
+	if !requiresRoutingGroupHeader(c) || !setting.TokenHasIntelligentRoutingAccess(tokenID) || strings.TrimSpace(requestedGroup) != "" {
 		return true
 	}
 	abortWithOpenAiMessage(c, http.StatusForbidden,
