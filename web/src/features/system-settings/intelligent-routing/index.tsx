@@ -756,7 +756,7 @@ export function IntelligentRoutingPage() {
               <h2 className='font-semibold'>{t('Harness routing tokens')}</h2>
               <p className='text-muted-foreground mt-1 text-sm'>
                 {t(
-                  'Create the token in Console → Tokens first, then authorize it here. An authorized token may call every routing group; it picks one per request with the X-Route-Group header.'
+                  'Create the token in Console → Tokens, then authorize it here. Authorized tokens must send X-Route-Group on every model generation request or receive HTTP 403. Model listing and task-result reads do not require this header. Revoking authorization restores normal token routing.'
                 )}
               </p>
               {tokenAccessQuery.isError ? (
