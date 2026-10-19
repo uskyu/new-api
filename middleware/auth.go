@@ -643,7 +643,11 @@ func TokenAuth() func(c *gin.Context) {
 		if err != nil {
 			return
 		}
-		if requestedGroup := strings.TrimSpace(c.GetHeader(setting.IntelligentRoutingGroupHeader)); requestedGroup != "" {
+		requestedGroup := strings.TrimSpace(c.GetHeader(setting.IntelligentRoutingGroupHeader))
+		if !enforceAuthorizedRoutingGroupHeader(c, token.Id, requestedGroup) {
+			return
+		}
+		if requestedGroup != "" {
 			if token.ModelLimitsEnabled {
 				abortWithOpenAiMessage(c, http.StatusForbidden, "request-level resource pool selection requires a full-model service token", types.ErrorCodeAccessDenied)
 				return
@@ -658,6 +662,34 @@ func TokenAuth() func(c *gin.Context) {
 			}
 		}
 		c.Next()
+	}
+}
+
+// Authorized routing tokens must not fall back to ordinary channels when
+// an inference request omits the resource pool header.
+func enforceAuthorizedRoutingGroupHeader(c *gin.Context, tokenID int, requestedGroup string) bool {
+	if !requiresRoutingGroupHeader(c) || !setting.TokenHasIntelligentRoutingAccess(tokenID) || requestedGroup != "" {
+		return true
+	}
+	abortWithOpenAiMessage(c, http.StatusForbidden,
+		"this token requires X-Route-Group for model generation requests; choose an authorized resource pool",
+		types.ErrorCodeAccessDenied)
+	return false
+}
+
+// RouteTag("relay") precedes TokenAuth. Ordinary GET endpoints read metadata
+// or task results; the two WebSocket GET endpoints initiate generation.
+func requiresRoutingGroupHeader(c *gin.Context) bool {
+	if c == nil || c.Request == nil || c.GetString(RouteTagKey) != "relay" {
+		return false
+	}
+	switch c.Request.Method {
+	case http.MethodGet:
+		return c.Request.URL.Path == "/v1/responses" || c.Request.URL.Path == "/v1/realtime"
+	case http.MethodHead, http.MethodOptions:
+		return false
+	default:
+		return true
 	}
 }
 
