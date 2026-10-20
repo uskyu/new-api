@@ -697,7 +697,7 @@ const RegisterForm = () => {
                           title={t('刷新验证码')}
                           onClick={fetchRegisterCaptcha}
                           style={{
-                            height: 32,
+                            height: 64,
                             cursor: 'pointer',
                             display: 'block',
                           }}

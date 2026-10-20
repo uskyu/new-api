@@ -382,12 +382,12 @@ export function SignUpForm({
                   disabled={isCaptchaLoading}
                   aria-label={t('Refresh captcha')}
                   title={t('Refresh captcha')}
-                  className='border-input bg-background flex h-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border px-1 transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50'
+                  className='border-input bg-background flex h-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border px-1 transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50'
                 >
                   <img
                     src={captchaImage}
                     alt={t('Registration captcha')}
-                    className='h-8 w-auto max-w-36 object-contain'
+                    className='h-16 w-auto max-w-72 object-contain'
                   />
                 </button>
               ) : (
