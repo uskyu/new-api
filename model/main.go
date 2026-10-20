@@ -285,6 +285,7 @@ func migrateDB() error {
 		&RefundBatch{},
 		&RefundItem{},
 		&RiskIPRecord{},
+		&AffiliateReward{},
 	)
 	if err != nil {
 		return err

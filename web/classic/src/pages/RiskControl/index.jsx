@@ -48,9 +48,16 @@ const { Text, Title } = Typography;
 const PAGE_SIZE = 10;
 const MIN_USERS_OPTIONS = [2, 3, 5, 10];
 const DEFAULT_MIN_USERS = 2;
-const DEFAULT_SHARED_SORT = 'user_count';
-const DEFAULT_INVITER_SORT = 'direct_invite_count';
-const DEFAULT_ORDER = 'desc';
+// 排序方式合并为单个下拉，状态形如 `sort_by:order`。
+const DEFAULT_SHARED_SORT = 'user_count:desc';
+const DEFAULT_INVITER_SORT = 'direct_invite_count:desc';
+const SHARED_SORT_FALLBACK = 'user_count';
+const INVITER_SORT_FALLBACK = 'direct_invite_count';
+
+const parseSortValue = (value, fallbackSortBy) => {
+  const [sortBy, order] = String(value || '').split(':');
+  return [sortBy || fallbackSortBy, order === 'asc' ? 'asc' : 'desc'];
+};
 
 const SourceTag = ({ source, t }) => (
   <Tag color={source === 'login' ? 'blue' : 'cyan'} shape='circle'>
@@ -342,12 +349,10 @@ export default function RiskControl() {
   const [banState, setBanState] = useState('');
 
   // 同 IP 用户排序/筛选
-  const [sharedSortBy, setSharedSortBy] = useState(DEFAULT_SHARED_SORT);
-  const [sharedOrder, setSharedOrder] = useState(DEFAULT_ORDER);
+  const [sharedSort, setSharedSort] = useState(DEFAULT_SHARED_SORT);
   const [minUsers, setMinUsers] = useState(DEFAULT_MIN_USERS);
   // 邀请关系排序
-  const [inviterSortBy, setInviterSortBy] = useState(DEFAULT_INVITER_SORT);
-  const [inviterOrder, setInviterOrder] = useState(DEFAULT_ORDER);
+  const [inviterSort, setInviterSort] = useState(DEFAULT_INVITER_SORT);
 
   const [accountModal, setAccountModal] = useState({
     visible: false,
@@ -376,11 +381,19 @@ export default function RiskControl() {
         }
         params.search_type = searchType;
         params.min_users = minUsers;
-        params.sort_by = sharedSortBy;
-        params.order = sharedOrder;
+        const [sortBy, order] = parseSortValue(
+          sharedSort,
+          SHARED_SORT_FALLBACK,
+        );
+        params.sort_by = sortBy;
+        params.order = order;
       } else {
-        params.sort_by = inviterSortBy;
-        params.order = inviterOrder;
+        const [sortBy, order] = parseSortValue(
+          inviterSort,
+          INVITER_SORT_FALLBACK,
+        );
+        params.sort_by = sortBy;
+        params.order = order;
       }
       const [overviewRes, listRes] = await Promise.all([
         API.get('/api/risk-control/overview'),
@@ -419,11 +432,9 @@ export default function RiskControl() {
     searchType,
     search,
     page,
-    sharedSortBy,
-    sharedOrder,
+    sharedSort,
     minUsers,
-    inviterSortBy,
-    inviterOrder,
+    inviterSort,
     banState,
   ]);
 
@@ -913,58 +924,63 @@ export default function RiskControl() {
               </Select>
               {tab === 'shared' ? (
                 <Select
-                  value={sharedSortBy}
+                  value={sharedSort}
                   onChange={(value) => {
-                    setSharedSortBy(value);
+                    setSharedSort(value);
                     setPage(1);
                   }}
-                  className='w-full sm:w-48'
-                  prefix={t('排序')}
+                  className='w-full sm:w-56'
+                  prefix={t('排序方式')}
                 >
-                  <Select.Option value='user_count'>
-                    {t('按用户数')}
+                  <Select.Option value='user_count:desc'>
+                    {t('用户数从多到少')}
                   </Select.Option>
-                  <Select.Option value='event_count'>
-                    {t('按采样次数')}
+                  <Select.Option value='user_count:asc'>
+                    {t('用户数从少到多')}
                   </Select.Option>
-                  <Select.Option value='last_seen_at'>
-                    {t('按最近出现')}
+                  <Select.Option value='last_seen_at:desc'>
+                    {t('最近出现优先')}
                   </Select.Option>
-                  <Select.Option value='ip'>{t('按 IP')}</Select.Option>
+                  <Select.Option value='first_seen_at:asc'>
+                    {t('最早出现优先')}
+                  </Select.Option>
+                  <Select.Option value='event_count:desc'>
+                    {t('采样次数从多到少')}
+                  </Select.Option>
+                  <Select.Option value='event_count:asc'>
+                    {t('采样次数从少到多')}
+                  </Select.Option>
+                  <Select.Option value='ip:asc'>
+                    {t('按 IP 升序')}
+                  </Select.Option>
                 </Select>
               ) : (
                 <Select
-                  value={inviterSortBy}
+                  value={inviterSort}
                   onChange={(value) => {
-                    setInviterSortBy(value);
+                    setInviterSort(value);
                     setPage(1);
                   }}
-                  className='w-full sm:w-48'
-                  prefix={t('排序')}
+                  className='w-full sm:w-56'
+                  prefix={t('排序方式')}
                 >
-                  <Select.Option value='direct_invite_count'>
-                    {t('按邀请人数')}
+                  <Select.Option value='direct_invite_count:desc'>
+                    {t('邀请人数从多到少')}
                   </Select.Option>
-                  <Select.Option value='inviter_id'>
-                    {t('按邀请人 ID')}
+                  <Select.Option value='direct_invite_count:asc'>
+                    {t('邀请人数从少到多')}
+                  </Select.Option>
+                  <Select.Option value='aff_quota:desc'>
+                    {t('可提现额度从多到少')}
+                  </Select.Option>
+                  <Select.Option value='inviter_id:asc'>
+                    {t('邀请人 ID 升序')}
+                  </Select.Option>
+                  <Select.Option value='created_at:desc'>
+                    {t('邀请人注册时间从新到旧')}
                   </Select.Option>
                 </Select>
               )}
-              <Select
-                value={tab === 'shared' ? sharedOrder : inviterOrder}
-                onChange={(value) => {
-                  if (tab === 'shared') {
-                    setSharedOrder(value);
-                  } else {
-                    setInviterOrder(value);
-                  }
-                  setPage(1);
-                }}
-                className='w-full sm:w-28'
-              >
-                <Select.Option value='desc'>{t('降序')}</Select.Option>
-                <Select.Option value='asc'>{t('升序')}</Select.Option>
-              </Select>
               {tab === 'shared' && (
                 <Select
                   value={minUsers}

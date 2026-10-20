@@ -24,14 +24,17 @@ const (
 
 var (
 	riskSharedIPSortFields = map[string]struct{}{
-		"user_count":   {},
-		"event_count":  {},
-		"last_seen_at": {},
-		"ip":           {},
+		"user_count":    {},
+		"event_count":   {},
+		"last_seen_at":  {},
+		"first_seen_at": {},
+		"ip":            {},
 	}
 	riskInviterSortFields = map[string]struct{}{
 		"direct_invite_count": {},
 		"inviter_id":          {},
+		"created_at":          {},
+		"aff_quota":           {},
 	}
 )
 

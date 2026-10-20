@@ -181,6 +181,8 @@ func riskSharedIPOrderClause(sortBy string, order string) string {
 		return "COUNT(DISTINCT user_id) " + direction + ", ip ASC, source ASC"
 	case "event_count":
 		return "SUM(event_count) " + direction + ", ip ASC, source ASC"
+	case "first_seen_at":
+		return "MIN(first_seen_at) " + direction + ", ip ASC, source ASC"
 	case "ip":
 		return "ip " + direction + ", source ASC"
 	default: // last_seen_at
@@ -381,6 +383,10 @@ func riskInviterOrderClause(sortBy string, order string) string {
 		return "users.id " + direction + ", users.id ASC"
 	case "direct_invite_count":
 		return "inviter_stats.direct_invite_count " + direction + ", users.id ASC"
+	case "created_at":
+		return "users.created_at " + direction + ", users.id ASC"
+	case "aff_quota":
+		return "users.aff_quota " + direction + ", users.id ASC"
 	default:
 		return "inviter_stats.direct_invite_count desc, users.id ASC"
 	}

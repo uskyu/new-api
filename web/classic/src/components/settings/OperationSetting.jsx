@@ -26,6 +26,7 @@ import SettingsSensitiveWords from '../../pages/Setting/Operation/SettingsSensit
 import SettingsLog from '../../pages/Setting/Operation/SettingsLog';
 import SettingsMonitoring from '../../pages/Setting/Operation/SettingsMonitoring';
 import SettingsCreditLimit from '../../pages/Setting/Operation/SettingsCreditLimit';
+import SettingsAffiliateReward from '../../pages/Setting/Operation/SettingsAffiliateReward';
 import SettingsCheckin from '../../pages/Setting/Operation/SettingsCheckin';
 import { API, showError, toBoolean } from '../../helpers';
 
@@ -37,6 +38,12 @@ const OperationSetting = () => {
     QuotaForInviter: 0,
     QuotaForInvitee: 0,
     'quota_setting.enable_free_model_pre_consume': true,
+
+    /* 邀请奖励相关 */
+    'affiliate_setting.invitee_reward_require_recharge': false,
+    'affiliate_setting.inviter_withdraw_require_invitee_recharge': false,
+    'affiliate_setting.unrecharged_withdraw_ratio': 100,
+    'affiliate_setting.recharged_withdraw_ratio': 100,
 
     /* 通用设置 */
     TopUpLink: '',
@@ -155,6 +162,10 @@ const OperationSetting = () => {
         {/* 额度设置 */}
         <Card style={{ marginTop: '10px' }}>
           <SettingsCreditLimit options={inputs} refresh={onRefresh} />
+        </Card>
+        {/* 邀请奖励设置 */}
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsAffiliateReward options={inputs} refresh={onRefresh} />
         </Card>
         {/* 签到设置 */}
         <Card style={{ marginTop: '10px' }}>

@@ -464,33 +464,66 @@ func GetSelf(c *gin.Context) {
 	// Return resolved defaults even for legacy rows that predate this feature.
 	user.SetSetting(userSetting)
 
+	// 邀请额度可划转明细：计算失败不阻断 GetSelf，回退为「全部可划转」
+	affWithdrawable := user.AffQuota
+	affLocked := 0
+	affWithdrawRule := map[string]interface{}{
+		"invitee_reward_require_recharge":           operation_setting.GetAffiliateSetting().InviteeRewardRequireRecharge,
+		"inviter_withdraw_require_invitee_recharge": operation_setting.GetAffiliateSetting().InviterWithdrawRequireInviteeRecharge,
+		"unrecharged_withdraw_ratio":                operation_setting.GetAffiliateSetting().UnrechargedWithdrawRatio,
+		"recharged_withdraw_ratio":                  operation_setting.GetAffiliateSetting().RechargedWithdrawRatio,
+		"unlocked_remaining":                        0,
+		"locked_remaining":                          0,
+		"legacy_remaining":                          0,
+		"pending_invitee_reward":                    0,
+	}
+	if detail, detailErr := model.GetAffiliateWithdrawable(user.Id); detailErr == nil && detail != nil {
+		affWithdrawable = detail.Withdrawable
+		affLocked = detail.Locked
+		affWithdrawRule = map[string]interface{}{
+			"invitee_reward_require_recharge":           detail.Rule.InviteeRewardRequireRecharge,
+			"inviter_withdraw_require_invitee_recharge": detail.Rule.InviterWithdrawRequireInviteeRecharge,
+			"unrecharged_withdraw_ratio":                detail.Rule.UnrechargedWithdrawRatio,
+			"recharged_withdraw_ratio":                  detail.Rule.RechargedWithdrawRatio,
+			"unlocked_remaining":                        detail.UnlockedRemaining,
+			"locked_remaining":                          detail.LockedRemaining,
+			"legacy_remaining":                          detail.LegacyRemaining,
+			"pending_invitee_reward":                    detail.PendingInviteeReward,
+		}
+	} else if detailErr != nil {
+		common.SysLog("failed to compute affiliate withdrawable: " + detailErr.Error())
+	}
+
 	// 构建响应数据，包含用户信息和权限
 	responseData := map[string]interface{}{
-		"id":                user.Id,
-		"username":          user.Username,
-		"display_name":      user.DisplayName,
-		"role":              user.Role,
-		"status":            user.Status,
-		"email":             user.Email,
-		"github_id":         user.GitHubId,
-		"discord_id":        user.DiscordId,
-		"oidc_id":           user.OidcId,
-		"wechat_id":         user.WeChatId,
-		"telegram_id":       user.TelegramId,
-		"group":             user.Group,
-		"quota":             user.Quota,
-		"used_quota":        user.UsedQuota,
-		"request_count":     user.RequestCount,
-		"aff_code":          user.AffCode,
-		"aff_count":         user.AffCount,
-		"aff_quota":         user.AffQuota,
-		"aff_history_quota": user.AffHistoryQuota,
-		"inviter_id":        user.InviterId,
-		"linux_do_id":       user.LinuxDOId,
-		"setting":           user.Setting,
-		"stripe_customer":   user.StripeCustomer,
-		"sidebar_modules":   userSetting.SidebarModules, // 正确提取sidebar_modules字段
-		"permissions":       permissions,                // 新增权限字段
+		"id":                     user.Id,
+		"username":               user.Username,
+		"display_name":           user.DisplayName,
+		"role":                   user.Role,
+		"status":                 user.Status,
+		"email":                  user.Email,
+		"github_id":              user.GitHubId,
+		"discord_id":             user.DiscordId,
+		"oidc_id":                user.OidcId,
+		"wechat_id":              user.WeChatId,
+		"telegram_id":            user.TelegramId,
+		"group":                  user.Group,
+		"quota":                  user.Quota,
+		"used_quota":             user.UsedQuota,
+		"request_count":          user.RequestCount,
+		"aff_code":               user.AffCode,
+		"aff_count":              user.AffCount,
+		"aff_quota":              user.AffQuota,
+		"aff_history_quota":      user.AffHistoryQuota,
+		"aff_withdrawable_quota": affWithdrawable,
+		"aff_locked_quota":       affLocked,
+		"aff_withdraw_rule":      affWithdrawRule,
+		"inviter_id":             user.InviterId,
+		"linux_do_id":            user.LinuxDOId,
+		"setting":                user.Setting,
+		"stripe_customer":        user.StripeCustomer,
+		"sidebar_modules":        userSetting.SidebarModules, // 正确提取sidebar_modules字段
+		"permissions":            permissions,                // 新增权限字段
 	}
 
 	c.JSON(http.StatusOK, gin.H{

@@ -339,15 +339,29 @@ func HardDeleteUserById(id int) error {
 	return err
 }
 
-func inviteUser(inviterId int) (err error) {
-	user, err := GetUserById(inviterId, true)
-	if err != nil {
-		return err
+// inviteUser 记录一次成功邀请：邀请人的邀请计数/额度累加，并写入邀请奖励台账。
+// inviteeId 为本次新注册的（被邀请）用户 id。
+func inviteUser(inviterId int, inviteeId int) (err error) {
+	if inviterId == 0 {
+		return errors.New("inviterId 为空！")
 	}
-	user.AffCount++
-	user.AffQuota += common.QuotaForInviter
-	user.AffHistoryQuota += common.QuotaForInviter
-	return DB.Save(user).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		inviter := &User{}
+		if err := lockForUpdate(tx).Where("id = ?", inviterId).First(inviter).Error; err != nil {
+			return err
+		}
+		inviter.AffCount++
+		inviter.AffQuota += common.QuotaForInviter
+		inviter.AffHistoryQuota += common.QuotaForInviter
+		if err := tx.Model(&User{}).Where("id = ?", inviter.Id).Updates(map[string]interface{}{
+			"aff_count":   inviter.AffCount,
+			"aff_quota":   inviter.AffQuota,
+			"aff_history": inviter.AffHistoryQuota,
+		}).Error; err != nil {
+			return err
+		}
+		return createAffiliateRewardTx(tx, inviterId, inviteeId)
+	})
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
@@ -364,14 +378,26 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	defer tx.Rollback() // 确保在函数退出时事务能回滚
 
 	// 加锁查询用户以确保数据一致性
-	err := lockForUpdate(tx).First(&user, user.Id).Error
-	if err != nil {
+	if err := lockForUpdate(tx).Where("id = ?", user.Id).First(user).Error; err != nil {
 		return err
 	}
 
-	// 再次检查用户的AffQuota是否足够
-	if user.AffQuota < quota {
-		return errors.New("邀请额度不足！")
+	// 锁住用户行之后再读台账，保证同一事务内的可划转额度是最新值（防双花）
+	records := make([]AffiliateReward, 0)
+	if err := tx.Where("inviter_id = ?", user.Id).Order("id asc").Find(&records).Error; err != nil {
+		return err
+	}
+	withdrawable := computeAffiliateWithdrawable(user.AffQuota, records)
+
+	// 可划转额度不足：区分「已解锁」和「待被邀请人充值解锁」两部分
+	if quota > withdrawable.Withdrawable {
+		return fmt.Errorf("邀请额度不足！当前可划转%s，其中%s需被邀请人充值后解锁",
+			logger.LogQuota(withdrawable.Withdrawable), logger.LogQuota(withdrawable.Locked))
+	}
+
+	// 先扣已解锁池，不足部分再扣未解锁池（按比例预算），legacy 不落台账
+	if err := allocateAffiliateWithdrawal(tx, records, quota, withdrawable.LockedRemaining); err != nil {
+		return err
 	}
 
 	// 更新用户额度
@@ -379,7 +405,10 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	user.Quota += quota
 
 	// 保存用户状态
-	if err := tx.Save(user).Error; err != nil {
+	if err := tx.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+		"aff_quota": user.AffQuota,
+		"quota":     user.Quota,
+	}).Error; err != nil {
 		return err
 	}
 
@@ -430,14 +459,22 @@ func (user *User) Insert(inviterId int) error {
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
 	}
 	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
+		affiliateSetting := operation_setting.GetAffiliateSetting()
 		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
-			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
+			if affiliateSetting.InviteeRewardRequireRecharge {
+				// 要求充值后才发放：这里只留说明，实际发放由 SettleAffiliateRewards 在首次充值后触发
+				RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码即将获得 %s，完成首次充值后发放", logger.LogQuota(common.QuotaForInvitee)))
+			} else {
+				_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
+				RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
+			}
 		}
 		if common.QuotaForInviter > 0 {
-			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
 			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
+		}
+		// aff_count / 台账在该用户有邀请人时总要落，即使当前奖励为 0
+		if err := inviteUser(inviterId, user.Id); err != nil {
+			common.SysLog("failed to record invite: " + err.Error())
 		}
 	}
 	return nil
@@ -491,13 +528,22 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
 	}
 	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
+		affiliateSetting := operation_setting.GetAffiliateSetting()
 		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
-			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
+			if affiliateSetting.InviteeRewardRequireRecharge {
+				// 要求充值后才发放：这里只留说明，实际发放由 SettleAffiliateRewards 在首次充值后触发
+				RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码即将获得 %s，完成首次充值后发放", logger.LogQuota(common.QuotaForInvitee)))
+			} else {
+				_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
+				RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
+			}
 		}
 		if common.QuotaForInviter > 0 {
 			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
+		}
+		// aff_count / 台账在该用户有邀请人时总要落，即使当前奖励为 0
+		if err := inviteUser(inviterId, user.Id); err != nil {
+			common.SysLog("failed to record invite: " + err.Error())
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -794,4 +795,180 @@ func TestNormalizeRiskBanState(t *testing.T) {
 	require.Equal(t, RiskBanStateAllBanned, normalizeRiskBanState("all_banned"))
 	require.Equal(t, "", normalizeRiskBanState("disabled"))
 	require.Equal(t, "", normalizeRiskBanState("ALL_BANNED"))
+}
+
+// ---------------------------------------------------------------------------
+// 风控排序扩充（阶段 A）：shared IP 的 first_seen_at 排序
+// ---------------------------------------------------------------------------
+
+func TestListRiskSharedIPsSortsByFirstSeenAt(t *testing.T) {
+	setupRiskControlTest(t)
+	users := createRiskUsers(t, []User{
+		{Username: "risk-firstseen-a", AffCode: "risk-firstseen-a-aff"},
+		{Username: "risk-firstseen-b", AffCode: "risk-firstseen-b-aff"},
+		{Username: "risk-firstseen-c", AffCode: "risk-firstseen-c-aff"},
+	})
+	userA, userB, userC := users[0].Id, users[1].Id, users[2].Id
+	records := []RiskIPRecord{
+		// 198.51.100.10：一组内最早 first_seen_at=10（另有条目 70），last_seen 400。
+		{UserId: userA, TokenId: 1, IP: "198.51.100.10", Source: RiskIPSourceToken, FirstSeenAt: 10, LastSeenAt: 400, EventCount: 1},
+		{UserId: userB, TokenId: 1, IP: "198.51.100.10", Source: RiskIPSourceToken, FirstSeenAt: 70, LastSeenAt: 350, EventCount: 1},
+		// 198.51.100.20：最早 20；last_seen 最高（500），用于确认没有回退到 last_seen_at 排序。
+		{UserId: userA, TokenId: 1, IP: "198.51.100.20", Source: RiskIPSourceToken, FirstSeenAt: 20, LastSeenAt: 500, EventCount: 1},
+		{UserId: userB, TokenId: 1, IP: "198.51.100.20", Source: RiskIPSourceToken, FirstSeenAt: 60, LastSeenAt: 450, EventCount: 1},
+		// 198.51.100.25：最早 20，与 .20 相同；last_seen 最低（100），验证稳定次序按 ip ASC。
+		{UserId: userB, TokenId: 1, IP: "198.51.100.25", Source: RiskIPSourceToken, FirstSeenAt: 20, LastSeenAt: 100, EventCount: 1},
+		{UserId: userC, TokenId: 1, IP: "198.51.100.25", Source: RiskIPSourceToken, FirstSeenAt: 50, LastSeenAt: 90, EventCount: 1},
+		// 198.51.100.30：最早 30。
+		{UserId: userB, TokenId: 1, IP: "198.51.100.30", Source: RiskIPSourceToken, FirstSeenAt: 30, LastSeenAt: 200, EventCount: 1},
+		{UserId: userC, TokenId: 1, IP: "198.51.100.30", Source: RiskIPSourceToken, FirstSeenAt: 80, LastSeenAt: 190, EventCount: 1},
+		// 198.51.100.40：最早 40。
+		{UserId: userC, TokenId: 1, IP: "198.51.100.40", Source: RiskIPSourceToken, FirstSeenAt: 40, LastSeenAt: 300, EventCount: 1},
+		{UserId: userA, TokenId: 1, IP: "198.51.100.40", Source: RiskIPSourceToken, FirstSeenAt: 70, LastSeenAt: 290, EventCount: 1},
+	}
+	require.NoError(t, DB.Create(&records).Error)
+
+	list := func(order string, startIdx int, limit int) ([]string, int64) {
+		items, total, err := ListRiskSharedIPs(RiskIPSourceToken, "ip", "", 2, startIdx, limit, "first_seen_at", order, "")
+		require.NoError(t, err)
+		return riskSharedIPIPs(items), total
+	}
+
+	// MIN(first_seen_at) asc：组内取最早值，而不是任一单条记录的值。
+	ascending := []string{"198.51.100.10", "198.51.100.20", "198.51.100.25", "198.51.100.30", "198.51.100.40"}
+	// MIN(first_seen_at) desc：.20 / .25 同为 20，稳定次序 ip ASC 仍生效。
+	descending := []string{"198.51.100.40", "198.51.100.30", "198.51.100.20", "198.51.100.25", "198.51.100.10"}
+
+	ips, total := list("asc", 0, 10)
+	require.EqualValues(t, 5, total)
+	require.Equal(t, ascending, ips)
+
+	ips, total = list("desc", 0, 10)
+	require.EqualValues(t, 5, total)
+	require.Equal(t, descending, ips)
+
+	// order 非法时回退 desc（与 normalizeRiskOrder 的默认一致）。
+	ips, _ = list("sideways", 0, 10)
+	require.Equal(t, descending, ips)
+
+	// 稳定翻页：并列值 20 的 .20 / .25 正好跨页，两页拼接后无重复、无丢失。
+	firstPage, total := list("asc", 0, 2)
+	require.EqualValues(t, 5, total)
+	require.Equal(t, []string{"198.51.100.10", "198.51.100.20"}, firstPage)
+	secondPage, total := list("asc", 2, 2)
+	require.EqualValues(t, 5, total)
+	require.Equal(t, []string{"198.51.100.25", "198.51.100.30"}, secondPage)
+	thirdPage, total := list("asc", 4, 2)
+	require.EqualValues(t, 5, total)
+	require.Equal(t, []string{"198.51.100.40"}, thirdPage)
+
+	paged := append(append(append([]string{}, firstPage...), secondPage...), thirdPage...)
+	assert.Equal(t, ascending, paged)
+	assert.Len(t, paged, len(ascending), "两页拼接后行数应与总行数一致")
+	require.Equal(t, len(paged), len(uniqueRiskStrings(paged)), "翻页拼接不应出现重复行")
+}
+
+// uniqueRiskStrings 返回去重后的字符串切片，用于校验翻页无重复。
+func uniqueRiskStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+// ---------------------------------------------------------------------------
+// 风控排序扩充（阶段 A）：邀请关系的 created_at / aff_quota 排序与稳定翻页
+// ---------------------------------------------------------------------------
+
+func TestListRiskInvitersSortsByCreatedAtAndAffQuota(t *testing.T) {
+	setupRiskControlTest(t)
+	// created_at：C 与 D 同为 200（验证 users.id ASC 稳定次序）；aff_quota：A 与 D 同为 100。
+	inviters := createRiskUsers(t, []User{
+		{Username: "risk-order-a", AffCode: "risk-order-a-aff", CreatedAt: 300, AffQuota: 100},
+		{Username: "risk-order-b", AffCode: "risk-order-b-aff", CreatedAt: 100, AffQuota: 500},
+		{Username: "risk-order-c", AffCode: "risk-order-c-aff", CreatedAt: 200, AffQuota: 300},
+		{Username: "risk-order-d", AffCode: "risk-order-d-aff", CreatedAt: 200, AffQuota: 100},
+		{Username: "risk-order-e", AffCode: "risk-order-e-aff", CreatedAt: 400, AffQuota: 200},
+	})
+	// 每个邀请人至少一个被邀请人，才会出现在邀请关系聚合结果中。
+	createRiskUsers(t, []User{
+		{Username: "risk-order-invitee-a1", AffCode: "risk-order-invitee-a1-aff", InviterId: inviters[0].Id},
+		{Username: "risk-order-invitee-b1", AffCode: "risk-order-invitee-b1-aff", InviterId: inviters[1].Id},
+		{Username: "risk-order-invitee-c1", AffCode: "risk-order-invitee-c1-aff", InviterId: inviters[2].Id},
+		{Username: "risk-order-invitee-d1", AffCode: "risk-order-invitee-d1-aff", InviterId: inviters[3].Id},
+		{Username: "risk-order-invitee-e1", AffCode: "risk-order-invitee-e1-aff", InviterId: inviters[4].Id},
+	})
+	require.EqualValues(t, 300, inviters[0].CreatedAt)
+	require.EqualValues(t, 100, inviters[0].AffQuota)
+
+	list := func(sortBy string, order string, startIdx int, limit int) ([]int, int64) {
+		items, total, err := ListRiskInviters("", startIdx, limit, sortBy, order, "")
+		require.NoError(t, err)
+		ids := make([]int, 0, len(items))
+		for _, item := range items {
+			ids = append(ids, item.InviterId)
+		}
+		return ids, total
+	}
+
+	idsAt := func(indexes ...int) []int {
+		ids := make([]int, 0, len(indexes))
+		for _, index := range indexes {
+			ids = append(ids, inviters[index].Id)
+		}
+		return ids
+	}
+
+	// created_at asc / desc：C(200) 与 D(200) 并列时按 users.id ASC。
+	ids, total := list("created_at", "asc", 0, 10)
+	require.EqualValues(t, 5, total)
+	require.Equal(t, idsAt(1, 2, 3, 0, 4), ids)
+
+	ids, total = list("created_at", "desc", 0, 10)
+	require.EqualValues(t, 5, total)
+	require.Equal(t, idsAt(4, 0, 2, 3, 1), ids)
+
+	// aff_quota asc / desc：A(100) 与 D(100) 并列时按 users.id ASC。
+	ids, total = list("aff_quota", "asc", 0, 10)
+	require.EqualValues(t, 5, total)
+	require.Equal(t, idsAt(0, 3, 4, 2, 1), ids)
+
+	ids, total = list("aff_quota", "desc", 0, 10)
+	require.EqualValues(t, 5, total)
+	require.Equal(t, idsAt(1, 2, 4, 0, 3), ids)
+
+	// order 非法时回退 desc。
+	ids, _ = list("created_at", "sideways", 0, 10)
+	require.Equal(t, idsAt(4, 0, 2, 3, 1), ids)
+	ids, _ = list("aff_quota", "sideways", 0, 10)
+	require.Equal(t, idsAt(1, 2, 4, 0, 3), ids)
+
+	// 稳定翻页：并列值跨页时两页拼接无重复、无丢失。
+	fullOrder := idsAt(4, 0, 2, 3, 1)
+	firstPage, total := list("created_at", "desc", 0, 2)
+	require.EqualValues(t, 5, total)
+	secondPage, total := list("created_at", "desc", 2, 2)
+	require.EqualValues(t, 5, total)
+	thirdPage, total := list("created_at", "desc", 4, 2)
+	require.EqualValues(t, 5, total)
+	require.Equal(t, idsAt(4, 0), firstPage)
+	require.Equal(t, idsAt(2, 3), secondPage)
+	require.Equal(t, idsAt(1), thirdPage)
+
+	paged := append(append(append([]int{}, firstPage...), secondPage...), thirdPage...)
+	assert.Equal(t, fullOrder, paged, "两页拼接应等于完整排序结果")
+
+	seen := make(map[int]struct{}, len(paged))
+	for _, id := range paged {
+		_, duplicated := seen[id]
+		assert.Falsef(t, duplicated, "翻页拼接出现重复邀请人 %d", id)
+		seen[id] = struct{}{}
+	}
+	assert.Len(t, seen, len(fullOrder), "翻页拼接不应丢行")
 }

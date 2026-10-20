@@ -40,6 +40,17 @@ const InvitationCard = ({
   handleAffLinkClick,
   complianceConfirmed = true,
 }) => {
+  // 可划转额度由后端按邀请奖励设置实时计算；旧接口无该字段时回退到 aff_quota。
+  const withdrawableQuota =
+    Number(userState?.user?.aff_withdrawable_quota ?? userState?.user?.aff_quota ?? 0) ||
+    0;
+  const lockedQuota = Number(userState?.user?.aff_locked_quota ?? 0) || 0;
+  const withdrawRule = userState?.user?.aff_withdraw_rule;
+  const requireInviteeRecharge =
+    withdrawRule &&
+    typeof withdrawRule === 'object' &&
+    withdrawRule.inviter_withdraw_require_invitee_recharge === true;
+
   return (
     <Card className='!rounded-2xl shadow-sm border-0'>
       {/* 卡片头部 */}
@@ -83,8 +94,7 @@ const InvitationCard = ({
                     size='small'
                     disabled={
                       !complianceConfirmed ||
-                      !userState?.user?.aff_quota ||
-                      userState?.user?.aff_quota <= 0
+                      withdrawableQuota <= 0
                     }
                     onClick={() => setOpenTransfer(true)}
                     className='!rounded-lg'
@@ -112,7 +122,7 @@ const InvitationCard = ({
                       className='text-base sm:text-2xl font-bold mb-2'
                       style={{ color: 'white' }}
                     >
-                      {renderQuota(userState?.user?.aff_quota || 0)}
+                      {renderQuota(withdrawableQuota)}
                     </div>
                     <div className='flex items-center justify-center text-sm'>
                       <TrendingUp
@@ -129,6 +139,14 @@ const InvitationCard = ({
                         {t('待使用收益')}
                       </Text>
                     </div>
+                    {lockedQuota > 0 && (
+                      <div
+                        className='mt-1 text-xs'
+                        style={{ color: 'rgba(255,255,255,0.75)' }}
+                      >
+                        {t('待解锁')}: {renderQuota(lockedQuota)}
+                      </div>
+                    )}
                   </div>
 
                   {/* 总收益 */}
@@ -231,6 +249,17 @@ const InvitationCard = ({
                 {t('邀请的好友越多，获得的奖励越多')}
               </Text>
             </div>
+
+            {requireInviteeRecharge && (
+              <div className='flex items-start gap-2'>
+                <Badge dot type='warning' />
+                <Text type='tertiary' className='text-sm'>
+                  {t(
+                    '好友充值后，邀请额度才可划转提现',
+                  )}
+                </Text>
+              </div>
+            )}
           </div>
         </Card>
       </Space>

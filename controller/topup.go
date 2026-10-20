@@ -417,6 +417,11 @@ func EpayNotify(c *gin.Context) {
 			if processed {
 				logger.LogInfo(c.Request.Context(), fmt.Sprintf("epay topup success trade_no=%s user_id=%d client_ip=%s quota_to_add=%d money=%.2f topup=%q", topUp.TradeNo, topUp.UserId, c.ClientIP(), quotaToAdd, topUp.Money, common.GetJsonString(topUp)))
 				model.RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money), c.ClientIP(), topUp.PaymentMethod, "epay")
+				// 仅在本次真正把订单从 pending 置为 success 时解锁邀请奖励；
+				// SettleAffiliateRewards 自身以 unlocked_at = 0 做 CAS，重复调用幂等。
+				if settleErr := model.SettleAffiliateRewards(topUp.UserId); settleErr != nil {
+					common.SysLog("failed to settle affiliate rewards after epay topup: " + settleErr.Error())
+				}
 			}
 			return
 		}
