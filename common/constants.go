@@ -89,6 +89,7 @@ var LinuxDOOAuthEnabled = false
 var WeChatAuthEnabled = false
 var TelegramOAuthEnabled = false
 var TurnstileCheckEnabled = false
+var RegisterCaptchaEnabled = false
 var RegisterEnabled = true
 
 var EmailDomainRestrictionEnabled = false // 是否启用邮箱域名限制
@@ -137,6 +138,9 @@ var WeChatAccountQRCodeImageURL = ""
 
 var TurnstileSiteKey = ""
 var TurnstileSecretKey = ""
+
+// RegisterCaptchaKind 注册图形验证码类型：math（数学算式）/ digit（纯数字）
+var RegisterCaptchaKind = "math"
 
 var TelegramBotToken = ""
 var TelegramBotName = ""

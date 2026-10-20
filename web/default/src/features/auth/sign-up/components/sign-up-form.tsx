@@ -16,11 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Loader2 } from 'lucide-react'
+import { Loader2, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -45,6 +45,7 @@ import { OAuthProviders } from '@/features/auth/components/oauth-providers'
 import { registerFormSchema } from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useEmailVerification } from '@/features/auth/hooks/use-email-verification'
+import { useRegisterCaptcha } from '@/features/auth/hooks/use-register-captcha'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import {
   getAffiliateCode,
@@ -72,6 +73,16 @@ export function SignUpForm({
     setTurnstileToken,
     validateTurnstile,
   } = useTurnstile()
+  const {
+    isRegisterCaptchaEnabled,
+    captchaId,
+    captchaImage,
+    captchaAnswer,
+    setCaptchaAnswer,
+    isLoading: isCaptchaLoading,
+    refresh: refreshCaptcha,
+    validate: validateCaptcha,
+  } = useRegisterCaptcha()
   const { redirectToLogin, handleLoginSuccess } = useAuthRedirect()
   const {
     isSending: isSendingCode,
@@ -104,6 +115,7 @@ export function SignUpForm({
     true
   const hasWeChatLogin = Boolean(status?.wechat_login)
   const turnstileReady = !isTurnstileEnabled || Boolean(turnstileToken)
+  const hasFetchedCaptchaRef = useRef(false)
 
   const wechatQrCodeUrl = useMemo(() => {
     return (
@@ -134,6 +146,13 @@ export function SignUpForm({
     }
   }, [])
 
+  // Fetch the registration captcha once when the feature is enabled.
+  useEffect(() => {
+    if (!isRegisterCaptchaEnabled || hasFetchedCaptchaRef.current) return
+    hasFetchedCaptchaRef.current = true
+    void refreshCaptcha()
+  }, [isRegisterCaptchaEnabled, refreshCaptcha])
+
   async function onSubmit(data: z.infer<typeof registerFormSchema>) {
     if (requiresLegalConsent && !agreedToLegal) {
       toast.error(legalConsentErrorMessage)
@@ -152,6 +171,7 @@ export function SignUpForm({
       }
     }
 
+    if (!validateCaptcha()) return
     if (!validateTurnstile()) return
 
     setIsLoading(true)
@@ -163,6 +183,8 @@ export function SignUpForm({
         verification_code: verificationCode || undefined,
         aff_code: getAffiliateCode(),
         turnstile: turnstileToken,
+        captcha_id: captchaId,
+        captcha_answer: captchaAnswer.trim(),
       })
 
       if (res?.success) {
@@ -170,9 +192,12 @@ export function SignUpForm({
         redirectToLogin()
       } else {
         toast.error(res?.message || t('Failed to create account'))
+        // The challenge is consumed on failure; request a fresh one.
+        void refreshCaptcha()
       }
     } catch (_error) {
       // Errors are handled by global interceptor
+      void refreshCaptcha()
     } finally {
       setIsLoading(false)
     }
@@ -332,6 +357,58 @@ export function SignUpForm({
               </Button>
             </div>
           </>
+        )}
+
+        {/* Registration captcha */}
+        {isRegisterCaptchaEnabled && (
+          <FormItem>
+            <FormLabel htmlFor='register-captcha'>
+              {t('Registration captcha')}
+            </FormLabel>
+            <div className='flex items-center gap-2'>
+              <Input
+                id='register-captcha'
+                className='flex-1'
+                placeholder={t('Enter the captcha shown in the image')}
+                value={captchaAnswer}
+                onChange={(event) => setCaptchaAnswer(event.target.value)}
+                autoComplete='off'
+                disabled={isLoading}
+              />
+              {captchaImage ? (
+                <button
+                  type='button'
+                  onClick={() => void refreshCaptcha()}
+                  disabled={isCaptchaLoading}
+                  aria-label={t('Refresh captcha')}
+                  title={t('Refresh captcha')}
+                  className='border-input bg-background flex h-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border px-1 transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50'
+                >
+                  <img
+                    src={captchaImage}
+                    alt={t('Registration captcha')}
+                    className='h-8 w-auto max-w-36 object-contain'
+                  />
+                </button>
+              ) : (
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='icon'
+                  className='size-9 shrink-0'
+                  onClick={() => void refreshCaptcha()}
+                  disabled={isCaptchaLoading}
+                  aria-label={t('Refresh captcha')}
+                >
+                  {isCaptchaLoading ? (
+                    <Loader2 className='h-4 w-4 animate-spin' />
+                  ) : (
+                    <RefreshCw className='h-4 w-4' />
+                  )}
+                </Button>
+              )}
+            </div>
+          </FormItem>
         )}
 
         {/* Turnstile */}

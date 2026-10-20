@@ -207,6 +207,14 @@ func UpdateOption(c *gin.Context) {
 
 			return
 		}
+	case "RegisterCaptchaKind":
+		if option.Value != "math" && option.Value != "digit" {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无效的注册验证码类型，可选值：math、digit",
+			})
+			return
+		}
 	case "TelegramOAuthEnabled":
 		if option.Value == "true" && common.TelegramBotToken == "" {
 			c.JSON(http.StatusOK, gin.H{

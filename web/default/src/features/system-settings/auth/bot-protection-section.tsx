@@ -31,9 +31,18 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import {
   SettingsForm,
+  SettingsFormGridItem,
   SettingsSwitchContent,
   SettingsSwitchItem,
 } from '../components/settings-form-layout'
@@ -45,6 +54,8 @@ const botProtectionSchema = z.object({
   TurnstileCheckEnabled: z.boolean(),
   TurnstileSiteKey: z.string().optional(),
   TurnstileSecretKey: z.string().optional(),
+  RegisterCaptchaEnabled: z.boolean(),
+  RegisterCaptchaKind: z.string(),
 })
 
 type BotProtectionFormValues = z.infer<typeof botProtectionSchema>
@@ -67,6 +78,9 @@ export function BotProtectionSection({
   useEffect(() => {
     form.reset(defaultValues)
   }, [defaultValues, form])
+
+  const registerCaptchaEnabled =
+    form.watch('RegisterCaptchaEnabled') ?? defaultValues.RegisterCaptchaEnabled
 
   const onSubmit = async (data: BotProtectionFormValues) => {
     const updates = Object.entries(data).filter(
@@ -146,6 +160,59 @@ export function BotProtectionSection({
               </FormItem>
             )}
           />
+
+          <FormField
+            control={form.control}
+            name='RegisterCaptchaEnabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Enable registration captcha')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Require users to solve an image captcha before registering'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          {registerCaptchaEnabled && (
+            <SettingsFormGridItem>
+              <FormField
+                control={form.control}
+                name='RegisterCaptchaKind'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Captcha Type')}</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value='math'>
+                            {t('Math Expression')}
+                          </SelectItem>
+                          <SelectItem value='digit'>{t('Digits')}</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </SettingsFormGridItem>
+          )}
         </SettingsForm>
       </Form>
     </SettingsSection>

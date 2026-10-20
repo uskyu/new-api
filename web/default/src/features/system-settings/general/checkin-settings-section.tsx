@@ -188,11 +188,15 @@ export function CheckinSettingsSection({
       shouldTouch: true,
     })
     const nextField = TIER_FIELD_BY_METRIC[value] ?? 'requestCountTiers'
-    const nextRaw =
-      form.getValues(nextField) ||
-      (value === 'quota_consumed'
+    const storedTiers = form.getValues(nextField)
+    const fallbackTiers =
+      value === 'quota_consumed'
         ? defaultValues.quotaConsumedTiers
-        : defaultValues.requestCountTiers)
+        : defaultValues.requestCountTiers
+    const nextRaw =
+      typeof storedTiers === 'string' && storedTiers
+        ? storedTiers
+        : fallbackTiers
     const nextTiers = parseBonusTiers(nextRaw)
     setTiers(nextTiers)
     form.setValue('bonusTiers', JSON.stringify(nextTiers), {
@@ -423,6 +427,7 @@ export function CheckinSettingsSection({
                           <Select
                             value={field.value}
                             onValueChange={(value) => {
+                              if (typeof value !== 'string') return
                               handleMetricChange(value)
                               field.onChange(value)
                             }}

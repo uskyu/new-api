@@ -81,6 +81,8 @@ const SystemSetting = () => {
     TurnstileSiteKey: '',
     TurnstileSecretKey: '',
     RegisterEnabled: '',
+    RegisterCaptchaEnabled: '',
+    RegisterCaptchaKind: 'math',
     'passkey.enabled': '',
     'passkey.rp_display_name': '',
     'passkey.rp_id': '',
@@ -180,6 +182,7 @@ const SystemSetting = () => {
           case 'TelegramOAuthEnabled':
           case 'RegisterEnabled':
           case 'TurnstileCheckEnabled':
+          case 'RegisterCaptchaEnabled':
           case 'EmailDomainRestrictionEnabled':
           case 'EmailAliasRestrictionEnabled':
           case 'SMTPSSLEnabled':
@@ -588,7 +591,7 @@ const SystemSetting = () => {
     await updateOptions(options);
   };
 
-  const submitTurnstile = async () => {
+  const submitBotProtection = async () => {
     const options = [];
 
     if (originInputs['TurnstileSiteKey'] !== inputs.TurnstileSiteKey) {
@@ -601,6 +604,20 @@ const SystemSetting = () => {
       options.push({
         key: 'TurnstileSecretKey',
         value: inputs.TurnstileSecretKey,
+      });
+    }
+    if (
+      originInputs['RegisterCaptchaEnabled'] !== inputs.RegisterCaptchaEnabled
+    ) {
+      options.push({
+        key: 'RegisterCaptchaEnabled',
+        value: inputs.RegisterCaptchaEnabled ? 'true' : 'false',
+      });
+    }
+    if (originInputs['RegisterCaptchaKind'] !== inputs.RegisterCaptchaKind) {
+      options.push({
+        key: 'RegisterCaptchaKind',
+        value: inputs.RegisterCaptchaKind || 'math',
       });
     }
 
@@ -1034,6 +1051,18 @@ const SystemSetting = () => {
                         }
                       >
                         {t('允许 Turnstile 用户校验')}
+                      </Form.Checkbox>
+                      <Form.Checkbox
+                        field='RegisterCaptchaEnabled'
+                        noLabel
+                        extraText={t(
+                          '开启后新用户注册时需要输入图形验证码，防止脚本批量注册',
+                        )}
+                        onChange={(e) =>
+                          handleCheckboxChange('RegisterCaptchaEnabled', e)
+                        }
+                      >
+                        {t('启用注册图形验证码')}
                       </Form.Checkbox>
                     </Col>
                     <Col xs={24} sm={24} md={12} lg={12} xl={12}>
@@ -1629,8 +1658,23 @@ const SystemSetting = () => {
                       />
                     </Col>
                   </Row>
-                  <Button onClick={submitTurnstile}>
-                    {t('保存 Turnstile 设置')}
+                  <Row
+                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+                  >
+                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+                      <Form.Select
+                        field='RegisterCaptchaKind'
+                        label={t('验证码类型')}
+                        style={{ width: '100%' }}
+                        optionList={[
+                          { label: t('数学算式'), value: 'math' },
+                          { label: t('纯数字'), value: 'digit' },
+                        ]}
+                      />
+                    </Col>
+                  </Row>
+                  <Button onClick={submitBotProtection}>
+                    {t('保存人机验证设置')}
                   </Button>
                 </Form.Section>
               </Card>
