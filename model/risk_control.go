@@ -45,6 +45,8 @@ type RiskUserSummary struct {
 	UserId      int    `json:"user_id"`
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`  // users.email，可能为空字符串
+	Status      int    `json:"status"` // 1=正常 2=已封禁
 	Group       string `json:"group"`
 	Role        int    `json:"role"`
 	InviterId   int    `json:"inviter_id"`
@@ -59,11 +61,16 @@ type RiskInviter struct {
 	InviterId         int                `json:"inviter_id"`
 	Username          string             `json:"username"`
 	DisplayName       string             `json:"display_name"`
+	Email             string             `json:"email"`
+	Status            int                `json:"status"`
 	Group             string             `json:"group"`
 	DirectInviteCount int64              `json:"direct_invite_count"`
 	SharedIPCount     int64              `json:"shared_ip_count"`
 	Suspicious        bool               `json:"suspicious"`
 	Invitees          []*RiskUserSummary `json:"invitees" gorm:"-"`
+	// MatchedInvitees 是 keyword 命中的被邀请人摘要（每个邀请人最多 20 个）。
+	// 关键词为空或无命中时为空数组（不会是 nil）。
+	MatchedInvitees []*RiskUserSummary `json:"matched_invitees" gorm:"-"`
 }
 
 type RiskOverview struct {
@@ -135,7 +142,28 @@ func RecordRiskIPAsync(userId int, tokenId int, source string, ip string) {
 	})
 }
 
-func ListRiskSharedIPs(source string, searchType string, keyword string, minUsers int, startIdx int, limit int) ([]*RiskSharedIP, int64, error) {
+// riskSharedIPOrderClause 将排序白名单参数转换为 SQL 排序片段：
+// 主排序字段按 order 方向，随后强制追加稳定次序 ip ASC, source ASC，
+// 保证同等主排序值的行在翻页时不会重复或丢失。
+// 非法 sortBy/order 回退为 last_seen_at desc。
+func riskSharedIPOrderClause(sortBy string, order string) string {
+	direction := "desc"
+	if order == "asc" {
+		direction = "asc"
+	}
+	switch sortBy {
+	case "user_count":
+		return "COUNT(DISTINCT user_id) " + direction + ", ip ASC, source ASC"
+	case "event_count":
+		return "SUM(event_count) " + direction + ", ip ASC, source ASC"
+	case "ip":
+		return "ip " + direction + ", source ASC"
+	default: // last_seen_at
+		return "MAX(last_seen_at) " + direction + ", ip ASC, source ASC"
+	}
+}
+
+func ListRiskSharedIPs(source string, searchType string, keyword string, minUsers int, startIdx int, limit int, sortBy string, order string) ([]*RiskSharedIP, int64, error) {
 	if minUsers < 2 {
 		minUsers = 2
 	}
@@ -212,15 +240,16 @@ func ListRiskSharedIPs(source string, searchType string, keyword string, minUser
 	var rows []*RiskSharedIP
 	err := applyFilters(DB.Model(&RiskIPRecord{})).Select(selectColumns+", COUNT(DISTINCT user_id) AS user_count, SUM(event_count) AS event_count, MAX(last_seen_at) AS last_seen_at").
 		Group(groupColumns).Having("COUNT(DISTINCT user_id) >= ?", minUsers).
-		Order("last_seen_at desc").Offset(startIdx).Limit(limit).Scan(&rows).Error
+		Order(riskSharedIPOrderClause(sortBy, order)).Offset(startIdx).Limit(limit).Scan(&rows).Error
 	if err != nil {
 		return nil, 0, err
 	}
 	for _, row := range rows {
-		row.Users, err = listRiskIPUsers(row.IP, row.Source)
+		users, err := listRiskIPUsers(row.IP, row.Source)
 		if err != nil {
 			return nil, 0, err
 		}
+		row.Users = users
 	}
 	return rows, total, nil
 }
@@ -241,7 +270,7 @@ func listRiskIPUsers(ip string, source string) ([]*RiskUserSummary, error) {
 	users := make(map[int]*User)
 	if len(ids) > 0 {
 		var list []*User
-		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id").Where("id IN ?", ids).Find(&list).Error; err != nil {
+		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status").Where("id IN ?", ids).Find(&list).Error; err != nil {
 			return nil, err
 		}
 		for _, user := range list {
@@ -257,12 +286,12 @@ func listRiskIPUsers(ip string, source string) ([]*RiskUserSummary, error) {
 		}
 		summary := byUser[user.Id]
 		if summary == nil {
-			summary = &RiskUserSummary{
-				UserId: user.Id, Username: user.Username, DisplayName: user.DisplayName,
-				Group: user.Group, Role: user.Role, InviterId: user.InviterId,
-				TokenId: record.TokenId, Source: record.Source, FirstSeenAt: record.FirstSeenAt,
-				LastSeenAt: record.LastSeenAt, EventCount: record.EventCount,
-			}
+			summary = riskUserSummaryFromUser(user)
+			summary.TokenId = record.TokenId
+			summary.Source = record.Source
+			summary.FirstSeenAt = record.FirstSeenAt
+			summary.LastSeenAt = record.LastSeenAt
+			summary.EventCount = record.EventCount
 			byUser[user.Id] = summary
 			result = append(result, summary)
 			continue
@@ -278,59 +307,233 @@ func listRiskIPUsers(ip string, source string) ([]*RiskUserSummary, error) {
 	return result, nil
 }
 
-func ListRiskInviters(keyword string, startIdx int, limit int) ([]*RiskInviter, int64, error) {
+// riskInviterAggregateRow 是邀请人聚合分页查询的扫描结果。
+type riskInviterAggregateRow struct {
+	InviterId         int
+	Username          string
+	DisplayName       string
+	Email             string
+	Status            int
+	Group             string
+	DirectInviteCount int64
+}
+
+// riskInviterOrderClause 将排序白名单参数转换为 SQL 排序片段，并在主排序后
+// 强制追加 inviter_id (users.id) ASC 作为稳定次序。非法参数回退为
+// direct_invite_count desc。
+func riskInviterOrderClause(sortBy string, order string) string {
+	direction := "desc"
+	if order == "asc" {
+		direction = "asc"
+	}
+	switch sortBy {
+	case "inviter_id":
+		return "users.id " + direction + ", users.id ASC"
+	case "direct_invite_count":
+		return "inviter_stats.direct_invite_count " + direction + ", users.id ASC"
+	default:
+		return "inviter_stats.direct_invite_count desc, users.id ASC"
+	}
+}
+
+// riskUserSummaryFromUser 将用户记录转换为风控用户摘要（含 email/status）。
+func riskUserSummaryFromUser(user *User) *RiskUserSummary {
+	return &RiskUserSummary{
+		UserId: user.Id, Username: user.Username, DisplayName: user.DisplayName,
+		Email: user.Email, Status: user.Status,
+		Group: user.Group, Role: user.Role, InviterId: user.InviterId,
+	}
+}
+
+// riskUserKeywordMatchCondition 构建单个用户记录的 keyword 匹配条件与参数
+// （id / username / display_name）。数字关键词始终按用户 ID 精确匹配，并在
+// 关键词长度 >= 2 时继续对 username / display_name 做 LIKE 匹配；非数字关键词
+// 沿用原有 LIKE 模糊搜索规则（最短 2 个字符）。prefix 为列名前缀（如 "users."）。
+func riskUserKeywordMatchCondition(prefix string, keyword string) (string, []interface{}, error) {
+	keyword = strings.TrimSpace(keyword)
+	numericId := 0
+	if parsedId, err := strconv.Atoi(keyword); err == nil && parsedId > 0 {
+		numericId = parsedId
+	}
+	conditions := make([]string, 0, 3)
+	args := make([]interface{}, 0, 3)
+	if numericId > 0 {
+		conditions = append(conditions, prefix+"id = ?")
+		args = append(args, numericId)
+	}
+	// 单字符数字关键词只做 ID 精确匹配：LIKE 模糊搜索沿用既有最小长度限制。
+	if numericId == 0 || len(keyword) >= 2 {
+		pattern, err := sanitizeLikePattern("%" + keyword + "%")
+		if err != nil {
+			return "", nil, err
+		}
+		conditions = append(conditions,
+			prefix+"username LIKE ? ESCAPE '!'",
+			prefix+"display_name LIKE ? ESCAPE '!'",
+		)
+		args = append(args, pattern, pattern)
+	}
+	return "(" + strings.Join(conditions, " OR ") + ")", args, nil
+}
+
+// riskInviterKeywordCondition 构建邀请关系 keyword 过滤条件：关键词同时匹配
+// 邀请人自身（users.id / username / display_name）或其任一被邀请人；只有被邀请人
+// 命中时也会返回对应邀请人行。返回的 SQL 已用外层括号分组，可直接作为 AND 条件。
+func riskInviterKeywordCondition(keyword string) (string, []interface{}, error) {
+	inviterCondition, inviterArgs, err := riskUserKeywordMatchCondition("users.", keyword)
+	if err != nil {
+		return "", nil, err
+	}
+	inviteeCondition, inviteeArgs, err := riskUserKeywordMatchCondition("", keyword)
+	if err != nil {
+		return "", nil, err
+	}
+	// 命中任一被邀请人时取其 inviter_id 匹配邀请人；软删除用户不参与。
+	inviteeSubquery := "SELECT DISTINCT inviter_id FROM users WHERE inviter_id > 0 AND deleted_at IS NULL AND " + inviteeCondition
+	condition := "(" + inviterCondition + " OR inviter_stats.inviter_id IN (" + inviteeSubquery + "))"
+	args := make([]interface{}, 0, len(inviterArgs)+len(inviteeArgs))
+	args = append(args, inviterArgs...)
+	args = append(args, inviteeArgs...)
+	return condition, args, nil
+}
+
+// listRiskMatchedInvitees 返回指定邀请人被 keyword 命中的前 20 个被邀请人（id DESC）。
+// 关键词为空时返回空数组（不为 nil）。
+func listRiskMatchedInvitees(inviterId int, keyword string) ([]*RiskUserSummary, error) {
+	summaries := make([]*RiskUserSummary, 0)
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return summaries, nil
+	}
+	condition, args, err := riskUserKeywordMatchCondition("", keyword)
+	if err != nil {
+		return nil, err
+	}
+	var users []*User
+	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status").
+		Where("inviter_id = ?", inviterId).
+		Where(condition, args...).
+		Order("id desc").Limit(20).
+		Find(&users).Error; err != nil {
+		return nil, err
+	}
+	for _, user := range users {
+		summaries = append(summaries, riskUserSummaryFromUser(user))
+	}
+	return summaries, nil
+}
+
+// ListRiskInviters 聚合所有邀请人的直接邀请人数并分页返回。
+// 聚合（COUNT(*) GROUP BY inviter_id）与分页都在数据库侧完成，total 与
+// direct_invite_count 都是真实总数而非当前页统计；当前页再补前 100 个被邀请人、
+// matched_invitees（keyword 命中的被邀请人，最多 20 个）与 shared_ip_count。
+// 实现只用 GORM 子查询 + JOIN，兼容 SQLite/MySQL/PostgreSQL。
+func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, order string) ([]*RiskInviter, int64, error) {
 	if limit <= 0 {
 		limit = common.ItemsPerPage
 	}
-	var inviterIds []int
-	if err := DB.Model(&User{}).Where("inviter_id > 0").Distinct("inviter_id").Pluck("inviter_id", &inviterIds).Error; err != nil {
-		return nil, 0, err
-	}
-	if len(inviterIds) == 0 {
-		return []*RiskInviter{}, 0, nil
-	}
-	tx := DB.Model(&User{}).Where("id IN ?", inviterIds)
+	keyword = strings.TrimSpace(keyword)
+	var keywordCondition string
+	var keywordArgs []interface{}
 	if keyword != "" {
-		pattern, err := sanitizeLikePattern("%" + keyword + "%")
+		var err error
+		keywordCondition, keywordArgs, err = riskInviterKeywordCondition(keyword)
 		if err != nil {
 			return nil, 0, err
 		}
-		tx = tx.Where("username LIKE ? ESCAPE '!' OR display_name LIKE ? ESCAPE '!'", pattern, pattern)
+	}
+	buildQuery := func() *gorm.DB {
+		inviterStats := DB.Model(&User{}).
+			Select("inviter_id, COUNT(*) AS direct_invite_count").
+			Where("inviter_id > 0").
+			Group("inviter_id")
+		tx := DB.Table("(?) AS inviter_stats", inviterStats).
+			Joins("JOIN users ON users.id = inviter_stats.inviter_id").
+			Where("users.deleted_at IS NULL")
+		if keywordCondition != "" {
+			tx = tx.Where(keywordCondition, keywordArgs...)
+		}
+		return tx
 	}
 	var total int64
-	if err := tx.Count(&total).Error; err != nil {
+	if err := buildQuery().Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var inviters []*User
-	if err := tx.Select("id, username, display_name, " + commonGroupCol).Order("id desc").Offset(startIdx).Limit(limit).Find(&inviters).Error; err != nil {
+	if total == 0 {
+		return []*RiskInviter{}, 0, nil
+	}
+	var rows []*riskInviterAggregateRow
+	err := buildQuery().
+		Select("users.id AS inviter_id, users.username, users.display_name, users.email, users.status, users." + commonGroupCol + ", inviter_stats.direct_invite_count").
+		Order(riskInviterOrderClause(sortBy, order)).
+		Offset(startIdx).Limit(limit).
+		Scan(&rows).Error
+	if err != nil {
 		return nil, 0, err
 	}
-	result := make([]*RiskInviter, 0, len(inviters))
-	for _, inviter := range inviters {
-		var directInviteCount int64
-		if err := DB.Model(&User{}).Where("inviter_id = ?", inviter.Id).Count(&directInviteCount).Error; err != nil {
-			return nil, 0, err
-		}
+	result := make([]*RiskInviter, 0, len(rows))
+	for _, row := range rows {
 		var invitees []*User
-		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id").Where("inviter_id = ?", inviter.Id).Order("id desc").Limit(100).Find(&invitees).Error; err != nil {
+		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status").
+			Where("inviter_id = ?", row.InviterId).Order("id desc").Limit(100).Find(&invitees).Error; err != nil {
 			return nil, 0, err
 		}
 		ids := make([]int, 0, len(invitees)+1)
-		ids = append(ids, inviter.Id)
+		ids = append(ids, row.InviterId)
+		summaries := make([]*RiskUserSummary, 0, len(invitees))
 		for _, invitee := range invitees {
 			ids = append(ids, invitee.Id)
+			summaries = append(summaries, riskUserSummaryFromUser(invitee))
 		}
 		sharedIPs, err := countSharedIPsForUsers(ids)
 		if err != nil {
 			return nil, 0, err
 		}
-		summaries := make([]*RiskUserSummary, 0, len(invitees))
-		for _, invitee := range invitees {
-			summaries = append(summaries, &RiskUserSummary{UserId: invitee.Id, Username: invitee.Username, DisplayName: invitee.DisplayName, Group: invitee.Group, Role: invitee.Role, InviterId: invitee.InviterId})
+		matchedInvitees, err := listRiskMatchedInvitees(row.InviterId, keyword)
+		if err != nil {
+			return nil, 0, err
 		}
-		result = append(result, &RiskInviter{InviterId: inviter.Id, Username: inviter.Username, DisplayName: inviter.DisplayName, Group: inviter.Group, DirectInviteCount: directInviteCount, SharedIPCount: sharedIPs, Suspicious: sharedIPs > 0, Invitees: summaries})
+		result = append(result, &RiskInviter{
+			InviterId: row.InviterId, Username: row.Username, DisplayName: row.DisplayName,
+			Email: row.Email, Status: row.Status, Group: row.Group,
+			DirectInviteCount: row.DirectInviteCount,
+			SharedIPCount:     sharedIPs,
+			Suspicious:        sharedIPs > 0,
+			Invitees:          summaries,
+			MatchedInvitees:   matchedInvitees,
+		})
 	}
 	return result, total, nil
+}
+
+// ListRiskInvitees 分页返回指定邀请人的直接被邀请用户（按 users.id DESC）。
+// inviterId 非法或不存在时返回空列表而非错误，便于前端直接展示空态。
+func ListRiskInvitees(inviterId int, startIdx int, limit int) ([]*RiskUserSummary, int64, error) {
+	if inviterId <= 0 {
+		return []*RiskUserSummary{}, 0, nil
+	}
+	if limit <= 0 {
+		limit = common.ItemsPerPage
+	}
+	var total int64
+	if err := DB.Model(&User{}).Where("inviter_id = ?", inviterId).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return []*RiskUserSummary{}, 0, nil
+	}
+	var users []*User
+	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status").
+		Where("inviter_id = ?", inviterId).
+		Order("id desc").Offset(startIdx).Limit(limit).
+		Find(&users).Error; err != nil {
+		return nil, 0, err
+	}
+	items := make([]*RiskUserSummary, 0, len(users))
+	for _, user := range users {
+		items = append(items, riskUserSummaryFromUser(user))
+	}
+	return items, total, nil
 }
 
 func countSharedIPsForUsers(userIds []int) (int64, error) {

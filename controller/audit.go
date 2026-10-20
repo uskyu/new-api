@@ -46,6 +46,9 @@ var auditContentTemplates = map[string]string{
 	"channel.upstream_apply_all": "Applied upstream model changes to ${count} channels",
 
 	"redemption.create": "Created ${count} redemption codes named ${name} (${quota} each)",
+
+	"risk.batch_disable": "Disabled ${count} risk-control accounts (scope: ${scope})",
+	"risk.batch_enable":  "Enabled ${count} risk-control accounts (scope: ${scope})",
 }
 
 // auditContentEN 按 action 模板渲染英文兜底文本；未登记的 action 退回 action 本身。
