@@ -912,11 +912,9 @@ export default function RiskControl() {
                   setPage(1);
                 }}
                 className='w-full sm:w-56'
-                prefix={
-                  <span className='shrink-0 whitespace-nowrap'>
-                    {t('封禁状态')}
-                  </span>
-                }
+                // 用字符串前缀而非 JSX：Semi 只给字符串前缀加 semi-select-prefix-text
+                // （含 12px 间距），JSX 前缀缺少该类名会与选中值贴在一起。
+                prefix={t('封禁状态')}
               >
                 <Select.Option value=''>{t('全部状态')}</Select.Option>
                 <Select.Option value='has_banned'>{t('有已封禁账号')}</Select.Option>
@@ -929,7 +927,7 @@ export default function RiskControl() {
                     setSharedSort(value);
                     setPage(1);
                   }}
-                  className='w-full sm:w-56'
+                  className='w-full sm:w-72'
                   prefix={t('排序方式')}
                 >
                   <Select.Option value='user_count:desc'>
@@ -961,7 +959,7 @@ export default function RiskControl() {
                     setInviterSort(value);
                     setPage(1);
                   }}
-                  className='w-full sm:w-56'
+                  className='w-full sm:w-72'
                   prefix={t('排序方式')}
                 >
                   <Select.Option value='direct_invite_count:desc'>

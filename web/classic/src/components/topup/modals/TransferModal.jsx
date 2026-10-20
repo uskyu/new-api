@@ -124,7 +124,8 @@ const TransferModal = ({
               trigger='custom'
               visible={ruleVisible}
               content={ruleContent}
-              position='top'
+              position='rightTop'
+              showArrow
               onVisibleChange={setRuleVisible}
             >
               <span
