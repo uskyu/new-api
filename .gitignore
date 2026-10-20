@@ -44,3 +44,10 @@ relaykit/relayconvert/chat_responses_live_local_test.go
 service/openaicompat/chat_responses_live_local_test.go
 go.work
 go.work.sum
+
+# Local scratch output: verification scripts, captured credentials and logs.
+# The scratch directory can hold live tokens, so it must never be staged.
+/tmp/
+*.log
+.reasonix/
+.zcode/
