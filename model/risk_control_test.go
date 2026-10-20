@@ -87,7 +87,7 @@ func TestListRiskSharedIPsReturnsAssociatedUsers(t *testing.T) {
 		require.NoError(t, DB.Create(&RiskIPRecord{UserId: users[index].Id, TokenId: index + 1, IP: "198.51.100.8", Source: RiskIPSourceToken, FirstSeenAt: 100, LastSeenAt: 200 + int64(index), EventCount: 3}).Error)
 	}
 
-	items, total, err := ListRiskSharedIPs(RiskIPSourceToken, "ip", "198.51.100", 2, 0, 10, "last_seen_at", "desc")
+	items, total, err := ListRiskSharedIPs(RiskIPSourceToken, "ip", "198.51.100", 2, 0, 10, "last_seen_at", "desc", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
@@ -103,20 +103,20 @@ func TestListRiskSharedIPsReturnsAssociatedUsers(t *testing.T) {
 	require.Empty(t, byUser[users[1].Id].Email)
 
 	RecordRiskIP(users[0].Id, 0, RiskIPSourceLogin, "198.51.100.8")
-	items, total, err = ListRiskSharedIPs("", "ip", "", 2, 0, 10, "", "")
+	items, total, err = ListRiskSharedIPs("", "ip", "", 2, 0, 10, "", "", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Equal(t, "all", items[0].Source)
 	require.EqualValues(t, 2, items[0].UserCount)
 	require.Len(t, items[0].Users, 2)
 
-	items, total, err = ListRiskSharedIPs(RiskIPSourceToken, "username", "risk-shared-a", 2, 0, 10, "user_count", "asc")
+	items, total, err = ListRiskSharedIPs(RiskIPSourceToken, "username", "risk-shared-a", 2, 0, 10, "user_count", "asc", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
 	require.EqualValues(t, 2, items[0].UserCount)
 
-	items, total, err = ListRiskSharedIPs(RiskIPSourceToken, "user_id", strconv.Itoa(users[1].Id), 2, 0, 10, "ip", "asc")
+	items, total, err = ListRiskSharedIPs(RiskIPSourceToken, "user_id", strconv.Itoa(users[1].Id), 2, 0, 10, "ip", "asc", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
@@ -125,7 +125,7 @@ func TestListRiskSharedIPsReturnsAssociatedUsers(t *testing.T) {
 func TestListRiskSharedIPsSortingAndStablePaging(t *testing.T) {
 	setupRiskControlTest(t)
 	users := createRiskUsers(t, []User{
-		{Username: "risk-sort-a", Email: "risk-sort-a@example.com", AffCode: "risk-sort-a-aff"},
+		{Username: "risk-sort-a", Email: "risk-sort-a@example.com", AffCode: "risk-sort-a-aff", Quota: 5000},
 		{Username: "risk-sort-b", AffCode: "risk-sort-b-aff", Status: common.UserStatusDisabled},
 		{Username: "risk-sort-c", AffCode: "risk-sort-c-aff"},
 		{Username: "risk-sort-d", AffCode: "risk-sort-d-aff"},
@@ -150,7 +150,7 @@ func TestListRiskSharedIPsSortingAndStablePaging(t *testing.T) {
 	require.NoError(t, DB.Create(&records).Error)
 
 	list := func(sortBy string, order string, startIdx int, limit int) ([]*RiskSharedIP, int64) {
-		items, total, err := ListRiskSharedIPs(RiskIPSourceToken, "ip", "", 2, startIdx, limit, sortBy, order)
+		items, total, err := ListRiskSharedIPs(RiskIPSourceToken, "ip", "", 2, startIdx, limit, sortBy, order, "")
 		require.NoError(t, err)
 		return items, total
 	}
@@ -197,11 +197,11 @@ func TestListRiskSharedIPsSortingAndStablePaging(t *testing.T) {
 	// min_users 过滤仍然生效。
 	items, total = list("", "", 0, 10)
 	require.EqualValues(t, 4, total)
-	_, filteredTotal, err := ListRiskSharedIPs(RiskIPSourceToken, "ip", "", 3, 0, 10, "", "")
+	_, filteredTotal, err := ListRiskSharedIPs(RiskIPSourceToken, "ip", "", 3, 0, 10, "", "", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 2, filteredTotal)
 
-	// email / status 字段填充。
+	// email / status / quota 字段填充。
 	items, _ = list("ip", "asc", 0, 10)
 	require.Len(t, items[1].Users, 2)
 	byUser := make(map[int]*RiskUserSummary, len(items[1].Users))
@@ -210,8 +210,10 @@ func TestListRiskSharedIPsSortingAndStablePaging(t *testing.T) {
 	}
 	require.Equal(t, "risk-sort-a@example.com", byUser[users[0].Id].Email)
 	require.Equal(t, common.UserStatusEnabled, byUser[users[0].Id].Status)
+	require.Equal(t, 5000, byUser[users[0].Id].Quota)
 	require.Empty(t, byUser[users[1].Id].Email)
 	require.Equal(t, common.UserStatusDisabled, byUser[users[1].Id].Status)
+	require.Equal(t, 0, byUser[users[1].Id].Quota)
 }
 
 func TestRiskUserKeywordMatchCondition(t *testing.T) {
@@ -237,7 +239,7 @@ func TestRiskUserKeywordMatchCondition(t *testing.T) {
 func TestListRiskInvitersGlobalAggregationSortAndFields(t *testing.T) {
 	setupRiskControlTest(t)
 	inviters := createRiskUsers(t, []User{
-		{Username: "risk-inviter-a", DisplayName: "Risk Inviter A", Email: "inviter-a@example.com", AffCode: "risk-inviter-a-aff"},
+		{Username: "risk-inviter-a", DisplayName: "Risk Inviter A", Email: "inviter-a@example.com", AffCode: "risk-inviter-a-aff", Quota: 7000},
 		{Username: "risk-inviter-b", Email: "inviter-b@example.com", AffCode: "risk-inviter-b-aff", Status: common.UserStatusDisabled},
 		{Username: "risk-inviter-c", AffCode: "risk-inviter-c-aff"},
 	})
@@ -251,7 +253,7 @@ func TestListRiskInvitersGlobalAggregationSortAndFields(t *testing.T) {
 	})
 
 	list := func(keyword string, startIdx int, limit int, sortBy string, order string) ([]*RiskInviter, int64) {
-		items, total, err := ListRiskInviters(keyword, startIdx, limit, sortBy, order)
+		items, total, err := ListRiskInviters(keyword, startIdx, limit, sortBy, order, "")
 		require.NoError(t, err)
 		return items, total
 	}
@@ -267,11 +269,13 @@ func TestListRiskInvitersGlobalAggregationSortAndFields(t *testing.T) {
 	require.NotNil(t, items[0].MatchedInvitees)
 	require.Empty(t, items[0].MatchedInvitees)
 
-	// 邀请人 email / status。
+	// 邀请人 email / status / quota。
 	require.Equal(t, "inviter-a@example.com", items[0].Email)
 	require.Equal(t, common.UserStatusEnabled, items[0].Status)
+	require.Equal(t, 7000, items[0].Quota)
 	require.Equal(t, "inviter-b@example.com", items[2].Email)
 	require.Equal(t, common.UserStatusDisabled, items[2].Status)
+	require.Equal(t, 0, items[2].Quota)
 
 	// 被邀请人 email / status。
 	require.Len(t, items[0].Invitees, 3)
@@ -325,7 +329,7 @@ func TestListRiskInvitersUsesActualInviteCount(t *testing.T) {
 	}
 	require.NoError(t, DB.CreateInBatches(&invitees, 50).Error)
 
-	items, total, err := ListRiskInviters("risk-inviter", 0, 10, "direct_invite_count", "desc")
+	items, total, err := ListRiskInviters("risk-inviter", 0, 10, "direct_invite_count", "desc", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
@@ -375,7 +379,7 @@ func TestListRiskInvitersKeywordMatchesInviterOrInvitee(t *testing.T) {
 	}
 
 	// 按被邀请人用户名搜索：返回邀请人行，matched_invitees 命中对应被邀请人。
-	items, total, err := ListRiskInviters("risk-kw-invitee-two", 0, 10, "direct_invite_count", "desc")
+	items, total, err := ListRiskInviters("risk-kw-invitee-two", 0, 10, "direct_invite_count", "desc", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
@@ -386,7 +390,7 @@ func TestListRiskInvitersKeywordMatchesInviterOrInvitee(t *testing.T) {
 	require.Equal(t, common.UserStatusDisabled, items[0].MatchedInvitees[0].Status)
 
 	// 按被邀请人用户 ID 搜索：数字关键词按用户 ID 精确命中邀请人。
-	items, total, err = ListRiskInviters(strconv.Itoa(inviteeTwo.Id), 0, 10, "", "")
+	items, total, err = ListRiskInviters(strconv.Itoa(inviteeTwo.Id), 0, 10, "", "", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
@@ -395,7 +399,7 @@ func TestListRiskInvitersKeywordMatchesInviterOrInvitee(t *testing.T) {
 	require.Equal(t, inviteeTwo.Id, items[0].MatchedInvitees[0].UserId)
 
 	// 按邀请人 ID 搜索：命中邀请人自身，matched_invitees 为空数组。
-	items, total, err = ListRiskInviters(strconv.Itoa(inviterAlpha.Id), 0, 10, "", "")
+	items, total, err = ListRiskInviters(strconv.Itoa(inviterAlpha.Id), 0, 10, "", "", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
@@ -404,7 +408,7 @@ func TestListRiskInvitersKeywordMatchesInviterOrInvitee(t *testing.T) {
 	require.Empty(t, items[0].MatchedInvitees)
 
 	// 按邀请人用户名搜索：命中邀请人自身。
-	items, total, err = ListRiskInviters("risk-kw-alpha", 0, 10, "", "")
+	items, total, err = ListRiskInviters("risk-kw-alpha", 0, 10, "", "", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
@@ -412,7 +416,7 @@ func TestListRiskInvitersKeywordMatchesInviterOrInvitee(t *testing.T) {
 	require.Empty(t, items[0].MatchedInvitees)
 
 	// 一个关键词命中多个邀请人的被邀请人：total 为匹配邀请人数。
-	items, total, err = ListRiskInviters("risk-kw-invitee", 0, 10, "direct_invite_count", "desc")
+	items, total, err = ListRiskInviters("risk-kw-invitee", 0, 10, "direct_invite_count", "desc", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 3, total)
 	require.Len(t, items, 3)
@@ -424,13 +428,13 @@ func TestListRiskInvitersKeywordMatchesInviterOrInvitee(t *testing.T) {
 	require.Len(t, findInviter(items, inviterGamma.Id).MatchedInvitees, 1)
 
 	// 关键词无命中返回空列表。
-	items, total, err = ListRiskInviters("risk-kw-no-such-user", 0, 10, "", "")
+	items, total, err = ListRiskInviters("risk-kw-no-such-user", 0, 10, "", "", "")
 	require.NoError(t, err)
 	require.Zero(t, total)
 	require.Empty(t, items)
 
 	// matched_invitees 每个邀请人最多 20 个。
-	items, total, err = ListRiskInviters("risk-kw-bulk", 0, 10, "", "")
+	items, total, err = ListRiskInviters("risk-kw-bulk", 0, 10, "", "", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
@@ -439,7 +443,7 @@ func TestListRiskInvitersKeywordMatchesInviterOrInvitee(t *testing.T) {
 	require.Equal(t, bulkInvitees[24].Id, items[0].MatchedInvitees[0].UserId)
 
 	// 关键词为空时 matched_invitees 为空数组（不是 nil）。
-	items, total, err = ListRiskInviters("", 0, 10, "direct_invite_count", "desc")
+	items, total, err = ListRiskInviters("", 0, 10, "direct_invite_count", "desc", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 4, total)
 	for _, item := range items {
@@ -663,4 +667,131 @@ func TestInvalidateUsersCacheAndTokensWithoutRedis(t *testing.T) {
 	var count int64
 	require.NoError(t, DB.Model(&User{}).Where("id IN ?", []int{users[0].Id, users[1].Id}).Count(&count).Error)
 	require.EqualValues(t, 2, count)
+}
+
+func TestListRiskSharedIPsFiltersByBanState(t *testing.T) {
+	setupRiskControlTest(t)
+	users := createRiskUsers(t, []User{
+		{Username: "risk-ban-normal", AffCode: "risk-ban-normal-aff"},
+		{Username: "risk-ban-disabled", AffCode: "risk-ban-disabled-aff", Status: common.UserStatusDisabled},
+		{Username: "risk-ban-disabled-two", AffCode: "risk-ban-disabled-two-aff", Status: common.UserStatusDisabled},
+		{Username: "risk-ban-normal-two", AffCode: "risk-ban-normal-two-aff"},
+	})
+	records := []RiskIPRecord{
+		// 203.0.113.10：普通 + 已封禁 → 命中 has_banned，不命中 all_banned。
+		{UserId: users[0].Id, TokenId: 1, IP: "203.0.113.10", Source: RiskIPSourceToken, FirstSeenAt: 10, LastSeenAt: 10, EventCount: 1},
+		{UserId: users[1].Id, TokenId: 1, IP: "203.0.113.10", Source: RiskIPSourceToken, FirstSeenAt: 10, LastSeenAt: 10, EventCount: 1},
+		// 203.0.113.11：两个已封禁 → 同时命中 has_banned 与 all_banned。
+		{UserId: users[1].Id, TokenId: 2, IP: "203.0.113.11", Source: RiskIPSourceToken, FirstSeenAt: 10, LastSeenAt: 20, EventCount: 1},
+		{UserId: users[2].Id, TokenId: 2, IP: "203.0.113.11", Source: RiskIPSourceToken, FirstSeenAt: 10, LastSeenAt: 20, EventCount: 1},
+		// 203.0.113.12：全部正常 → 两个筛选都不命中。
+		{UserId: users[0].Id, TokenId: 3, IP: "203.0.113.12", Source: RiskIPSourceToken, FirstSeenAt: 10, LastSeenAt: 30, EventCount: 1},
+		{UserId: users[3].Id, TokenId: 3, IP: "203.0.113.12", Source: RiskIPSourceToken, FirstSeenAt: 10, LastSeenAt: 30, EventCount: 1},
+	}
+	require.NoError(t, DB.Create(&records).Error)
+
+	list := func(banState string) ([]string, int64) {
+		items, total, err := ListRiskSharedIPs(RiskIPSourceToken, "ip", "", 2, 0, 10, "ip", "asc", banState)
+		require.NoError(t, err)
+		return riskSharedIPIPs(items), total
+	}
+
+	// 不筛选：三组都在。
+	ips, total := list("")
+	require.Equal(t, []string{"203.0.113.10", "203.0.113.11", "203.0.113.12"}, ips)
+	require.EqualValues(t, 3, total)
+
+	// 非法值等同不筛选。
+	ips, total = list("bogus")
+	require.Equal(t, []string{"203.0.113.10", "203.0.113.11", "203.0.113.12"}, ips)
+	require.EqualValues(t, 3, total)
+
+	// has_banned：关联账号中存在已封禁。
+	ips, total = list(RiskBanStateHasBanned)
+	require.Equal(t, []string{"203.0.113.10", "203.0.113.11"}, ips)
+	require.EqualValues(t, 2, total)
+
+	// all_banned：关联账号全部已封禁。
+	ips, total = list(RiskBanStateAllBanned)
+	require.Equal(t, []string{"203.0.113.11"}, ips)
+	require.EqualValues(t, 1, total)
+
+	// 软删除用户不计入封禁统计：删掉 203.0.113.11 中的普通账号后，该组不再全部封禁。
+	require.NoError(t, DB.Delete(&User{}, users[1].Id).Error)
+	ips, total = list(RiskBanStateAllBanned)
+	require.Empty(t, ips)
+	require.EqualValues(t, 0, total)
+}
+
+func TestListRiskInvitersFiltersByBanState(t *testing.T) {
+	setupRiskControlTest(t)
+	inviters := createRiskUsers(t, []User{
+		{Username: "risk-ban-inviter-mixed", AffCode: "risk-ban-inviter-mixed-aff"},
+		{Username: "risk-ban-inviter-all", AffCode: "risk-ban-inviter-all-aff"},
+		{Username: "risk-ban-inviter-clean", AffCode: "risk-ban-inviter-clean-aff"},
+	})
+	invitees := createRiskUsers(t, []User{
+		// 混合：1 个已封禁 + 1 个正常。
+		{Username: "risk-ban-invitee-mixed-a", AffCode: "risk-ban-invitee-mixed-a-aff", InviterId: inviters[0].Id},
+		{Username: "risk-ban-invitee-mixed-b", AffCode: "risk-ban-invitee-mixed-b-aff", InviterId: inviters[0].Id},
+		// 全部封禁。
+		{Username: "risk-ban-invitee-all-a", AffCode: "risk-ban-invitee-all-a-aff", InviterId: inviters[1].Id, Status: common.UserStatusDisabled},
+		{Username: "risk-ban-invitee-all-b", AffCode: "risk-ban-invitee-all-b-aff", InviterId: inviters[1].Id, Status: common.UserStatusDisabled},
+		// 全部正常。
+		{Username: "risk-ban-invitee-clean-a", AffCode: "risk-ban-invitee-clean-a-aff", InviterId: inviters[2].Id},
+		{Username: "risk-ban-invitee-clean-b", AffCode: "risk-ban-invitee-clean-b-aff", InviterId: inviters[2].Id},
+	})
+	require.NotZero(t, invitees[0].Id)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", invitees[0].Id).Update("status", common.UserStatusDisabled).Error)
+
+	usernames := func(rows []*RiskInviter) []string {
+		result := make([]string, 0, len(rows))
+		for _, row := range rows {
+			result = append(result, row.Username)
+		}
+		return result
+	}
+	list := func(banState string) ([]string, int64) {
+		items, total, err := ListRiskInviters("", 0, 10, "inviter_id", "asc", banState)
+		require.NoError(t, err)
+		return usernames(items), total
+	}
+
+	ips, total := list("")
+	require.Equal(t, []string{"risk-ban-inviter-mixed", "risk-ban-inviter-all", "risk-ban-inviter-clean"}, ips)
+	require.EqualValues(t, 3, total)
+
+	ips, total = list(RiskBanStateHasBanned)
+	require.Equal(t, []string{"risk-ban-inviter-mixed", "risk-ban-inviter-all"}, ips)
+	require.EqualValues(t, 2, total)
+
+	ips, total = list(RiskBanStateAllBanned)
+	require.Equal(t, []string{"risk-ban-inviter-all"}, ips)
+	require.EqualValues(t, 1, total)
+
+	// 与关键词搜索叠加：命中被邀请人且存在已封禁。
+	items, total, err := ListRiskInviters("risk-ban-invitee-mixed", 0, 10, "inviter_id", "asc", RiskBanStateHasBanned)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Equal(t, []string{"risk-ban-inviter-mixed"}, usernames(items))
+
+	// 关键词命中但无已封禁账号时，筛选后为空。
+	items, total, err = ListRiskInviters("risk-ban-invitee-clean", 0, 10, "inviter_id", "asc", RiskBanStateHasBanned)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, total)
+	require.Empty(t, items)
+
+	// 软删除被邀请人不参与封禁统计：删掉唯一正常被邀请人后，mixed 变为全部封禁。
+	require.NoError(t, DB.Delete(&User{}, invitees[1].Id).Error)
+	ips, total = list(RiskBanStateAllBanned)
+	require.Equal(t, []string{"risk-ban-inviter-mixed", "risk-ban-inviter-all"}, ips)
+	require.EqualValues(t, 2, total)
+}
+
+func TestNormalizeRiskBanState(t *testing.T) {
+	require.Equal(t, "", normalizeRiskBanState(""))
+	require.Equal(t, RiskBanStateHasBanned, normalizeRiskBanState(" has_banned "))
+	require.Equal(t, RiskBanStateAllBanned, normalizeRiskBanState("all_banned"))
+	require.Equal(t, "", normalizeRiskBanState("disabled"))
+	require.Equal(t, "", normalizeRiskBanState("ALL_BANNED"))
 }

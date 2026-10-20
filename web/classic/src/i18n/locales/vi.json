@@ -4375,6 +4375,9 @@
     "已跳过 {{count}} 个账号": "Đã bỏ qua {{count}} tài khoản",
     "加载中": "Đang tải",
     "访客": "Khách",
-    "默认补全倍率": "Tỷ lệ hoàn thành mặc định"
+    "默认补全倍率": "Tỷ lệ hoàn thành mặc định",
+    "封禁状态": "Trạng thái cấm",
+    "有已封禁账号": "Có tài khoản bị cấm",
+    "全部已封禁": "Tất cả đều bị cấm"
   }
 }

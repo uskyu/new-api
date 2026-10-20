@@ -3988,6 +3988,9 @@
     "已跳过 {{count}} 个账号": "Skipped {{count}} accounts",
     "加载中": "Loading",
     "访客": "Guest",
-    "默认补全倍率": "Default completion ratio"
+    "默认补全倍率": "Default completion ratio",
+    "封禁状态": "Ban status",
+    "有已封禁账号": "Has banned accounts",
+    "全部已封禁": "All accounts banned"
   }
 }

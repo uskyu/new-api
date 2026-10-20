@@ -19,6 +19,29 @@ const (
 	riskIPWriteWindow = int64(300)
 )
 
+// 风控列表的封禁状态筛选。作用于每条记录「关联账号」这一列：
+//   - 空字符串：不筛选；
+//   - RiskBanStateHasBanned：关联账号中至少有一个已封禁；
+//   - RiskBanStateAllBanned：关联账号全部已封禁。
+//
+// 口径与页面展示一致：只统计未删除（deleted_at IS NULL）用户。
+const (
+	RiskBanStateHasBanned = "has_banned"
+	RiskBanStateAllBanned = "all_banned"
+)
+
+// normalizeRiskBanState 把未知值归零为「不筛选」，避免非法参数改变结果集。
+func normalizeRiskBanState(banState string) string {
+	switch strings.TrimSpace(banState) {
+	case RiskBanStateHasBanned:
+		return RiskBanStateHasBanned
+	case RiskBanStateAllBanned:
+		return RiskBanStateAllBanned
+	default:
+		return ""
+	}
+}
+
 // RiskIPRecord is a compact, queryable IP history. It deliberately aggregates
 // repeated requests so the risk-control feature does not grow like request logs.
 type RiskIPRecord struct {
@@ -47,6 +70,7 @@ type RiskUserSummary struct {
 	DisplayName string `json:"display_name"`
 	Email       string `json:"email"`  // users.email，可能为空字符串
 	Status      int    `json:"status"` // 1=正常 2=已封禁
+	Quota       int    `json:"quota"`  // users.quota，原始额度值，前端按显示设置换算
 	Group       string `json:"group"`
 	Role        int    `json:"role"`
 	InviterId   int    `json:"inviter_id"`
@@ -63,6 +87,7 @@ type RiskInviter struct {
 	DisplayName       string             `json:"display_name"`
 	Email             string             `json:"email"`
 	Status            int                `json:"status"`
+	Quota             int                `json:"quota"` // users.quota，原始额度值
 	Group             string             `json:"group"`
 	DirectInviteCount int64              `json:"direct_invite_count"`
 	SharedIPCount     int64              `json:"shared_ip_count"`
@@ -163,13 +188,31 @@ func riskSharedIPOrderClause(sortBy string, order string) string {
 	}
 }
 
-func ListRiskSharedIPs(source string, searchType string, keyword string, minUsers int, startIdx int, limit int, sortBy string, order string) ([]*RiskSharedIP, int64, error) {
+// riskSharedIPBanHaving 生成「关联账号封禁状态」筛选的 HAVING 片段。
+// 只统计未删除用户；同一用户可能有多条 IP 记录，因此用 COUNT(DISTINCT ...) 口径。
+// 返回空 having 表示不筛选。CASE WHEN + COUNT(DISTINCT) + 子查询在
+// SQLite/MySQL/PostgreSQL 上语义一致。
+func riskSharedIPBanHaving(banState string) (string, []interface{}) {
+	bannedCount := "COUNT(DISTINCT CASE WHEN user_id IN (" +
+		"SELECT id FROM users WHERE status = ? AND deleted_at IS NULL) THEN user_id END)"
+	switch banState {
+	case RiskBanStateHasBanned:
+		return bannedCount + " > 0", []interface{}{common.UserStatusDisabled}
+	case RiskBanStateAllBanned:
+		return bannedCount + " = COUNT(DISTINCT user_id)", []interface{}{common.UserStatusDisabled}
+	default:
+		return "", nil
+	}
+}
+
+func ListRiskSharedIPs(source string, searchType string, keyword string, minUsers int, startIdx int, limit int, sortBy string, order string, banState string) ([]*RiskSharedIP, int64, error) {
 	if minUsers < 2 {
 		minUsers = 2
 	}
 	if limit <= 0 {
 		limit = common.ItemsPerPage
 	}
+	banState = normalizeRiskBanState(banState)
 
 	var matchingUserIds []int
 	var matchingIPs []string
@@ -233,14 +276,20 @@ func ListRiskSharedIPs(source string, searchType string, keyword string, minUser
 		selectColumns = "ip, source"
 	}
 	grouped := applyFilters(DB.Model(&RiskIPRecord{})).Select(groupColumns).Group(groupColumns).Having("COUNT(DISTINCT user_id) >= ?", minUsers)
+	if having, args := riskSharedIPBanHaving(banState); having != "" {
+		grouped = grouped.Having(having, args...)
+	}
 	var total int64
 	if err := DB.Table("(?) AS risk_ip_groups", grouped).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var rows []*RiskSharedIP
-	err := applyFilters(DB.Model(&RiskIPRecord{})).Select(selectColumns+", COUNT(DISTINCT user_id) AS user_count, SUM(event_count) AS event_count, MAX(last_seen_at) AS last_seen_at").
-		Group(groupColumns).Having("COUNT(DISTINCT user_id) >= ?", minUsers).
-		Order(riskSharedIPOrderClause(sortBy, order)).Offset(startIdx).Limit(limit).Scan(&rows).Error
+	query := applyFilters(DB.Model(&RiskIPRecord{})).Select(selectColumns+", COUNT(DISTINCT user_id) AS user_count, SUM(event_count) AS event_count, MAX(last_seen_at) AS last_seen_at").
+		Group(groupColumns).Having("COUNT(DISTINCT user_id) >= ?", minUsers)
+	if having, args := riskSharedIPBanHaving(banState); having != "" {
+		query = query.Having(having, args...)
+	}
+	err := query.Order(riskSharedIPOrderClause(sortBy, order)).Offset(startIdx).Limit(limit).Scan(&rows).Error
 	if err != nil {
 		return nil, 0, err
 	}
@@ -270,7 +319,7 @@ func listRiskIPUsers(ip string, source string) ([]*RiskUserSummary, error) {
 	users := make(map[int]*User)
 	if len(ids) > 0 {
 		var list []*User
-		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status").Where("id IN ?", ids).Find(&list).Error; err != nil {
+		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota").Where("id IN ?", ids).Find(&list).Error; err != nil {
 			return nil, err
 		}
 		for _, user := range list {
@@ -314,6 +363,7 @@ type riskInviterAggregateRow struct {
 	DisplayName       string
 	Email             string
 	Status            int
+	Quota             int
 	Group             string
 	DirectInviteCount int64
 }
@@ -336,11 +386,11 @@ func riskInviterOrderClause(sortBy string, order string) string {
 	}
 }
 
-// riskUserSummaryFromUser 将用户记录转换为风控用户摘要（含 email/status）。
+// riskUserSummaryFromUser 将用户记录转换为风控用户摘要（含 email/status/quota）。
 func riskUserSummaryFromUser(user *User) *RiskUserSummary {
 	return &RiskUserSummary{
 		UserId: user.Id, Username: user.Username, DisplayName: user.DisplayName,
-		Email: user.Email, Status: user.Status,
+		Email: user.Email, Status: user.Status, Quota: user.Quota,
 		Group: user.Group, Role: user.Role, InviterId: user.InviterId,
 	}
 }
@@ -410,7 +460,7 @@ func listRiskMatchedInvitees(inviterId int, keyword string) ([]*RiskUserSummary,
 		return nil, err
 	}
 	var users []*User
-	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status").
+	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota").
 		Where("inviter_id = ?", inviterId).
 		Where(condition, args...).
 		Order("id desc").Limit(20).
@@ -423,16 +473,33 @@ func listRiskMatchedInvitees(inviterId int, keyword string) ([]*RiskUserSummary,
 	return summaries, nil
 }
 
+// riskInviterBanCondition 生成「被邀请账号封禁状态」筛选条件（作用于邀请人行）。
+// 只统计未删除的被邀请人；返回空条件表示不筛选。
+func riskInviterBanCondition(banState string) (string, []interface{}) {
+	switch banState {
+	case RiskBanStateHasBanned:
+		return "EXISTS (SELECT 1 FROM users invitees WHERE invitees.inviter_id = users.id AND invitees.deleted_at IS NULL AND invitees.status = ?)",
+			[]interface{}{common.UserStatusDisabled}
+	case RiskBanStateAllBanned:
+		return "EXISTS (SELECT 1 FROM users invitees WHERE invitees.inviter_id = users.id AND invitees.deleted_at IS NULL AND invitees.status = ?) " +
+				"AND NOT EXISTS (SELECT 1 FROM users invitees WHERE invitees.inviter_id = users.id AND invitees.deleted_at IS NULL AND invitees.status <> ?)",
+			[]interface{}{common.UserStatusDisabled, common.UserStatusDisabled}
+	default:
+		return "", nil
+	}
+}
+
 // ListRiskInviters 聚合所有邀请人的直接邀请人数并分页返回。
 // 聚合（COUNT(*) GROUP BY inviter_id）与分页都在数据库侧完成，total 与
 // direct_invite_count 都是真实总数而非当前页统计；当前页再补前 100 个被邀请人、
 // matched_invitees（keyword 命中的被邀请人，最多 20 个）与 shared_ip_count。
 // 实现只用 GORM 子查询 + JOIN，兼容 SQLite/MySQL/PostgreSQL。
-func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, order string) ([]*RiskInviter, int64, error) {
+func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, order string, banState string) ([]*RiskInviter, int64, error) {
 	if limit <= 0 {
 		limit = common.ItemsPerPage
 	}
 	keyword = strings.TrimSpace(keyword)
+	banState = normalizeRiskBanState(banState)
 	var keywordCondition string
 	var keywordArgs []interface{}
 	if keyword != "" {
@@ -442,6 +509,7 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 			return nil, 0, err
 		}
 	}
+	banCondition, banArgs := riskInviterBanCondition(banState)
 	buildQuery := func() *gorm.DB {
 		inviterStats := DB.Model(&User{}).
 			Select("inviter_id, COUNT(*) AS direct_invite_count").
@@ -452,6 +520,9 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 			Where("users.deleted_at IS NULL")
 		if keywordCondition != "" {
 			tx = tx.Where(keywordCondition, keywordArgs...)
+		}
+		if banCondition != "" {
+			tx = tx.Where(banCondition, banArgs...)
 		}
 		return tx
 	}
@@ -464,7 +535,7 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 	}
 	var rows []*riskInviterAggregateRow
 	err := buildQuery().
-		Select("users.id AS inviter_id, users.username, users.display_name, users.email, users.status, users." + commonGroupCol + ", inviter_stats.direct_invite_count").
+		Select("users.id AS inviter_id, users.username, users.display_name, users.email, users.status, users.quota, users." + commonGroupCol + ", inviter_stats.direct_invite_count").
 		Order(riskInviterOrderClause(sortBy, order)).
 		Offset(startIdx).Limit(limit).
 		Scan(&rows).Error
@@ -474,7 +545,7 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 	result := make([]*RiskInviter, 0, len(rows))
 	for _, row := range rows {
 		var invitees []*User
-		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status").
+		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota").
 			Where("inviter_id = ?", row.InviterId).Order("id desc").Limit(100).Find(&invitees).Error; err != nil {
 			return nil, 0, err
 		}
@@ -495,7 +566,7 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 		}
 		result = append(result, &RiskInviter{
 			InviterId: row.InviterId, Username: row.Username, DisplayName: row.DisplayName,
-			Email: row.Email, Status: row.Status, Group: row.Group,
+			Email: row.Email, Status: row.Status, Quota: row.Quota, Group: row.Group,
 			DirectInviteCount: row.DirectInviteCount,
 			SharedIPCount:     sharedIPs,
 			Suspicious:        sharedIPs > 0,
@@ -523,7 +594,7 @@ func ListRiskInvitees(inviterId int, startIdx int, limit int) ([]*RiskUserSummar
 		return []*RiskUserSummary{}, 0, nil
 	}
 	var users []*User
-	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status").
+	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota").
 		Where("inviter_id = ?", inviterId).
 		Order("id desc").Offset(startIdx).Limit(limit).
 		Find(&users).Error; err != nil {

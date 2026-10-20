@@ -100,6 +100,7 @@ func GetRiskControlSharedIPs(c *gin.Context) {
 		pageInfo.GetPageSize(),
 		sortBy,
 		order,
+		strings.TrimSpace(c.Query("ban_state")),
 	)
 	if err != nil {
 		common.ApiError(c, err)
@@ -120,6 +121,7 @@ func GetRiskControlInviters(c *gin.Context) {
 		pageInfo.GetPageSize(),
 		sortBy,
 		order,
+		strings.TrimSpace(c.Query("ban_state")),
 	)
 	if err != nil {
 		common.ApiError(c, err)
@@ -173,6 +175,7 @@ func GetRiskControlUser(c *gin.Context) {
 		"display_name":  user.DisplayName,
 		"email":         user.Email,
 		"status":        user.Status,
+		"quota":         user.Quota,
 		"group":         user.Group,
 		"inviter_id":    user.InviterId,
 		"last_login_at": user.LastLoginAt,

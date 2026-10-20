@@ -27,7 +27,7 @@ import {
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
-import { API, showError, timestamp2string } from '../../helpers';
+import { API, renderQuota, showError, timestamp2string } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { getUserRowKey, isUserBanned } from './UserInlineList';
 import { notifyBatchStatus, submitBatchStatus } from './batchStatus';
@@ -383,13 +383,13 @@ export default function AccountManageModal({
       {
         title: t('用户ID'),
         dataIndex: 'user_id',
-        width: 90,
+        width: 80,
         render: (value, record) => value ?? getUserRowKey(record) ?? '-',
       },
       {
         title: t('用户名'),
         dataIndex: 'username',
-        width: 160,
+        width: 150,
         render: (value, record) => (
           <div className='min-w-0'>
             <div className='truncate font-medium'>{value || '-'}</div>
@@ -412,15 +412,25 @@ export default function AccountManageModal({
         render: (_, record) => renderStatusTag(record, t),
       },
       {
+        title: t('额度'),
+        dataIndex: 'quota',
+        width: 110,
+        render: (value) => (
+          <span className='tabular-nums'>
+            {typeof value === 'number' ? renderQuota(value) : '-'}
+          </span>
+        ),
+      },
+      {
         title: t('角色'),
         dataIndex: 'role',
-        width: 130,
+        width: 110,
         render: (value) => renderRoleTag(value, t),
       },
       {
         title: t('最近出现'),
         dataIndex: 'last_seen_at',
-        width: 180,
+        width: 160,
         render: (_, record) => formatLastSeen(record),
       },
     ],
@@ -596,8 +606,18 @@ export default function AccountManageModal({
                           {renderRoleTag(user.role, t)}
                         </div>
                       </div>
-                      <div className='mt-1 text-xs text-[var(--semi-color-text-2)]'>
-                        {t('最近出现')}: {formatLastSeen(user)}
+                      <div className='mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--semi-color-text-2)]'>
+                        <span>
+                          {t('额度')}:{' '}
+                          <span className='tabular-nums text-[var(--semi-color-text-0)]'>
+                            {typeof user.quota === 'number'
+                              ? renderQuota(user.quota)
+                              : '-'}
+                          </span>
+                        </span>
+                        <span>
+                          {t('最近出现')}: {formatLastSeen(user)}
+                        </span>
                       </div>
                     </div>
                   </div>

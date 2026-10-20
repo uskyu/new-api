@@ -3843,6 +3843,9 @@
     "已跳过 {{count}} 个账号": "{{count}} comptes ignorés",
     "加载中": "Chargement",
     "访客": "Invité",
-    "默认补全倍率": "Taux de complétion par défaut"
+    "默认补全倍率": "Taux de complétion par défaut",
+    "封禁状态": "Statut de bannissement",
+    "有已封禁账号": "Contient des comptes bannis",
+    "全部已封禁": "Tous les comptes bannis"
   }
 }

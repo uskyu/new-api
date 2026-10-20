@@ -35,7 +35,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { RefreshCw, Search, ShieldAlert, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { API, showError, timestamp2string } from '../../helpers';
+import { API, renderQuota, showError, timestamp2string } from '../../helpers';
 import AccountManageModal from './AccountManageModal';
 import UserInlineList, {
   getUserRowKey,
@@ -265,6 +265,10 @@ function InviterCards({
               <Tag color={item.shared_ip_count ? 'red' : 'white'}>
                 {t('关联同 IP')}: {item.shared_ip_count}
               </Tag>
+              <Tag>
+                {t('额度')}:{' '}
+                {typeof item.quota === 'number' ? renderQuota(item.quota) : '-'}
+              </Tag>
             </div>
             <div className='mt-3 border-t border-[var(--semi-color-border)] pt-3'>
               <div className='mb-1 text-xs text-[var(--semi-color-text-2)]'>
@@ -333,6 +337,10 @@ export default function RiskControl() {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
 
+  // 封禁状态筛选（两个页签共用同一个状态，切换页签时保持各自语义）：
+  // '' 不筛选 / has_banned 有已封禁账号 / all_banned 全部已封禁。
+  const [banState, setBanState] = useState('');
+
   // 同 IP 用户排序/筛选
   const [sharedSortBy, setSharedSortBy] = useState(DEFAULT_SHARED_SORT);
   const [sharedOrder, setSharedOrder] = useState(DEFAULT_ORDER);
@@ -359,6 +367,9 @@ export default function RiskControl() {
           ? '/api/risk-control/shared-ips'
           : '/api/risk-control/inviters';
       const params = { p: page, page_size: PAGE_SIZE, keyword: search };
+      if (banState) {
+        params.ban_state = banState;
+      }
       if (tab === 'shared') {
         if (source !== 'all') {
           params.source = source;
@@ -413,6 +424,7 @@ export default function RiskControl() {
     minUsers,
     inviterSortBy,
     inviterOrder,
+    banState,
   ]);
 
   const openAccountModal = useCallback((mode, item) => {
@@ -645,6 +657,16 @@ export default function RiskControl() {
     { title: t('直接邀请人数'), dataIndex: 'direct_invite_count', width: 120 },
     { title: t('关联同 IP'), dataIndex: 'shared_ip_count', width: 110 },
     {
+      title: t('额度'),
+      dataIndex: 'quota',
+      width: 130,
+      render: (value) => (
+        <span className='tabular-nums'>
+          {typeof value === 'number' ? renderQuota(value) : '-'}
+        </span>
+      ),
+    },
+    {
       title: t('被邀请用户'),
       dataIndex: 'invitees',
       width: 360,
@@ -872,6 +894,23 @@ export default function RiskControl() {
             </div>
 
             <div className='flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center'>
+              <Select
+                value={banState}
+                onChange={(value) => {
+                  setBanState(value || '');
+                  setPage(1);
+                }}
+                className='w-full sm:w-56'
+                prefix={
+                  <span className='shrink-0 whitespace-nowrap'>
+                    {t('封禁状态')}
+                  </span>
+                }
+              >
+                <Select.Option value=''>{t('全部状态')}</Select.Option>
+                <Select.Option value='has_banned'>{t('有已封禁账号')}</Select.Option>
+                <Select.Option value='all_banned'>{t('全部已封禁')}</Select.Option>
+              </Select>
               {tab === 'shared' ? (
                 <Select
                   value={sharedSortBy}
