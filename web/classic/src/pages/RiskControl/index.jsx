@@ -54,6 +54,65 @@ const DEFAULT_INVITER_SORT = 'direct_invite_count:desc';
 const SHARED_SORT_FALLBACK = 'user_count';
 const INVITER_SORT_FALLBACK = 'direct_invite_count';
 
+// 分类 chip：点击后一次性写入该分类的预设筛选值，预设里没有的项回到页签默认值，
+// 因此「全部」等价于改造前的默认行为（不额外传任何新参数）。
+const SHARED_CHIP_DEFAULTS = {
+  source: 'all',
+  minUsers: DEFAULT_MIN_USERS,
+  banState: '',
+  active24h: false,
+};
+const SHARED_CHIPS = [
+  { key: 'all', label: '全部', preset: {} },
+  {
+    key: 'high_risk',
+    label: '高危',
+    preset: { minUsers: 3, banState: 'has_banned' },
+  },
+  { key: 'multi_user', label: '多人共用', preset: { minUsers: 5 } },
+  { key: 'active_24h', label: '24小时活跃', preset: { active24h: true } },
+  { key: 'source_login', label: '仅登录来源', preset: { source: 'login' } },
+  { key: 'source_token', label: '仅令牌来源', preset: { source: 'token' } },
+];
+
+const INVITER_CHIP_DEFAULTS = {
+  banState: '',
+  suspiciousOnly: false,
+  minInvites: 0,
+  inviterStatus: '',
+};
+const INVITER_CHIPS = [
+  { key: 'all', label: '全部', preset: {} },
+  { key: 'needs_review', label: '需复核', preset: { suspiciousOnly: true } },
+  { key: 'big_inviters', label: '大邀请人', preset: { minInvites: 10 } },
+  {
+    key: 'has_banned_invitees',
+    label: '含已封禁被邀请人',
+    preset: { banState: 'has_banned' },
+  },
+  {
+    key: 'disabled_inviters',
+    label: '已封禁邀请人',
+    preset: { inviterStatus: 'disabled' },
+  },
+];
+
+// 同 IP 页签的关键词匹配：email 为后端新增的 search_type，其余沿用通用匹配。
+const matchesSharedUserKeyword = (user, keyword, searchType) => {
+  if (!keyword) return false;
+  if (searchType === 'email') {
+    return String(user?.email || '')
+      .toLowerCase()
+      .includes(String(keyword).trim().toLowerCase());
+  }
+  return userMatchesKeyword(user, keyword, searchType);
+};
+
+// 网段疑似标记：同网段账号数大于本行账号数时才展示。
+const hasSuspiciousSubnet = (item) =>
+  Boolean(item?.subnet) &&
+  (Number(item?.subnet_user_count) || 0) > (Number(item?.user_count) || 0);
+
 const parseSortValue = (value, fallbackSortBy) => {
   const [sortBy, order] = String(value || '').split(':');
   return [sortBy || fallbackSortBy, order === 'asc' ? 'asc' : 'desc'];
@@ -76,6 +135,20 @@ const MatchHint = ({ t }) => (
     </Tag>
   </div>
 );
+
+const SubnetTag = ({ item, t }) => {
+  if (!hasSuspiciousSubnet(item)) {
+    return <Text type='tertiary'>-</Text>;
+  }
+  return (
+    <Tag color='orange' shape='circle' size='small'>
+      {t('网段 {{subnet}} · {{count}} 账号', {
+        subnet: item.subnet,
+        count: Number(item.subnet_user_count),
+      })}
+    </Tag>
+  );
+};
 
 const scopeActionKey = (mode, item, action) =>
   mode === 'shared'
@@ -101,13 +174,11 @@ function SharedIPCards({
   return (
     <div className='grid gap-3 md:hidden'>
       {items.map((item) => {
-        const matchedUsers =
-          highlightKeyword &&
-          (searchType === 'username' || searchType === 'user_id')
-            ? (item.users || []).filter((user) =>
-                userMatchesKeyword(user, highlightKeyword, searchType),
-              )
-            : [];
+        const matchedUsers = highlightKeyword
+          ? (item.users || []).filter((user) =>
+              matchesSharedUserKeyword(user, highlightKeyword, searchType),
+            )
+          : [];
         return (
           <div
             key={`${item.source}-${item.ip}`}
@@ -119,6 +190,11 @@ function SharedIPCards({
               </Text>
               <SourceTag source={item.source} t={t} />
             </div>
+            {hasSuspiciousSubnet(item) && (
+              <div className='mt-2'>
+                <SubnetTag item={item} t={t} />
+              </div>
+            )}
             <div className='mt-3 grid grid-cols-3 gap-2 text-center'>
               <div>
                 <div className='text-xs text-[var(--semi-color-text-2)]'>
@@ -270,7 +346,7 @@ function InviterCards({
                 {t('直接邀请人数')}: {item.direct_invite_count}
               </Tag>
               <Tag color={item.shared_ip_count ? 'red' : 'white'}>
-                {t('关联同 IP')}: {item.shared_ip_count}
+                {t('同 IP 组')}: {Number(item.shared_ip_count) || 0}
               </Tag>
               <Tag>
                 {t('额度')}:{' '}
@@ -354,6 +430,14 @@ export default function RiskControl() {
   // 邀请关系排序
   const [inviterSort, setInviterSort] = useState(DEFAULT_INVITER_SORT);
 
+  // 以下为分类 chip 对应的隐藏筛选参数（没有独立下拉框，点 chip 直接生效）。
+  // 默认值即「不筛选」，保证「全部」与改造前行为一致。
+  const [active24h, setActive24h] = useState(false);
+  const [inviterSearchType, setInviterSearchType] = useState('any');
+  const [suspiciousOnly, setSuspiciousOnly] = useState(false);
+  const [minInvites, setMinInvites] = useState(0);
+  const [inviterStatus, setInviterStatus] = useState('');
+
   const [accountModal, setAccountModal] = useState({
     visible: false,
     mode: 'shared',
@@ -381,6 +465,9 @@ export default function RiskControl() {
         }
         params.search_type = searchType;
         params.min_users = minUsers;
+        if (active24h) {
+          params.active_24h = 'true';
+        }
         const [sortBy, order] = parseSortValue(
           sharedSort,
           SHARED_SORT_FALLBACK,
@@ -388,6 +475,18 @@ export default function RiskControl() {
         params.sort_by = sortBy;
         params.order = order;
       } else {
+        if (inviterSearchType === 'ip') {
+          params.search_type = inviterSearchType;
+        }
+        if (suspiciousOnly) {
+          params.suspicious_only = 'true';
+        }
+        if (minInvites > 1) {
+          params.min_invites = minInvites;
+        }
+        if (inviterStatus) {
+          params.inviter_status = inviterStatus;
+        }
         const [sortBy, order] = parseSortValue(
           inviterSort,
           INVITER_SORT_FALLBACK,
@@ -436,6 +535,11 @@ export default function RiskControl() {
     minUsers,
     inviterSort,
     banState,
+    active24h,
+    inviterSearchType,
+    suspiciousOnly,
+    minInvites,
+    inviterStatus,
   ]);
 
   const openAccountModal = useCallback((mode, item) => {
@@ -536,10 +640,87 @@ export default function RiskControl() {
   const appliedKeyword = search.trim();
   const sharedHighlightActive =
     tab === 'shared' &&
-    (searchType === 'username' || searchType === 'user_id') &&
+    (searchType === 'username' ||
+      searchType === 'user_id' ||
+      searchType === 'email') &&
     appliedKeyword !== '';
-  const inviterHighlightActive =
-    tab === 'inviters' && appliedKeyword !== '';
+  const inviterHighlightActive = tab === 'inviters' && appliedKeyword !== '';
+
+  // chip 高亮由当前筛选值反推：手工调整下拉后若不再精确匹配任何预设，
+  // 自动取消高亮（「预设」与「自定义」二选一里选取消高亮）。
+  const sharedChipValues = { source, minUsers, banState, active24h };
+  const inviterChipValues = {
+    banState,
+    suspiciousOnly,
+    minInvites,
+    inviterStatus,
+  };
+  const activeSharedChip = SHARED_CHIPS.find((chip) => {
+    const expected = { ...SHARED_CHIP_DEFAULTS, ...chip.preset };
+    return Object.keys(expected).every(
+      (key) => sharedChipValues[key] === expected[key],
+    );
+  });
+  const activeInviterChip = INVITER_CHIPS.find((chip) => {
+    const expected = { ...INVITER_CHIP_DEFAULTS, ...chip.preset };
+    return Object.keys(expected).every(
+      (key) => inviterChipValues[key] === expected[key],
+    );
+  });
+  const activeChip = tab === 'shared' ? activeSharedChip : activeInviterChip;
+  const currentChips = tab === 'shared' ? SHARED_CHIPS : INVITER_CHIPS;
+
+  // 点击分类 chip：写入预设值，未在预设里出现的项回到该页签默认值。
+  const applyChip = (chip) => {
+    if (tab === 'shared') {
+      const values = { ...SHARED_CHIP_DEFAULTS, ...chip.preset };
+      setSource(values.source);
+      setMinUsers(values.minUsers);
+      setBanState(values.banState);
+      setActive24h(values.active24h);
+    } else {
+      const values = { ...INVITER_CHIP_DEFAULTS, ...chip.preset };
+      setBanState(values.banState);
+      setSuspiciousOnly(values.suspiciousOnly);
+      setMinInvites(values.minInvites);
+      setInviterStatus(values.inviterStatus);
+    }
+    setPage(1);
+  };
+
+  // 重置筛选：清空关键词/筛选/排序与 chip 隐藏参数，分类回到「全部」。
+  const resetFilters = () => {
+    setKeyword('');
+    setSearch('');
+    setSource('all');
+    setMinUsers(DEFAULT_MIN_USERS);
+    setSharedSort(DEFAULT_SHARED_SORT);
+    setInviterSort(DEFAULT_INVITER_SORT);
+    setBanState('');
+    setActive24h(false);
+    setSuspiciousOnly(false);
+    setMinInvites(0);
+    setInviterStatus('');
+    setPage(1);
+  };
+
+  const applySearch = () => {
+    setSearch(keyword.trim());
+    setPage(1);
+  };
+
+  const keywordPlaceholder =
+    tab === 'shared'
+      ? searchType === 'username'
+        ? t('搜索用户名/昵称')
+        : searchType === 'user_id'
+          ? t('搜索用户ID')
+          : searchType === 'email'
+            ? t('搜索邮箱')
+            : t('搜索 IP')
+      : inviterSearchType === 'ip'
+        ? t('搜索 IP')
+        : t('搜索用户 ID 或名称');
 
   const sharedColumns = [
     {
@@ -565,7 +746,7 @@ export default function RiskControl() {
       render: (users, item) => {
         const matchedUsers = sharedHighlightActive
           ? (users || []).filter((user) =>
-              userMatchesKeyword(user, appliedKeyword, searchType),
+              matchesSharedUserKeyword(user, appliedKeyword, searchType),
             )
           : [];
         return (
@@ -582,6 +763,12 @@ export default function RiskControl() {
       },
     },
     { title: t('用户数'), dataIndex: 'user_count', width: 90 },
+    {
+      title: t('网段'),
+      dataIndex: 'subnet',
+      width: 200,
+      render: (_, item) => <SubnetTag item={item} t={t} />,
+    },
     { title: t('采样次数'), dataIndex: 'event_count', width: 100 },
     {
       title: t('最近出现'),
@@ -666,7 +853,16 @@ export default function RiskControl() {
       },
     },
     { title: t('直接邀请人数'), dataIndex: 'direct_invite_count', width: 120 },
-    { title: t('关联同 IP'), dataIndex: 'shared_ip_count', width: 110 },
+    {
+      title: t('同 IP 组'),
+      dataIndex: 'shared_ip_count',
+      width: 120,
+      render: (value) => (
+        <span className='tabular-nums'>
+          {t('同 IP 组')}: {Number(value) || 0}
+        </span>
+      ),
+    },
     {
       title: t('额度'),
       dataIndex: 'quota',
@@ -841,6 +1037,28 @@ export default function RiskControl() {
             />
           </Tabs>
 
+          {/* 分类 chip：移动端单行横向滚动，桌面端正常换行；高亮由当前筛选值反推。 */}
+          <div
+            role='group'
+            className='-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1 scrollbar-hide md:flex-wrap md:overflow-visible'
+          >
+            {currentChips.map((chip) => {
+              const active = activeChip?.key === chip.key;
+              return (
+                <Button
+                  key={chip.key}
+                  size='small'
+                  type={active ? 'primary' : 'tertiary'}
+                  theme={active ? 'solid' : 'light'}
+                  className='shrink-0 !rounded-full whitespace-nowrap'
+                  onClick={() => applyChip(chip)}
+                >
+                  {t(chip.label)}
+                </Button>
+              );
+            })}
+          </div>
+
           <div className='my-4 flex flex-col gap-3'>
             <div className='flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center'>
               {tab === 'shared' && (
@@ -857,7 +1075,7 @@ export default function RiskControl() {
                   <Select.Option value='token'>{t('令牌')}</Select.Option>
                 </Select>
               )}
-              {tab === 'shared' && (
+              {tab === 'shared' ? (
                 <Select
                   value={searchType}
                   onChange={(value) => {
@@ -873,6 +1091,19 @@ export default function RiskControl() {
                   <Select.Option value='user_id'>
                     {t('搜索用户ID')}
                   </Select.Option>
+                  <Select.Option value='email'>{t('搜索邮箱')}</Select.Option>
+                </Select>
+              ) : (
+                <Select
+                  value={inviterSearchType}
+                  onChange={(value) => {
+                    setInviterSearchType(value);
+                    setPage(1);
+                  }}
+                  className='w-full sm:w-40'
+                >
+                  <Select.Option value='any'>{t('综合搜索')}</Select.Option>
+                  <Select.Option value='ip'>{t('搜索 IP')}</Select.Option>
                 </Select>
               )}
               <Input
@@ -880,28 +1111,17 @@ export default function RiskControl() {
                 onChange={setKeyword}
                 prefix={<Search size={16} />}
                 className='w-full sm:w-64'
-                placeholder={
-                  tab === 'shared'
-                    ? searchType === 'username'
-                      ? t('搜索用户名/昵称')
-                      : searchType === 'user_id'
-                        ? t('搜索用户ID')
-                        : t('搜索 IP')
-                    : t('搜索用户 ID 或名称')
-                }
-                onEnterPress={() => {
-                  setSearch(keyword.trim());
-                  setPage(1);
-                }}
+                placeholder={keywordPlaceholder}
+                onEnterPress={applySearch}
               />
-              <Button
-                onClick={() => {
-                  setSearch(keyword.trim());
-                  setPage(1);
-                }}
-              >
-                {t('查询')}
-              </Button>
+              <div className='flex w-full gap-2 sm:w-auto'>
+                <Button className='flex-1 sm:flex-none' onClick={applySearch}>
+                  {t('查询')}
+                </Button>
+                <Button className='flex-1 sm:flex-none' onClick={resetFilters}>
+                  {t('重置筛选')}
+                </Button>
+              </div>
             </div>
 
             <div className='flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center'>

@@ -1,7 +1,9 @@
 package model
 
 import (
+	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +44,29 @@ func normalizeRiskBanState(banState string) string {
 	}
 }
 
+// 邀请关系列表的搜索类型：any（默认，匹配用户字段） / ip（匹配 IP 精确或前缀）。
+const (
+	riskInviterSearchAny = "any"
+	riskInviterSearchIP  = "ip"
+)
+
+// 邀请人自身状态筛选：仅支持 disabled，其余值不筛选。
+const riskInviterStatusDisabled = "disabled"
+
+func normalizeRiskInviterSearchType(raw string) string {
+	if strings.TrimSpace(raw) == riskInviterSearchIP {
+		return riskInviterSearchIP
+	}
+	return riskInviterSearchAny
+}
+
+func normalizeRiskInviterStatus(raw string) string {
+	if strings.TrimSpace(raw) == riskInviterStatusDisabled {
+		return riskInviterStatusDisabled
+	}
+	return ""
+}
+
 // RiskIPRecord is a compact, queryable IP history. It deliberately aggregates
 // repeated requests so the risk-control feature does not grow like request logs.
 type RiskIPRecord struct {
@@ -56,21 +81,25 @@ type RiskIPRecord struct {
 }
 
 type RiskSharedIP struct {
-	IP         string             `json:"ip"`
-	Source     string             `json:"source"`
-	UserCount  int64              `json:"user_count"`
-	EventCount int64              `json:"event_count"`
-	LastSeenAt int64              `json:"last_seen_at"`
-	Users      []*RiskUserSummary `json:"users" gorm:"-"`
+	IP              string             `json:"ip"`
+	Source          string             `json:"source"`
+	Subnet          string             `json:"subnet"`            // 该 IP 所在网段（IPv4 /24、IPv6 /64），无法解析为空串
+	SubnetUserCount int64              `json:"subnet_user_count"` // 当前页同网段去重账号数（含本行；按页统计，翻页可能变化）
+	UserCount       int64              `json:"user_count"`
+	EventCount      int64              `json:"event_count"`
+	LastSeenAt      int64              `json:"last_seen_at"`
+	Users           []*RiskUserSummary `json:"users" gorm:"-"`
 }
 
 type RiskUserSummary struct {
 	UserId      int    `json:"user_id"`
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
-	Email       string `json:"email"`  // users.email，可能为空字符串
-	Status      int    `json:"status"` // 1=正常 2=已封禁
-	Quota       int    `json:"quota"`  // users.quota，原始额度值，前端按显示设置换算
+	Email       string `json:"email"`      // users.email，可能为空字符串
+	Status      int    `json:"status"`     // 1=正常 2=已封禁
+	Quota       int    `json:"quota"`      // users.quota，原始额度值，前端按显示设置换算
+	IP          string `json:"ip"`         // 该用户最近一次出现的 IP，无记录时为空串
+	CreatedAt   int64  `json:"created_at"` // users.created_at
 	Group       string `json:"group"`
 	Role        int    `json:"role"`
 	InviterId   int    `json:"inviter_id"`
@@ -207,7 +236,11 @@ func riskSharedIPBanHaving(banState string) (string, []interface{}) {
 	}
 }
 
-func ListRiskSharedIPs(source string, searchType string, keyword string, minUsers int, startIdx int, limit int, sortBy string, order string, banState string) ([]*RiskSharedIP, int64, error) {
+// ListRiskSharedIPs 返回同 IP 用户组列表。
+// search_type=username|email 时按用户字段匹配（均包含邮箱模糊匹配）；
+// search_type=user_id 时按用户 ID 精确匹配；其余按 IP 模糊匹配。
+// active24h=true 时只保留 MAX(last_seen_at) >= now-86400 的 IP 组。
+func ListRiskSharedIPs(source string, searchType string, keyword string, minUsers int, startIdx int, limit int, sortBy string, order string, banState string, active24h bool) ([]*RiskSharedIP, int64, error) {
 	if minUsers < 2 {
 		minUsers = 2
 	}
@@ -215,30 +248,58 @@ func ListRiskSharedIPs(source string, searchType string, keyword string, minUser
 		limit = common.ItemsPerPage
 	}
 	banState = normalizeRiskBanState(banState)
+	searchType = strings.TrimSpace(searchType)
+	keyword = strings.TrimSpace(keyword)
 
 	var matchingUserIds []int
 	var matchingIPs []string
-	if searchType == "username" && keyword != "" {
-		pattern, err := sanitizeLikePattern("%" + keyword + "%")
-		if err != nil {
-			return nil, 0, err
+	ipPattern := ""
+	// userSearchApplied 表示本次关键词走「用户维度」搜索（username/email/user_id）。
+	// 该维度命中 0 个用户时必须立即返回空列表，不能退化为「不筛选」而返回全量 IP 组。
+	userSearchApplied := false
+	if keyword != "" {
+		switch searchType {
+		case "username":
+			userSearchApplied = true
+			pattern, err := sanitizeLikePattern("%" + keyword + "%")
+			if err != nil {
+				return nil, 0, err
+			}
+			if err := DB.Model(&User{}).
+				Where("username LIKE ? ESCAPE '!' OR display_name LIKE ? ESCAPE '!' OR email LIKE ? ESCAPE '!'", pattern, pattern, pattern).
+				Pluck("id", &matchingUserIds).Error; err != nil {
+				return nil, 0, err
+			}
+		case "email":
+			userSearchApplied = true
+			pattern, err := sanitizeLikePattern("%" + keyword + "%")
+			if err != nil {
+				return nil, 0, err
+			}
+			if err := DB.Model(&User{}).
+				Where("email LIKE ? ESCAPE '!'", pattern).
+				Pluck("id", &matchingUserIds).Error; err != nil {
+				return nil, 0, err
+			}
+		case "user_id":
+			userSearchApplied = true
+			id, err := strconv.Atoi(keyword)
+			if err != nil || id <= 0 {
+				return []*RiskSharedIP{}, 0, nil
+			}
+			matchingUserIds = append(matchingUserIds, id)
+		default:
+			pattern, err := sanitizeLikePattern("%" + keyword + "%")
+			if err != nil {
+				return nil, 0, err
+			}
+			ipPattern = pattern
 		}
-		if err := DB.Model(&User{}).
-			Where("username LIKE ? ESCAPE '!' OR display_name LIKE ? ESCAPE '!'", pattern, pattern).
-			Pluck("id", &matchingUserIds).Error; err != nil {
-			return nil, 0, err
-		}
+	}
+	if userSearchApplied {
 		if len(matchingUserIds) == 0 {
 			return []*RiskSharedIP{}, 0, nil
 		}
-	} else if searchType == "user_id" && keyword != "" {
-		id, err := strconv.Atoi(strings.TrimSpace(keyword))
-		if err != nil || id <= 0 {
-			return []*RiskSharedIP{}, 0, nil
-		}
-		matchingUserIds = append(matchingUserIds, id)
-	}
-	if len(matchingUserIds) > 0 {
 		if err := DB.Model(&RiskIPRecord{}).
 			Where("user_id IN ? AND ip <> ''", matchingUserIds).
 			Distinct("ip").
@@ -250,14 +311,6 @@ func ListRiskSharedIPs(source string, searchType string, keyword string, minUser
 		}
 	}
 
-	pattern := ""
-	if searchType != "username" && searchType != "user_id" && keyword != "" {
-		var err error
-		pattern, err = sanitizeLikePattern("%" + keyword + "%")
-		if err != nil {
-			return nil, 0, err
-		}
-	}
 	applyFilters := func(tx *gorm.DB) *gorm.DB {
 		tx = tx.Where("ip <> ''")
 		if source == RiskIPSourceLogin || source == RiskIPSourceToken {
@@ -266,8 +319,8 @@ func ListRiskSharedIPs(source string, searchType string, keyword string, minUser
 		if len(matchingIPs) > 0 {
 			tx = tx.Where("ip IN ?", matchingIPs)
 		}
-		if pattern != "" {
-			tx = tx.Where("ip LIKE ? ESCAPE '!'", pattern)
+		if ipPattern != "" {
+			tx = tx.Where("ip LIKE ? ESCAPE '!'", ipPattern)
 		}
 		return tx
 	}
@@ -277,20 +330,26 @@ func ListRiskSharedIPs(source string, searchType string, keyword string, minUser
 		groupColumns = "ip, source"
 		selectColumns = "ip, source"
 	}
-	grouped := applyFilters(DB.Model(&RiskIPRecord{})).Select(groupColumns).Group(groupColumns).Having("COUNT(DISTINCT user_id) >= ?", minUsers)
-	if having, args := riskSharedIPBanHaving(banState); having != "" {
-		grouped = grouped.Having(having, args...)
+	// 24 小时活跃阈值只取一次，保证 count 与分页查询使用同一时间基准。
+	activeCutoff := time.Now().Unix() - 86400
+	applyHaving := func(tx *gorm.DB) *gorm.DB {
+		tx = tx.Having("COUNT(DISTINCT user_id) >= ?", minUsers)
+		if having, args := riskSharedIPBanHaving(banState); having != "" {
+			tx = tx.Having(having, args...)
+		}
+		if active24h {
+			tx = tx.Having("MAX(last_seen_at) >= ?", activeCutoff)
+		}
+		return tx
 	}
+	grouped := applyHaving(applyFilters(DB.Model(&RiskIPRecord{})).Select(groupColumns).Group(groupColumns))
 	var total int64
 	if err := DB.Table("(?) AS risk_ip_groups", grouped).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var rows []*RiskSharedIP
-	query := applyFilters(DB.Model(&RiskIPRecord{})).Select(selectColumns+", COUNT(DISTINCT user_id) AS user_count, SUM(event_count) AS event_count, MAX(last_seen_at) AS last_seen_at").
-		Group(groupColumns).Having("COUNT(DISTINCT user_id) >= ?", minUsers)
-	if having, args := riskSharedIPBanHaving(banState); having != "" {
-		query = query.Having(having, args...)
-	}
+	query := applyHaving(applyFilters(DB.Model(&RiskIPRecord{})).Select(selectColumns + ", COUNT(DISTINCT user_id) AS user_count, SUM(event_count) AS event_count, MAX(last_seen_at) AS last_seen_at").
+		Group(groupColumns))
 	err := query.Order(riskSharedIPOrderClause(sortBy, order)).Offset(startIdx).Limit(limit).Scan(&rows).Error
 	if err != nil {
 		return nil, 0, err
@@ -302,7 +361,122 @@ func ListRiskSharedIPs(source string, searchType string, keyword string, minUser
 		}
 		row.Users = users
 	}
+	if err := attachRiskSharedIPSubnets(rows); err != nil {
+		return nil, 0, err
+	}
 	return rows, total, nil
+}
+
+// riskIPSubnet 返回 IP 所在网段：IPv4 取前 3 段（/24），IPv6 取前 4 段（/64）。
+// 解析失败返回空字符串。网段计算必须在 Go 里完成，保证 SQLite/MySQL/PostgreSQL 一致。
+func riskIPSubnet(raw string) string {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil {
+		return ""
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		return fmt.Sprintf("%d.%d.%d.0/24", ip4[0], ip4[1], ip4[2])
+	}
+	ip16 := ip.To16()
+	if ip16 == nil {
+		return ""
+	}
+	// IPv6 /64：保留前 8 字节（4 个 hextet），其余清零后按标准压缩格式输出。
+	masked := make(net.IP, net.IPv6len)
+	copy(masked, ip16[:8])
+	return masked.String() + "/64"
+}
+
+// attachRiskSharedIPSubnets 为当前页的同 IP 行补充网段信息。
+// 只为当前页行计算，且用一次带 IN 的聚合查询完成（禁止逐行查询）：
+// 统计范围为「当前页这些 IP」下按 (ip, user_id) 去重后的账号，即同一网段
+// 在当前页内的去重账号数（含本行账号）。
+//
+// 注意口径：该值按页统计，不含不在当前页的同网段 IP 组；因此同一网段的行
+// 被分页拆开时，不同页看到的 subnet_user_count 可能不同。前端只把它当作
+// 「疑似」提示（subnet_user_count > user_count 时展示），不作为精确总数使用。
+func attachRiskSharedIPSubnets(rows []*RiskSharedIP) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	pageIPs := make([]string, 0, len(rows))
+	ipSubnet := make(map[string]string, len(rows))
+	for _, row := range rows {
+		subnet := riskIPSubnet(row.IP)
+		row.Subnet = subnet
+		if subnet == "" {
+			continue
+		}
+		if _, ok := ipSubnet[row.IP]; !ok {
+			ipSubnet[row.IP] = subnet
+			pageIPs = append(pageIPs, row.IP)
+		}
+	}
+	if len(pageIPs) == 0 {
+		return nil
+	}
+	type riskIPUserPair struct {
+		IP     string
+		UserId int
+	}
+	var pairs []*riskIPUserPair
+	if err := DB.Model(&RiskIPRecord{}).
+		Select("ip, user_id").
+		Where("ip IN ? AND ip <> ''", pageIPs).
+		Group("ip, user_id").
+		Scan(&pairs).Error; err != nil {
+		return err
+	}
+	subnetUsers := make(map[string]map[int]struct{})
+	for _, pair := range pairs {
+		subnet := ipSubnet[pair.IP]
+		if subnet == "" {
+			continue
+		}
+		users := subnetUsers[subnet]
+		if users == nil {
+			users = make(map[int]struct{})
+			subnetUsers[subnet] = users
+		}
+		users[pair.UserId] = struct{}{}
+	}
+	for _, row := range rows {
+		if row.Subnet == "" {
+			row.SubnetUserCount = 0
+			continue
+		}
+		row.SubnetUserCount = int64(len(subnetUsers[row.Subnet]))
+	}
+	return nil
+}
+
+// listLatestRiskIPRecordsByUserIds 返回每个用户 last_seen_at 最大的那条 IP 记录。
+// 同一 last_seen_at 有多条记录时按 ip 字典序取最小，保证结果稳定。
+// 无任何 IP 记录的用户不在返回 map 中。按 500 个 id 分块，避免 SQLite 变量上限。
+func listLatestRiskIPRecordsByUserIds(userIds []int) (map[int]*RiskIPRecord, error) {
+	latest := make(map[int]*RiskIPRecord, len(userIds))
+	const chunkSize = 500
+	for start := 0; start < len(userIds); start += chunkSize {
+		end := start + chunkSize
+		if end > len(userIds) {
+			end = len(userIds)
+		}
+		var records []*RiskIPRecord
+		if err := DB.Select("user_id, ip, first_seen_at, last_seen_at").
+			Where("user_id IN ? AND ip <> ''", userIds[start:end]).
+			Where("last_seen_at = (SELECT MAX(latest.last_seen_at) FROM risk_ip_records latest WHERE latest.user_id = risk_ip_records.user_id)").
+			Order("user_id ASC, last_seen_at DESC, ip ASC").
+			Find(&records).Error; err != nil {
+			return nil, err
+		}
+		for _, record := range records {
+			if _, ok := latest[record.UserId]; ok {
+				continue
+			}
+			latest[record.UserId] = record
+		}
+	}
+	return latest, nil
 }
 
 func listRiskIPUsers(ip string, source string) ([]*RiskUserSummary, error) {
@@ -321,7 +495,7 @@ func listRiskIPUsers(ip string, source string) ([]*RiskUserSummary, error) {
 	users := make(map[int]*User)
 	if len(ids) > 0 {
 		var list []*User
-		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota").Where("id IN ?", ids).Find(&list).Error; err != nil {
+		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at").Where("id IN ?", ids).Find(&list).Error; err != nil {
 			return nil, err
 		}
 		for _, user := range list {
@@ -340,6 +514,7 @@ func listRiskIPUsers(ip string, source string) ([]*RiskUserSummary, error) {
 			summary = riskUserSummaryFromUser(user)
 			summary.TokenId = record.TokenId
 			summary.Source = record.Source
+			summary.IP = record.IP
 			summary.FirstSeenAt = record.FirstSeenAt
 			summary.LastSeenAt = record.LastSeenAt
 			summary.EventCount = record.EventCount
@@ -392,27 +567,49 @@ func riskInviterOrderClause(sortBy string, order string) string {
 	}
 }
 
-// riskUserSummaryFromUser 将用户记录转换为风控用户摘要（含 email/status/quota）。
+// riskUserSummaryFromUser 将用户记录转换为风控用户摘要（含 email/status/quota/created_at）。
 func riskUserSummaryFromUser(user *User) *RiskUserSummary {
 	return &RiskUserSummary{
 		UserId: user.Id, Username: user.Username, DisplayName: user.DisplayName,
 		Email: user.Email, Status: user.Status, Quota: user.Quota,
-		Group: user.Group, Role: user.Role, InviterId: user.InviterId,
+		CreatedAt: user.CreatedAt,
+		Group:     user.Group, Role: user.Role, InviterId: user.InviterId,
 	}
 }
 
+// escapeRiskLikeLiteral 转义 LIKE 模式中的特殊字符（ESCAPE '!'），
+// 用于把用户输入的 IP 关键词当作字面前缀匹配。
+func escapeRiskLikeLiteral(input string) string {
+	input = strings.ReplaceAll(input, "!", "!!")
+	input = strings.ReplaceAll(input, "%", "!%")
+	input = strings.ReplaceAll(input, "_", "!_")
+	return input
+}
+
+// riskIPKeywordCondition 构造 RiskIPRecord.ip 的「精确 / 前缀」匹配条件。
+// 可解析为合法 IP 时同时做精确匹配；前缀匹配使用字面前缀，避免用户输入被当作通配符。
+func riskIPKeywordCondition(column string, keyword string) (string, []interface{}) {
+	keyword = strings.TrimSpace(keyword)
+	prefixPattern := escapeRiskLikeLiteral(keyword) + "%"
+	if exact := NormalizeRiskIP(keyword); exact != "" {
+		return "(" + column + " = ? OR " + column + " LIKE ? ESCAPE '!')", []interface{}{exact, prefixPattern}
+	}
+	return "(" + column + " LIKE ? ESCAPE '!')", []interface{}{prefixPattern}
+}
+
 // riskUserKeywordMatchCondition 构建单个用户记录的 keyword 匹配条件与参数
-// （id / username / display_name）。数字关键词始终按用户 ID 精确匹配，并在
-// 关键词长度 >= 2 时继续对 username / display_name 做 LIKE 匹配；非数字关键词
-// 沿用原有 LIKE 模糊搜索规则（最短 2 个字符）。prefix 为列名前缀（如 "users."）。
+// （id / username / display_name / email）。数字关键词始终按用户 ID 精确匹配，
+// 并在关键词长度 >= 2 时继续对 username / display_name / email 做 LIKE 匹配；
+// 非数字关键词沿用原有 LIKE 模糊搜索规则（最短 2 个字符）。
+// prefix 为列名前缀（如 "users."）。
 func riskUserKeywordMatchCondition(prefix string, keyword string) (string, []interface{}, error) {
 	keyword = strings.TrimSpace(keyword)
 	numericId := 0
 	if parsedId, err := strconv.Atoi(keyword); err == nil && parsedId > 0 {
 		numericId = parsedId
 	}
-	conditions := make([]string, 0, 3)
-	args := make([]interface{}, 0, 3)
+	conditions := make([]string, 0, 4)
+	args := make([]interface{}, 0, 4)
 	if numericId > 0 {
 		conditions = append(conditions, prefix+"id = ?")
 		args = append(args, numericId)
@@ -426,8 +623,9 @@ func riskUserKeywordMatchCondition(prefix string, keyword string) (string, []int
 		conditions = append(conditions,
 			prefix+"username LIKE ? ESCAPE '!'",
 			prefix+"display_name LIKE ? ESCAPE '!'",
+			prefix+"email LIKE ? ESCAPE '!'",
 		)
-		args = append(args, pattern, pattern)
+		args = append(args, pattern, pattern, pattern)
 	}
 	return "(" + strings.Join(conditions, " OR ") + ")", args, nil
 }
@@ -453,20 +651,39 @@ func riskInviterKeywordCondition(keyword string) (string, []interface{}, error) 
 	return condition, args, nil
 }
 
+// riskInviterIPKeywordCondition 构建邀请关系的 IP 关键词过滤条件：
+// 命中「邀请人本人或其任一被邀请人用过该 IP」的邀请人。IP 采用精确/前缀匹配。
+func riskInviterIPKeywordCondition(keyword string) (string, []interface{}) {
+	ipCondition, ipArgs := riskIPKeywordCondition("r.ip", keyword)
+	condition := "EXISTS (SELECT 1 FROM risk_ip_records r JOIN users ip_users ON ip_users.id = r.user_id " +
+		"WHERE ip_users.deleted_at IS NULL AND (ip_users.id = users.id OR ip_users.inviter_id = users.id) AND " + ipCondition + ")"
+	return condition, ipArgs
+}
+
 // listRiskMatchedInvitees 返回指定邀请人被 keyword 命中的前 20 个被邀请人（id DESC）。
+// searchType=ip 时按「该被邀请人用过该 IP」匹配，否则按用户字段（id/用户名/昵称/邮箱）匹配。
 // 关键词为空时返回空数组（不为 nil）。
-func listRiskMatchedInvitees(inviterId int, keyword string) ([]*RiskUserSummary, error) {
+func listRiskMatchedInvitees(inviterId int, keyword string, searchType string) ([]*RiskUserSummary, error) {
 	summaries := make([]*RiskUserSummary, 0)
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
 		return summaries, nil
 	}
-	condition, args, err := riskUserKeywordMatchCondition("", keyword)
-	if err != nil {
-		return nil, err
+	var condition string
+	var args []interface{}
+	if normalizeRiskInviterSearchType(searchType) == "ip" {
+		ipCondition, ipArgs := riskIPKeywordCondition("r.ip", keyword)
+		condition = "EXISTS (SELECT 1 FROM risk_ip_records r WHERE r.user_id = users.id AND " + ipCondition + ")"
+		args = ipArgs
+	} else {
+		var err error
+		condition, args, err = riskUserKeywordMatchCondition("", keyword)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var users []*User
-	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota").
+	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at").
 		Where("inviter_id = ?", inviterId).
 		Where(condition, args...).
 		Order("id desc").Limit(20).
@@ -499,20 +716,37 @@ func riskInviterBanCondition(banState string) (string, []interface{}) {
 // 聚合（COUNT(*) GROUP BY inviter_id）与分页都在数据库侧完成，total 与
 // direct_invite_count 都是真实总数而非当前页统计；当前页再补前 100 个被邀请人、
 // matched_invitees（keyword 命中的被邀请人，最多 20 个）与 shared_ip_count。
+//
+// searchType=ip 时 keyword 按 IP 精确/前缀匹配「邀请人本人或其被邀请人用过的 IP」；
+// 其余（默认 any）沿用用户字段匹配。新增筛选均在 SQL 侧完成，保证 total 与分页正确：
+//   - suspiciousOnly：邀请人本人或其任一被邀请人存在与他人共享 IP 的记录
+//     （EXISTS 子查询，避免先分页后过滤；注意它覆盖全量被邀请人，见下方行内口径说明）；
+//   - minInvites >= 2：direct_invite_count >= minInvites；
+//   - inviterStatus=disabled：邀请人自身 status=2。
+//
 // 实现只用 GORM 子查询 + JOIN，兼容 SQLite/MySQL/PostgreSQL。
-func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, order string, banState string) ([]*RiskInviter, int64, error) {
+func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, order string, banState string, searchType string, suspiciousOnly bool, minInvites int, inviterStatus string) ([]*RiskInviter, int64, error) {
 	if limit <= 0 {
 		limit = common.ItemsPerPage
 	}
 	keyword = strings.TrimSpace(keyword)
 	banState = normalizeRiskBanState(banState)
+	searchType = normalizeRiskInviterSearchType(searchType)
+	inviterStatus = normalizeRiskInviterStatus(inviterStatus)
+	if minInvites <= 1 {
+		minInvites = 0
+	}
 	var keywordCondition string
 	var keywordArgs []interface{}
 	if keyword != "" {
-		var err error
-		keywordCondition, keywordArgs, err = riskInviterKeywordCondition(keyword)
-		if err != nil {
-			return nil, 0, err
+		if searchType == riskInviterSearchIP {
+			keywordCondition, keywordArgs = riskInviterIPKeywordCondition(keyword)
+		} else {
+			var err error
+			keywordCondition, keywordArgs, err = riskInviterKeywordCondition(keyword)
+			if err != nil {
+				return nil, 0, err
+			}
 		}
 	}
 	banCondition, banArgs := riskInviterBanCondition(banState)
@@ -529,6 +763,24 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 		}
 		if banCondition != "" {
 			tx = tx.Where(banCondition, banArgs...)
+		}
+		if minInvites >= 2 {
+			tx = tx.Where("inviter_stats.direct_invite_count >= ?", minInvites)
+		}
+		if suspiciousOnly {
+			// 「需复核」= 邀请人本人或其任一被邀请人存在与他人共享 IP 的记录，
+			// 与行内 shared_ip_count/suspicious 的口径对齐（而不是只看邀请人本人）。
+			// 必须在 SQL 侧过滤：若先分页再在 Go 里过滤，total 与结果集都会错。
+			// a/b 两侧都 JOIN users 且要求 deleted_at IS NULL，避免已删除账号把邀请人
+			// 误标为需复核；a.ip <> '' 与同 IP 列表的过滤口径保持一致。
+			tx = tx.Where("EXISTS (SELECT 1 FROM risk_ip_records a " +
+				"JOIN risk_ip_records b ON a.ip = b.ip AND a.user_id <> b.user_id " +
+				"JOIN users shared_owner ON shared_owner.id = a.user_id AND shared_owner.deleted_at IS NULL " +
+				"JOIN users shared_peer ON shared_peer.id = b.user_id AND shared_peer.deleted_at IS NULL " +
+				"WHERE a.ip <> '' AND (shared_owner.id = users.id OR shared_owner.inviter_id = users.id))")
+		}
+		if inviterStatus == riskInviterStatusDisabled {
+			tx = tx.Where("users.status = ?", common.UserStatusDisabled)
 		}
 		return tx
 	}
@@ -551,7 +803,7 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 	result := make([]*RiskInviter, 0, len(rows))
 	for _, row := range rows {
 		var invitees []*User
-		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota").
+		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at").
 			Where("inviter_id = ?", row.InviterId).Order("id desc").Limit(100).Find(&invitees).Error; err != nil {
 			return nil, 0, err
 		}
@@ -562,11 +814,15 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 			ids = append(ids, invitee.Id)
 			summaries = append(summaries, riskUserSummaryFromUser(invitee))
 		}
+		// 口径说明：行内 shared_ip_count / suspicious 只统计「邀请人 + 前 100 个被邀请人」
+		// 范围内的共享 IP 数；而 suspicious_only 过滤使用全量被邀请人的 SQL EXISTS。
+		// 被邀请人 > 100 且共享 IP 只出现在第 101 个之后时，可能出现「筛选命中但行内
+		// suspicious=false」的差异（既有 shared_ip_count 实现限制，本次不扩大其范围）。
 		sharedIPs, err := countSharedIPsForUsers(ids)
 		if err != nil {
 			return nil, 0, err
 		}
-		matchedInvitees, err := listRiskMatchedInvitees(row.InviterId, keyword)
+		matchedInvitees, err := listRiskMatchedInvitees(row.InviterId, keyword, searchType)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -584,6 +840,7 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 }
 
 // ListRiskInvitees 分页返回指定邀请人的直接被邀请用户（按 users.id DESC）。
+// 每行补 created_at 与该用户最近一次出现的 IP / last_seen_at（无记录时为空/0）。
 // inviterId 非法或不存在时返回空列表而非错误，便于前端直接展示空态。
 func ListRiskInvitees(inviterId int, startIdx int, limit int) ([]*RiskUserSummary, int64, error) {
 	if inviterId <= 0 {
@@ -600,17 +857,277 @@ func ListRiskInvitees(inviterId int, startIdx int, limit int) ([]*RiskUserSummar
 		return []*RiskUserSummary{}, 0, nil
 	}
 	var users []*User
-	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota").
+	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at").
 		Where("inviter_id = ?", inviterId).
 		Order("id desc").Offset(startIdx).Limit(limit).
 		Find(&users).Error; err != nil {
 		return nil, 0, err
 	}
+	ids := make([]int, 0, len(users))
+	for _, user := range users {
+		ids = append(ids, user.Id)
+	}
+	latestRecords, err := listLatestRiskIPRecordsByUserIds(ids)
+	if err != nil {
+		return nil, 0, err
+	}
 	items := make([]*RiskUserSummary, 0, len(users))
 	for _, user := range users {
-		items = append(items, riskUserSummaryFromUser(user))
+		summary := riskUserSummaryFromUser(user)
+		if record := latestRecords[user.Id]; record != nil {
+			summary.IP = record.IP
+			summary.LastSeenAt = record.LastSeenAt
+		}
+		items = append(items, summary)
 	}
 	return items, total, nil
+}
+
+// 邀请人被邀请人分组接口（GET /inviters/:id/invitee-groups）的常量与结构。
+const (
+	RiskInviteeGroupByIP     = "ip"
+	RiskInviteeGroupByTime   = "time"
+	RiskInviteeGroupBySubnet = "subnet"
+
+	RiskInviteeGroupKindIP     = "ip"
+	RiskInviteeGroupKindTime   = "time"
+	RiskInviteeGroupKindSubnet = "subnet"
+	RiskInviteeGroupKindNoIP   = "no_ip"
+
+	// riskInviteeGroupMaxLoadedUsers 是参与分组的被邀请人上限。
+	riskInviteeGroupMaxLoadedUsers = 2000
+	// riskInviteeGroupDefaultGroupUsers 是每组返回成员摘要上限的默认值与上限。
+	riskInviteeGroupDefaultGroupUsers = 50
+	riskInviteeGroupMaxGroupUsers     = 50
+	// riskInviteeGroupDefaultLimit 是返回分组数上限的默认值与上限。
+	riskInviteeGroupDefaultLimit = 200
+	riskInviteeGroupMaxLimit     = 200
+)
+
+// riskInviteeGroupTimeWindows 是 group_by=time 允许的分桶秒数白名单。
+var riskInviteeGroupTimeWindows = map[int64]struct{}{
+	300:   {},
+	1800:  {},
+	3600:  {},
+	21600: {},
+	86400: {},
+}
+
+// RiskInviteeGroup 是邀请人名下被邀请人的一个分组。
+type RiskInviteeGroup struct {
+	Key              string             `json:"key"`
+	Kind             string             `json:"kind"`         // ip | time | subnet | no_ip
+	Label            string             `json:"label"`        // ip → IP；subnet → 网段；time / no_ip → ""
+	BucketStart      int64              `json:"bucket_start"` // 仅 kind=time
+	UserCount        int64              `json:"user_count"`
+	BannedCount      int64              `json:"banned_count"`
+	FirstSeenAt      int64              `json:"first_seen_at"` // 组内成员最早出现；无 IP 记录为 0
+	LastSeenAt       int64              `json:"last_seen_at"`  // 组内成员最近出现；无 IP 记录为 0
+	UserIds          []int              `json:"user_ids"`      // 组内完整 user_id（上限 2000）
+	UserIdsTruncated bool               `json:"user_ids_truncated"`
+	Users            []*RiskUserSummary `json:"users"` // 最多 group_users 个成员摘要
+}
+
+// RiskInviteeGroupsResult 是 GET /inviters/:id/invitee-groups 的响应 data 结构。
+type RiskInviteeGroupsResult struct {
+	InviterId       int                 `json:"inviter_id"`
+	GroupBy         string              `json:"group_by"`
+	TimeWindow      int64               `json:"time_window"`
+	TotalUsers      int64               `json:"total_users"`
+	LoadedUsers     int                 `json:"loaded_users"`
+	Truncated       bool                `json:"truncated"`
+	GroupCount      int                 `json:"group_count"`
+	GroupsTruncated bool                `json:"groups_truncated"`
+	Groups          []*RiskInviteeGroup `json:"groups"`
+}
+
+func normalizeRiskInviteeGroupBy(raw string) string {
+	switch strings.TrimSpace(raw) {
+	case RiskInviteeGroupByTime:
+		return RiskInviteeGroupByTime
+	case RiskInviteeGroupBySubnet:
+		return RiskInviteeGroupBySubnet
+	default:
+		return RiskInviteeGroupByIP
+	}
+}
+
+func normalizeRiskInviteeGroupTimeWindow(window int64) int64 {
+	if _, ok := riskInviteeGroupTimeWindows[window]; ok {
+		return window
+	}
+	return 3600
+}
+
+func normalizeRiskInviteeGroupUsers(groupUsers int) int {
+	if groupUsers <= 0 {
+		return riskInviteeGroupDefaultGroupUsers
+	}
+	if groupUsers > riskInviteeGroupMaxGroupUsers {
+		return riskInviteeGroupMaxGroupUsers
+	}
+	return groupUsers
+}
+
+func normalizeRiskInviteeGroupLimit(limitGroups int) int {
+	if limitGroups <= 0 {
+		return riskInviteeGroupDefaultLimit
+	}
+	if limitGroups > riskInviteeGroupMaxLimit {
+		return riskInviteeGroupMaxLimit
+	}
+	return limitGroups
+}
+
+// ListRiskInviteeGroups 按指定维度对邀请人名下的被邀请人分组。
+//
+// 分组、时间分桶与网段计算全部在 Go 里完成，SQL 只负责取数：
+//   - group_by=ip：按用户「最近一次出现的 IP」归组，一个用户只计一次；无记录归入 no_ip；
+//   - group_by=time：按 users.created_at / time_window 分桶（bucket_start 在 Go 里算）；
+//   - group_by=subnet：按最近一次 IP 的网段（IPv4 /24、IPv6 /64）归组，解析失败归入 no_ip。
+//
+// 排序统一为 user_count DESC、key ASC，no_ip 组强制最后；分组数超过 limit_groups 时截断。
+// 参与分组的用户上限 2000，超过时 truncated=true。inviterId <= 0 返回空分组不报错。
+func ListRiskInviteeGroups(inviterId int, groupBy string, timeWindow int64, groupUsers int, limitGroups int) (*RiskInviteeGroupsResult, error) {
+	groupBy = normalizeRiskInviteeGroupBy(groupBy)
+	timeWindow = normalizeRiskInviteeGroupTimeWindow(timeWindow)
+	groupUsers = normalizeRiskInviteeGroupUsers(groupUsers)
+	limitGroups = normalizeRiskInviteeGroupLimit(limitGroups)
+	result := &RiskInviteeGroupsResult{
+		InviterId:  inviterId,
+		GroupBy:    groupBy,
+		TimeWindow: timeWindow,
+		Groups:     make([]*RiskInviteeGroup, 0),
+	}
+	if inviterId <= 0 {
+		return result, nil
+	}
+	var totalUsers int64
+	if err := DB.Model(&User{}).Where("inviter_id = ?", inviterId).Count(&totalUsers).Error; err != nil {
+		return nil, err
+	}
+	result.TotalUsers = totalUsers
+	if totalUsers == 0 {
+		return result, nil
+	}
+	var users []*User
+	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at").
+		Where("inviter_id = ?", inviterId).
+		Order("id ASC").
+		Limit(riskInviteeGroupMaxLoadedUsers).
+		Find(&users).Error; err != nil {
+		return nil, err
+	}
+	result.LoadedUsers = len(users)
+	result.Truncated = int64(len(users)) < totalUsers
+
+	userIds := make([]int, 0, len(users))
+	for _, user := range users {
+		userIds = append(userIds, user.Id)
+	}
+	latestRecords, err := listLatestRiskIPRecordsByUserIds(userIds)
+	if err != nil {
+		return nil, err
+	}
+
+	type inviteeGroupBuilder struct {
+		group        *RiskInviteeGroup
+		memberIds    []int
+		members      []*RiskUserSummary
+		firstSeenSet bool
+		lastSeenSet  bool
+	}
+	builders := make(map[string]*inviteeGroupBuilder)
+	for _, user := range users {
+		record := latestRecords[user.Id]
+		var key, kind, label string
+		var bucketStart int64
+		switch groupBy {
+		case RiskInviteeGroupByTime:
+			bucketStart = (user.CreatedAt / timeWindow) * timeWindow
+			key = "time:" + strconv.FormatInt(bucketStart, 10)
+			kind = RiskInviteeGroupKindTime
+		case RiskInviteeGroupBySubnet:
+			subnet := ""
+			if record != nil {
+				subnet = riskIPSubnet(record.IP)
+			}
+			if subnet == "" {
+				key, kind, label = "no_ip", RiskInviteeGroupKindNoIP, ""
+			} else {
+				key, kind, label = "subnet:"+subnet, RiskInviteeGroupKindSubnet, subnet
+			}
+		default: // ip
+			if record == nil || record.IP == "" {
+				key, kind, label = "no_ip", RiskInviteeGroupKindNoIP, ""
+			} else {
+				key, kind, label = "ip:"+record.IP, RiskInviteeGroupKindIP, record.IP
+			}
+		}
+		builder := builders[key]
+		if builder == nil {
+			builder = &inviteeGroupBuilder{group: &RiskInviteeGroup{
+				Key: key, Kind: kind, Label: label, BucketStart: bucketStart,
+				UserIds: make([]int, 0), Users: make([]*RiskUserSummary, 0),
+			}}
+			builders[key] = builder
+		}
+		builder.group.UserCount++
+		if user.Status == common.UserStatusDisabled {
+			builder.group.BannedCount++
+		}
+		builder.memberIds = append(builder.memberIds, user.Id)
+		summary := riskUserSummaryFromUser(user)
+		if record != nil {
+			summary.IP = record.IP
+			summary.LastSeenAt = record.LastSeenAt
+		}
+		builder.members = append(builder.members, summary)
+		// 组级 first/last seen 仅对 IP 相关维度有含义；time / no_ip 固定为 0。
+		if record != nil && (kind == RiskInviteeGroupKindIP || kind == RiskInviteeGroupKindSubnet) {
+			if !builder.firstSeenSet || record.FirstSeenAt < builder.group.FirstSeenAt {
+				builder.group.FirstSeenAt = record.FirstSeenAt
+				builder.firstSeenSet = true
+			}
+			if !builder.lastSeenSet || record.LastSeenAt > builder.group.LastSeenAt {
+				builder.group.LastSeenAt = record.LastSeenAt
+				builder.lastSeenSet = true
+			}
+		}
+	}
+
+	groups := make([]*RiskInviteeGroup, 0, len(builders))
+	for _, builder := range builders {
+		group := builder.group
+		group.UserIds = append(group.UserIds, builder.memberIds...)
+		group.UserIdsTruncated = len(builder.memberIds) > riskInviteeGroupMaxLoadedUsers
+		for index, summary := range builder.members {
+			if index >= groupUsers {
+				break
+			}
+			group.Users = append(group.Users, summary)
+		}
+		groups = append(groups, group)
+	}
+	// user_count DESC、key ASC；no_ip 组强制最后。
+	sort.SliceStable(groups, func(i int, j int) bool {
+		iNoIP := groups[i].Kind == RiskInviteeGroupKindNoIP
+		jNoIP := groups[j].Kind == RiskInviteeGroupKindNoIP
+		if iNoIP != jNoIP {
+			return !iNoIP
+		}
+		if groups[i].UserCount != groups[j].UserCount {
+			return groups[i].UserCount > groups[j].UserCount
+		}
+		return groups[i].Key < groups[j].Key
+	})
+	if len(groups) > limitGroups {
+		groups = groups[:limitGroups]
+		result.GroupsTruncated = true
+	}
+	result.GroupCount = len(groups)
+	result.Groups = groups
+	return result, nil
 }
 
 func countSharedIPsForUsers(userIds []int) (int64, error) {

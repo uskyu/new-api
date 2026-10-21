@@ -22,11 +22,15 @@ import {
   Button,
   Checkbox,
   Modal,
+  Radio,
+  RadioGroup,
+  Select,
   Spin,
   Table,
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { API, renderQuota, showError, timestamp2string } from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { getUserRowKey, isUserBanned } from './UserInlineList';
@@ -36,6 +40,21 @@ const { Text } = Typography;
 const PAGE_SIZE = 20;
 // 角色 >= 管理员（10）的账号前端置灰不可勾选，服务端仍会二次校验并返回 skipped。
 const SELECTABLE_ROLE_LIMIT = 10;
+
+// inviter 弹窗视图：ip / time 为分组卡片视图，flat 为原有平铺分页列表。
+const VIEW_IP = 'ip';
+const VIEW_TIME = 'time';
+const VIEW_FLAT = 'flat';
+const DEFAULT_TIME_WINDOW = 3600;
+const GROUPS_LIMIT = 200;
+const EMPTY_GROUPS_META = {
+  total_users: 0,
+  loaded_users: 0,
+  truncated: false,
+  groups_truncated: false,
+  group_count: 0,
+  time_window: DEFAULT_TIME_WINDOW,
+};
 
 const canSelectUser = (user) => Number(user?.role) < SELECTABLE_ROLE_LIMIT;
 
@@ -108,6 +127,24 @@ export default function AccountManageModal({
   // 用于丢弃过期的分页响应，避免快速关闭/切换弹窗时旧请求覆盖新数据。
   const loadSeqRef = useRef(0);
 
+  // inviter 模式分组视图状态（shared 模式不使用）。
+  const [viewMode, setViewMode] = useState(VIEW_IP);
+  const [timeWindow, setTimeWindow] = useState(DEFAULT_TIME_WINDOW);
+  const [groupsLoading, setGroupsLoading] = useState(false);
+  const [groups, setGroups] = useState([]);
+  const [groupsError, setGroupsError] = useState(false);
+  const [groupsMeta, setGroupsMeta] = useState(EMPTY_GROUPS_META);
+  const [expandedGroups, setExpandedGroups] = useState({});
+  const [groupActionLoading, setGroupActionLoading] = useState('');
+  // 丢弃过期的分组响应，避免快速切换视图/时间窗口时旧响应覆盖新数据。
+  const groupsSeqRef = useRef(0);
+
+  // 分组视图（仅 inviter）与「封禁全部」使用的账号总数。
+  const isGroupedView = isInviter && viewMode !== VIEW_FLAT;
+  const effectiveTotal = isGroupedView
+    ? Number(groupsMeta.total_users) || 0
+    : total;
+
   const loadInvitees = async (targetPage) => {
     if (!inviterId) {
       setItems([]);
@@ -152,6 +189,63 @@ export default function AccountManageModal({
     }
   };
 
+  // 分组视图：GET /api/risk-control/inviters/:id/invitee-groups
+  // groupBy: 'ip' | 'time'；time 模式需传 time_window。
+  const loadGroups = async (groupBy, windowSeconds) => {
+    if (!inviterId) {
+      setGroups([]);
+      setGroupsError(false);
+      setGroupsMeta(EMPTY_GROUPS_META);
+      return;
+    }
+    const seq = ++groupsSeqRef.current;
+    setGroupsLoading(true);
+    setGroupsError(false);
+    try {
+      const params = { group_by: groupBy, limit_groups: GROUPS_LIMIT };
+      if (groupBy === VIEW_TIME) {
+        params.time_window = windowSeconds || DEFAULT_TIME_WINDOW;
+      }
+      const res = await API.get(
+        `/api/risk-control/inviters/${inviterId}/invitee-groups`,
+        { params, skipErrorHandler: true },
+      );
+      if (seq !== groupsSeqRef.current) {
+        return;
+      }
+      const payload = res?.data;
+      if (!payload?.success) {
+        showError(payload?.message || t('加载失败'));
+        setGroups([]);
+        setGroupsError(true);
+        setGroupsMeta(EMPTY_GROUPS_META);
+        return;
+      }
+      const data = payload.data || {};
+      setGroups(Array.isArray(data.groups) ? data.groups : []);
+      setGroupsMeta({
+        total_users: Number(data.total_users) || 0,
+        loaded_users: Number(data.loaded_users) || 0,
+        truncated: Boolean(data.truncated),
+        groups_truncated: Boolean(data.groups_truncated),
+        group_count: Number(data.group_count) || 0,
+        time_window: Number(data.time_window) || DEFAULT_TIME_WINDOW,
+      });
+    } catch (error) {
+      if (seq !== groupsSeqRef.current) {
+        return;
+      }
+      showError(error);
+      setGroups([]);
+      setGroupsError(true);
+      setGroupsMeta(EMPTY_GROUPS_META);
+    } finally {
+      if (seq === groupsSeqRef.current) {
+        setGroupsLoading(false);
+      }
+    }
+  };
+
   useEffect(() => {
     if (!visible) {
       return;
@@ -159,13 +253,25 @@ export default function AccountManageModal({
     setSelected({});
     setPage(1);
     setActionLoading('');
+    setGroupActionLoading('');
+    setExpandedGroups({});
+    setGroups([]);
+    setGroupsError(false);
+    setGroupsMeta(EMPTY_GROUPS_META);
     if (mode === 'inviter') {
+      // 默认进入「按 IP 分组」视图；平铺列表在用户切换时再加载。
+      loadSeqRef.current += 1;
+      setLoading(false);
       setItems([]);
       setTotal(0);
-      loadInvitees(1);
+      setViewMode(VIEW_IP);
+      setTimeWindow(DEFAULT_TIME_WINDOW);
+      loadGroups(VIEW_IP, DEFAULT_TIME_WINDOW);
     } else {
       // 使邀请人模式下仍在途的请求失效。
       loadSeqRef.current += 1;
+      groupsSeqRef.current += 1;
+      setGroupsLoading(false);
       setLoading(false);
       const users = Array.isArray(item?.users) ? item.users : [];
       setItems(users);
@@ -218,6 +324,25 @@ export default function AccountManageModal({
     setSelected((prev) => {
       const next = { ...prev };
       pageSelectable.forEach((user) => {
+        const key = String(getUserRowKey(user));
+        if (checked) {
+          next[key] = user;
+        } else {
+          delete next[key];
+        }
+      });
+      return next;
+    });
+  };
+
+  // 分组视图：全选/取消全选某一组内可勾选的用户。
+  const setUsersSelected = (users, checked) => {
+    setSelected((prev) => {
+      const next = { ...prev };
+      (Array.isArray(users) ? users : []).forEach((user) => {
+        if (!canSelectUser(user)) {
+          return;
+        }
         const key = String(getUserRowKey(user));
         if (checked) {
           next[key] = user;
@@ -327,7 +452,7 @@ export default function AccountManageModal({
       <div>
         <div>{scopeText}</div>
         <div className='mt-1 text-[var(--semi-color-text-2)]'>
-          {t('共 {{total}} 个账号', { total })}
+          {t('共 {{total}} 个账号', { total: effectiveTotal })}
         </div>
         <div className='mt-1'>
           {action === 'disable'
@@ -377,6 +502,143 @@ export default function AccountManageModal({
       'all',
     );
   };
+
+  // 分组卡片标题：无 IP / 时间段 / 网段（或 IP）。
+  const formatGroupTitle = (group) => {
+    if (!group) {
+      return '-';
+    }
+    if (group.kind === 'no_ip') {
+      return t('无 IP 记录');
+    }
+    if (group.kind === 'time') {
+      const start = Number(group.bucket_start) || 0;
+      if (!start) {
+        return '-';
+      }
+      const windowSeconds =
+        Number(groupsMeta.time_window) ||
+        Number(timeWindow) ||
+        DEFAULT_TIME_WINDOW;
+      const end = start + Math.max(windowSeconds - 1, 0);
+      return `${timestamp2string(start)} ~ ${timestamp2string(end)}`;
+    }
+    const label = String(group.label || '').trim();
+    return label || group.key || '-';
+  };
+
+  const toggleGroup = (key) => {
+    if (!key) {
+      return;
+    }
+    setExpandedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const handleChangeView = (nextView) => {
+    if (!nextView || nextView === viewMode) {
+      return;
+    }
+    setViewMode(nextView);
+    setSelected({});
+    setExpandedGroups({});
+    setGroupActionLoading('');
+    if (nextView === VIEW_FLAT) {
+      setPage(1);
+      loadInvitees(1);
+      return;
+    }
+    setGroups([]);
+    setGroupsError(false);
+    setGroupsMeta(EMPTY_GROUPS_META);
+    loadGroups(nextView, timeWindow);
+  };
+
+  const handleChangeTimeWindow = (value) => {
+    const nextWindow = Number(value) || DEFAULT_TIME_WINDOW;
+    if (nextWindow === timeWindow) {
+      return;
+    }
+    setTimeWindow(nextWindow);
+    setSelected({});
+    setExpandedGroups({});
+    setGroups([]);
+    setGroupsError(false);
+    setGroupsMeta(EMPTY_GROUPS_META);
+    loadGroups(VIEW_TIME, nextWindow);
+  };
+
+  // 分组批量封禁/解禁：直接复用 users 范围批量接口。
+  const runGroupBatch = async (group, action) => {
+    const userIds = (Array.isArray(group?.user_ids) ? group.user_ids : [])
+      .map((userId) => Number(userId))
+      .filter((userId) => userId > 0);
+    if (!group || group.user_ids_truncated || userIds.length === 0) {
+      return false;
+    }
+    setGroupActionLoading(`${group.key}:${action}`);
+    try {
+      const result = await submitBatchStatus({
+        action,
+        scope: 'users',
+        userIds,
+      });
+      if (!result.ok) {
+        showError(result.message || t('操作失败'));
+        return false;
+      }
+      notifyBatchStatus(action, result, t);
+      if (typeof onSuccess === 'function') {
+        onSuccess();
+      }
+      await loadGroups(
+        viewMode === VIEW_TIME ? VIEW_TIME : VIEW_IP,
+        viewMode === VIEW_TIME ? timeWindow : DEFAULT_TIME_WINDOW,
+      );
+      return true;
+    } catch (error) {
+      showError(error);
+      return false;
+    } finally {
+      setGroupActionLoading('');
+    }
+  };
+
+  const confirmGroupBatch = (group, action) => {
+    const groupUserCount =
+      Number(group?.user_count) ||
+      (Array.isArray(group?.user_ids) ? group.user_ids.length : 0);
+    Modal.confirm({
+      title:
+        action === 'disable'
+          ? t('确认封禁该组账号')
+          : t('确认解禁该组账号'),
+      content: (
+        <div>
+          <div>{formatGroupTitle(group)}</div>
+          <div className='mt-1 text-[var(--semi-color-text-2)]'>
+            {t('共 {{total}} 个账号', { total: groupUserCount })}
+          </div>
+          <div className='mt-1'>
+            {action === 'disable'
+              ? t('封禁后这些账号将无法登录和调用 API。')
+              : t('解禁后这些账号将恢复访问。')}
+          </div>
+        </div>
+      ),
+      centered: true,
+      okText: action === 'disable' ? t('封禁') : t('解禁'),
+      cancelText: t('取消'),
+      okType: action === 'disable' ? 'danger' : 'primary',
+      onOk: () => runGroupBatch(group, action),
+    });
+  };
+
+  const buildGroupRowSelection = (groupUsers) => ({
+    selectedRowKeys: Object.keys(selected).map((key) => Number(key)),
+    getCheckboxProps: (record) => ({ disabled: !canSelectUser(record) }),
+    onSelect: (record, checked) => setUserSelected(record, checked),
+    onSelectAll: (checked) => setUsersSelected(groupUsers, checked),
+  });
 
   const columns = useMemo(
     () => [
@@ -454,6 +716,165 @@ export default function AccountManageModal({
     ? `#${item?.inviter_id ?? '-'} ${item?.username || ''}`.trim()
     : `${item?.ip || ''} · ${sourceText}`;
 
+  // 分组视图：可折叠卡片 + 展开后的成员列表（桌面表格 / 手机卡片）。
+  const renderGroupCard = (group) => {
+    const groupKey = group?.key || '';
+    const expanded = Boolean(expandedGroups[groupKey]);
+    const groupUsers = Array.isArray(group?.users) ? group.users : [];
+    const userCount = Number(group?.user_count) || groupUsers.length;
+    const bannedCount = Number(group?.banned_count) || 0;
+    const userIdsCount = Array.isArray(group?.user_ids)
+      ? group.user_ids.length
+      : 0;
+    const truncated = Boolean(group?.user_ids_truncated);
+    const groupBusy = actionLoading !== '' || groupActionLoading !== '';
+    return (
+      <div
+        key={groupKey}
+        className='rounded-lg border border-[var(--semi-color-border)]'
+      >
+        <div className='flex flex-col gap-2 p-3 md:flex-row md:items-center md:justify-between'>
+          <button
+            type='button'
+            className='flex min-w-0 flex-1 items-start gap-2 text-left'
+            onClick={() => toggleGroup(groupKey)}
+          >
+            <span className='mt-0.5 shrink-0 text-[var(--semi-color-text-2)]'>
+              {expanded ? (
+                <ChevronDown size={16} />
+              ) : (
+                <ChevronRight size={16} />
+              )}
+            </span>
+            <span className='min-w-0'>
+              <span className='flex flex-wrap items-center gap-2'>
+                <Text strong className='break-all'>
+                  {formatGroupTitle(group)}
+                </Text>
+                <Tag color='white' shape='circle' size='small'>
+                  {t('{{count}} 人', { count: userCount })}
+                </Tag>
+                <Tag
+                  color={bannedCount > 0 ? 'red' : 'white'}
+                  shape='circle'
+                  size='small'
+                >
+                  {t('已封禁 {{count}} 人', { count: bannedCount })}
+                </Tag>
+              </span>
+              {truncated && (
+                <span className='mt-1 block text-xs text-[var(--semi-color-warning)]'>
+                  {t('本组人数过多，请用平铺列表处理')}
+                </span>
+              )}
+            </span>
+          </button>
+          <div className='flex shrink-0 flex-wrap gap-2'>
+            <Button
+              size='small'
+              type='danger'
+              theme='light'
+              loading={groupActionLoading === `${groupKey}:disable`}
+              disabled={
+                truncated || userCount === 0 || userIdsCount === 0 || groupBusy
+              }
+              onClick={() => confirmGroupBatch(group, 'disable')}
+            >
+              {t('封禁本组')}
+            </Button>
+            <Button
+              size='small'
+              type='primary'
+              theme='light'
+              loading={groupActionLoading === `${groupKey}:enable`}
+              disabled={
+                truncated || userCount === 0 || userIdsCount === 0 || groupBusy
+              }
+              onClick={() => confirmGroupBatch(group, 'enable')}
+            >
+              {t('解禁本组')}
+            </Button>
+          </div>
+        </div>
+        {expanded && (
+          <div className='border-t border-[var(--semi-color-border)] p-3'>
+            {userCount > groupUsers.length && (
+              <div className='mb-2 text-xs text-[var(--semi-color-text-2)]'>
+                {t('仅显示前 {{count}} 人', { count: groupUsers.length })}
+              </div>
+            )}
+            <div className='hidden md:block'>
+              <Table
+                columns={columns}
+                dataSource={groupUsers}
+                rowKey={(record) => getUserRowKey(record)}
+                rowSelection={buildGroupRowSelection(groupUsers)}
+                pagination={false}
+                size='small'
+                scroll={{ x: 'max-content' }}
+                empty={t('暂无数据')}
+              />
+            </div>
+            <div className='space-y-2 md:hidden'>
+              {groupUsers.length === 0 ? (
+                <div className='py-4 text-center text-sm text-[var(--semi-color-text-2)]'>
+                  {t('暂无数据')}
+                </div>
+              ) : (
+                groupUsers.map((user) => {
+                  const key = getUserRowKey(user);
+                  return (
+                    <div
+                      key={key}
+                      className='flex items-start gap-3 rounded-lg border border-[var(--semi-color-border)] p-3'
+                    >
+                      <Checkbox
+                        checked={Boolean(selected[String(key)])}
+                        disabled={!canSelectUser(user)}
+                        onChange={(e) =>
+                          setUserSelected(user, Boolean(e?.target?.checked))
+                        }
+                      />
+                      <div className='min-w-0 flex-1'>
+                        <div className='flex items-start justify-between gap-2'>
+                          <div className='min-w-0'>
+                            <div className='truncate font-medium'>
+                              #{key} {user.username || '-'}
+                            </div>
+                            <div className='truncate text-xs text-[var(--semi-color-text-2)]'>
+                              {user.email || '-'}
+                            </div>
+                          </div>
+                          <div className='flex shrink-0 flex-col items-end gap-1'>
+                            {renderStatusTag(user, t)}
+                            {renderRoleTag(user.role, t)}
+                          </div>
+                        </div>
+                        <div className='mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--semi-color-text-2)]'>
+                          <span>
+                            {t('额度')}:{' '}
+                            <span className='tabular-nums text-[var(--semi-color-text-0)]'>
+                              {typeof user.quota === 'number'
+                                ? renderQuota(user.quota)
+                                : '-'}
+                            </span>
+                          </span>
+                          <span>
+                            {t('最近出现')}: {formatLastSeen(user)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const footer = (
     <div className='flex flex-col gap-2 md:flex-row md:items-center md:justify-between'>
       <Text type='secondary'>{t('已选 {{count}} 项', { count: selectedCount })}</Text>
@@ -462,7 +883,11 @@ export default function AccountManageModal({
           type='danger'
           theme='light'
           loading={actionLoading === 'selected-disable'}
-          disabled={selectedCount === 0 || actionLoading !== ''}
+          disabled={
+            selectedCount === 0 ||
+            actionLoading !== '' ||
+            groupActionLoading !== ''
+          }
           onClick={() => confirmSelected('disable')}
         >
           {t('封禁选中')}
@@ -471,7 +896,11 @@ export default function AccountManageModal({
           type='primary'
           theme='light'
           loading={actionLoading === 'selected-enable'}
-          disabled={selectedCount === 0 || actionLoading !== ''}
+          disabled={
+            selectedCount === 0 ||
+            actionLoading !== '' ||
+            groupActionLoading !== ''
+          }
           onClick={() => confirmSelected('enable')}
         >
           {t('解禁选中')}
@@ -480,7 +909,11 @@ export default function AccountManageModal({
           type='danger'
           theme='borderless'
           loading={actionLoading === 'all-disable'}
-          disabled={total === 0 || actionLoading !== ''}
+          disabled={
+            effectiveTotal === 0 ||
+            actionLoading !== '' ||
+            groupActionLoading !== ''
+          }
           onClick={() => confirmAll('disable')}
         >
           {t('封禁全部')}
@@ -489,7 +922,11 @@ export default function AccountManageModal({
           type='primary'
           theme='borderless'
           loading={actionLoading === 'all-enable'}
-          disabled={total === 0 || actionLoading !== ''}
+          disabled={
+            effectiveTotal === 0 ||
+            actionLoading !== '' ||
+            groupActionLoading !== ''
+          }
           onClick={() => confirmAll('enable')}
         >
           {t('解禁全部')}
@@ -517,13 +954,96 @@ export default function AccountManageModal({
       bodyStyle={{ padding: 16, maxHeight: '62vh', overflowY: 'auto' }}
       onCancel={onClose}
       footer={footer}
-      maskClosable={!actionLoading}
-      closeOnEsc={!actionLoading}
+      maskClosable={actionLoading === '' && groupActionLoading === ''}
+      closeOnEsc={actionLoading === '' && groupActionLoading === ''}
     >
       <div>
-        <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
-          <Checkbox
-            checked={allPageSelected}
+        {isInviter && (
+          <div className='mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between'>
+            <div className='min-w-0 overflow-x-auto'>
+              <RadioGroup
+                type='button'
+                value={viewMode}
+                onChange={(e) => handleChangeView(e.target.value)}
+              >
+                <Radio value={VIEW_IP}>{t('按 IP 分组')}</Radio>
+                <Radio value={VIEW_TIME}>{t('按注册时间')}</Radio>
+                <Radio value={VIEW_FLAT}>{t('平铺列表')}</Radio>
+              </RadioGroup>
+            </div>
+            {viewMode === VIEW_TIME && (
+              <div className='flex shrink-0 items-center gap-2'>
+                <Text type='secondary' size='small'>
+                  {t('时间窗口')}
+                </Text>
+                <Select
+                  value={timeWindow}
+                  onChange={handleChangeTimeWindow}
+                  className='w-28'
+                >
+                  <Select.Option value={3600}>{t('1小时')}</Select.Option>
+                  <Select.Option value={21600}>{t('6小时')}</Select.Option>
+                  <Select.Option value={86400}>{t('1天')}</Select.Option>
+                </Select>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isGroupedView ? (
+          <>
+            <div className='mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--semi-color-text-2)]'>
+              <span>{t('共 {{total}} 个账号', { total: effectiveTotal })}</span>
+              {groupsMeta.truncated && (
+                <span className='text-[var(--semi-color-warning)]'>
+                  {t('数据量过大，已加载前 2000 人')}
+                </span>
+              )}
+              {groupsMeta.groups_truncated && (
+                <span className='text-[var(--semi-color-warning)]'>
+                  {t('分组过多，仅显示前 {{count}} 组', {
+                    count: groups.length,
+                  })}
+                </span>
+              )}
+            </div>
+            <Spin spinning={groupsLoading}>
+              {groupsLoading && groups.length === 0 ? (
+                <div className='py-8 text-center text-sm text-[var(--semi-color-text-2)]'>
+                  {t('加载中')}
+                </div>
+              ) : groupsError ? (
+                <div className='py-8 text-center text-sm text-[var(--semi-color-text-2)]'>
+                  <div>{t('加载失败')}</div>
+                  <Button
+                    size='small'
+                    theme='borderless'
+                    onClick={() =>
+                      loadGroups(
+                        viewMode === VIEW_TIME ? VIEW_TIME : VIEW_IP,
+                        timeWindow,
+                      )
+                    }
+                  >
+                    {t('重试')}
+                  </Button>
+                </div>
+              ) : groups.length === 0 ? (
+                <div className='py-8 text-center text-sm text-[var(--semi-color-text-2)]'>
+                  {t('暂无数据')}
+                </div>
+              ) : (
+                <div className='space-y-2'>
+                  {groups.map((group) => renderGroupCard(group))}
+                </div>
+              )}
+            </Spin>
+          </>
+        ) : (
+          <>
+            <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
+              <Checkbox
+                checked={allPageSelected}
             indeterminate={somePageSelected}
             disabled={pageSelectable.length === 0 || actionLoading !== ''}
             onChange={(e) => setPageSelected(Boolean(e?.target?.checked))}
@@ -626,6 +1146,8 @@ export default function AccountManageModal({
             )}
           </div>
         </Spin>
+          </>
+        )}
       </div>
     </Modal>
   );

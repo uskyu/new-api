@@ -94,6 +94,8 @@ func GetRiskControlSharedIPs(c *gin.Context) {
 	minUsers, _ := strconv.Atoi(c.Query("min_users"))
 	sortBy := normalizeRiskSortBy(c.Query("sort_by"), riskSharedIPSortFields, "last_seen_at")
 	order := normalizeRiskOrder(c.Query("order"))
+	// bool 参数只认 "true"（不接受 "1"），非法/缺省一律不筛选。
+	active24h := c.Query("active_24h") == "true"
 	items, total, err := model.ListRiskSharedIPs(
 		strings.TrimSpace(c.Query("source")),
 		strings.TrimSpace(c.DefaultQuery("search_type", "ip")),
@@ -104,6 +106,7 @@ func GetRiskControlSharedIPs(c *gin.Context) {
 		sortBy,
 		order,
 		strings.TrimSpace(c.Query("ban_state")),
+		active24h,
 	)
 	if err != nil {
 		common.ApiError(c, err)
@@ -118,6 +121,7 @@ func GetRiskControlInviters(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	sortBy := normalizeRiskSortBy(c.Query("sort_by"), riskInviterSortFields, "direct_invite_count")
 	order := normalizeRiskOrder(c.Query("order"))
+	minInvites, _ := strconv.Atoi(c.Query("min_invites"))
 	items, total, err := model.ListRiskInviters(
 		strings.TrimSpace(c.Query("keyword")),
 		pageInfo.GetStartIdx(),
@@ -125,6 +129,10 @@ func GetRiskControlInviters(c *gin.Context) {
 		sortBy,
 		order,
 		strings.TrimSpace(c.Query("ban_state")),
+		strings.TrimSpace(c.Query("search_type")),
+		c.Query("suspicious_only") == "true",
+		minInvites,
+		strings.TrimSpace(c.Query("inviter_status")),
 	)
 	if err != nil {
 		common.ApiError(c, err)
@@ -133,6 +141,29 @@ func GetRiskControlInviters(c *gin.Context) {
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(items)
 	common.ApiSuccess(c, pageInfo)
+}
+
+// GetRiskControlInviterInviteeGroups 返回指定邀请人名下被邀请人的分组视图。
+// group_by 非法回退 ip；time_window 白名单非法回退 3600；
+// group_users 默认 50（上限 50）；limit_groups 默认 200（上限 200）。
+// inviterId 非法或不存在时返回空 groups（success=true），不返回错误。
+func GetRiskControlInviterInviteeGroups(c *gin.Context) {
+	inviterId, _ := strconv.Atoi(c.Param("id"))
+	timeWindow, _ := strconv.ParseInt(strings.TrimSpace(c.Query("time_window")), 10, 64)
+	groupUsers, _ := strconv.Atoi(c.Query("group_users"))
+	limitGroups, _ := strconv.Atoi(c.Query("limit_groups"))
+	result, err := model.ListRiskInviteeGroups(
+		inviterId,
+		strings.TrimSpace(c.Query("group_by")),
+		timeWindow,
+		groupUsers,
+		limitGroups,
+	)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
 }
 
 // GetRiskControlInviterInvitees 返回指定邀请人的直接被邀请用户分页列表。

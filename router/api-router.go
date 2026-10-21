@@ -213,6 +213,7 @@ func SetApiRouter(router *gin.Engine) {
 			riskControlRoute.POST("/shared-ips/batch-status", controller.BatchRiskControlSharedIPStatus)
 			riskControlRoute.GET("/inviters", controller.GetRiskControlInviters)
 			riskControlRoute.GET("/inviters/:id/invitees", controller.GetRiskControlInviterInvitees)
+			riskControlRoute.GET("/inviters/:id/invitee-groups", controller.GetRiskControlInviterInviteeGroups)
 			riskControlRoute.POST("/inviters/:id/batch-status", controller.BatchRiskControlInviterStatus)
 			riskControlRoute.GET("/users/:id", controller.GetRiskControlUser)
 			riskControlRoute.POST("/users/batch-status", controller.BatchRiskControlUserStatus)
