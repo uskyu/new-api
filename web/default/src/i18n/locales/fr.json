@@ -4798,6 +4798,20 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
+    "Numeric-only Local Part for Specific Domains": "Partie locale numérique uniquement pour certains domaines",
+    "Only applies to the listed domains: the part before @ may contain digits only, and any letter is rejected. Other domains are not checked": "S'applique uniquement aux domaines listés : la partie avant @ ne peut contenir que des chiffres, toute lettre est refusée. Les autres domaines ne sont pas vérifiés",
+    "Numeric-only Domain List": "Liste des domaines à partie locale numérique",
+    "qq.com": "qq.com",
+    "One domain per line (only used when numeric-only restriction is enabled)": "Un domaine par ligne (utilisé uniquement lorsque la restriction numérique est activée)",
+    "Minimum recharge amount (yuan)": "Montant de recharge minimum (yuans)",
+    "Minimum cumulative EPAY recharge amount required to check in; 0 means no limit": "Montant cumulé minimum de recharge EPAY requis pour le pointage ; 0 signifie aucune limite",
+    "{{amount}} yuan equals {{quota}} quota": "{{amount}} yuans = {{quota}} de quota",
+    "Inactive days before check-in is paused": "Jours d'inactivité avant suspension du pointage",
+    "Pause check-in when the user has not called the API for this many days; 0 means no limit": "Suspendre le pointage lorsque l'utilisateur n'a pas appelé l'API depuis ce nombre de jours ; 0 signifie aucune limite",
+    "Check-in paused": "Pointage suspendu",
+    "Check-in requires a cumulative recharge of at least {{min}} yuan. You have recharged {{recharged}} yuan, {{gap}} more to go": "Le pointage nécessite une recharge cumulée d'au moins {{min}} yuans. Vous avez rechargé {{recharged}} yuans, il reste {{gap}} yuans",
+    "Check-in is paused because you have not used the API for a long time. Call the API once or recharge to resume": "Le pointage est suspendu car vous n'avez pas utilisé l'API depuis longtemps. Appelez l'API une fois ou rechargez pour reprendre",
+    "Check-in is currently unavailable": "Le pointage est actuellement indisponible",
     "Zoom": "Zoom"
   }
 }

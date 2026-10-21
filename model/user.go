@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -364,10 +365,17 @@ func inviteUser(inviterId int, inviteeId int) (err error) {
 	})
 }
 
+// affiliateTransferMinQuota 返回邀请额度单次划转的最低额度：0.1 元，即 QuotaPerUnit/10。
+// 必须使用浮点除法，禁止 int(QuotaPerUnit)/10（整数除法会截断，500000/10 会变成 49999）。
+func affiliateTransferMinQuota() float64 {
+	return common.QuotaPerUnit / 10
+}
+
 func (user *User) TransferAffQuotaToQuota(quota int) error {
-	// 检查quota是否小于最小额度
-	if float64(quota) < common.QuotaPerUnit {
-		return fmt.Errorf("转移额度最小为%s！", logger.LogQuota(int(common.QuotaPerUnit)))
+	// 最低划转门槛（0.1 元）在拿到可划转额度之后再校验，因为存在“余额不足门槛可全提”特例。
+	minQuota := affiliateTransferMinQuota()
+	if quota <= 0 {
+		return fmt.Errorf("转移额度最小为%s！", logger.LogQuota(int(math.Round(minQuota))))
 	}
 
 	// 开始数据库事务
@@ -388,6 +396,12 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 		return err
 	}
 	withdrawable := computeAffiliateWithdrawable(user.AffQuota, records)
+
+	// 全提特例：请求额度已覆盖当前全部可划转额度时，即使低于最低门槛也放行，
+	// 避免剩余小额额度（如 0.03 元）永远无法划出。
+	if float64(quota) < minQuota && float64(quota) < float64(withdrawable.Withdrawable) {
+		return fmt.Errorf("转移额度最小为%s！", logger.LogQuota(int(math.Round(minQuota))))
+	}
 
 	// 可划转额度不足：区分「已解锁」和「待被邀请人充值解锁」两部分
 	if quota > withdrawable.Withdrawable {

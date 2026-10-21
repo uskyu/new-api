@@ -21,6 +21,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Checkbox,
+  Dropdown,
   Modal,
   Radio,
   RadioGroup,
@@ -1142,7 +1143,73 @@ export default function AccountManageModal({
     );
   };
 
-  const footer = (
+  // 移动端底部只保留一行：左侧已选数量，右侧「批量操作」下拉承载全部动作。
+  // 这样正文能拿到最大空间（boss 反馈：底部偏大、中间内容偏小）。
+  const mobileActionsMenu = (
+    <Dropdown.Menu>
+      <Dropdown.Item
+        type='danger'
+        disabled={
+          selectedCount === 0 ||
+          actionLoading !== '' ||
+          groupActionLoading !== ''
+        }
+        onClick={() => confirmSelected('disable')}
+      >
+        {t('封禁选中')}
+      </Dropdown.Item>
+      <Dropdown.Item
+        disabled={
+          selectedCount === 0 ||
+          actionLoading !== '' ||
+          groupActionLoading !== ''
+        }
+        onClick={() => confirmSelected('enable')}
+      >
+        {t('解禁选中')}
+      </Dropdown.Item>
+      <Dropdown.Item
+        type='danger'
+        disabled={
+          effectiveTotal === 0 ||
+          actionLoading !== '' ||
+          groupActionLoading !== ''
+        }
+        onClick={() => confirmAll('disable')}
+      >
+        {t('封禁全部')}
+      </Dropdown.Item>
+      <Dropdown.Item
+        disabled={
+          effectiveTotal === 0 ||
+          actionLoading !== '' ||
+          groupActionLoading !== ''
+        }
+        onClick={() => confirmAll('enable')}
+      >
+        {t('解禁全部')}
+      </Dropdown.Item>
+      <Dropdown.Item onClick={onClose}>{t('关闭')}</Dropdown.Item>
+    </Dropdown.Menu>
+  );
+
+  const footer = isMobile ? (
+    <div className='flex items-center justify-between gap-2'>
+      <Text type='secondary' size='small'>
+        {t('已选 {{count}} 项', { count: selectedCount })}
+      </Text>
+      <Dropdown trigger='click' position='topRight' render={mobileActionsMenu}>
+        <Button
+          size='small'
+          theme='solid'
+          type='primary'
+          icon={<ChevronDown size={14} />}
+        >
+          {t('批量操作')}
+        </Button>
+      </Dropdown>
+    </div>
+  ) : (
     <div className='flex flex-col gap-2 md:flex-row md:items-center md:justify-between'>
       <Text type='secondary'>{t('已选 {{count}} 项', { count: selectedCount })}</Text>
       <div className='flex flex-wrap gap-2'>
@@ -1227,7 +1294,8 @@ export default function AccountManageModal({
       }
       bodyStyle={{
         padding: 0,
-        height: isMobile ? '54vh' : '62vh',
+        // 移动端：底部按钮已压缩为 2 行，正文给到 68vh；桌面端保持 62vh。
+        height: isMobile ? '68vh' : '62vh',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -1384,41 +1452,80 @@ export default function AccountManageModal({
           </div>
         ) : (
           <div className='shrink-0 border-t border-[var(--semi-color-border)] px-4 py-2'>
-            <div className='flex flex-wrap items-center justify-between gap-2'>
-              <Checkbox
-                checked={allPageSelected}
-                indeterminate={somePageSelected}
-                disabled={pageSelectable.length === 0 || actionLoading !== ''}
-                onChange={(e) => setPageSelected(Boolean(e?.target?.checked))}
-              >
-                {t('全选本页')}
-              </Checkbox>
-              <div className='flex flex-wrap items-center justify-end gap-2'>
-                <Button
-                  size='small'
-                  theme='borderless'
-                  disabled={page <= 1 || actionLoading !== ''}
-                  onClick={() => goToPage(page - 1)}
+            {isMobile ? (
+              // 移动端：全选 + 翻页压成单行，页码用「1/10」短格式，避免折行挤占正文。
+              <div className='flex items-center justify-between gap-2'>
+                <Checkbox
+                  checked={allPageSelected}
+                  indeterminate={somePageSelected}
+                  disabled={pageSelectable.length === 0 || actionLoading !== ''}
+                  onChange={(e) =>
+                    setPageSelected(Boolean(e?.target?.checked))
+                  }
                 >
-                  {t('上一页')}
-                </Button>
-                <Text type='secondary' size='small'>
-                  {t('共 {{total}} 个账号', { total })} ·{' '}
-                  {t('第 {{page}}/{{pages}} 页', {
-                    page,
-                    pages: totalPages,
-                  })}
-                </Text>
-                <Button
-                  size='small'
-                  theme='borderless'
-                  disabled={page >= totalPages || actionLoading !== ''}
-                  onClick={() => goToPage(page + 1)}
-                >
-                  {t('下一页')}
-                </Button>
+                  <span className='text-xs'>{t('全选本页')}</span>
+                </Checkbox>
+                <div className='flex shrink-0 items-center gap-1'>
+                  <Button
+                    size='small'
+                    theme='borderless'
+                    disabled={page <= 1 || actionLoading !== ''}
+                    onClick={() => goToPage(page - 1)}
+                  >
+                    {t('上一页')}
+                  </Button>
+                  <Text type='secondary' size='small' className='tabular-nums'>
+                    {page}/{totalPages}
+                  </Text>
+                  <Button
+                    size='small'
+                    theme='borderless'
+                    disabled={page >= totalPages || actionLoading !== ''}
+                    onClick={() => goToPage(page + 1)}
+                  >
+                    {t('下一页')}
+                  </Button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className='flex flex-wrap items-center justify-between gap-2'>
+                <Checkbox
+                  checked={allPageSelected}
+                  indeterminate={somePageSelected}
+                  disabled={pageSelectable.length === 0 || actionLoading !== ''}
+                  onChange={(e) =>
+                    setPageSelected(Boolean(e?.target?.checked))
+                  }
+                >
+                  {t('全选本页')}
+                </Checkbox>
+                <div className='flex flex-wrap items-center justify-end gap-2'>
+                  <Button
+                    size='small'
+                    theme='borderless'
+                    disabled={page <= 1 || actionLoading !== ''}
+                    onClick={() => goToPage(page - 1)}
+                  >
+                    {t('上一页')}
+                  </Button>
+                  <Text type='secondary' size='small'>
+                    {t('共 {{total}} 个账号', { total })} ·{' '}
+                    {t('第 {{page}}/{{pages}} 页', {
+                      page,
+                      pages: totalPages,
+                    })}
+                  </Text>
+                  <Button
+                    size='small'
+                    theme='borderless'
+                    disabled={page >= totalPages || actionLoading !== ''}
+                    onClick={() => goToPage(page + 1)}
+                  >
+                    {t('下一页')}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

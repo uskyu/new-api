@@ -4071,6 +4071,20 @@
     "共 {{count}} 组": "{{count}} groups",
     "暂无零充值账号": "No zero-recharge accounts",
     "（{{count}} 次）": "({{count}} times)",
+    "指定域名仅允许纯数字邮箱": "Numeric-only local part for specific domains",
+    "仅对下列域名生效：@ 前只允许纯数字，含字母即拒绝；其他域名不检查": "Applies only to the listed domains: only digits are allowed before @; any letter is rejected. Other domains are not checked",
+    "启用指定域名仅允许纯数字邮箱": "Enable numeric-only local part for specific domains",
+    "保存纯数字邮箱域名设置": "Save numeric-only email domain settings",
+    "签到门槛": "Check-in Thresholds",
+    "限制未充值或长期不活跃的账号签到，0 表示不限制": "Restrict check-in for accounts that have not recharged or have been inactive for a long time; 0 means no limit",
+    "签到充值门槛（元）": "Minimum recharge for check-in (yuan)",
+    "0 表示不限制": "0 means no limit",
+    "{{amount}} 元 = {{quota}} 额度": "{{amount}} yuan = {{quota}} quota",
+    "不活跃停签到天数": "Days of inactivity before check-in is paused",
+    "超过该天数未调用 API 将暂停签到；0 表示不限制": "Check-in will be paused if the API is not called for more than this many days; 0 means no limit",
+    "当前账号暂不满足签到条件": "This account does not currently meet the check-in requirements",
+    "需累计充值 ¥{{min}}，当前 ¥{{current}}，还差 ¥{{diff}}": "Cumulative recharge of ¥{{min}} required; currently ¥{{current}}, ¥{{diff}} more to go",
+    "长期未使用 API，签到已暂停。调用一次 API 或充值后可恢复": "Check-in is paused because the API has not been used for a long time. Call the API once or recharge to resume",
     "开启后，邀请人的邀请额度需被邀请人充值后才可解锁提现": "After enabling, the inviter's invitation quota can only be withdrawn after the invitee recharges"
   }
 }

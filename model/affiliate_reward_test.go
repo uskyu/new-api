@@ -1,9 +1,11 @@
 package model
 
 import (
+	"math"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/stretchr/testify/assert"
@@ -517,6 +519,75 @@ func TestAffiliateRegistrationGrantsInviteeRewardImmediatelyByDefault(t *testing
 	// 幂等：Settle 不应再加额度
 	require.NoError(t, SettleAffiliateRewards(invitee.Id))
 	assert.Equal(t, 120, loadAffiliateUser(t, invitee.Id).Quota)
+}
+
+// ---------------------------------------------------------------------------
+// 9. 划转最低门槛 0.1 元 + 余额低于门槛可全提（功能 4）
+// ---------------------------------------------------------------------------
+
+func TestAffiliateTransferMinimumThresholdAndFullWithdraw(t *testing.T) {
+	setupAffiliateTest(t)
+
+	// QuotaPerUnit = 100 时，最低门槛为 10（0.1 元）；必须用浮点除法，不能整除截断。
+	minQuota := int(affiliateTransferMinQuota())
+	require.Equal(t, affiliateTestQuotaPerUnit/10, minQuota, "最低门槛必须是 QuotaPerUnit/10（0.1 元）")
+	require.Equal(t, 10, minQuota)
+
+	// 恰好等于新门槛：通过
+	exact := createAffiliateUser(t, "aff-threshold-exact", minQuota*3)
+	require.NoError(t, loadAffiliateUser(t, exact.Id).TransferAffQuotaToQuota(minQuota))
+	after := loadAffiliateUser(t, exact.Id)
+	assert.Equal(t, minQuota*2, after.AffQuota)
+	assert.Equal(t, minQuota, after.Quota)
+
+	// 高于门槛：通过
+	above := createAffiliateUser(t, "aff-threshold-above", minQuota*5)
+	require.NoError(t, loadAffiliateUser(t, above.Id).TransferAffQuotaToQuota(minQuota*2))
+	after = loadAffiliateUser(t, above.Id)
+	assert.Equal(t, minQuota*3, after.AffQuota)
+	assert.Equal(t, minQuota*2, after.Quota)
+
+	// 低于门槛且非全部可划转：拒绝，且不得扣减额度；错误提示应为 0.1 元口径
+	expectedMinText := logger.LogQuota(int(math.Round(affiliateTransferMinQuota())))
+	below := createAffiliateUser(t, "aff-threshold-below", minQuota*100)
+	err := loadAffiliateUser(t, below.Id).TransferAffQuotaToQuota(minQuota - 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "转移额度最小")
+	assert.Contains(t, err.Error(), expectedMinText)
+	after = loadAffiliateUser(t, below.Id)
+	assert.Equal(t, minQuota*100, after.AffQuota)
+	assert.Equal(t, 0, after.Quota)
+
+	// 0 额度：拒绝，且错误提示同样反映新门槛
+	err = loadAffiliateUser(t, below.Id).TransferAffQuotaToQuota(0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), expectedMinText)
+
+	// 低于门槛但等于当前全部可划转：通过（全提特例）
+	fullWithdraw := createAffiliateUser(t, "aff-threshold-full", minQuota-1)
+	require.NoError(t, loadAffiliateUser(t, fullWithdraw.Id).TransferAffQuotaToQuota(minQuota-1))
+	after = loadAffiliateUser(t, fullWithdraw.Id)
+	assert.Equal(t, 0, after.AffQuota)
+	assert.Equal(t, minQuota-1, after.Quota)
+
+	// 低于门槛且大于可划转额度（其余被锁）：仍应拒绝
+	locked := createAffiliateUser(t, "aff-threshold-locked", minQuota*100)
+	setting := operation_setting.GetAffiliateSetting()
+	setting.InviterWithdrawRequireInviteeRecharge = true
+	setting.UnrechargedWithdrawRatio = 0
+	lockedInvitee := createAffiliateUser(t, "aff-threshold-locked-invitee", 0)
+	createAffiliateRecord(t, AffiliateReward{
+		InviterId:    locked.Id,
+		InviteeId:    lockedInvitee.Id,
+		InviterQuota: minQuota * 100,
+		UnlockedAt:   0,
+	})
+	lockedDetail, err := GetAffiliateWithdrawable(locked.Id)
+	require.NoError(t, err)
+	require.Equal(t, 0, lockedDetail.Withdrawable)
+	err = loadAffiliateUser(t, locked.Id).TransferAffQuotaToQuota(minQuota - 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "邀请额度不足")
 }
 
 func TestAffiliateComputeWithdrawableIgnoresUnknownUser(t *testing.T) {

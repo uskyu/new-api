@@ -81,13 +81,19 @@ const TransferModal = ({
   };
 
   const displayValue = toDisplayAmount(transferAmount);
-  const displayMin = toDisplayAmount(getQuotaPerUnit());
   const displayMax = toDisplayAmount(withdrawableQuota);
+  // 最低划转门槛：0.1 元（QuotaPerUnit/10）。
+  const displayMinThreshold = toDisplayAmount(getQuotaPerUnit() / 10);
+  // 余额低于最低门槛时允许一次性全提（后端全提特例），输入框下限收敛到可划转额度。
+  const displayMin =
+    displayMax > 0 && displayMax < displayMinThreshold
+      ? displayMax
+      : displayMinThreshold;
   const canFillAll = withdrawableQuota > 0 && displayMax > 0;
   // TOKENS 模式展示精确额度，货币模式沿用 renderQuota 的货币格式。
   const minHintAmount = isTokens
-    ? String(displayMin)
-    : renderQuota(getQuotaPerUnit());
+    ? String(displayMinThreshold)
+    : renderQuota(getQuotaPerUnit() / 10);
 
   // 输入的是显示金额，写回父组件的仍是原始额度；受可划转额度上限约束。
   const handleAmountChange = (value) => {
@@ -120,7 +126,13 @@ const TransferModal = ({
     setCurrencyConfig(getCurrencyConfig());
     if (!openTransfer) {
       setRuleVisible(false);
+      return;
     }
+    // 余额低于最低门槛时，默认输入额度可能超过可划转额度；打开时收敛到可全提额度。
+    if (withdrawableQuota > 0 && transferAmount > withdrawableQuota) {
+      setTransferAmount(withdrawableQuota);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openTransfer]);
 
   // 跨标签页切换显示币种/汇率时同步刷新。

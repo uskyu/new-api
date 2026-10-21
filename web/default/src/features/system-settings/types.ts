@@ -79,6 +79,8 @@ export type AuthSettings = {
   EmailDomainRestrictionEnabled: boolean
   EmailAliasRestrictionEnabled: boolean
   EmailDomainWhitelist: string
+  EmailNumericOnlyRestrictionEnabled: boolean
+  EmailNumericOnlyDomainWhitelist: string
   GitHubOAuthEnabled: boolean
   GitHubClientId: string
   GitHubClientSecret: string
@@ -275,6 +277,8 @@ export type BillingSettings = {
   'checkin_setting.bonus_metric': string
   'checkin_setting.request_count_tiers': string
   'checkin_setting.quota_consumed_tiers': string
+  'checkin_setting.min_recharge_amount': number
+  'checkin_setting.inactive_days': number
 }
 
 export type OperationsSettings = {

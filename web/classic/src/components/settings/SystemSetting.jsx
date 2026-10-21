@@ -92,9 +92,11 @@ const SystemSetting = () => {
     'passkey.attachment_preference': '',
     EmailDomainRestrictionEnabled: '',
     EmailAliasRestrictionEnabled: '',
+    EmailNumericOnlyRestrictionEnabled: '',
     SMTPSSLEnabled: '',
     SMTPForceAuthLogin: '',
     EmailDomainWhitelist: [],
+    EmailNumericOnlyDomainWhitelist: [],
     TelegramOAuthEnabled: '',
     TelegramBotToken: '',
     TelegramBotName: '',
@@ -119,6 +121,8 @@ const SystemSetting = () => {
   const [isLoaded, setIsLoaded] = useState(false);
   const formApiRef = useRef(null);
   const [emailDomainWhitelist, setEmailDomainWhitelist] = useState([]);
+  // 「指定域名仅允许纯数字邮箱」的域名列表（如 qq.com），与上面的别名/临时邮箱白名单互相独立。
+  const [emailNumericOnlyDomains, setEmailNumericOnlyDomains] = useState([]);
   const [showPasswordLoginConfirmModal, setShowPasswordLoginConfirmModal] =
     useState(false);
   const [linuxDOOAuthEnabled, setLinuxDOOAuthEnabled] = useState(false);
@@ -142,6 +146,11 @@ const SystemSetting = () => {
             break;
           case 'EmailDomainWhitelist':
             setEmailDomainWhitelist(item.value ? item.value.split(',') : []);
+            break;
+          case 'EmailNumericOnlyDomainWhitelist':
+            setEmailNumericOnlyDomains(
+              item.value ? item.value.split(',') : [],
+            );
             break;
           case 'fetch_setting.allow_private_ip':
           case 'fetch_setting.enable_ssrf_protection':
@@ -185,6 +194,7 @@ const SystemSetting = () => {
           case 'RegisterCaptchaEnabled':
           case 'EmailDomainRestrictionEnabled':
           case 'EmailAliasRestrictionEnabled':
+          case 'EmailNumericOnlyRestrictionEnabled':
           case 'SMTPSSLEnabled':
           case 'SMTPForceAuthLogin':
           case 'LinuxDOOAuthEnabled':
@@ -358,6 +368,20 @@ const SystemSetting = () => {
         {
           key: 'EmailDomainWhitelist',
           value: emailDomainWhitelist.join(','),
+        },
+      ]);
+    } else {
+      showError(t('邮箱域名白名单格式不正确'));
+    }
+  };
+
+  // 保存「指定域名仅允许纯数字邮箱」的域名列表（开关本身走 handleCheckboxChange 即时保存）。
+  const submitEmailNumericOnlyDomains = async () => {
+    if (Array.isArray(emailNumericOnlyDomains)) {
+      await updateOptions([
+        {
+          key: 'EmailNumericOnlyDomainWhitelist',
+          value: emailNumericOnlyDomains.join(','),
         },
       ]);
     } else {
@@ -1317,6 +1341,49 @@ const SystemSetting = () => {
                   >
                     {t('保存邮箱域名白名单设置')}
                   </Button>
+                  <div
+                    style={{
+                      marginTop: 24,
+                      paddingTop: 16,
+                      borderTop: '1px solid var(--semi-color-border)',
+                    }}
+                  >
+                    <Text strong>{t('指定域名仅允许纯数字邮箱')}</Text>
+                    <Text
+                      type='secondary'
+                      style={{ display: 'block', marginTop: 4 }}
+                    >
+                      {t(
+                        '仅对下列域名生效：@ 前只允许纯数字，含字母即拒绝；其他域名不检查',
+                      )}
+                    </Text>
+                    <div style={{ marginTop: 8 }}>
+                      <Form.Checkbox
+                        field='EmailNumericOnlyRestrictionEnabled'
+                        noLabel
+                        onChange={(e) =>
+                          handleCheckboxChange(
+                            'EmailNumericOnlyRestrictionEnabled',
+                            e,
+                          )
+                        }
+                      >
+                        {t('启用指定域名仅允许纯数字邮箱')}
+                      </Form.Checkbox>
+                    </div>
+                    <TagInput
+                      value={emailNumericOnlyDomains}
+                      onChange={setEmailNumericOnlyDomains}
+                      placeholder={t('输入域名后回车')}
+                      style={{ width: '100%', marginTop: 12 }}
+                    />
+                    <Button
+                      onClick={submitEmailNumericOnlyDomains}
+                      style={{ marginTop: 10 }}
+                    >
+                      {t('保存纯数字邮箱域名设置')}
+                    </Button>
+                  </div>
                 </Form.Section>
               </Card>
               <Card>

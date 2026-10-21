@@ -111,6 +111,8 @@ const defaultBillingSettings: BillingSettings = {
   'checkin_setting.bonus_metric': 'request_count',
   'checkin_setting.request_count_tiers': '[]',
   'checkin_setting.quota_consumed_tiers': '[]',
+  'checkin_setting.min_recharge_amount': 0,
+  'checkin_setting.inactive_days': 0,
 }
 
 export function BillingSettings() {

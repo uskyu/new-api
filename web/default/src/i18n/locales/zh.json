@@ -4798,6 +4798,20 @@
     "Zero retention": "零数据保留",
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
+    "Numeric-only Local Part for Specific Domains": "指定域名仅允许纯数字邮箱",
+    "Only applies to the listed domains: the part before @ may contain digits only, and any letter is rejected. Other domains are not checked": "仅对下列域名生效：@ 前只允许纯数字，含字母即拒绝；其他域名不检查",
+    "Numeric-only Domain List": "纯数字邮箱域名列表",
+    "qq.com": "qq.com",
+    "One domain per line (only used when numeric-only restriction is enabled)": "每行一个域名 (仅在启用纯数字限制时使用)",
+    "Minimum recharge amount (yuan)": "最低充值金额（元）",
+    "Minimum cumulative EPAY recharge amount required to check in; 0 means no limit": "签到所需的最低累计 EPAY 充值金额；0 表示不限制",
+    "{{amount}} yuan equals {{quota}} quota": "{{amount}} 元 = {{quota}} 额度",
+    "Inactive days before check-in is paused": "不活跃停签到天数",
+    "Pause check-in when the user has not called the API for this many days; 0 means no limit": "超过该天数未调用 API 将暂停签到；0 表示不限制",
+    "Check-in paused": "签到已暂停",
+    "Check-in requires a cumulative recharge of at least {{min}} yuan. You have recharged {{recharged}} yuan, {{gap}} more to go": "签到需累计充值至少 {{min}} 元，您已充值 {{recharged}} 元，还差 {{gap}} 元",
+    "Check-in is paused because you have not used the API for a long time. Call the API once or recharge to resume": "长期未使用 API，签到已暂停。调用一次 API 或充值后可恢复",
+    "Check-in is currently unavailable": "当前暂不可签到",
     "Zoom": "缩放"
   }
 }

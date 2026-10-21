@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useContext, useEffect, useMemo, useState, useRef } from 'react';
 import {
   Button,
   Col,
@@ -35,6 +35,7 @@ import {
   showSuccess,
   showWarning,
 } from '../../../helpers';
+import { StatusContext } from '../../../context/Status';
 import { useTranslation } from 'react-i18next';
 
 const DEFAULT_INPUTS = {
@@ -47,6 +48,9 @@ const DEFAULT_INPUTS = {
   'checkin_setting.bonus_metric': 'request_count',
   'checkin_setting.request_count_tiers': '[]',
   'checkin_setting.quota_consumed_tiers': '[]',
+  // 签到门槛：充值门槛（元，0 = 不限制）/ 不活跃停签到天数（0 = 不限制）
+  'checkin_setting.min_recharge_amount': 0,
+  'checkin_setting.inactive_days': 0,
 };
 
 // 指标 -> 档位存储键 映射
@@ -67,6 +71,7 @@ const parseTiers = (value) => {
 
 export default function SettingsCheckin(props) {
   const { t } = useTranslation();
+  const [statusState] = useContext(StatusContext);
   const [loading, setLoading] = useState(false);
   const [inputs, setInputs] = useState(DEFAULT_INPUTS);
   const [inputsRow, setInputsRow] = useState(DEFAULT_INPUTS);
@@ -76,6 +81,33 @@ export default function SettingsCheckin(props) {
     quota_consumed: [],
   });
   const refForm = useRef();
+
+  // 平台 1 元 = QuotaPerUnit 额度（优先 /api/status，其次后台选项 QuotaPerUnit，最后本地缓存）。
+  const quotaPerUnit = useMemo(() => {
+    const fromStatus = Number(statusState?.status?.quota_per_unit);
+    if (Number.isFinite(fromStatus) && fromStatus > 0) {
+      return fromStatus;
+    }
+    const fromOptions = Number(props.options?.QuotaPerUnit);
+    if (Number.isFinite(fromOptions) && fromOptions > 0) {
+      return fromOptions;
+    }
+    const fromLocal = parseFloat(localStorage.getItem('quota_per_unit'));
+    return Number.isFinite(fromLocal) && fromLocal > 0 ? fromLocal : 0;
+  }, [statusState?.status?.quota_per_unit, props.options?.QuotaPerUnit]);
+
+  const minRechargeAmount =
+    Number(inputs['checkin_setting.min_recharge_amount']) || 0;
+  const minRechargeQuotaText = useMemo(() => {
+    if (quotaPerUnit <= 0 || minRechargeAmount <= 0) {
+      return '';
+    }
+    const quota = minRechargeAmount * quotaPerUnit;
+    // 不加千分位，避免与「X 元 = Y 额度」的预期文案/联调断言不一致。
+    return Number.isInteger(quota)
+      ? String(quota)
+      : String(Number(quota.toFixed(2)));
+  }, [minRechargeAmount, quotaPerUnit]);
 
   const bonusMetric =
     inputs['checkin_setting.bonus_metric'] || 'request_count';
@@ -159,6 +191,14 @@ export default function SettingsCheckin(props) {
       if (typeof DEFAULT_INPUTS[key] === 'boolean' && typeof value === 'string') {
         value = value === 'true' || value === '1';
       }
+      // 数值项（额度/金额/天数）统一转成 number，InputNumber 才能正确受控。
+      if (
+        typeof DEFAULT_INPUTS[key] === 'number' &&
+        typeof value !== 'number'
+      ) {
+        const numeric = Number(value);
+        value = Number.isFinite(numeric) ? numeric : DEFAULT_INPUTS[key];
+      }
       currentInputs[key] = value;
     }
     setInputs(currentInputs);
@@ -220,6 +260,58 @@ export default function SettingsCheckin(props) {
                   onChange={handleFieldChange('checkin_setting.max_quota')}
                   min={0}
                   disabled={!inputs['checkin_setting.enabled']}
+                />
+              </Col>
+            </Row>
+          </Form.Section>
+
+          <Form.Section text={t('签到门槛')}>
+            <Typography.Text
+              type='tertiary'
+              style={{ marginBottom: 16, display: 'block' }}
+            >
+              {t('限制未充值或长期不活跃的账号签到，0 表示不限制')}
+            </Typography.Text>
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'checkin_setting.min_recharge_amount'}
+                  label={t('签到充值门槛（元）')}
+                  placeholder={t('0 表示不限制')}
+                  min={0}
+                  step={0.1}
+                  precision={2}
+                  style={{ width: '100%' }}
+                  disabled={!inputs['checkin_setting.enabled']}
+                  onChange={handleFieldChange(
+                    'checkin_setting.min_recharge_amount',
+                  )}
+                  extraText={
+                    minRechargeAmount > 0
+                      ? minRechargeQuotaText
+                        ? t('{{amount}} 元 = {{quota}} 额度', {
+                            amount: minRechargeAmount,
+                            quota: minRechargeQuotaText,
+                          })
+                        : undefined
+                      : t('0 表示不限制')
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'checkin_setting.inactive_days'}
+                  label={t('不活跃停签到天数')}
+                  placeholder={t('0 表示不限制')}
+                  min={0}
+                  step={1}
+                  precision={0}
+                  style={{ width: '100%' }}
+                  disabled={!inputs['checkin_setting.enabled']}
+                  onChange={handleFieldChange(
+                    'checkin_setting.inactive_days',
+                  )}
+                  extraText={t('超过该天数未调用 API 将暂停签到；0 表示不限制')}
                 />
               </Col>
             </Row>

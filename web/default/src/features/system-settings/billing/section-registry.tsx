@@ -210,7 +210,11 @@ const BILLING_SECTIONS = [
               settings['checkin_setting.request_count_tiers'],
             quotaConsumedTiers:
               settings['checkin_setting.quota_consumed_tiers'],
+            minRechargeAmount:
+              settings['checkin_setting.min_recharge_amount'],
+            inactiveDays: settings['checkin_setting.inactive_days'],
           }}
+          quotaPerUnit={settings.QuotaPerUnit}
         />
       )
     },

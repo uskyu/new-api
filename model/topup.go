@@ -454,7 +454,13 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 
 			// 如果用户邮箱为空，则更新为支付时使用的邮箱
 			if user.Email == "" {
-				updateFields["email"] = customerEmail
+				// Creem 回调补邮箱同样受「指定域名仅允许纯数字本地部分」限制约束（默认关闭）。
+				// 注意：支付此时已成功，不能因邮箱规则拒绝入账，仅跳过写入不合法邮箱。
+				if emailErr := ValidateEmailNumericOnlyRule(customerEmail); emailErr != nil {
+					common.SysLog(fmt.Sprintf("creem topup: skip invalid customer email for user %d: %s", topUp.UserId, emailErr.Error()))
+				} else {
+					updateFields["email"] = customerEmail
+				}
 			}
 		}
 

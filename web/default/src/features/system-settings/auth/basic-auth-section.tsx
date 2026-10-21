@@ -50,12 +50,37 @@ const basicAuthSchema = z.object({
   EmailDomainRestrictionEnabled: z.boolean(),
   EmailAliasRestrictionEnabled: z.boolean(),
   EmailDomainWhitelist: z.string(),
+  EmailNumericOnlyRestrictionEnabled: z.boolean(),
+  EmailNumericOnlyDomainWhitelist: z.string(),
 })
 
 type BasicAuthFormValues = z.infer<typeof basicAuthSchema>
 
 type BasicAuthSectionProps = {
   defaultValues: BasicAuthFormValues
+}
+
+// These fields are edited as a newline-separated list but persisted as a
+// comma-separated string (the format the backend expects).
+const DOMAIN_LIST_FIELDS: ReadonlySet<keyof BasicAuthFormValues> = new Set([
+  'EmailDomainWhitelist',
+  'EmailNumericOnlyDomainWhitelist',
+])
+
+function toMultilineDomains(value: string): string {
+  return value
+    .split(',')
+    .map((domain) => domain.trim())
+    .filter(Boolean)
+    .join('\n')
+}
+
+function toCommaSeparatedDomains(value: string): string {
+  return value
+    .split('\n')
+    .map((domain) => domain.trim())
+    .filter(Boolean)
+    .join(',')
 }
 
 export function BasicAuthSection({ defaultValues }: BasicAuthSectionProps) {
@@ -65,10 +90,12 @@ export function BasicAuthSection({ defaultValues }: BasicAuthSectionProps) {
   const formDefaults = useMemo<BasicAuthFormValues>(
     () => ({
       ...defaultValues,
-      EmailDomainWhitelist: defaultValues.EmailDomainWhitelist.split(',')
-        .map((domain) => domain.trim())
-        .filter(Boolean)
-        .join('\n'),
+      EmailDomainWhitelist: toMultilineDomains(
+        defaultValues.EmailDomainWhitelist
+      ),
+      EmailNumericOnlyDomainWhitelist: toMultilineDomains(
+        defaultValues.EmailNumericOnlyDomainWhitelist
+      ),
     }),
     [defaultValues]
   )
@@ -84,17 +111,16 @@ export function BasicAuthSection({ defaultValues }: BasicAuthSectionProps) {
     const updates: Array<{ key: string; value: string | boolean }> = []
 
     Object.entries(data).forEach(([key, value]) => {
-      if (key === 'EmailDomainWhitelist') {
+      if (DOMAIN_LIST_FIELDS.has(key as keyof BasicAuthFormValues)) {
         if (typeof value !== 'string') return
-        const domains = value
-          .split('\n')
-          .map((domain) => domain.trim())
-          .filter(Boolean)
-          .join(',')
-        if (domains !== defaultValues.EmailDomainWhitelist) {
+        const domains = toCommaSeparatedDomains(value)
+        const originalValue = defaultValues[key as keyof BasicAuthFormValues]
+        if (typeof originalValue === 'string' && domains !== originalValue) {
           updates.push({ key, value: domains })
         }
-      } else if (value !== defaultValues[key as keyof typeof defaultValues]) {
+        return
+      }
+      if (value !== defaultValues[key as keyof typeof defaultValues]) {
         updates.push({ key, value })
       }
     })
@@ -254,6 +280,50 @@ export function BasicAuthSection({ defaultValues }: BasicAuthSectionProps) {
                 <FormDescription>
                   {t(
                     'One domain per line (only used when domain restriction is enabled)'
+                  )}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='EmailNumericOnlyRestrictionEnabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>
+                    {t('Numeric-only Local Part for Specific Domains')}
+                  </FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Only applies to the listed domains: the part before @ may contain digits only, and any letter is rejected. Other domains are not checked'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='EmailNumericOnlyDomainWhitelist'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Numeric-only Domain List')}</FormLabel>
+                <FormControl>
+                  <Textarea placeholder={t('qq.com')} rows={3} {...field} />
+                </FormControl>
+                <FormDescription>
+                  {t(
+                    'One domain per line (only used when numeric-only restriction is enabled)'
                   )}
                 </FormDescription>
                 <FormMessage />

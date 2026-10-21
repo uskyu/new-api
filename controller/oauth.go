@@ -257,6 +257,10 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		user.DisplayName = provider.GetName() + " User"
 	}
 	if oauthUser.Email != "" {
+		// 「指定域名仅允许纯数字本地部分」限制：OAuth 注册写邮箱同样必须校验（默认关闭）。
+		if err := model.ValidateEmailNumericOnlyRule(oauthUser.Email); err != nil {
+			return nil, err
+		}
 		user.Email = oauthUser.Email
 	}
 	user.Role = common.RoleCommonUser

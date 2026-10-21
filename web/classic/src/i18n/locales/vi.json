@@ -4458,6 +4458,20 @@
     "共 {{count}} 组": "Tổng cộng {{count}} nhóm",
     "暂无零充值账号": "Không có tài khoản không nạp tiền",
     "（{{count}} 次）": "({{count}} lần)",
+    "指定域名仅允许纯数字邮箱": "Chỉ cho phép phần trước @ là số với tên miền chỉ định",
+    "仅对下列域名生效：@ 前只允许纯数字，含字母即拒绝；其他域名不检查": "Chỉ áp dụng cho các tên miền được liệt kê: phần trước @ chỉ cho phép chữ số, có chữ cái sẽ bị từ chối. Các tên miền khác không bị kiểm tra",
+    "启用指定域名仅允许纯数字邮箱": "Bật giới hạn chỉ chữ số cho tên miền chỉ định",
+    "保存纯数字邮箱域名设置": "Lưu cài đặt tên miền email chỉ chữ số",
+    "签到门槛": "Ngưỡng đăng nhập",
+    "限制未充值或长期不活跃的账号签到，0 表示不限制": "Hạn chế đăng nhập đối với tài khoản chưa nạp tiền hoặc không hoạt động lâu; 0 nghĩa là không giới hạn",
+    "签到充值门槛（元）": "Ngưỡng nạp tiền để đăng nhập (tệ)",
+    "0 表示不限制": "0 nghĩa là không giới hạn",
+    "{{amount}} 元 = {{quota}} 额度": "{{amount}} tệ = {{quota}} hạn ngạch",
+    "不活跃停签到天数": "Số ngày không hoạt động trước khi tạm dừng đăng nhập",
+    "超过该天数未调用 API 将暂停签到；0 表示不限制": "Đăng nhập sẽ bị tạm dừng nếu không gọi API quá số ngày này; 0 nghĩa là không giới hạn",
+    "当前账号暂不满足签到条件": "Tài khoản này hiện chưa đủ điều kiện đăng nhập",
+    "需累计充值 ¥{{min}}，当前 ¥{{current}}，还差 ¥{{diff}}": "Cần nạp tích lũy ¥{{min}}, hiện tại ¥{{current}}, còn thiếu ¥{{diff}}",
+    "长期未使用 API，签到已暂停。调用一次 API 或充值后可恢复": "Đăng nhập đã tạm dừng do lâu ngày không sử dụng API. Hãy gọi API một lần hoặc nạp tiền để khôi phục",
     "开启后，邀请人的邀请额度需被邀请人充值后才可解锁提现": "Sau khi bật, hạn mức lời mời của người mời chỉ có thể rút sau khi người được mời nạp tiền"
   }
 }

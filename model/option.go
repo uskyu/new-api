@@ -58,6 +58,8 @@ func InitOptionMap() {
 	common.OptionMap["EmailDomainRestrictionEnabled"] = strconv.FormatBool(common.EmailDomainRestrictionEnabled)
 	common.OptionMap["EmailAliasRestrictionEnabled"] = strconv.FormatBool(common.EmailAliasRestrictionEnabled)
 	common.OptionMap["EmailDomainWhitelist"] = strings.Join(common.EmailDomainWhitelist, ",")
+	common.OptionMap["EmailNumericOnlyRestrictionEnabled"] = strconv.FormatBool(common.EmailNumericOnlyRestrictionEnabled)
+	common.OptionMap["EmailNumericOnlyDomainWhitelist"] = strings.Join(common.EmailNumericOnlyDomainWhitelist, ",")
 	common.OptionMap["SMTPServer"] = ""
 	common.OptionMap["SMTPFrom"] = ""
 	common.OptionMap["SMTPPort"] = strconv.Itoa(common.SMTPPort)
@@ -205,7 +207,7 @@ func loadOptionsFromDatabase() {
 // 会把注册配置的默认值（空数组）预填进 OptionMap，需直接查数据库。
 func migrateLegacyCheckinTiers() {
 	var newKeyCount int64
-	if err := DB.Model(&Option{}).Where("key = ?", "checkin_setting.request_count_tiers").Count(&newKeyCount).Error; err != nil {
+	if err := DB.Model(&Option{}).Where(commonKeyCol+" = ?", "checkin_setting.request_count_tiers").Count(&newKeyCount).Error; err != nil {
 		return
 	}
 	if newKeyCount > 0 {
@@ -287,7 +289,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 
 // DeleteOption 从数据库和内存缓存中删除一个配置项
 func DeleteOption(key string) error {
-	if err := DB.Where("key = ?", key).Delete(&Option{}).Error; err != nil {
+	if err := DB.Where(commonKeyCol+" = ?", key).Delete(&Option{}).Error; err != nil {
 		return err
 	}
 	common.OptionMapRWMutex.Lock()
@@ -347,6 +349,8 @@ func updateOptionMap(key string, value string) (err error) {
 			common.EmailDomainRestrictionEnabled = boolValue
 		case "EmailAliasRestrictionEnabled":
 			common.EmailAliasRestrictionEnabled = boolValue
+		case "EmailNumericOnlyRestrictionEnabled":
+			common.EmailNumericOnlyRestrictionEnabled = boolValue
 		case "AutomaticDisableChannelEnabled":
 			common.AutomaticDisableChannelEnabled = boolValue
 		case "AutomaticEnableChannelEnabled":
@@ -410,6 +414,9 @@ func updateOptionMap(key string, value string) (err error) {
 	switch key {
 	case "EmailDomainWhitelist":
 		common.EmailDomainWhitelist = strings.Split(value, ",")
+	case "EmailNumericOnlyDomainWhitelist":
+		// 规范化：去空白、去空项、转小写，避免空字符串产生 [""] 让「启用但无域名」校验失效。
+		common.EmailNumericOnlyDomainWhitelist = parseEmailNumericOnlyDomainWhitelist(value)
 	case "SMTPServer":
 		common.SMTPServer = value
 	case "SMTPPort":

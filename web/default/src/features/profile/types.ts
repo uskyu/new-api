@@ -216,6 +216,25 @@ export interface CheckinStats {
 }
 
 /**
+ * Check-in eligibility returned by the backend.
+ * The frontend must not derive the threshold itself; use these fields as-is.
+ */
+export interface CheckinEligibility {
+  /** Whether the user is currently allowed to check in */
+  can_checkin: boolean
+  /** Reason why check-in is blocked; empty when check-in is allowed */
+  reason: '' | 'recharge_required' | 'inactive'
+  /** Minimum cumulative EPAY recharge amount (yuan) required; 0 = no limit */
+  min_recharge_amount: number
+  /** User's cumulative EPAY recharge amount (yuan) */
+  user_recharge_amount: number
+  /** Configured inactive days before check-in is paused; 0 = no limit */
+  inactive_days: number
+  /** Timestamp of the user's latest API call; 0 = never called */
+  last_api_used_at: number
+}
+
+/**
  * Check-in status response
  */
 export interface CheckinStatusResponse {
@@ -239,6 +258,8 @@ export interface CheckinStatusResponse {
   yesterday_quota?: number
   /** Matched active reward tier */
   bonus_tier?: CheckinBonusTier
+  /** Check-in eligibility; absent on backends without the threshold checks */
+  eligibility?: CheckinEligibility
   /** Check-in statistics */
   stats: CheckinStats
 }

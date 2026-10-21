@@ -105,6 +105,15 @@ var EmailDomainWhitelist = []string{
 	"yahoo.com",
 	"foxmail.com",
 }
+
+// EmailNumericOnlyRestrictionEnabled 是否启用「指定域名仅允许纯数字本地部分」限制。
+// 默认 false：升级后行为不变。启用后仅对 EmailNumericOnlyDomainWhitelist 命中的域名生效：
+// @ 之前的本地部分必须每个字符都是数字（unicode.IsDigit，含全角数字），否则拒绝。
+var EmailNumericOnlyRestrictionEnabled = false
+
+// EmailNumericOnlyDomainWhitelist 是「仅允许纯数字本地部分」生效的邮箱域名列表。
+// 域名比较大小写不敏感；其他域名完全不受该限制约束。
+var EmailNumericOnlyDomainWhitelist = []string{"qq.com"}
 var EmailLoginAuthServerList = []string{
 	"smtp.sendcloud.net",
 	"smtp.azurecomm.net",

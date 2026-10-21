@@ -40,6 +40,12 @@ import {
 import Turnstile from 'react-turnstile';
 import { API, showError, showSuccess, renderQuota } from '../../../../helpers';
 
+// 后端返回的金额单位是元（float），这里只做展示格式化，不参与门槛判断。
+const formatYuanAmount = (value) => {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount.toFixed(2) : '0.00';
+};
+
 const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
   const [loading, setLoading] = useState(false);
   const [checkinLoading, setCheckinLoading] = useState(false);
@@ -230,6 +236,56 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
     return null;
   }
 
+  // 签到资格（充值门槛 / 不活跃停签到）：优先用后端 eligibility 对象，
+  // 字段缺失（旧后端）时回退到顶层 checkin_unlocked，二者都没有则视为可签到。
+  const eligibility = checkinData?.eligibility || null;
+  const legacyUnlocked =
+    typeof checkinData?.checkin_unlocked === 'boolean'
+      ? checkinData.checkin_unlocked
+      : null;
+  const canCheckinByEligibility = eligibility
+    ? eligibility.can_checkin !== false
+    : legacyUnlocked !== false;
+  const eligibilityReason = String(eligibility?.reason || '');
+  const eligibilityMinRecharge =
+    Number(
+      eligibility?.min_recharge_amount ?? checkinData?.min_recharge_amount,
+    ) || 0;
+  const eligibilityUserRecharge =
+    Number(
+      eligibility?.user_recharge_amount ?? checkinData?.user_recharge_amount,
+    ) || 0;
+
+  const renderEligibilityHint = () => {
+    if (canCheckinByEligibility) {
+      return null;
+    }
+    let message = t('当前账号暂不满足签到条件');
+    if (eligibilityReason === 'recharge_required') {
+      const shortfall = Math.max(
+        eligibilityMinRecharge - eligibilityUserRecharge,
+        0,
+      );
+      message = t(
+        '需累计充值 ¥{{min}}，当前 ¥{{current}}，还差 ¥{{diff}}',
+        {
+          min: formatYuanAmount(eligibilityMinRecharge),
+          current: formatYuanAmount(eligibilityUserRecharge),
+          diff: formatYuanAmount(shortfall),
+        },
+      );
+    } else if (eligibilityReason === 'inactive') {
+      message = t(
+        '长期未使用 API，签到已暂停。调用一次 API 或充值后可恢复',
+      );
+    }
+    return (
+      <div className='mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'>
+        {message}
+      </div>
+    );
+  };
+
   // 日期渲染函数 - 显示签到状态和获得的额度
   const dateRender = (dateString) => {
     // Semi Calendar 传入的 dateString 是 Date.toString() 格式
@@ -381,7 +437,11 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
               : doCheckin()
           }
           loading={checkinLoading || !initialLoaded}
-          disabled={!initialLoaded || checkinData.stats?.checked_in_today}
+          disabled={
+            !initialLoaded ||
+            checkinData.stats?.checked_in_today ||
+            !canCheckinByEligibility
+          }
         >
           {!initialLoaded
             ? t('加载中...')
@@ -390,6 +450,9 @@ const CheckinCalendar = ({ t, status, turnstileEnabled, turnstileSiteKey }) => {
               : t('立即签到')}
         </Button>
       </div>
+
+      {/* 签到资格未满足的原因（充值门槛 / 长期不活跃），固定在卡片头部下方常显 */}
+      {renderEligibilityHint()}
 
       {/* 可折叠内容 */}
       <Collapsible isOpen={isCollapsed === false} keepDOM>

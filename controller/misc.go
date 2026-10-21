@@ -278,6 +278,14 @@ func SendEmailVerification(c *gin.Context) {
 			return
 		}
 	}
+	// 「指定域名仅允许纯数字本地部分」限制（默认关闭）：覆盖密码注册 / 自助改邮箱 / 重置发信。
+	if err := model.ValidateEmailNumericOnlyRule(email); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
 
 	if model.IsEmailAlreadyTaken(email) {
 		c.JSON(http.StatusOK, gin.H{

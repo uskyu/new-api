@@ -4798,6 +4798,20 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
+    "Numeric-only Local Part for Specific Domains": "Numeric-only Local Part for Specific Domains",
+    "Only applies to the listed domains: the part before @ may contain digits only, and any letter is rejected. Other domains are not checked": "Only applies to the listed domains: the part before @ may contain digits only, and any letter is rejected. Other domains are not checked",
+    "Numeric-only Domain List": "Numeric-only Domain List",
+    "qq.com": "qq.com",
+    "One domain per line (only used when numeric-only restriction is enabled)": "One domain per line (only used when numeric-only restriction is enabled)",
+    "Minimum recharge amount (yuan)": "Minimum recharge amount (yuan)",
+    "Minimum cumulative EPAY recharge amount required to check in; 0 means no limit": "Minimum cumulative EPAY recharge amount required to check in; 0 means no limit",
+    "{{amount}} yuan equals {{quota}} quota": "{{amount}} yuan equals {{quota}} quota",
+    "Inactive days before check-in is paused": "Inactive days before check-in is paused",
+    "Pause check-in when the user has not called the API for this many days; 0 means no limit": "Pause check-in when the user has not called the API for this many days; 0 means no limit",
+    "Check-in paused": "Check-in paused",
+    "Check-in requires a cumulative recharge of at least {{min}} yuan. You have recharged {{recharged}} yuan, {{gap}} more to go": "Check-in requires a cumulative recharge of at least {{min}} yuan. You have recharged {{recharged}} yuan, {{gap}} more to go",
+    "Check-in is paused because you have not used the API for a long time. Call the API once or recharge to resume": "Check-in is paused because you have not used the API for a long time. Call the API once or recharge to resume",
+    "Check-in is currently unavailable": "Check-in is currently unavailable",
     "Zoom": "Zoom"
   }
 }

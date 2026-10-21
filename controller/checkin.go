@@ -44,6 +44,19 @@ func GetCheckinStatus(c *gin.Context) {
 		"bonus_tiers":     setting.ActiveTiers(),
 		"stats":           stats,
 	}
+	// 签到资格（充值门槛 + 不活跃停签到）。计算失败不阻断状态查询，
+	// 回退为「可签到」，保证状态接口在异常情况下仍可用。
+	eligibility, err := model.GetCheckinEligibility(userId, setting)
+	if err != nil {
+		common.SysLog("failed to compute checkin eligibility: " + err.Error())
+		eligibility = &model.CheckinEligibility{
+			CanCheckin:        true,
+			Reason:            model.CheckinReasonNone,
+			MinRechargeAmount: setting.MinRechargeAmount,
+			InactiveDays:      setting.InactiveDays,
+		}
+	}
+	data["eligibility"] = eligibility
 	if setting.BonusEnabled {
 		calls, consumedQuota, err := model.GetYesterdayCheckinUsage(userId)
 		if err == nil {

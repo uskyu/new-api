@@ -69,6 +69,10 @@ const checkinSchema = z.object({
   // 两套独立档位（按次 / 按额度），各自保存互不覆盖
   requestCountTiers: z.string(),
   quotaConsumedTiers: z.string(),
+  // 签到门槛：最低累计充值（元，0 = 不限制）
+  minRechargeAmount: z.coerce.number().min(0),
+  // 不活跃天数（0 = 不限制）
+  inactiveDays: z.coerce.number().int().min(0),
 })
 
 type CheckinFormValues = z.infer<typeof checkinSchema>
@@ -84,6 +88,8 @@ type CheckinSettingsSectionProps = {
     requestCountTiers: string
     quotaConsumedTiers: string
   }
+  /** Quota amount equivalent to 1 yuan, used for the recharge threshold hint */
+  quotaPerUnit: number
 }
 
 const OPTION_KEY_MAP: Record<string, string> = {
@@ -94,6 +100,8 @@ const OPTION_KEY_MAP: Record<string, string> = {
   captchaKind: 'checkin_setting.captcha_kind',
   bonusEnabled: 'checkin_setting.bonus_enabled',
   bonusMetric: 'checkin_setting.bonus_metric',
+  minRechargeAmount: 'checkin_setting.min_recharge_amount',
+  inactiveDays: 'checkin_setting.inactive_days',
   // bonusTiers 仅作渲染载体，不直接保存；保存走下面两个独立键
   requestCountTiers: 'checkin_setting.request_count_tiers',
   quotaConsumedTiers: 'checkin_setting.quota_consumed_tiers',
@@ -118,6 +126,7 @@ function parseBonusTiers(raw: string | undefined): CheckinBonusTier[] {
 
 export function CheckinSettingsSection({
   defaultValues,
+  quotaPerUnit,
 }: CheckinSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
@@ -157,6 +166,11 @@ export function CheckinSettingsSection({
     form.watch('captchaEnabled') ?? defaultValues.captchaEnabled
   const bonusEnabled = form.watch('bonusEnabled') ?? defaultValues.bonusEnabled
   const bonusMetric = form.watch('bonusMetric') ?? defaultValues.bonusMetric
+  const minRechargeAmount =
+    form.watch('minRechargeAmount') ?? defaultValues.minRechargeAmount
+  const rechargeQuotaHint = Math.round(
+    (Number.isFinite(minRechargeAmount) ? minRechargeAmount : 0) * quotaPerUnit
+  )
 
   useEffect(() => {
     setTiers(parseBonusTiers(defaultValues.bonusTiers))
@@ -319,6 +333,76 @@ export function CheckinSettingsSection({
                     </FormControl>
                     <FormDescription>
                       {t('Maximum quota amount awarded for check-in')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='minRechargeAmount'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      {t('Minimum recharge amount (yuan)')}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={0}
+                        step={0.01}
+                        value={field.value ?? ''}
+                        onChange={(event) =>
+                          field.onChange(event.target.valueAsNumber)
+                        }
+                        name={field.name}
+                        onBlur={field.onBlur}
+                        ref={field.ref}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Minimum cumulative EPAY recharge amount required to check in; 0 means no limit'
+                      )}
+                      {rechargeQuotaHint > 0
+                        ? ` · ${t('{{amount}} yuan equals {{quota}} quota', {
+                            amount: minRechargeAmount,
+                            quota: rechargeQuotaHint.toLocaleString(),
+                          })}`
+                        : ''}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='inactiveDays'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      {t('Inactive days before check-in is paused')}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={0}
+                        step={1}
+                        value={field.value ?? ''}
+                        onChange={(event) =>
+                          field.onChange(event.target.valueAsNumber)
+                        }
+                        name={field.name}
+                        onBlur={field.onBlur}
+                        ref={field.ref}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Pause check-in when the user has not called the API for this many days; 0 means no limit'
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

@@ -4798,6 +4798,20 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
+    "Numeric-only Local Part for Specific Domains": "Chỉ cho phép phần trước @ là số với tên miền chỉ định",
+    "Only applies to the listed domains: the part before @ may contain digits only, and any letter is rejected. Other domains are not checked": "Chỉ áp dụng cho các tên miền được liệt kê: phần trước @ chỉ có thể chứa chữ số, có chữ cái sẽ bị từ chối. Các tên miền khác không bị kiểm tra",
+    "Numeric-only Domain List": "Danh sách tên miền chỉ chữ số",
+    "qq.com": "qq.com",
+    "One domain per line (only used when numeric-only restriction is enabled)": "Mỗi dòng một tên miền (chỉ được sử dụng khi giới hạn chỉ chữ số được bật)",
+    "Minimum recharge amount (yuan)": "Số tiền nạp tối thiểu (tệ)",
+    "Minimum cumulative EPAY recharge amount required to check in; 0 means no limit": "Số tiền nạp EPAY tích lũy tối thiểu để điểm danh; 0 nghĩa là không giới hạn",
+    "{{amount}} yuan equals {{quota}} quota": "{{amount}} tệ = {{quota}} hạn ngạch",
+    "Inactive days before check-in is paused": "Số ngày không hoạt động trước khi tạm dừng điểm danh",
+    "Pause check-in when the user has not called the API for this many days; 0 means no limit": "Tạm dừng điểm danh khi người dùng không gọi API trong số ngày này; 0 nghĩa là không giới hạn",
+    "Check-in paused": "Điểm danh tạm dừng",
+    "Check-in requires a cumulative recharge of at least {{min}} yuan. You have recharged {{recharged}} yuan, {{gap}} more to go": "Điểm danh yêu cầu nạp tích lũy ít nhất {{min}} tệ. Bạn đã nạp {{recharged}} tệ, còn thiếu {{gap}} tệ",
+    "Check-in is paused because you have not used the API for a long time. Call the API once or recharge to resume": "Điểm danh đã tạm dừng vì bạn lâu ngày không sử dụng API. Hãy gọi API một lần hoặc nạp tiền để khôi phục",
+    "Check-in is currently unavailable": "Hiện không thể điểm danh",
     "Zoom": "Zoom"
   }
 }

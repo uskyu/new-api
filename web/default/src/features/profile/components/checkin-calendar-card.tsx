@@ -51,6 +51,14 @@ interface CheckinCalendarCardProps {
   turnstileSiteKey: string
 }
 
+/**
+ * Format an amount that the backend reports in yuan (e.g. recharge totals).
+ */
+function formatYuanAmount(amount: number): string {
+  if (!Number.isFinite(amount)) return '0'
+  return String(Math.round(amount * 100) / 100)
+}
+
 export function CheckinCalendarCard({
   checkinEnabled,
   turnstileEnabled,
@@ -121,6 +129,45 @@ export function CheckinCalendarCard({
 
   const checkedToday = checkinData?.stats?.checked_in_today === true
   const todayAward = checkinRecordsMap[todayString]
+
+  // The backend decides eligibility (recharge threshold / inactive pause);
+  // the frontend only renders the result.
+  const eligibility = checkinData?.eligibility
+  const checkinBlocked = eligibility?.can_checkin === false
+
+  const getCheckinButtonLabel = (): string => {
+    if (checkinLoading) return t('Loading...')
+    if (checkedToday) return t('Checked in')
+    if (checkinBlocked) return t('Check-in paused')
+    return t('Check in now')
+  }
+
+  const getBlockedMessage = (): string | null => {
+    if (!checkinBlocked || !eligibility) return null
+    if (eligibility.reason === 'recharge_required') {
+      const minAmount = formatYuanAmount(eligibility.min_recharge_amount)
+      const rechargedAmount = formatYuanAmount(
+        eligibility.user_recharge_amount
+      )
+      const gapAmount = formatYuanAmount(
+        Math.max(
+          0,
+          eligibility.min_recharge_amount - eligibility.user_recharge_amount
+        )
+      )
+      return t(
+        'Check-in requires a cumulative recharge of at least {{min}} yuan. You have recharged {{recharged}} yuan, {{gap}} more to go',
+        { min: minAmount, recharged: rechargedAmount, gap: gapAmount }
+      )
+    }
+    if (eligibility.reason === 'inactive') {
+      return t(
+        'Check-in is paused because you have not used the API for a long time. Call the API once or recharge to resume'
+      )
+    }
+    return t('Check-in is currently unavailable')
+  }
+  const blockedMessage = getBlockedMessage()
 
   useEffect(() => {
     if (initialLoaded) return
@@ -428,17 +475,18 @@ export function CheckinCalendarCard({
                   ? fetchCheckinCaptcha()
                   : doCheckin()
               }
-              disabled={checkinLoading || checkedToday}
+              disabled={checkinLoading || checkedToday || checkinBlocked}
               size='sm'
               className='w-full shrink-0 sm:w-auto'
             >
-              {checkinLoading
-                ? t('Loading...')
-                : checkedToday
-                  ? t('Checked in')
-                  : t('Check in now')}
+              {getCheckinButtonLabel()}
             </Button>
           </div>
+          {blockedMessage ? (
+            <div className='mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 sm:text-sm dark:text-amber-400'>
+              {blockedMessage}
+            </div>
+          ) : null}
         </div>
 
         {!collapsed ? (

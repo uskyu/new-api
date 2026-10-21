@@ -4798,6 +4798,20 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
+    "Numeric-only Local Part for Specific Domains": "Только цифры в локальной части для указанных доменов",
+    "Only applies to the listed domains: the part before @ may contain digits only, and any letter is rejected. Other domains are not checked": "Действует только для перечисленных доменов: часть перед @ может содержать только цифры, при наличии букв — отказ. Остальные домены не проверяются",
+    "Numeric-only Domain List": "Список доменов с цифровыми адресами",
+    "qq.com": "qq.com",
+    "One domain per line (only used when numeric-only restriction is enabled)": "Один домен на строку (используется только при включённом ограничении «только цифры»)",
+    "Minimum recharge amount (yuan)": "Минимальная сумма пополнения (юаней)",
+    "Minimum cumulative EPAY recharge amount required to check in; 0 means no limit": "Минимальная суммарная сумма пополнения EPAY для регистрации; 0 — без ограничений",
+    "{{amount}} yuan equals {{quota}} quota": "{{amount}} юаней = {{quota}} квоты",
+    "Inactive days before check-in is paused": "Дней неактивности до приостановки регистрации",
+    "Pause check-in when the user has not called the API for this many days; 0 means no limit": "Приостанавливать регистрацию, если пользователь не вызывал API указанное число дней; 0 — без ограничений",
+    "Check-in paused": "Регистрация приостановлена",
+    "Check-in requires a cumulative recharge of at least {{min}} yuan. You have recharged {{recharged}} yuan, {{gap}} more to go": "Для регистрации требуется суммарное пополнение не менее {{min}} юаней. Вы пополнили на {{recharged}} юаней, осталось {{gap}}",
+    "Check-in is paused because you have not used the API for a long time. Call the API once or recharge to resume": "Регистрация приостановлена, так как вы давно не использовали API. Вызовите API один раз или пополните баланс, чтобы возобновить",
+    "Check-in is currently unavailable": "Регистрация сейчас недоступна",
     "Zoom": "Zoom"
   }
 }

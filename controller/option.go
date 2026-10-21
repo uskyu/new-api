@@ -190,6 +190,14 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "EmailNumericOnlyRestrictionEnabled":
+		if option.Value == "true" && len(common.EmailNumericOnlyDomainWhitelist) == 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无法启用邮箱纯数字限制，请先填入生效的邮箱域名！",
+			})
+			return
+		}
 	case "WeChatAuthEnabled":
 		if option.Value == "true" && common.WeChatServerAddress == "" {
 			c.JSON(http.StatusOK, gin.H{

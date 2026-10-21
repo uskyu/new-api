@@ -3926,6 +3926,20 @@
     "共 {{count}} 组": "{{count}} groupes",
     "暂无零充值账号": "Aucun compte sans recharge",
     "（{{count}} 次）": "({{count}} fois)",
+    "指定域名仅允许纯数字邮箱": "Partie locale numérique uniquement pour certains domaines",
+    "仅对下列域名生效：@ 前只允许纯数字，含字母即拒绝；其他域名不检查": "S'applique uniquement aux domaines listés : seuls les chiffres sont autorisés avant @ ; toute lettre est refusée. Les autres domaines ne sont pas vérifiés",
+    "启用指定域名仅允许纯数字邮箱": "Activer la restriction numérique pour certains domaines",
+    "保存纯数字邮箱域名设置": "Enregistrer les paramètres des domaines à partie locale numérique",
+    "签到门槛": "Seuils d'enregistrement",
+    "限制未充值或长期不活跃的账号签到，0 表示不限制": "Restreindre l'enregistrement des comptes sans recharge ou inactifs depuis longtemps ; 0 signifie aucune limite",
+    "签到充值门槛（元）": "Recharge minimale pour l'enregistrement (yuans)",
+    "0 表示不限制": "0 signifie aucune limite",
+    "{{amount}} 元 = {{quota}} 额度": "{{amount}} yuans = {{quota}} de quota",
+    "不活跃停签到天数": "Jours d'inactivité avant suspension de l'enregistrement",
+    "超过该天数未调用 API 将暂停签到；0 表示不限制": "L'enregistrement sera suspendu si l'API n'est pas appelée pendant plus de ce nombre de jours ; 0 signifie aucune limite",
+    "当前账号暂不满足签到条件": "Ce compte ne remplit pas encore les conditions d'enregistrement",
+    "需累计充值 ¥{{min}}，当前 ¥{{current}}，还差 ¥{{diff}}": "Recharge cumulée de ¥{{min}} requise ; actuellement ¥{{current}}, encore ¥{{diff}}",
+    "长期未使用 API，签到已暂停。调用一次 API 或充值后可恢复": "L'enregistrement est suspendu en raison d'une longue inactivité de l'API. Appelez l'API une fois ou rechargez pour reprendre",
     "开启后，邀请人的邀请额度需被邀请人充值后才可解锁提现": "Une fois activé, le quota d'invitation de l'inviteur ne peut être retiré qu'après la recharge de l'invité"
   }
 }

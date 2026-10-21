@@ -23,6 +23,14 @@ type CheckinSetting struct {
 	// 切换 BonusMetric 时互不覆盖，各自独立编辑与保存。
 	RequestCountTiers  []CheckinBonusTier `json:"request_count_tiers"`  // 按次档位（threshold 为次数）
 	QuotaConsumedTiers []CheckinBonusTier `json:"quota_consumed_tiers"` // 按额度档位（threshold 为额度）
+
+	// MinRechargeAmount 签到充值门槛，单位：元（不是 token 额度）。
+	// 口径：只统计 EPAY 渠道的成功充值；0 = 不限制（默认，行为与升级前一致）。
+	// 允许 0.5 这类小数，故用 float64 而不是 int。
+	MinRechargeAmount float64 `json:"min_recharge_amount"`
+	// InactiveDays 连续多少天未调用 API 则暂停签到；0 = 不限制（默认）。
+	// 恢复规则：最近 N 天内调用过 API，或累计充值过（EPAY 口径 > 0）。
+	InactiveDays int `json:"inactive_days"`
 }
 
 // 默认配置
