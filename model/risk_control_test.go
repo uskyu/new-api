@@ -75,6 +75,8 @@ func setupRiskControlTest(t *testing.T) {
 	t.Helper()
 	require.NoError(t, DB.AutoMigrate(&RiskIPRecord{}, &Checkin{}))
 	riskIPWriteState = sync.Map{}
+	// 共享 IP 统计是进程级缓存，测试间必须强制失效，避免上一用例的数据串味。
+	resetRiskInviterSharedIPCountsCacheForTest()
 	t.Cleanup(func() {
 		riskTestAssertDBSnapshotColumnLimits(t)
 		DB.Exec("DELETE FROM risk_ip_records")
@@ -82,6 +84,7 @@ func setupRiskControlTest(t *testing.T) {
 		DB.Exec("DELETE FROM top_ups")
 		DB.Exec("DELETE FROM users")
 		riskIPWriteState = sync.Map{}
+		resetRiskInviterSharedIPCountsCacheForTest()
 	})
 }
 
@@ -2349,4 +2352,241 @@ func TestListRiskInviteesRechargeAggregatesOnlySuccess(t *testing.T) {
 	require.EqualValues(t, 1, byId[users[1].Id].RechargeCount)
 	require.Zero(t, byId[users[2].Id].RechargeQuota)
 	require.Zero(t, byId[users[2].Id].RechargeCount)
+}
+
+// ---------------------------------------------------------------------------
+// 第三阶段 E 性能修复：shared_ip_count 派生表（避免逐邀请人相关 self-join）
+// ---------------------------------------------------------------------------
+
+// riskInviterOldSharedIPCount 用「原始 self-join 语义」独立计算某邀请人的共享 IP 数，
+// 作为新派生表方案的等价性参考实现（仅测试使用）。
+func riskInviterOldSharedIPCount(t *testing.T, inviterId int) int64 {
+	t.Helper()
+	var count int64
+	row := DB.Raw("SELECT (SELECT COUNT(DISTINCT a.ip) FROM risk_ip_records a "+
+		"JOIN risk_ip_records b ON a.ip = b.ip AND a.user_id <> b.user_id "+
+		"JOIN users ax ON ax.id = a.user_id AND ax.deleted_at IS NULL "+
+		"JOIN users bx ON bx.id = b.user_id AND bx.deleted_at IS NULL "+
+		"WHERE a.ip <> '' AND (ax.id = ? OR ax.inviter_id = ?))", inviterId, inviterId).Row()
+	require.NoError(t, row.Scan(&count))
+	return count
+}
+
+func TestListRiskInvitersSharedIPCountEquivalentToSelfJoinSemantics(t *testing.T) {
+	setupRiskControlTest(t)
+	inviters := createRiskUsers(t, []User{
+		{Username: "risk-equiv-parent", AffCode: "risk-equiv-parent-aff"},
+		{Username: "risk-equiv-a", AffCode: "risk-equiv-a-aff"},
+		{Username: "risk-equiv-b", AffCode: "risk-equiv-b-aff"},
+		{Username: "risk-equiv-c", AffCode: "risk-equiv-c-aff"},
+	})
+	// 多级邀请：nested 本身是 parent 的被邀请人，同时又有自己的被邀请人 dChild。
+	others := createRiskUsers(t, []User{
+		{Username: "risk-equiv-nested", AffCode: "risk-equiv-nested-aff", InviterId: inviters[0].Id},
+		{Username: "risk-equiv-a1", AffCode: "risk-equiv-a1-aff", InviterId: inviters[1].Id},
+		{Username: "risk-equiv-a2", AffCode: "risk-equiv-a2-aff", InviterId: inviters[1].Id},
+		{Username: "risk-equiv-a3", AffCode: "risk-equiv-a3-aff", InviterId: inviters[1].Id},
+		{Username: "risk-equiv-b1", AffCode: "risk-equiv-b1-aff", InviterId: inviters[2].Id},
+		{Username: "risk-equiv-c1", AffCode: "risk-equiv-c1-aff", InviterId: inviters[3].Id},
+		{Username: "risk-equiv-dchild", AffCode: "risk-equiv-dchild-aff", InviterId: 0},
+	})
+	nested := others[0]
+	// dChild 的邀请人是 nested（需要在创建后补 inviter_id）。
+	require.NoError(t, DB.Model(&User{}).Where("username = ?", "risk-equiv-dchild").Update("inviter_id", nested.Id).Error)
+	dChild := others[6]
+	externals := createRiskUsers(t, []User{
+		{Username: "risk-equiv-ext-live", AffCode: "risk-equiv-extlive-aff"},
+		{Username: "risk-equiv-ext-deleted", AffCode: "risk-equiv-extdel-aff"},
+	})
+	liveExternal, deletedExternal := externals[0], externals[1]
+	records := []RiskIPRecord{
+		// A：被邀请人 a1/a2 共享 S1；a2 与外部账号共享 S2 → A 共 2 个共享 IP。
+		{UserId: others[1].Id, TokenId: 1, IP: "203.0.113.11", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: others[2].Id, TokenId: 1, IP: "203.0.113.11", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: others[2].Id, TokenId: 2, IP: "203.0.113.12", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: liveExternal.Id, TokenId: 1, IP: "203.0.113.12", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		// B：邀请人本人有共享 IP（同一 IP 两条记录，去重后仍算 1 个）。
+		{UserId: inviters[2].Id, TokenId: 1, IP: "203.0.113.21", Source: RiskIPSourceLogin, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: inviters[2].Id, TokenId: 2, IP: "203.0.113.21", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: liveExternal.Id, TokenId: 2, IP: "203.0.113.21", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		// C：被邀请人只与「已删除账号」共享，不算共享 IP。
+		{UserId: others[5].Id, TokenId: 1, IP: "203.0.113.31", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: deletedExternal.Id, TokenId: 3, IP: "203.0.113.31", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		// nested：本人与外部共享 S5（应同时计入 nested 和其上级 parent）；被邀请人 dChild 与外部共享 S6。
+		{UserId: nested.Id, TokenId: 1, IP: "203.0.113.41", Source: RiskIPSourceLogin, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: liveExternal.Id, TokenId: 4, IP: "203.0.113.41", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: dChild.Id, TokenId: 1, IP: "203.0.113.42", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: liveExternal.Id, TokenId: 5, IP: "203.0.113.42", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+	}
+	require.NoError(t, DB.Create(&records).Error)
+	require.NoError(t, DB.Delete(&User{}, deletedExternal.Id).Error)
+
+	// 写死的期望值：口径 = 邀请人本人 + 全部被邀请人，且只统计两边都未删除的共享。
+	expectedCounts := map[int]int64{
+		inviters[0].Id: 1, // parent：被邀请人 nested 本人共享 S5
+		inviters[1].Id: 2, // a：S1 + S2
+		inviters[2].Id: 1, // b：本人共享 S21（同 IP 去重 1）
+		inviters[3].Id: 0, // c：只与已删除账号共享
+		nested.Id:      2, // nested：本人 S5 + 被邀请人 dChild 的 S6（多级场景关键用例）
+	}
+
+	items, total, err := ListRiskInviters("", 0, 10, "inviter_id", "asc", "", "any", false, 0, "", riskInviterDefaultRecentInvitesWindow, 0, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, len(expectedCounts), total)
+	require.Len(t, items, len(expectedCounts))
+	for _, item := range items {
+		expected, ok := expectedCounts[item.InviterId]
+		require.Truef(t, ok, "unexpected inviter %d", item.InviterId)
+		require.Equalf(t, expected, item.SharedIPCount, "inviter %d shared_ip_count", item.InviterId)
+		require.Equal(t, expected > 0, item.Suspicious, "inviter %d suspicious", item.InviterId)
+		// 与原始 self-join 语义逐行比对（参考实现直接跑旧 SQL）。
+		require.Equalf(t, riskInviterOldSharedIPCount(t, item.InviterId), item.SharedIPCount, "inviter %d 与 self-join 语义不一致", item.InviterId)
+	}
+
+	// suspicious_only 与 min_shared_ips 过滤结果与期望一致（回归旧筛选语义）。
+	suspiciousItems, suspiciousTotal, err := ListRiskInviters("", 0, 10, "inviter_id", "asc", "", "any", true, 0, "", riskInviterDefaultRecentInvitesWindow, 0, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 4, suspiciousTotal) // parent/a/b/nested
+	require.Len(t, suspiciousItems, 4)
+	for _, item := range suspiciousItems {
+		require.Positive(t, item.SharedIPCount)
+	}
+
+	minTwoItems, minTwoTotal, err := ListRiskInviters("", 0, 10, "inviter_id", "asc", "", "any", false, 0, "", riskInviterDefaultRecentInvitesWindow, 0, 2)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, minTwoTotal)
+	require.ElementsMatch(t, []int{inviters[1].Id, nested.Id}, []int{minTwoItems[0].InviterId, minTwoItems[1].InviterId})
+
+	// sort_by=shared_ip_count desc：2,2,1,1,0；并列按 users.id ASC。
+	sortedItems, sortedTotal, err := ListRiskInviters("", 0, 10, "shared_ip_count", "desc", "", "any", false, 0, "", riskInviterDefaultRecentInvitesWindow, 0, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 5, sortedTotal)
+	require.Equal(t, []int{inviters[1].Id, nested.Id, inviters[0].Id, inviters[2].Id, inviters[3].Id},
+		[]int{sortedItems[0].InviterId, sortedItems[1].InviterId, sortedItems[2].InviterId, sortedItems[3].InviterId, sortedItems[4].InviterId})
+}
+
+// TestListRiskInvitersLargeDatasetPerformance 用 ~300 邀请人 / ~1500 条 IP 记录模拟
+// 「邀请关系列表」的真实规模，防止 shared_ip_count 退化为逐邀请人扫全表的慢查询。
+func TestListRiskInvitersLargeDatasetPerformance(t *testing.T) {
+	setupRiskControlTest(t)
+	const (
+		inviterCount = 300
+		inviteePer   = 4
+		noiseUsers   = 300
+	)
+	inviters := make([]User, inviterCount)
+	for index := range inviters {
+		inviters[index] = User{
+			Username: fmt.Sprintf("risk-perf-inv-%03d", index),
+			Password: "test-password",
+			AffCode:  fmt.Sprintf("risk-perf-inv-%03d-aff", index),
+		}
+	}
+	require.NoError(t, DB.CreateInBatches(&inviters, 200).Error)
+
+	users := make([]User, inviterCount*inviteePer)
+	for index := 0; index < inviterCount; index++ {
+		for offset := 0; offset < inviteePer; offset++ {
+			users[index*inviteePer+offset] = User{
+				Username:  fmt.Sprintf("risk-perf-u-%03d-%d", index, offset),
+				Password:  "test-password",
+				AffCode:   fmt.Sprintf("risk-perf-u-%03d-%d-aff", index, offset),
+				InviterId: inviters[index].Id,
+			}
+		}
+	}
+	require.NoError(t, DB.CreateInBatches(&users, 200).Error)
+
+	records := make([]RiskIPRecord, 0, inviterCount*inviteePer+noiseUsers)
+	for index := 0; index < inviterCount; index++ {
+		// 每个邀请人的 4 个被邀请人两两共享 2 个 IP → 该邀请人 shared_ip_count = 2。
+		ipA := fmt.Sprintf("10.%d.%d.1", index/250, index%250)
+		ipB := fmt.Sprintf("10.%d.%d.2", index/250, index%250)
+		for offset := 0; offset < inviteePer; offset++ {
+			ip := ipA
+			tokenId := 1
+			if offset >= 2 {
+				ip = ipB
+				tokenId = 2
+			}
+			records = append(records, RiskIPRecord{
+				UserId: users[index*inviteePer+offset].Id, TokenId: tokenId, IP: ip,
+				Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1,
+			})
+		}
+	}
+	noise := make([]User, noiseUsers)
+	for index := range noise {
+		noise[index] = User{
+			Username: fmt.Sprintf("risk-perf-noise-%03d", index),
+			Password: "test-password",
+			AffCode:  fmt.Sprintf("risk-perf-noise-%03d-aff", index),
+		}
+	}
+	require.NoError(t, DB.CreateInBatches(&noise, 200).Error)
+	for index := range noise {
+		records = append(records, RiskIPRecord{
+			UserId: noise[index].Id, TokenId: 1, IP: fmt.Sprintf("172.16.%d.%d", index/250, index%250),
+			Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1,
+		})
+	}
+	require.NoError(t, DB.CreateInBatches(&records, 200).Error)
+
+	// 默认查询（老板卡住的场景）+ 共享 IP 排序/过滤查询都应在 2 秒内完成。
+	started := time.Now()
+	items, total, err := ListRiskInviters("", 0, 10, "direct_invite_count", "desc", "", "any", false, 0, "", riskInviterDefaultRecentInvitesWindow, 0, 0)
+	defaultElapsed := time.Since(started)
+	require.NoError(t, err)
+	require.EqualValues(t, inviterCount, total)
+	require.Len(t, items, 10)
+	for _, item := range items {
+		require.EqualValues(t, 2, item.SharedIPCount, "每个邀请人都有 2 个共享 IP")
+	}
+	require.Lessf(t, defaultElapsed, 2*time.Second, "默认邀请列表查询耗时 %v，超过 2s", defaultElapsed)
+
+	started = time.Now()
+	sortedItems, sortedTotal, err := ListRiskInviters("", 0, 10, "shared_ip_count", "desc", "", "any", false, 0, "", riskInviterDefaultRecentInvitesWindow, 0, 2)
+	sortedElapsed := time.Since(started)
+	require.NoError(t, err)
+	require.EqualValues(t, inviterCount, sortedTotal)
+	require.Len(t, sortedItems, 10)
+	for _, item := range sortedItems {
+		require.GreaterOrEqual(t, item.SharedIPCount, int64(2))
+	}
+	require.Lessf(t, sortedElapsed, 2*time.Second, "shared_ip_count 排序查询耗时 %v，超过 2s", sortedElapsed)
+}
+
+// TestListRiskInvitersSharedIPCountCacheInvalidatedByRecordRiskIP 验证共享 IP 统计缓存：
+// 预热的旧值在 RecordRiskIP 写入新 IP 记录后失效重建，筛选/行内值随即反映新数据。
+func TestListRiskInvitersSharedIPCountCacheInvalidatedByRecordRiskIP(t *testing.T) {
+	setupRiskControlTest(t)
+	inviter := createRiskUsers(t, []User{
+		{Username: "risk-cache-inviter", AffCode: "risk-cache-inviter-aff"},
+	})[0]
+	users := createRiskUsers(t, []User{
+		{Username: "risk-cache-u1", AffCode: "risk-cache-u1-aff", InviterId: inviter.Id},
+		{Username: "risk-cache-u2", AffCode: "risk-cache-u2-aff", InviterId: inviter.Id},
+	})
+	list := func(suspiciousOnly bool) *RiskInviter {
+		items, total, err := ListRiskInviters("", 0, 10, "inviter_id", "asc", "", "any", suspiciousOnly, 0, "", riskInviterDefaultRecentInvitesWindow, 0, 0)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, total)
+		require.Len(t, items, 1)
+		return items[0]
+	}
+
+	// 预热缓存：此时两个被邀请人没有 IP 记录，行内值应为 0。
+	require.Zero(t, list(false).SharedIPCount)
+
+	// 走真实写路径写入同一共享 IP，应触发缓存失效（版本号变更后重建）。
+	RecordRiskIP(users[0].Id, 1, RiskIPSourceToken, "203.0.113.210")
+	RecordRiskIP(users[1].Id, 1, RiskIPSourceToken, "203.0.113.210")
+
+	item := list(false)
+	require.EqualValues(t, 1, item.SharedIPCount, "写入新的共享 IP 后行内统计应更新")
+	require.True(t, item.Suspicious)
+	// 命中缓存后的重复查询结果保持一致。
+	require.EqualValues(t, 1, list(false).SharedIPCount)
+	// 筛选路径同样基于更新后的缓存。
+	require.EqualValues(t, 1, list(true).SharedIPCount)
 }

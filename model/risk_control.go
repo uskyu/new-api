@@ -7,10 +7,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/bytedance/gopkg/util/gopool"
+	"github.com/samber/hot"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -70,24 +73,164 @@ func normalizeRiskInviterRecentInvitesWindow(window int) int {
 	return riskInviterDefaultRecentInvitesWindow
 }
 
-// riskInviterSharedIPCountExpr 计算「邀请人本人或其任一被邀请人与其他未删除账号
-// 共享的去重 IP 数」的 SQL 派生列（契约 phase3 E.2）。口径为邀请人 + **全部**被邀请人，
-// 不再局限当前页/前 100 个被邀请人。
+// riskInviterSharedIPSetSQL 是「共享 IP 小集合」：被 >=2 个未删除用户使用过的 IP。
+// 原语义「存在另一个未删除用户 b 与 a 共享同一 IP」等价于「该 IP 下未删除用户
+// 去重数 >= 2」，因此可先聚合出这个小集合（通常远小于全表），避免逐邀请人做
+// self-join 相关子查询。
+const riskInviterSharedIPSetSQL = "SELECT r2.ip FROM risk_ip_records r2 " +
+	"JOIN users u2 ON u2.id = r2.user_id AND u2.deleted_at IS NULL " +
+	"WHERE r2.ip <> '' GROUP BY r2.ip HAVING COUNT(DISTINCT r2.user_id) >= 2"
+
+// riskInviterSharedIPCountsSQL 一次性聚合「owner → 共享 IP 去重数」。
 //
-// 该表达式同时用于：
-//   - 行内 RiskInviter.SharedIPCount 的取值；
-//   - min_shared_ips / suspicious_only 的 SQL 过滤（先过滤再分页，保证 total 正确）；
-//   - ORDER BY（通过别名 risk_shared_ip_count）。
+// owner 映射（与契约 E.2 的「邀请人本人或其全部被邀请人」口径一致）：
+//   - 每条共享 IP 记录计入 owner = 上级邀请人（第一支，仅 inviter_id > 0）；
+//   - 同时计入 owner = 用户本人（第二支），且只保留「本身确有被邀请人」的用户
+//     （self_owners），因为 owner=本人的行只会被 LEFT JOIN 到邀请人行。
 //
-// 性能说明：这是一个相关子查询，无法在 WHERE/ORDER BY 里引用 SELECT 别名，
-// 因此 WHERE 处会重复表达式；risk_ip_records.ip / user_id、users.id / inviter_id
-// 均有索引，但本表达式仍会按邀请人行逐行求值。契约要求本期不加索引，若线上邀请人
-// 规模大导致该列表变慢，需要单独立项评估（如落冗余列/加索引）。
-const riskInviterSharedIPCountExpr = "(SELECT COUNT(DISTINCT a.ip) FROM risk_ip_records a " +
-	"JOIN risk_ip_records b ON a.ip = b.ip AND a.user_id <> b.user_id " +
-	"JOIN users ax ON ax.id = a.user_id AND ax.deleted_at IS NULL " +
-	"JOIN users bx ON bx.id = b.user_id AND bx.deleted_at IS NULL " +
-	"WHERE a.ip <> '' AND (ax.id = users.id OR ax.inviter_id = users.id))"
+// 性能：两支先 UNION ALL 得到 (owner, ip) 归属，再用**一次** IN 子查询过滤共享 IP
+// 集合（共享集合只计算一次，代替旧版在两个 UNION 支里各内联一遍），最后按 owner 聚合。
+// 结果与邀请人数量无关，只随 risk_ip_records/users 规模增长；SQLite/MySQL/PG 通用。
+const riskInviterSharedIPCountsSQL = "SELECT owner_id, COUNT(DISTINCT ip) AS cnt FROM (" +
+	"SELECT u.inviter_id AS owner_id, r.ip FROM risk_ip_records r " +
+	"JOIN users u ON u.id = r.user_id AND u.deleted_at IS NULL " +
+	"WHERE u.inviter_id > 0 " +
+	"UNION ALL " +
+	"SELECT u.id AS owner_id, r.ip FROM risk_ip_records r " +
+	"JOIN users u ON u.id = r.user_id AND u.deleted_at IS NULL " +
+	"JOIN (SELECT DISTINCT inviter_id AS user_id FROM users WHERE inviter_id > 0) self_owners ON self_owners.user_id = u.id" +
+	") risk_shared_ip_owners WHERE ip IN (" + riskInviterSharedIPSetSQL + ") GROUP BY owner_id"
+
+// riskInviterSharedIPJoinSQL 仅在 sort_by=shared_ip_count（需要 SQL 侧排序）时挂载：
+// LEFT JOIN 派生表 sic（owner_id 唯一，一对一，不影响行数）。默认/过滤路径改用
+// 进程内缓存 map + IN 过滤，见 getRiskInviterSharedIPCounts。
+const riskInviterSharedIPJoinSQL = "LEFT JOIN (" + riskInviterSharedIPCountsSQL + ") sic ON sic.owner_id = users.id"
+
+// riskInviterSharedIPCountSQL 是派生表 sic 的取值表达式。
+const riskInviterSharedIPCountSQL = "COALESCE(sic.cnt, 0)"
+
+// 共享 IP 统计缓存：派生表只依赖 risk_ip_records + users，与分页/筛选/排序无关，
+// 因此用 cachex 混合缓存（Redis 启用走 Redis，否则内存 hot cache）缓存 30 秒。
+// 失效：RecordRiskIP 成功写入后按 5 秒窗口合并失效（版本号 +1），避免高频写入导致
+// 缓存持续抖动；TTL 兜底覆盖用户删除等非 RecordRiskIP 路径的变化（最长 30 秒）。
+const (
+	riskInviterSharedIPCountsCacheNamespace = "risk:inviter_shared_ip_counts"
+	riskInviterSharedIPCountsCacheKey       = "all"
+	riskInviterSharedIPCountsCacheTTL       = 30 * time.Second
+	// riskInviterSharedFilterIDLimit 是「用缓存 map 生成 IN 列表过滤」的 id 上限；
+	// 超过则回退到 SQL 派生表 JOIN 过滤，避免撞上 SQLite/驱动的绑定变量上限。
+	riskInviterSharedFilterIDLimit = 5000
+	// riskInviterSharedIPCountsInvalidateMinInterval 是缓存失效的最小合并间隔。
+	riskInviterSharedIPCountsInvalidateMinInterval = 5 * time.Second
+)
+
+var (
+	riskInviterSharedIPCountsCacheOnce        sync.Once
+	riskInviterSharedIPCountsCache            *cachex.HybridCache[map[string]int64]
+	riskInviterSharedIPCountsCacheVersion     atomic.Uint64
+	riskInviterSharedIPCountsLastInvalidateAt atomic.Int64
+)
+
+func getRiskInviterSharedIPCountsCache() *cachex.HybridCache[map[string]int64] {
+	riskInviterSharedIPCountsCacheOnce.Do(func() {
+		riskInviterSharedIPCountsCache = cachex.NewHybridCache[map[string]int64](cachex.HybridCacheConfig[map[string]int64]{
+			Namespace: cachex.Namespace(riskInviterSharedIPCountsCacheNamespace),
+			Redis:     common.RDB,
+			RedisEnabled: func() bool {
+				return common.RedisEnabled && common.RDB != nil
+			},
+			RedisCodec: cachex.JSONCodec[map[string]int64]{},
+			Memory: func() *hot.HotCache[string, map[string]int64] {
+				return hot.NewHotCache[string, map[string]int64](hot.LRU, 128).
+					WithTTL(riskInviterSharedIPCountsCacheTTL).
+					WithJanitor().
+					Build()
+			},
+		})
+	})
+	return riskInviterSharedIPCountsCache
+}
+
+// invalidateRiskInviterSharedIPCountsCache 使后续读取重建共享 IP 统计。
+// 用版本号前缀实现 O(1) 失效（不扫 key、不删 Redis），旧 key 由 TTL 自然过期；
+// 5 秒窗口内的连续失效合并为一次，避免高频风险写入把缓存打成持续 miss。
+func invalidateRiskInviterSharedIPCountsCache() {
+	now := time.Now().UnixNano()
+	last := riskInviterSharedIPCountsLastInvalidateAt.Load()
+	if last != 0 && now-last < int64(riskInviterSharedIPCountsInvalidateMinInterval) {
+		return
+	}
+	if riskInviterSharedIPCountsLastInvalidateAt.CompareAndSwap(last, now) {
+		riskInviterSharedIPCountsCacheVersion.Add(1)
+	}
+}
+
+// resetRiskInviterSharedIPCountsCacheForTest 绕过 5 秒合并窗口强制失效（仅测试使用）。
+func resetRiskInviterSharedIPCountsCacheForTest() {
+	riskInviterSharedIPCountsLastInvalidateAt.Store(0)
+	riskInviterSharedIPCountsCacheVersion.Add(1)
+}
+
+func riskInviterSharedIPCountsCacheVersionKey() string {
+	return fmt.Sprintf("%s:v%d", riskInviterSharedIPCountsCacheKey, riskInviterSharedIPCountsCacheVersion.Load())
+}
+
+type riskInviterSharedIPCountRow struct {
+	OwnerId int
+	Cnt     int64
+}
+
+// loadRiskInviterSharedIPCountsFromDB 回源数据库一次性计算 owner → 共享 IP 数。
+func loadRiskInviterSharedIPCountsFromDB() (map[string]int64, error) {
+	var rows []*riskInviterSharedIPCountRow
+	if err := DB.Raw(riskInviterSharedIPCountsSQL).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		if row == nil || row.OwnerId <= 0 {
+			continue
+		}
+		counts[strconv.Itoa(row.OwnerId)] = row.Cnt
+	}
+	return counts, nil
+}
+
+// getRiskInviterSharedIPCounts 读取 owner → 共享 IP 数（缓存优先，未命中回源并写回）。
+func getRiskInviterSharedIPCounts() (map[string]int64, error) {
+	cache := getRiskInviterSharedIPCountsCache()
+	key := riskInviterSharedIPCountsCacheVersionKey()
+	if counts, found, err := cache.Get(key); err == nil && found {
+		return counts, nil
+	} else if err != nil {
+		common.SysLog("failed to read risk inviter shared ip counts cache: " + err.Error())
+	}
+	counts, err := loadRiskInviterSharedIPCountsFromDB()
+	if err != nil {
+		return nil, err
+	}
+	if err := cache.SetWithTTL(key, counts, riskInviterSharedIPCountsCacheTTL); err != nil {
+		common.SysLog("failed to write risk inviter shared ip counts cache: " + err.Error())
+	}
+	return counts, nil
+}
+
+// riskInviterSharedIPFilterIDs 从缓存 map 中筛出共享 IP 数 >= minCount 的 owner id（升序）。
+func riskInviterSharedIPFilterIDs(counts map[string]int64, minCount int64) []int {
+	ids := make([]int, 0, len(counts))
+	for key, count := range counts {
+		if count < minCount {
+			continue
+		}
+		id, err := strconv.Atoi(key)
+		if err != nil || id <= 0 {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	return ids
+}
 
 // riskInviterRecentInviteCountExpr 计算「最近窗口内新增被邀请人数」的 SQL 相关子查询
 // （唯一参数为窗口起点 cutoff）。按契约 E.1：它既用于 min_recent_invites 过滤，
@@ -238,7 +381,11 @@ func RecordRiskIP(userId int, tokenId int, source string, rawIP string) {
 	}).Create(record).Error
 	if err != nil {
 		common.SysLog("failed to record risk IP: " + err.Error())
+		return
 	}
+	// 新增/更新 IP 记录后失效邀请人共享 IP 统计缓存，保证列表统计尽快反映最新数据
+	// （5 秒合并窗口内的连续写入合并为一次失效，TTL 兜底）。
+	invalidateRiskInviterSharedIPCountsCache()
 }
 
 func RecordRiskIPAsync(userId int, tokenId int, source string, ip string) {
@@ -894,10 +1041,16 @@ func riskInviterBanCondition(banState string) (string, []interface{}) {
 //   - minRecentInvites >= 2：最近 recentInvitesWindow 秒内新增被邀请人 >= 阈值；
 //   - minSharedIPs >= 1：shared_ip_count >= minSharedIPs。
 //
-// 行内 RiskInviter.SharedIPCount / Suspicious 与上述筛选/排序统一使用
-// riskInviterSharedIPCountExpr 的 SQL 派生值（口径 = 邀请人本人 + 全部被邀请人），
-// 不再使用基于当前页前 100 个被邀请人的 Go 侧统计，消除「筛选命中但行内
-// suspicious=false」的历史不一致。
+// 行内 RiskInviter.SharedIPCount / Suspicious 与 min_shared_ips / suspicious_only
+// 筛选口径统一为「邀请人本人 + 全部被邀请人」的共享 IP 去重数，不再使用基于当前页
+// 前 100 个被邀请人的 Go 侧统计，消除「筛选命中但行内 suspicious=false」的不一致。
+//
+// 性能：共享 IP 统计只依赖 risk_ip_records/users，与分页/筛选/排序无关，因此：
+//   - 默认与过滤路径：从 cachex 混合缓存（30s TTL，RecordRiskIP 写入后合并失效）
+//     读取 owner→count map；筛选在 Go 侧生成 id 列表后用 `users.id IN ?` 下推 SQL，
+//     避免每次请求重算派生表；id 过多时回退 SQL 派生表 JOIN 防止撞绑定变量上限。
+//   - sort_by=shared_ip_count：需要 SQL 侧排序，挂 LEFT JOIN 派生表 sic（owner_id
+//     唯一、一对一，不影响 total），排序/过滤仍走同一份 SQL 口径。
 //
 // 实现只用 GORM 子查询 + JOIN，兼容 SQLite/MySQL/PostgreSQL。
 func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, order string, banState string, searchType string, suspiciousOnly bool, minInvites int, inviterStatus string, recentInvitesWindow int, minRecentInvites int, minSharedIPs int) ([]*RiskInviter, int64, error) {
@@ -934,7 +1087,41 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 	banCondition, banArgs := riskInviterBanCondition(banState)
 	// 最近邀请窗口的时间阈值只取一次，保证 count 与分页查询使用同一时间基准。
 	recentInvitesCutoff := time.Now().Unix() - int64(recentInvitesWindow)
-	buildQuery := func() *gorm.DB {
+
+	// 共享 IP 统计：默认/过滤路径用缓存 map；只有 sort_by=shared_ip_count 需要 SQL JOIN。
+	useSharedIPJoin := sortBy == "shared_ip_count"
+	needSharedCounts := suspiciousOnly || minSharedIPs >= 1 || !useSharedIPJoin
+	var sharedCounts map[string]int64
+	if needSharedCounts {
+		var countsErr error
+		sharedCounts, countsErr = getRiskInviterSharedIPCounts()
+		if countsErr != nil {
+			return nil, 0, countsErr
+		}
+	}
+	sharedFilterMinCount := int64(0)
+	if minSharedIPs >= 1 {
+		sharedFilterMinCount = int64(minSharedIPs)
+	}
+	if suspiciousOnly && sharedFilterMinCount < 1 {
+		sharedFilterMinCount = 1
+	}
+	var sharedFilterIDs []int
+	sharedFilterByJoin := false
+	if sharedFilterMinCount > 0 {
+		sharedFilterIDs = riskInviterSharedIPFilterIDs(sharedCounts, sharedFilterMinCount)
+		if len(sharedFilterIDs) == 0 {
+			return []*RiskInviter{}, 0, nil
+		}
+		if len(sharedFilterIDs) > riskInviterSharedFilterIDLimit {
+			// ID 过多时回退 SQL 派生表过滤，避免 IN 列表超出各库绑定变量上限。
+			sharedFilterByJoin = true
+			sharedFilterIDs = nil
+		}
+	}
+	includeSharedIPJoin := useSharedIPJoin || sharedFilterByJoin
+
+	buildQuery := func(includeJoin bool) *gorm.DB {
 		inviterStats := DB.Model(&User{}).
 			Select("inviter_id, COUNT(*) AS direct_invite_count").
 			Where("inviter_id > 0").
@@ -942,6 +1129,9 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 		tx := DB.Table("(?) AS inviter_stats", inviterStats).
 			Joins("JOIN users ON users.id = inviter_stats.inviter_id").
 			Where("users.deleted_at IS NULL")
+		if includeJoin {
+			tx = tx.Joins(riskInviterSharedIPJoinSQL)
+		}
 		if keywordCondition != "" {
 			tx = tx.Where(keywordCondition, keywordArgs...)
 		}
@@ -951,12 +1141,12 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 		if minInvites >= 2 {
 			tx = tx.Where("inviter_stats.direct_invite_count >= ?", minInvites)
 		}
-		// 「需复核」与 min_shared_ips 都直接复用 SQL 派生列，保证过滤、排序与行内值一致。
-		if suspiciousOnly {
-			tx = tx.Where(riskInviterSharedIPCountExpr + " > 0")
-		}
-		if minSharedIPs >= 1 {
-			tx = tx.Where(riskInviterSharedIPCountExpr+" >= ?", minSharedIPs)
+		if sharedFilterMinCount > 0 {
+			if sharedFilterByJoin {
+				tx = tx.Where(riskInviterSharedIPCountSQL+" >= ?", sharedFilterMinCount)
+			} else if len(sharedFilterIDs) > 0 {
+				tx = tx.Where("users.id IN ?", sharedFilterIDs)
+			}
 		}
 		if minRecentInvites >= 2 {
 			tx = tx.Where(riskInviterRecentInviteCountExpr+" >= ?", recentInvitesCutoff, minRecentInvites)
@@ -967,7 +1157,8 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 		return tx
 	}
 	var total int64
-	if err := buildQuery().Count(&total).Error; err != nil {
+	// LEFT JOIN sic 是 owner_id 一对一，不影响行数；只有过滤回退到派生表时 count 才需要 JOIN。
+	if err := buildQuery(sharedFilterByJoin).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	if total == 0 {
@@ -976,8 +1167,12 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 	var rows []*riskInviterAggregateRow
 	// recent_invite_count 是响应字段（E.1），默认查询（不传 min_recent_invites）也必须计算；
 	// 唯一占位符为窗口起点 recentInvitesCutoff。
-	err := buildQuery().
-		Select("users.id AS inviter_id, users.username, users.display_name, users.email, users.status, users.quota, users."+commonGroupCol+", inviter_stats.direct_invite_count, "+riskInviterSharedIPCountExpr+" AS risk_shared_ip_count, "+riskInviterRecentInviteCountExpr+" AS recent_invite_count", recentInvitesCutoff).
+	pageSelect := "users.id AS inviter_id, users.username, users.display_name, users.email, users.status, users.quota, users." + commonGroupCol + ", inviter_stats.direct_invite_count"
+	if useSharedIPJoin {
+		pageSelect += ", " + riskInviterSharedIPCountSQL + " AS risk_shared_ip_count"
+	}
+	err := buildQuery(includeSharedIPJoin).
+		Select(pageSelect+", "+riskInviterRecentInviteCountExpr+" AS recent_invite_count", recentInvitesCutoff).
 		Order(riskInviterOrderClause(sortBy, order)).
 		Offset(startIdx).Limit(limit).
 		Scan(&rows).Error
@@ -1004,13 +1199,17 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 		}
 		pageSummaries = append(pageSummaries, summaries...)
 		pageSummaries = append(pageSummaries, matchedInvitees...)
+		sharedIPCount := row.SharedIPCount
+		if !useSharedIPJoin {
+			sharedIPCount = sharedCounts[strconv.Itoa(row.InviterId)]
+		}
 		result = append(result, &RiskInviter{
 			InviterId: row.InviterId, Username: row.Username, DisplayName: row.DisplayName,
 			Email: row.Email, Status: row.Status, Quota: row.Quota, Group: row.Group,
 			DirectInviteCount: row.DirectInviteCount,
 			RecentInviteCount: row.RecentInviteCount,
-			SharedIPCount:     row.SharedIPCount,
-			Suspicious:        row.SharedIPCount > 0,
+			SharedIPCount:     sharedIPCount,
+			Suspicious:        sharedIPCount > 0,
 			Invitees:          summaries,
 			MatchedInvitees:   matchedInvitees,
 		})
