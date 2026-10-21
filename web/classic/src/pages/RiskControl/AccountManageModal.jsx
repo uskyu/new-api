@@ -41,6 +41,13 @@ const PAGE_SIZE = 20;
 // 角色 >= 管理员（10）的账号前端置灰不可勾选，服务端仍会二次校验并返回 skipped。
 const SELECTABLE_ROLE_LIMIT = 10;
 
+// 用户表 9 列固定宽度之和（1100）+ 行选择列 48 = 1148。
+// 弹窗宽 1200 时表格可视区约 1103px，横向仅剩约 45px，配合左侧固定列即可。
+const TABLE_SCROLL_X = 1148;
+// 桌面弹窗宽度自适应：1440 屏取满 1200；1024 等窄屏自动收窄到视口 - 64px，
+// 保证左右各留 32px 边距，弹窗不会被视口裁掉（1440 下计算结果仍为 1200）。
+const MODAL_DESKTOP_WIDTH = 'min(1200px, calc(100vw - 64px))';
+
 // inviter 弹窗视图：ip / time 为分组卡片视图，flat 为原有平铺分页列表。
 const VIEW_IP = 'ip';
 const VIEW_TIME = 'time';
@@ -101,6 +108,180 @@ const renderStatusTag = (user, t) =>
 const formatLastSeen = (user) =>
   user?.last_seen_at ? timestamp2string(user.last_seen_at) : '-';
 
+// 用户活跃度判据（严格按契约 H 节表格，判断顺序即优先级）。
+const getActivityMeta = (user) => {
+  const requestCount = Number(user?.request_count) || 0;
+  const usedQuota = Number(user?.used_quota) || 0;
+  const checkinCount = Number(user?.checkin_count) || 0;
+  if (requestCount === 0 && usedQuota === 0 && checkinCount === 0) {
+    return { key: 'zombie', label: '僵尸号', color: 'red' };
+  }
+  if (requestCount === 0 && checkinCount > 0) {
+    return { key: 'checkin_only', label: '只签到未调用', color: 'orange' };
+  }
+  if (requestCount === 0 && usedQuota > 0) {
+    return { key: 'quota_only', label: '有消耗无请求', color: 'yellow' };
+  }
+  return { key: 'active', label: '有调用', color: 'green' };
+};
+
+const sumUserField = (users, field) =>
+  (Array.isArray(users) ? users : []).reduce(
+    (sum, user) => sum + (Number(user?.[field]) || 0),
+    0,
+  );
+
+// 合计金额为空（<=0）时显示 -，不显示 0 造成误解。
+const formatQuotaTotal = (value) =>
+  Number(value) > 0 ? renderQuota(Number(value)) : '-';
+
+const renderActivityTag = (user, t) => {
+  const meta = getActivityMeta(user);
+  return (
+    <Tag color={meta.color} shape='circle' size='small'>
+      {t(meta.label)}
+    </Tag>
+  );
+};
+
+const renderRechargeCell = (user, t) => {
+  const rechargeQuota = Number(user?.recharge_quota) || 0;
+  if (rechargeQuota <= 0) {
+    return <Text type='tertiary'>-</Text>;
+  }
+  const rechargeCount = Number(user?.recharge_count) || 0;
+  return (
+    <span className='tabular-nums'>
+      {renderQuota(rechargeQuota)}
+      <span className='ml-1 text-xs text-[var(--semi-color-text-2)]'>
+        {t('（{{count}} 次）', { count: rechargeCount })}
+      </span>
+    </span>
+  );
+};
+
+// 邀请人范围批量操作需要 include_inviter（batchStatus.js 不在本次写作用域，先本地封装）。
+const submitInviterScopeStatus = async ({
+  action,
+  inviterId,
+  includeInviter,
+}) => {
+  const res = await API.post(
+    `/api/risk-control/inviters/${inviterId}/batch-status`,
+    { action, include_inviter: Boolean(includeInviter) },
+    { skipErrorHandler: true },
+  );
+  const payload = res?.data;
+  if (!payload?.success) {
+    return { ok: false, message: payload?.message || '' };
+  }
+  const data = payload.data || {};
+  return {
+    ok: true,
+    updated: Number(data.updated) || 0,
+    skipped: Array.isArray(data.skipped) ? data.skipped : [],
+  };
+};
+
+// 「封禁/解禁全部」确认内容（邀请人范围）：默认同时处理邀请人本人。
+const InviterAllConfirmContent = ({
+  t,
+  action,
+  inviteeCount,
+  includeInviterRef,
+}) => {
+  const [includeInviter, setIncludeInviter] = useState(true);
+  const total = inviteeCount + (includeInviter ? 1 : 0);
+  return (
+    <div>
+      <div>
+        {action === 'disable'
+          ? t('封禁全部被邀请账号')
+          : t('解禁全部被邀请账号')}
+      </div>
+      <div className='mt-1 text-[var(--semi-color-text-2)]'>
+        {t('共 {{total}} 个账号', { total })}
+        {includeInviter ? `（${t('含邀请人本人')}）` : ''}
+      </div>
+      <div className='mt-1'>
+        {action === 'disable'
+          ? t('封禁后这些账号将无法登录和调用 API。')
+          : t('解禁后这些账号将恢复访问。')}
+      </div>
+      <div className='mt-2'>
+        <Checkbox
+          defaultChecked
+          onChange={(e) => {
+            const checked = Boolean(e?.target?.checked);
+            includeInviterRef.current = checked;
+            setIncludeInviter(checked);
+          }}
+        >
+          {action === 'disable'
+            ? t('同时封禁邀请人本人')
+            : t('同时解禁邀请人本人')}
+        </Checkbox>
+      </div>
+    </div>
+  );
+};
+
+// 手机端用户卡片：状态/角色/活跃度 + 额度/充值/历史消耗/请求数（桌面表格的移动端等价）。
+const MobileUserCard = ({ user, selected, onSelect, t }) => {
+  const key = getUserRowKey(user);
+  const usedQuota = Number(user?.used_quota) || 0;
+  const requestCount = Number(user?.request_count) || 0;
+  return (
+    <div className='flex items-start gap-3 rounded-lg border border-[var(--semi-color-border)] p-3'>
+      <Checkbox
+        checked={Boolean(selected[String(key)])}
+        disabled={!canSelectUser(user)}
+        onChange={(e) => onSelect(user, Boolean(e?.target?.checked))}
+      />
+      <div className='min-w-0 flex-1'>
+        <div className='flex items-start justify-between gap-2'>
+          <div className='min-w-0'>
+            <div className='truncate font-medium'>
+              #{key} {user.username || '-'}
+            </div>
+            <div className='truncate text-xs text-[var(--semi-color-text-2)]'>
+              {user.email || '-'}
+            </div>
+          </div>
+          <div className='flex shrink-0 flex-col items-end gap-1'>
+            {renderStatusTag(user, t)}
+            {renderRoleTag(user.role, t)}
+            {renderActivityTag(user, t)}
+          </div>
+        </div>
+        <div className='mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--semi-color-text-2)]'>
+          <span className='flex items-center gap-1'>
+            {t('充值')}: {renderRechargeCell(user, t)}
+          </span>
+          <span>
+            {t('额度')}:{' '}
+            <span className='tabular-nums text-[var(--semi-color-text-0)]'>
+              {typeof user.quota === 'number' ? renderQuota(user.quota) : '-'}
+            </span>
+          </span>
+          <span>
+            {t('历史消耗')}:{' '}
+            <span className='tabular-nums text-[var(--semi-color-text-0)]'>
+              {usedQuota > 0 ? renderQuota(usedQuota) : '-'}
+            </span>
+          </span>
+          <span>
+            {t('请求数')}: {requestCount}
+          </span>
+          <span>
+            {t('最近出现')}: {formatLastSeen(user)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /**
  * 关联账号管理弹窗。
  * - shared 模式：数据来自同 IP 行内 item.users（全量），前端分页，不发请求。
@@ -127,8 +308,8 @@ export default function AccountManageModal({
   // 用于丢弃过期的分页响应，避免快速关闭/切换弹窗时旧请求覆盖新数据。
   const loadSeqRef = useRef(0);
 
-  // inviter 模式分组视图状态（shared 模式不使用）。
-  const [viewMode, setViewMode] = useState(VIEW_IP);
+  // inviter 模式视图状态（shared 模式不使用）。默认「平铺列表」（契约 G）。
+  const [viewMode, setViewMode] = useState(VIEW_FLAT);
   const [timeWindow, setTimeWindow] = useState(DEFAULT_TIME_WINDOW);
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [groups, setGroups] = useState([]);
@@ -136,6 +317,8 @@ export default function AccountManageModal({
   const [groupsMeta, setGroupsMeta] = useState(EMPTY_GROUPS_META);
   const [expandedGroups, setExpandedGroups] = useState({});
   const [groupActionLoading, setGroupActionLoading] = useState('');
+  // 快捷筛选「仅看零充值」：只做本地过滤，不发请求（契约 I）。
+  const [zeroRechargeOnly, setZeroRechargeOnly] = useState(false);
   // 丢弃过期的分组响应，避免快速切换视图/时间窗口时旧响应覆盖新数据。
   const groupsSeqRef = useRef(0);
 
@@ -258,15 +441,14 @@ export default function AccountManageModal({
     setGroups([]);
     setGroupsError(false);
     setGroupsMeta(EMPTY_GROUPS_META);
+    setZeroRechargeOnly(false);
     if (mode === 'inviter') {
-      // 默认进入「按 IP 分组」视图；平铺列表在用户切换时再加载。
-      loadSeqRef.current += 1;
-      setLoading(false);
-      setItems([]);
-      setTotal(0);
-      setViewMode(VIEW_IP);
+      // 默认进入「平铺列表」视图（契约 G）；分组视图在用户切换时再加载。
+      groupsSeqRef.current += 1;
+      setGroupsLoading(false);
+      setViewMode(VIEW_FLAT);
       setTimeWindow(DEFAULT_TIME_WINDOW);
-      loadGroups(VIEW_IP, DEFAULT_TIME_WINDOW);
+      loadInvitees(1);
     } else {
       // 使邀请人模式下仍在途的请求失效。
       loadSeqRef.current += 1;
@@ -294,9 +476,36 @@ export default function AccountManageModal({
     [total],
   );
 
+  // 「仅看零充值」只过滤当前页/当前组，不发请求（契约 I）。
+  const displayedFlatItems = useMemo(
+    () =>
+      zeroRechargeOnly
+        ? pagedItems.filter((user) => (Number(user?.recharge_quota) || 0) <= 0)
+        : pagedItems,
+    [pagedItems, zeroRechargeOnly],
+  );
+
+  // 弹窗头部合计（契约 C）：基于当前已加载数据本地求和，分组视图汇总已加载成员。
+  const summaryUsers = useMemo(() => {
+    const base = isGroupedView
+      ? groups.flatMap((group) =>
+          Array.isArray(group?.users) ? group.users : [],
+        )
+      : items;
+    if (!zeroRechargeOnly) {
+      return base;
+    }
+    return base.filter((user) => (Number(user?.recharge_quota) || 0) <= 0);
+  }, [isGroupedView, groups, items, zeroRechargeOnly]);
+  const summaryTotal = isGroupedView
+    ? Number(groupsMeta.total_users) || 0
+    : total;
+  const summaryRecharge = sumUserField(summaryUsers, 'recharge_quota');
+  const summaryUsed = sumUserField(summaryUsers, 'used_quota');
+
   const pageSelectable = useMemo(
-    () => pagedItems.filter(canSelectUser),
-    [pagedItems],
+    () => displayedFlatItems.filter(canSelectUser),
+    [displayedFlatItems],
   );
 
   const selectedCount = Object.keys(selected).length;
@@ -365,7 +574,7 @@ export default function AccountManageModal({
     }
   };
 
-  const runBatch = async (action, scope) => {
+  const runBatch = async (action, scope, includeInviter = false) => {
     setActionLoading(`${scope}-${action}`);
     try {
       let result;
@@ -382,10 +591,10 @@ export default function AccountManageModal({
           userIds,
         });
       } else if (isInviter) {
-        result = await submitBatchStatus({
+        result = await submitInviterScopeStatus({
           action,
-          scope: 'inviter',
           inviterId,
+          includeInviter,
         });
       } else {
         result = await submitBatchStatus({
@@ -441,11 +650,8 @@ export default function AccountManageModal({
   );
 
   const buildAllConfirmContent = (action) => {
-    const scopeText = isInviter
-      ? action === 'disable'
-        ? t('封禁全部被邀请账号')
-        : t('解禁全部被邀请账号')
-      : action === 'disable'
+    const scopeText =
+      action === 'disable'
         ? t('封禁该 IP 下全部账号')
         : t('解禁该 IP 下全部账号');
     return (
@@ -483,14 +689,27 @@ export default function AccountManageModal({
 
   const confirmAll = (action) => {
     if (isInviter) {
-      confirmBatch(
-        action === 'disable'
-          ? t('确认封禁该邀请人的全部被邀请账号')
-          : t('确认解禁该邀请人的全部被邀请账号'),
-        buildAllConfirmContent(action),
-        action,
-        'all',
-      );
+      const includeInviterRef = { current: true };
+      const inviteeCount = Number(effectiveTotal) || 0;
+      Modal.confirm({
+        title:
+          action === 'disable'
+            ? t('确认封禁该邀请人的全部被邀请账号')
+            : t('确认解禁该邀请人的全部被邀请账号'),
+        content: (
+          <InviterAllConfirmContent
+            t={t}
+            action={action}
+            inviteeCount={inviteeCount}
+            includeInviterRef={includeInviterRef}
+          />
+        ),
+        centered: true,
+        okText: action === 'disable' ? t('封禁') : t('解禁'),
+        cancelText: t('取消'),
+        okType: action === 'disable' ? 'danger' : 'primary',
+        onOk: () => runBatch(action, 'all', includeInviterRef.current),
+      });
       return;
     }
     confirmBatch(
@@ -634,6 +853,8 @@ export default function AccountManageModal({
   };
 
   const buildGroupRowSelection = (groupUsers) => ({
+    fixed: 'left',
+    width: 48,
     selectedRowKeys: Object.keys(selected).map((key) => Number(key)),
     getCheckboxProps: (record) => ({ disabled: !canSelectUser(record) }),
     onSelect: (record, checked) => setUserSelected(record, checked),
@@ -646,12 +867,14 @@ export default function AccountManageModal({
         title: t('用户ID'),
         dataIndex: 'user_id',
         width: 80,
+        fixed: 'left',
         render: (value, record) => value ?? getUserRowKey(record) ?? '-',
       },
       {
         title: t('用户名'),
         dataIndex: 'username',
-        width: 150,
+        width: 120,
+        fixed: 'left',
         render: (value, record) => (
           <div className='min-w-0'>
             <div className='truncate font-medium'>{value || '-'}</div>
@@ -666,17 +889,46 @@ export default function AccountManageModal({
       {
         title: t('邮箱'),
         dataIndex: 'email',
+        width: 150,
         render: (value) => <span className='break-all'>{value || '-'}</span>,
       },
       {
         title: t('状态'),
-        width: 100,
+        width: 88,
         render: (_, record) => renderStatusTag(record, t),
+      },
+      {
+        title: t('活跃度'),
+        width: 160,
+        render: (_, record) => {
+          const usedQuota = Number(record?.used_quota) || 0;
+          const requestCount = Number(record?.request_count) || 0;
+          return (
+            <div className='min-w-0'>
+              {renderActivityTag(record, t)}
+              <div className='mt-1 text-xs text-[var(--semi-color-text-2)]'>
+                {t('历史消耗')}:{' '}
+                <span className='tabular-nums'>
+                  {usedQuota > 0 ? renderQuota(usedQuota) : '-'}
+                </span>
+              </div>
+              <div className='text-xs text-[var(--semi-color-text-2)]'>
+                {t('请求数')}: {requestCount}
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        title: t('充值'),
+        dataIndex: 'recharge_quota',
+        width: 140,
+        render: (_, record) => renderRechargeCell(record, t),
       },
       {
         title: t('额度'),
         dataIndex: 'quota',
-        width: 110,
+        width: 96,
         render: (value) => (
           <span className='tabular-nums'>
             {typeof value === 'number' ? renderQuota(value) : '-'}
@@ -686,13 +938,13 @@ export default function AccountManageModal({
       {
         title: t('角色'),
         dataIndex: 'role',
-        width: 110,
+        width: 96,
         render: (value) => renderRoleTag(value, t),
       },
       {
         title: t('最近出现'),
         dataIndex: 'last_seen_at',
-        width: 160,
+        width: 170,
         render: (_, record) => formatLastSeen(record),
       },
     ],
@@ -700,6 +952,9 @@ export default function AccountManageModal({
   );
 
   const rowSelection = {
+    // 行选择列与「用户ID/用户名」一起固定在左侧，横向滚动时勾选入口不丢失。
+    fixed: 'left',
+    width: 48,
     selectedRowKeys: Object.keys(selected).map((key) => Number(key)),
     getCheckboxProps: (record) => ({ disabled: !canSelectUser(record) }),
     onSelect: (record, checked) => setUserSelected(record, checked),
@@ -728,6 +983,23 @@ export default function AccountManageModal({
       : 0;
     const truncated = Boolean(group?.user_ids_truncated);
     const groupBusy = actionLoading !== '' || groupActionLoading !== '';
+    // 契约 C/H/I：组头合计与活跃度汇总（基于已加载成员，本地求和）。
+    const groupRechargeSum = sumUserField(groupUsers, 'recharge_quota');
+    const groupUsedSum = sumUserField(groupUsers, 'used_quota');
+    const groupFullyLoaded = groupUsers.length >= userCount;
+    const isZeroRechargeGroup =
+      groupUsers.length > 0 && groupFullyLoaded && groupRechargeSum <= 0;
+    const hasActivityCounts = [
+      'zombie_count',
+      'checkin_only_count',
+      'active_count',
+    ].some((field) => group?.[field] !== undefined);
+    const zombieCount = Number(group?.zombie_count) || 0;
+    const checkinOnlyCount = Number(group?.checkin_only_count) || 0;
+    const activeCount = Number(group?.active_count) || 0;
+    const groupVisibleUsers = zeroRechargeOnly
+      ? groupUsers.filter((user) => (Number(user?.recharge_quota) || 0) <= 0)
+      : groupUsers;
     return (
       <div
         key={groupKey}
@@ -761,6 +1033,30 @@ export default function AccountManageModal({
                 >
                   {t('已封禁 {{count}} 人', { count: bannedCount })}
                 </Tag>
+              </span>
+              {hasActivityCounts && (
+                <span className='mt-1 flex flex-wrap items-center gap-1.5'>
+                  <Tag color='red' shape='circle' size='small'>
+                    {t('僵尸号')} {zombieCount}
+                  </Tag>
+                  <Tag color='orange' shape='circle' size='small'>
+                    {t('只签到未调用')} {checkinOnlyCount}
+                  </Tag>
+                  <Tag color='green' shape='circle' size='small'>
+                    {t('有调用')} {activeCount}
+                  </Tag>
+                </span>
+              )}
+              {isZeroRechargeGroup && (
+                <span className='mt-1 block'>
+                  <Tag color='orange' shape='circle' size='small'>
+                    {t('零充值')}
+                  </Tag>
+                </span>
+              )}
+              <span className='mt-1 block text-xs text-[var(--semi-color-text-2)]'>
+                {t('充值合计')}: {formatQuotaTotal(groupRechargeSum)} ·{' '}
+                {t('历史消耗合计')}: {formatQuotaTotal(groupUsedSum)}
               </span>
               {truncated && (
                 <span className='mt-1 block text-xs text-[var(--semi-color-warning)]'>
@@ -803,68 +1099,39 @@ export default function AccountManageModal({
                 {t('仅显示前 {{count}} 人', { count: groupUsers.length })}
               </div>
             )}
+            {zeroRechargeOnly && groupVisibleUsers.length === 0 && (
+              <div className='mb-2 text-xs text-[var(--semi-color-text-2)]'>
+                {t('暂无零充值账号')}
+              </div>
+            )}
             <div className='hidden md:block'>
               <Table
                 columns={columns}
-                dataSource={groupUsers}
+                dataSource={groupVisibleUsers}
                 rowKey={(record) => getUserRowKey(record)}
-                rowSelection={buildGroupRowSelection(groupUsers)}
+                rowSelection={buildGroupRowSelection(groupVisibleUsers)}
                 pagination={false}
                 size='small'
-                scroll={{ x: 'max-content' }}
+                scroll={{ x: TABLE_SCROLL_X }}
                 empty={t('暂无数据')}
               />
             </div>
             <div className='space-y-2 md:hidden'>
-              {groupUsers.length === 0 ? (
+              {groupVisibleUsers.length === 0 ? (
                 <div className='py-4 text-center text-sm text-[var(--semi-color-text-2)]'>
                   {t('暂无数据')}
                 </div>
               ) : (
-                groupUsers.map((user) => {
+                groupVisibleUsers.map((user) => {
                   const key = getUserRowKey(user);
                   return (
-                    <div
+                    <MobileUserCard
                       key={key}
-                      className='flex items-start gap-3 rounded-lg border border-[var(--semi-color-border)] p-3'
-                    >
-                      <Checkbox
-                        checked={Boolean(selected[String(key)])}
-                        disabled={!canSelectUser(user)}
-                        onChange={(e) =>
-                          setUserSelected(user, Boolean(e?.target?.checked))
-                        }
-                      />
-                      <div className='min-w-0 flex-1'>
-                        <div className='flex items-start justify-between gap-2'>
-                          <div className='min-w-0'>
-                            <div className='truncate font-medium'>
-                              #{key} {user.username || '-'}
-                            </div>
-                            <div className='truncate text-xs text-[var(--semi-color-text-2)]'>
-                              {user.email || '-'}
-                            </div>
-                          </div>
-                          <div className='flex shrink-0 flex-col items-end gap-1'>
-                            {renderStatusTag(user, t)}
-                            {renderRoleTag(user.role, t)}
-                          </div>
-                        </div>
-                        <div className='mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--semi-color-text-2)]'>
-                          <span>
-                            {t('额度')}:{' '}
-                            <span className='tabular-nums text-[var(--semi-color-text-0)]'>
-                              {typeof user.quota === 'number'
-                                ? renderQuota(user.quota)
-                                : '-'}
-                            </span>
-                          </span>
-                          <span>
-                            {t('最近出现')}: {formatLastSeen(user)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
+                      user={user}
+                      selected={selected}
+                      onSelect={setUserSelected}
+                      t={t}
+                    />
                   );
                 })
               )}
@@ -942,71 +1209,97 @@ export default function AccountManageModal({
     <Modal
       visible={visible}
       centered
-      width={isMobile ? '100%' : 960}
+      width={isMobile ? '100%' : MODAL_DESKTOP_WIDTH}
       title={
         <div className='flex min-w-0 flex-col'>
           <span>{t('关联账号')}</span>
           <span className='truncate text-xs font-normal text-[var(--semi-color-text-2)]'>
             {subtitle}
           </span>
+          <span className='text-xs font-normal text-[var(--semi-color-text-2)]'>
+            {summaryTotal > 0
+              ? `${t('共 {{total}} 个账号', { total: summaryTotal })} · ${t('充值合计')}: ${formatQuotaTotal(
+                  summaryRecharge,
+                )} · ${t('历史消耗合计')}: ${formatQuotaTotal(summaryUsed)}`
+              : '-'}
+          </span>
         </div>
       }
-      bodyStyle={{ padding: 16, maxHeight: '62vh', overflowY: 'auto' }}
+      bodyStyle={{
+        padding: 0,
+        height: isMobile ? '54vh' : '62vh',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
       onCancel={onClose}
       footer={footer}
       maskClosable={actionLoading === '' && groupActionLoading === ''}
       closeOnEsc={actionLoading === '' && groupActionLoading === ''}
     >
-      <div>
-        {isInviter && (
-          <div className='mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between'>
-            <div className='min-w-0 overflow-x-auto'>
-              <RadioGroup
-                type='button'
-                value={viewMode}
-                onChange={(e) => handleChangeView(e.target.value)}
-              >
-                <Radio value={VIEW_IP}>{t('按 IP 分组')}</Radio>
-                <Radio value={VIEW_TIME}>{t('按注册时间')}</Radio>
-                <Radio value={VIEW_FLAT}>{t('平铺列表')}</Radio>
-              </RadioGroup>
-            </div>
-            {viewMode === VIEW_TIME && (
-              <div className='flex shrink-0 items-center gap-2'>
-                <Text type='secondary' size='small'>
-                  {t('时间窗口')}
-                </Text>
-                <Select
-                  value={timeWindow}
-                  onChange={handleChangeTimeWindow}
-                  className='w-28'
+      <div className='flex h-full min-h-0 flex-col'>
+        <div className='shrink-0 border-b border-[var(--semi-color-border)] px-4 py-2'>
+          {isInviter && (
+            <div className='mb-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between'>
+              <div className='min-w-0 overflow-x-auto'>
+                <RadioGroup
+                  type='button'
+                  value={viewMode}
+                  onChange={(e) => handleChangeView(e.target.value)}
                 >
-                  <Select.Option value={3600}>{t('1小时')}</Select.Option>
-                  <Select.Option value={21600}>{t('6小时')}</Select.Option>
-                  <Select.Option value={86400}>{t('1天')}</Select.Option>
-                </Select>
+                  <Radio value={VIEW_IP}>{t('按 IP 分组')}</Radio>
+                  <Radio value={VIEW_TIME}>{t('按注册时间')}</Radio>
+                  <Radio value={VIEW_FLAT}>{t('平铺列表')}</Radio>
+                </RadioGroup>
+              </div>
+              {viewMode === VIEW_TIME && (
+                <div className='flex shrink-0 items-center gap-2'>
+                  <Text type='secondary' size='small'>
+                    {t('时间窗口')}
+                  </Text>
+                  <Select
+                    value={timeWindow}
+                    onChange={handleChangeTimeWindow}
+                    className='w-28'
+                  >
+                    <Select.Option value={3600}>{t('1小时')}</Select.Option>
+                    <Select.Option value={21600}>{t('6小时')}</Select.Option>
+                    <Select.Option value={86400}>{t('1天')}</Select.Option>
+                  </Select>
+                </div>
+              )}
+            </div>
+          )}
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <Checkbox
+              checked={zeroRechargeOnly}
+              onChange={(e) =>
+                setZeroRechargeOnly(Boolean(e?.target?.checked))
+              }
+            >
+              {t('仅看零充值')}
+            </Checkbox>
+            {isGroupedView && (
+              <div className='flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--semi-color-text-2)]'>
+                {groupsMeta.truncated && (
+                  <span className='text-[var(--semi-color-warning)]'>
+                    {t('数据量过大，已加载前 2000 人')}
+                  </span>
+                )}
+                {groupsMeta.groups_truncated && (
+                  <span className='text-[var(--semi-color-warning)]'>
+                    {t('分组过多，仅显示前 {{count}} 组', {
+                      count: groups.length,
+                    })}
+                  </span>
+                )}
               </div>
             )}
           </div>
-        )}
+        </div>
 
-        {isGroupedView ? (
-          <>
-            <div className='mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--semi-color-text-2)]'>
-              <span>{t('共 {{total}} 个账号', { total: effectiveTotal })}</span>
-              {groupsMeta.truncated && (
-                <span className='text-[var(--semi-color-warning)]'>
-                  {t('数据量过大，已加载前 2000 人')}
-                </span>
-              )}
-              {groupsMeta.groups_truncated && (
-                <span className='text-[var(--semi-color-warning)]'>
-                  {t('分组过多，仅显示前 {{count}} 组', {
-                    count: groups.length,
-                  })}
-                </span>
-              )}
-            </div>
+        <div className='min-h-0 flex-1 overflow-y-auto px-4 py-3'>
+          {isGroupedView ? (
             <Spin spinning={groupsLoading}>
               {groupsLoading && groups.length === 0 ? (
                 <div className='py-8 text-center text-sm text-[var(--semi-color-text-2)]'>
@@ -1038,115 +1331,95 @@ export default function AccountManageModal({
                 </div>
               )}
             </Spin>
-          </>
-        ) : (
-          <>
-            <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
-              <Checkbox
-                checked={allPageSelected}
-            indeterminate={somePageSelected}
-            disabled={pageSelectable.length === 0 || actionLoading !== ''}
-            onChange={(e) => setPageSelected(Boolean(e?.target?.checked))}
-          >
-            {t('全选本页')}
-          </Checkbox>
-          <div className='flex flex-wrap items-center gap-2'>
-            <Button
-              size='small'
-              theme='borderless'
-              disabled={page <= 1 || actionLoading !== ''}
-              onClick={() => goToPage(page - 1)}
-            >
-              {t('上一页')}
-            </Button>
-            <Text type='secondary' size='small'>
-              {t('共 {{total}} 个账号', { total })}
-            </Text>
-            <Button
-              size='small'
-              theme='borderless'
-              disabled={page >= totalPages || actionLoading !== ''}
-              onClick={() => goToPage(page + 1)}
-            >
-              {t('下一页')}
-            </Button>
-          </div>
+          ) : (
+            <Spin spinning={loading}>
+              <div className='hidden md:block'>
+                <Table
+                  columns={columns}
+                  dataSource={displayedFlatItems}
+                  rowKey={(record) => getUserRowKey(record)}
+                  rowSelection={rowSelection}
+                  pagination={false}
+                  size='small'
+                  scroll={{ x: TABLE_SCROLL_X }}
+                  empty={t('暂无数据')}
+                />
+              </div>
+
+              <div className='space-y-2 md:hidden'>
+                {loading && displayedFlatItems.length === 0 ? (
+                  <div className='py-8 text-center text-sm text-[var(--semi-color-text-2)]'>
+                    {t('加载中')}
+                  </div>
+                ) : displayedFlatItems.length === 0 ? (
+                  <div className='py-8 text-center text-sm text-[var(--semi-color-text-2)]'>
+                    {zeroRechargeOnly ? t('暂无零充值账号') : t('暂无数据')}
+                  </div>
+                ) : (
+                  displayedFlatItems.map((user) => (
+                    <MobileUserCard
+                      key={getUserRowKey(user)}
+                      user={user}
+                      selected={selected}
+                      onSelect={setUserSelected}
+                      t={t}
+                    />
+                  ))
+                )}
+              </div>
+            </Spin>
+          )}
         </div>
 
-        <Spin spinning={loading}>
-          <div className='hidden md:block'>
-            <Table
-              columns={columns}
-              dataSource={pagedItems}
-              rowKey={(record) => getUserRowKey(record)}
-              rowSelection={rowSelection}
-              pagination={false}
-              size='small'
-              scroll={{ x: 'max-content' }}
-              empty={t('暂无数据')}
-            />
+        {isGroupedView ? (
+          <div className='shrink-0 border-t border-[var(--semi-color-border)] px-4 py-2'>
+            <div className='flex flex-wrap items-center justify-between gap-2'>
+              <Text type='secondary' size='small'>
+                {t('共 {{total}} 个账号', { total: effectiveTotal })}
+              </Text>
+              <Text type='secondary' size='small'>
+                {t('共 {{count}} 组', { count: groups.length })}
+              </Text>
+            </div>
           </div>
-
-          <div className='space-y-2 md:hidden'>
-            {loading && pagedItems.length === 0 ? (
-              <div className='py-8 text-center text-sm text-[var(--semi-color-text-2)]'>
-                {t('加载中')}
+        ) : (
+          <div className='shrink-0 border-t border-[var(--semi-color-border)] px-4 py-2'>
+            <div className='flex flex-wrap items-center justify-between gap-2'>
+              <Checkbox
+                checked={allPageSelected}
+                indeterminate={somePageSelected}
+                disabled={pageSelectable.length === 0 || actionLoading !== ''}
+                onChange={(e) => setPageSelected(Boolean(e?.target?.checked))}
+              >
+                {t('全选本页')}
+              </Checkbox>
+              <div className='flex flex-wrap items-center justify-end gap-2'>
+                <Button
+                  size='small'
+                  theme='borderless'
+                  disabled={page <= 1 || actionLoading !== ''}
+                  onClick={() => goToPage(page - 1)}
+                >
+                  {t('上一页')}
+                </Button>
+                <Text type='secondary' size='small'>
+                  {t('共 {{total}} 个账号', { total })} ·{' '}
+                  {t('第 {{page}}/{{pages}} 页', {
+                    page,
+                    pages: totalPages,
+                  })}
+                </Text>
+                <Button
+                  size='small'
+                  theme='borderless'
+                  disabled={page >= totalPages || actionLoading !== ''}
+                  onClick={() => goToPage(page + 1)}
+                >
+                  {t('下一页')}
+                </Button>
               </div>
-            ) : pagedItems.length === 0 ? (
-              <div className='py-8 text-center text-sm text-[var(--semi-color-text-2)]'>
-                {t('暂无数据')}
-              </div>
-            ) : (
-              pagedItems.map((user) => {
-                const key = getUserRowKey(user);
-                return (
-                  <div
-                    key={key}
-                    className='flex items-start gap-3 rounded-lg border border-[var(--semi-color-border)] p-3'
-                  >
-                    <Checkbox
-                      checked={Boolean(selected[String(key)])}
-                      disabled={!canSelectUser(user)}
-                      onChange={(e) =>
-                        setUserSelected(user, Boolean(e?.target?.checked))
-                      }
-                    />
-                    <div className='min-w-0 flex-1'>
-                      <div className='flex items-start justify-between gap-2'>
-                        <div className='min-w-0'>
-                          <div className='truncate font-medium'>
-                            #{key} {user.username || '-'}
-                          </div>
-                          <div className='truncate text-xs text-[var(--semi-color-text-2)]'>
-                            {user.email || '-'}
-                          </div>
-                        </div>
-                        <div className='flex shrink-0 flex-col items-end gap-1'>
-                          {renderStatusTag(user, t)}
-                          {renderRoleTag(user.role, t)}
-                        </div>
-                      </div>
-                      <div className='mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--semi-color-text-2)]'>
-                        <span>
-                          {t('额度')}:{' '}
-                          <span className='tabular-nums text-[var(--semi-color-text-0)]'>
-                            {typeof user.quota === 'number'
-                              ? renderQuota(user.quota)
-                              : '-'}
-                          </span>
-                        </span>
-                        <span>
-                          {t('最近出现')}: {formatLastSeen(user)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
+            </div>
           </div>
-        </Spin>
-          </>
         )}
       </div>
     </Modal>

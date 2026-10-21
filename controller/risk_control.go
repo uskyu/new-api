@@ -35,6 +35,7 @@ var (
 		"inviter_id":          {},
 		"created_at":          {},
 		"aff_quota":           {},
+		"shared_ip_count":     {},
 	}
 )
 
@@ -122,6 +123,9 @@ func GetRiskControlInviters(c *gin.Context) {
 	sortBy := normalizeRiskSortBy(c.Query("sort_by"), riskInviterSortFields, "direct_invite_count")
 	order := normalizeRiskOrder(c.Query("order"))
 	minInvites, _ := strconv.Atoi(c.Query("min_invites"))
+	recentInvitesWindow, _ := strconv.Atoi(c.Query("recent_invites_window"))
+	minRecentInvites, _ := strconv.Atoi(c.Query("min_recent_invites"))
+	minSharedIPs, _ := strconv.Atoi(c.Query("min_shared_ips"))
 	items, total, err := model.ListRiskInviters(
 		strings.TrimSpace(c.Query("keyword")),
 		pageInfo.GetStartIdx(),
@@ -133,6 +137,9 @@ func GetRiskControlInviters(c *gin.Context) {
 		c.Query("suspicious_only") == "true",
 		minInvites,
 		strings.TrimSpace(c.Query("inviter_status")),
+		recentInvitesWindow,
+		minRecentInvites,
+		minSharedIPs,
 	)
 	if err != nil {
 		common.ApiError(c, err)
@@ -223,6 +230,8 @@ type riskBatchStatusRequest struct {
 	UserIds []int  `json:"user_ids"`
 	IP      string `json:"ip"`
 	Source  string `json:"source"`
+	// IncludeInviter 仅用于邀请人范围批量操作（D）：true 时把邀请人本人并入待处理列表。
+	IncludeInviter bool `json:"include_inviter"`
 }
 
 type riskBatchStatusResponse struct {
@@ -361,6 +370,9 @@ func BatchRiskControlInviterStatus(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	// D：include_inviter=true 时把邀请人本人放在最前（统一去重）；角色保护仍由
+	// BatchUpdateRiskUserStatus 二次过滤（admin/root/角色不低于操作者会进入 skipped）。
+	userIds = model.BuildRiskInviterBatchUserIds(inviterId, userIds, req.IncludeInviter)
 	if len(userIds) == 0 {
 		common.ApiSuccess(c, riskBatchStatusResponse{
 			Action:  action,
@@ -374,6 +386,7 @@ func BatchRiskControlInviterStatus(c *gin.Context) {
 		return
 	}
 	respondRiskBatchStatus(c, action, len(userIds), updated, skipped, riskBatchScopeInviter, map[string]interface{}{
-		"inviter_id": inviterId,
+		"inviter_id":      inviterId,
+		"include_inviter": req.IncludeInviter,
 	})
 }

@@ -18,8 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useState } from 'react';
-import { Modal, Typography, Input, InputNumber, Popover } from '@douyinfe/semi-ui';
+import { Modal, Typography, Input, InputNumber, Popover, Button } from '@douyinfe/semi-ui';
 import { CreditCard, HelpCircle } from 'lucide-react';
+import {
+  displayAmountToQuota,
+  quotaToDisplayAmount,
+} from '../../../helpers/quota';
+import { getCurrencyConfig } from '../../../helpers/render';
 
 // 后端未下发比例时按默认设置（100%）兜底，避免白屏或误导。
 const normalizeRatio = (value, fallback = 100) => {
@@ -42,6 +47,11 @@ const TransferModal = ({
   setTransferAmount,
 }) => {
   const [ruleVisible, setRuleVisible] = useState(false);
+  // 货币配置快照：getCurrencyConfig 依赖 localStorage，弹窗打开或跨标签页切换
+  // 币种时刷新该 state 触发重渲染，使 min/max/value 按新币种重新换算。
+  const [currencyConfig, setCurrencyConfig] = useState(() =>
+    getCurrencyConfig(),
+  );
 
   // 字段由 GET /api/user/self 新增下发，旧数据缺失时回退到 aff_quota / 0。
   const withdrawableQuota =
@@ -56,6 +66,45 @@ const TransferModal = ({
   const rechargedRatio = normalizeRatio(rule?.recharged_withdraw_ratio, 100);
   const unrechargedRatio = normalizeRatio(rule?.unrecharged_withdraw_ratio, 100);
 
+  // 显示金额：复用 helpers/quota.js 与当前货币配置换算，不再展示原始额度整数。
+  const isTokens = currencyConfig?.type === 'TOKENS';
+  const displayPrecision = isTokens ? 0 : 2;
+
+  // 统一按输入精度取整，避免 min/max 为长小数时被 InputNumber 判定越界。
+  const toDisplayAmount = (quota) => {
+    const amount = Number(quotaToDisplayAmount(quota)) || 0;
+    if (isTokens) {
+      return Math.round(amount);
+    }
+    const factor = 10 ** displayPrecision;
+    return Math.round(amount * factor) / factor;
+  };
+
+  const displayValue = toDisplayAmount(transferAmount);
+  const displayMin = toDisplayAmount(getQuotaPerUnit());
+  const displayMax = toDisplayAmount(withdrawableQuota);
+  const canFillAll = withdrawableQuota > 0 && displayMax > 0;
+  // TOKENS 模式展示精确额度，货币模式沿用 renderQuota 的货币格式。
+  const minHintAmount = isTokens
+    ? String(displayMin)
+    : renderQuota(getQuotaPerUnit());
+
+  // 输入的是显示金额，写回父组件的仍是原始额度；受可划转额度上限约束。
+  const handleAmountChange = (value) => {
+    const nextQuota = displayAmountToQuota(value);
+    const boundedQuota = Math.min(
+      Math.max(Number.isFinite(nextQuota) ? nextQuota : 0, 0),
+      withdrawableQuota,
+    );
+    setTransferAmount(boundedQuota);
+  };
+
+  const handleFillAll = () => {
+    if (withdrawableQuota > 0) {
+      setTransferAmount(withdrawableQuota);
+    }
+  };
+
   // 点击/悬浮展开；点击页面其它区域或关闭弹窗时收起。
   useEffect(() => {
     if (!ruleVisible) {
@@ -66,11 +115,28 @@ const TransferModal = ({
     return () => document.removeEventListener('click', handleDocumentClick);
   }, [ruleVisible]);
 
+  // 打开弹窗时重新读取货币配置，避免沿用旧币种的 min/max/value。
   useEffect(() => {
+    setCurrencyConfig(getCurrencyConfig());
     if (!openTransfer) {
       setRuleVisible(false);
     }
   }, [openTransfer]);
+
+  // 跨标签页切换显示币种/汇率时同步刷新。
+  useEffect(() => {
+    const handleStorage = (event) => {
+      if (
+        event.key &&
+        !['quota_display_type', 'quota_per_unit', 'status'].includes(event.key)
+      ) {
+        return;
+      }
+      setCurrencyConfig(getCurrencyConfig());
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
 
   const ruleContent = (
     <div className='max-w-[280px] text-xs leading-5'>
@@ -161,15 +227,40 @@ const TransferModal = ({
         </div>
         <div>
           <Typography.Text strong className='block mb-2'>
-            {t('划转额度')} · {t('最低') + renderQuota(getQuotaPerUnit())}
+            {t('划转额度')}
           </Typography.Text>
-          <InputNumber
-            min={getQuotaPerUnit()}
-            max={withdrawableQuota}
-            value={transferAmount}
-            onChange={(value) => setTransferAmount(value)}
-            className='w-full !rounded-lg'
-          />
+          <div className='flex items-start gap-2'>
+            <div className='min-w-0 flex-1'>
+              <InputNumber
+                min={displayMin}
+                max={displayMax}
+                value={displayValue}
+                precision={displayPrecision}
+                step={isTokens ? 1 : 0.01}
+                prefix={isTokens ? undefined : currencyConfig?.symbol}
+                onChange={handleAmountChange}
+                className='!rounded-lg'
+                style={{ width: '100%' }}
+              />
+              <div className='mt-1 text-xs text-[var(--semi-color-text-2)]'>
+                {isTokens
+                  ? t('按额度输入，最低可划转 {{amount}}', {
+                      amount: minHintAmount,
+                    })
+                  : t('按当前显示币种输入，最低可划转 {{amount}}', {
+                      amount: minHintAmount,
+                    })}
+              </div>
+            </div>
+            <Button
+              type='primary'
+              theme='light'
+              disabled={!canFillAll}
+              onClick={handleFillAll}
+            >
+              {t('全部划转')}
+            </Button>
+          </div>
         </div>
       </div>
     </Modal>

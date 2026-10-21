@@ -21,6 +21,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Button,
   Card,
+  Checkbox,
   Input,
   Modal,
   Pagination,
@@ -80,6 +81,9 @@ const INVITER_CHIP_DEFAULTS = {
   suspiciousOnly: false,
   minInvites: 0,
   inviterStatus: '',
+  recentInvitesWindow: 0,
+  minRecentInvites: 0,
+  minSharedIps: 0,
 };
 const INVITER_CHIPS = [
   { key: 'all', label: '全部', preset: {} },
@@ -95,7 +99,83 @@ const INVITER_CHIPS = [
     label: '已封禁邀请人',
     preset: { inviterStatus: 'disabled' },
   },
+  {
+    key: 'recent_bulk_invites',
+    label: '短时大量邀请',
+    preset: { recentInvitesWindow: 86400, minRecentInvites: 20 },
+  },
+  {
+    key: 'many_shared_ips',
+    label: '大量同 IP',
+    preset: { minSharedIps: 3 },
+  },
 ];
+
+// 邀请人范围批量操作需要 include_inviter（batchStatus.js 不在本次写作用域，先本地封装）。
+const submitInviterScopeStatus = async ({
+  action,
+  inviterId,
+  includeInviter,
+}) => {
+  const res = await API.post(
+    `/api/risk-control/inviters/${inviterId}/batch-status`,
+    { action, include_inviter: Boolean(includeInviter) },
+    { skipErrorHandler: true },
+  );
+  const payload = res?.data;
+  if (!payload?.success) {
+    return { ok: false, message: payload?.message || '' };
+  }
+  const data = payload.data || {};
+  return {
+    ok: true,
+    updated: Number(data.updated) || 0,
+    skipped: Array.isArray(data.skipped) ? data.skipped : [],
+  };
+};
+
+// 邀请人范围「封禁/解禁全部」确认内容：默认包含邀请人本人，可取消勾选。
+const InviterScopeConfirmContent = ({
+  t,
+  action,
+  inviteeCount,
+  includeInviterRef,
+}) => {
+  const [includeInviter, setIncludeInviter] = useState(true);
+  const total = inviteeCount + (includeInviter ? 1 : 0);
+  return (
+    <div>
+      <div>
+        {action === 'disable'
+          ? t('封禁全部被邀请账号')
+          : t('解禁全部被邀请账号')}
+      </div>
+      <div className='mt-1 text-[var(--semi-color-text-2)]'>
+        {t('共 {{total}} 个账号', { total })}
+        {includeInviter ? `（${t('含邀请人本人')}）` : ''}
+      </div>
+      <div className='mt-1'>
+        {action === 'disable'
+          ? t('封禁后这些账号将无法登录和调用 API。')
+          : t('解禁后这些账号将恢复访问。')}
+      </div>
+      <div className='mt-2'>
+        <Checkbox
+          defaultChecked
+          onChange={(e) => {
+            const checked = Boolean(e?.target?.checked);
+            includeInviterRef.current = checked;
+            setIncludeInviter(checked);
+          }}
+        >
+          {action === 'disable'
+            ? t('同时封禁邀请人本人')
+            : t('同时解禁邀请人本人')}
+        </Checkbox>
+      </div>
+    </div>
+  );
+};
 
 // 同 IP 页签的关键词匹配：email 为后端新增的 search_type，其余沿用通用匹配。
 const matchesSharedUserKeyword = (user, keyword, searchType) => {
@@ -437,6 +517,10 @@ export default function RiskControl() {
   const [suspiciousOnly, setSuspiciousOnly] = useState(false);
   const [minInvites, setMinInvites] = useState(0);
   const [inviterStatus, setInviterStatus] = useState('');
+  // E.3 新增隐藏参数：短时大量邀请（窗口 + 人数）、大量同 IP。
+  const [recentInvitesWindow, setRecentInvitesWindow] = useState(0);
+  const [minRecentInvites, setMinRecentInvites] = useState(0);
+  const [minSharedIps, setMinSharedIps] = useState(0);
 
   const [accountModal, setAccountModal] = useState({
     visible: false,
@@ -486,6 +570,13 @@ export default function RiskControl() {
         }
         if (inviterStatus) {
           params.inviter_status = inviterStatus;
+        }
+        if (recentInvitesWindow > 0 && minRecentInvites > 1) {
+          params.recent_invites_window = recentInvitesWindow;
+          params.min_recent_invites = minRecentInvites;
+        }
+        if (minSharedIps >= 1) {
+          params.min_shared_ips = minSharedIps;
         }
         const [sortBy, order] = parseSortValue(
           inviterSort,
@@ -540,6 +631,9 @@ export default function RiskControl() {
     suspiciousOnly,
     minInvites,
     inviterStatus,
+    recentInvitesWindow,
+    minRecentInvites,
+    minSharedIps,
   ]);
 
   const openAccountModal = useCallback((mode, item) => {
@@ -550,7 +644,12 @@ export default function RiskControl() {
     setAccountModal((prev) => ({ ...prev, visible: false }));
   }, []);
 
-  const executeScopeAction = async (mode, item, action) => {
+  const executeScopeAction = async (
+    mode,
+    item,
+    action,
+    includeInviter = false,
+  ) => {
     setScopeActionLoading(scopeActionKey(mode, item, action));
     try {
       const result =
@@ -561,10 +660,10 @@ export default function RiskControl() {
               ip: item?.ip,
               source: item?.source,
             })
-          : await submitBatchStatus({
+          : await submitInviterScopeStatus({
               action,
-              scope: 'inviter',
               inviterId: item?.inviter_id,
+              includeInviter,
             });
       if (!result.ok) {
         showError(result.message || t('操作失败'));
@@ -579,19 +678,12 @@ export default function RiskControl() {
     }
   };
 
-  const buildScopeConfirmContent = (mode, item, action) => {
+  const buildSharedScopeConfirmContent = (item, action) => {
     const scopeText =
-      mode === 'inviter'
-        ? action === 'disable'
-          ? t('封禁全部被邀请账号')
-          : t('解禁全部被邀请账号')
-        : action === 'disable'
-          ? t('封禁该 IP 下全部账号')
-          : t('解禁该 IP 下全部账号');
-    const scopeTotal =
-      mode === 'inviter'
-        ? Number(item?.direct_invite_count) || 0
-        : Number(item?.user_count) || 0;
+      action === 'disable'
+        ? t('封禁该 IP 下全部账号')
+        : t('解禁该 IP 下全部账号');
+    const scopeTotal = Number(item?.user_count) || 0;
     return (
       <div>
         <div>{scopeText}</div>
@@ -614,7 +706,7 @@ export default function RiskControl() {
           action === 'disable'
             ? t('确认封禁该 IP 下全部账号')
             : t('确认解禁该 IP 下全部账号'),
-        content: buildScopeConfirmContent(mode, item, action),
+        content: buildSharedScopeConfirmContent(item, action),
         centered: true,
         okText: action === 'disable' ? t('封禁') : t('解禁'),
         cancelText: t('取消'),
@@ -623,17 +715,26 @@ export default function RiskControl() {
       });
       return;
     }
+    const includeInviterRef = { current: true };
     Modal.confirm({
       title:
         action === 'disable'
           ? t('确认封禁该邀请人的全部被邀请账号')
           : t('确认解禁该邀请人的全部被邀请账号'),
-      content: buildScopeConfirmContent(mode, item, action),
+      content: (
+        <InviterScopeConfirmContent
+          t={t}
+          action={action}
+          inviteeCount={Number(item?.direct_invite_count) || 0}
+          includeInviterRef={includeInviterRef}
+        />
+      ),
       centered: true,
       okText: action === 'disable' ? t('封禁') : t('解禁'),
       cancelText: t('取消'),
       okType: action === 'disable' ? 'danger' : 'primary',
-      onOk: () => executeScopeAction(mode, item, action),
+      onOk: () =>
+        executeScopeAction(mode, item, action, includeInviterRef.current),
     });
   };
 
@@ -654,6 +755,9 @@ export default function RiskControl() {
     suspiciousOnly,
     minInvites,
     inviterStatus,
+    recentInvitesWindow,
+    minRecentInvites,
+    minSharedIps,
   };
   const activeSharedChip = SHARED_CHIPS.find((chip) => {
     const expected = { ...SHARED_CHIP_DEFAULTS, ...chip.preset };
@@ -684,6 +788,9 @@ export default function RiskControl() {
       setSuspiciousOnly(values.suspiciousOnly);
       setMinInvites(values.minInvites);
       setInviterStatus(values.inviterStatus);
+      setRecentInvitesWindow(values.recentInvitesWindow);
+      setMinRecentInvites(values.minRecentInvites);
+      setMinSharedIps(values.minSharedIps);
     }
     setPage(1);
   };
@@ -701,6 +808,9 @@ export default function RiskControl() {
     setSuspiciousOnly(false);
     setMinInvites(0);
     setInviterStatus('');
+    setRecentInvitesWindow(0);
+    setMinRecentInvites(0);
+    setMinSharedIps(0);
     setPage(1);
   };
 
@@ -1187,6 +1297,9 @@ export default function RiskControl() {
                   </Select.Option>
                   <Select.Option value='direct_invite_count:asc'>
                     {t('邀请人数从少到多')}
+                  </Select.Option>
+                  <Select.Option value='shared_ip_count:desc'>
+                    {t('同 IP 邀请从多到少')}
                   </Select.Option>
                   <Select.Option value='aff_quota:desc'>
                     {t('可提现额度从多到少')}

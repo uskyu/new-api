@@ -53,6 +53,48 @@ const (
 // 邀请人自身状态筛选：仅支持 disabled，其余值不筛选。
 const riskInviterStatusDisabled = "disabled"
 
+// 邀请关系高危筛选（E）：最近邀请窗口白名单（秒）与默认值。
+const riskInviterDefaultRecentInvitesWindow = 86400
+
+var riskInviterRecentInvitesWindows = map[int]struct{}{
+	3600:   {},
+	21600:  {},
+	86400:  {},
+	604800: {},
+}
+
+func normalizeRiskInviterRecentInvitesWindow(window int) int {
+	if _, ok := riskInviterRecentInvitesWindows[window]; ok {
+		return window
+	}
+	return riskInviterDefaultRecentInvitesWindow
+}
+
+// riskInviterSharedIPCountExpr 计算「邀请人本人或其任一被邀请人与其他未删除账号
+// 共享的去重 IP 数」的 SQL 派生列（契约 phase3 E.2）。口径为邀请人 + **全部**被邀请人，
+// 不再局限当前页/前 100 个被邀请人。
+//
+// 该表达式同时用于：
+//   - 行内 RiskInviter.SharedIPCount 的取值；
+//   - min_shared_ips / suspicious_only 的 SQL 过滤（先过滤再分页，保证 total 正确）；
+//   - ORDER BY（通过别名 risk_shared_ip_count）。
+//
+// 性能说明：这是一个相关子查询，无法在 WHERE/ORDER BY 里引用 SELECT 别名，
+// 因此 WHERE 处会重复表达式；risk_ip_records.ip / user_id、users.id / inviter_id
+// 均有索引，但本表达式仍会按邀请人行逐行求值。契约要求本期不加索引，若线上邀请人
+// 规模大导致该列表变慢，需要单独立项评估（如落冗余列/加索引）。
+const riskInviterSharedIPCountExpr = "(SELECT COUNT(DISTINCT a.ip) FROM risk_ip_records a " +
+	"JOIN risk_ip_records b ON a.ip = b.ip AND a.user_id <> b.user_id " +
+	"JOIN users ax ON ax.id = a.user_id AND ax.deleted_at IS NULL " +
+	"JOIN users bx ON bx.id = b.user_id AND bx.deleted_at IS NULL " +
+	"WHERE a.ip <> '' AND (ax.id = users.id OR ax.inviter_id = users.id))"
+
+// riskInviterRecentInviteCountExpr 计算「最近窗口内新增被邀请人数」的 SQL 相关子查询
+// （唯一参数为窗口起点 cutoff）。按契约 E.1：它既用于 min_recent_invites 过滤，
+// 也作为响应字段 recent_invite_count 返回；默认查询（不过滤）同样需要 SELECT 该列。
+const riskInviterRecentInviteCountExpr = "(SELECT COUNT(*) FROM users recent_inv WHERE recent_inv.inviter_id = users.id " +
+	"AND recent_inv.deleted_at IS NULL AND recent_inv.created_at >= ?)"
+
 func normalizeRiskInviterSearchType(raw string) string {
 	if strings.TrimSpace(raw) == riskInviterSearchIP {
 		return riskInviterSearchIP
@@ -100,14 +142,22 @@ type RiskUserSummary struct {
 	Quota       int    `json:"quota"`      // users.quota，原始额度值，前端按显示设置换算
 	IP          string `json:"ip"`         // 该用户最近一次出现的 IP，无记录时为空串
 	CreatedAt   int64  `json:"created_at"` // users.created_at
-	Group       string `json:"group"`
-	Role        int    `json:"role"`
-	InviterId   int    `json:"inviter_id"`
-	TokenId     int    `json:"token_id"`
-	Source      string `json:"source"`
-	FirstSeenAt int64  `json:"first_seen_at"`
-	LastSeenAt  int64  `json:"last_seen_at"`
-	EventCount  int64  `json:"event_count"`
+	// H：活跃度（僵尸号识别）
+	UsedQuota    int   `json:"used_quota"`    // users.used_quota 历史消耗
+	RequestCount int   `json:"request_count"` // users.request_count 历史请求数
+	LastLoginAt  int64 `json:"last_login_at"` // users.last_login_at
+	CheckinCount int64 `json:"checkin_count"` // checkins 表记录数
+	// I：充值统计（top_ups.status = success，口径为到账额度）
+	RechargeQuota int64  `json:"recharge_quota"` // SUM(top_ups.amount)
+	RechargeCount int64  `json:"recharge_count"` // COUNT(*)
+	Group         string `json:"group"`
+	Role          int    `json:"role"`
+	InviterId     int    `json:"inviter_id"`
+	TokenId       int    `json:"token_id"`
+	Source        string `json:"source"`
+	FirstSeenAt   int64  `json:"first_seen_at"`
+	LastSeenAt    int64  `json:"last_seen_at"`
+	EventCount    int64  `json:"event_count"`
 }
 
 type RiskInviter struct {
@@ -119,6 +169,7 @@ type RiskInviter struct {
 	Quota             int                `json:"quota"` // users.quota，原始额度值
 	Group             string             `json:"group"`
 	DirectInviteCount int64              `json:"direct_invite_count"`
+	RecentInviteCount int64              `json:"recent_invite_count"` // 最近窗口内新增被邀请人数（E，响应字段）
 	SharedIPCount     int64              `json:"shared_ip_count"`
 	Suspicious        bool               `json:"suspicious"`
 	Invitees          []*RiskUserSummary `json:"invitees" gorm:"-"`
@@ -354,12 +405,18 @@ func ListRiskSharedIPs(source string, searchType string, keyword string, minUser
 	if err != nil {
 		return nil, 0, err
 	}
+	// 整页只做一次 checkins / top_ups 批量聚合（H/I），避免逐行/逐用户查询。
+	pageSummaries := make([]*RiskUserSummary, 0)
 	for _, row := range rows {
 		users, err := listRiskIPUsers(row.IP, row.Source)
 		if err != nil {
 			return nil, 0, err
 		}
 		row.Users = users
+		pageSummaries = append(pageSummaries, users...)
+	}
+	if err := hydrateRiskUserSummaries(pageSummaries); err != nil {
+		return nil, 0, err
 	}
 	if err := attachRiskSharedIPSubnets(rows); err != nil {
 		return nil, 0, err
@@ -495,7 +552,7 @@ func listRiskIPUsers(ip string, source string) ([]*RiskUserSummary, error) {
 	users := make(map[int]*User)
 	if len(ids) > 0 {
 		var list []*User
-		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at").Where("id IN ?", ids).Find(&list).Error; err != nil {
+		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at, used_quota, request_count, last_login_at").Where("id IN ?", ids).Find(&list).Error; err != nil {
 			return nil, err
 		}
 		for _, user := range list {
@@ -543,11 +600,16 @@ type riskInviterAggregateRow struct {
 	Quota             int
 	Group             string
 	DirectInviteCount int64
+	// RecentInviteCount 来自 SQL 派生列 recent_invite_count（契约 phase3 E.1）。
+	RecentInviteCount int64 `gorm:"column:recent_invite_count"`
+	// SharedIPCount 来自 SQL 派生列 risk_shared_ip_count（契约 phase3 E.2）；
+	// 显式 gorm column 保证 Scan 能按别名映射到该字段。
+	SharedIPCount int64 `gorm:"column:risk_shared_ip_count"`
 }
 
 // riskInviterOrderClause 将排序白名单参数转换为 SQL 排序片段，并在主排序后
 // 强制追加 inviter_id (users.id) ASC 作为稳定次序。非法参数回退为
-// direct_invite_count desc。
+// direct_invite_count desc。shared_ip_count 使用 SQL 派生列别名排序。
 func riskInviterOrderClause(sortBy string, order string) string {
 	direction := "desc"
 	if order == "asc" {
@@ -562,19 +624,124 @@ func riskInviterOrderClause(sortBy string, order string) string {
 		return "users.created_at " + direction + ", users.id ASC"
 	case "aff_quota":
 		return "users.aff_quota " + direction + ", users.id ASC"
+	case "shared_ip_count":
+		return "risk_shared_ip_count " + direction + ", users.id ASC"
 	default:
 		return "inviter_stats.direct_invite_count desc, users.id ASC"
 	}
 }
 
-// riskUserSummaryFromUser 将用户记录转换为风控用户摘要（含 email/status/quota/created_at）。
+// riskUserSummaryFromUser 将用户记录转换为风控用户摘要
+// （含 email/status/quota/created_at 与 H 的活跃度基础字段）。
 func riskUserSummaryFromUser(user *User) *RiskUserSummary {
 	return &RiskUserSummary{
 		UserId: user.Id, Username: user.Username, DisplayName: user.DisplayName,
 		Email: user.Email, Status: user.Status, Quota: user.Quota,
 		CreatedAt: user.CreatedAt,
-		Group:     user.Group, Role: user.Role, InviterId: user.InviterId,
+		UsedQuota: user.UsedQuota, RequestCount: user.RequestCount, LastLoginAt: user.LastLoginAt,
+		Group: user.Group, Role: user.Role, InviterId: user.InviterId,
 	}
+}
+
+// riskUserActivityStats 是单个用户的 checkins / top_ups 聚合结果。
+type riskUserActivityStats struct {
+	CheckinCount  int64
+	RechargeQuota int64
+	RechargeCount int64
+}
+
+// loadRiskUserActivityStats 批量加载一批用户的签到次数与充值统计：
+//   - checkins：SELECT user_id, COUNT(*) ... WHERE user_id IN (...) GROUP BY user_id
+//   - top_ups： SELECT user_id, SUM(amount), COUNT(*) ... WHERE user_id IN (...) AND status='success' GROUP BY user_id
+//
+// 每张表只发一条查询（禁止 N+1）。调用方传入的都是一页数据（≤ 2000 个 id，
+// ListRiskInviters 单页最多约 10000 个被邀请人 id），一次 IN 在三个数据库的参数上限内。
+func loadRiskUserActivityStats(userIds []int) (map[int]*riskUserActivityStats, error) {
+	stats := make(map[int]*riskUserActivityStats, len(userIds))
+	ids := dedupeRiskUserIds(userIds)
+	if len(ids) == 0 {
+		return stats, nil
+	}
+	ensureStats := func(userId int) *riskUserActivityStats {
+		item := stats[userId]
+		if item == nil {
+			item = &riskUserActivityStats{}
+			stats[userId] = item
+		}
+		return item
+	}
+
+	var checkinRows []*struct {
+		UserId int
+		Count  int64
+	}
+	if err := DB.Model(&Checkin{}).
+		Select("user_id, COUNT(*) AS count").
+		Where("user_id IN ?", ids).
+		Group("user_id").
+		Scan(&checkinRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range checkinRows {
+		ensureStats(row.UserId).CheckinCount = row.Count
+	}
+
+	var rechargeRows []*struct {
+		UserId int
+		Quota  int64
+		Count  int64
+	}
+	if err := DB.Model(&TopUp{}).
+		Select("user_id, SUM(amount) AS quota, COUNT(*) AS count").
+		Where("user_id IN ? AND status = ?", ids, common.TopUpStatusSuccess).
+		Group("user_id").
+		Scan(&rechargeRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rechargeRows {
+		item := ensureStats(row.UserId)
+		item.RechargeQuota = row.Quota
+		item.RechargeCount = row.Count
+	}
+	return stats, nil
+}
+
+// hydrateRiskUserSummaries 为一页内的用户摘要批量补齐 checkins / top_ups 统计。
+func hydrateRiskUserSummaries(summaries []*RiskUserSummary) error {
+	if len(summaries) == 0 {
+		return nil
+	}
+	userIds := make([]int, 0, len(summaries))
+	for _, summary := range summaries {
+		if summary != nil {
+			userIds = append(userIds, summary.UserId)
+		}
+	}
+	stats, err := loadRiskUserActivityStats(userIds)
+	if err != nil {
+		return err
+	}
+	for _, summary := range summaries {
+		if summary == nil {
+			continue
+		}
+		if item := stats[summary.UserId]; item != nil {
+			summary.CheckinCount = item.CheckinCount
+			summary.RechargeQuota = item.RechargeQuota
+			summary.RechargeCount = item.RechargeCount
+		}
+	}
+	return nil
+}
+
+// applyRiskUserActivityStats 把已加载的聚合结果写入单个用户摘要。
+func applyRiskUserActivityStats(summary *RiskUserSummary, stats *riskUserActivityStats) {
+	if summary == nil || stats == nil {
+		return
+	}
+	summary.CheckinCount = stats.CheckinCount
+	summary.RechargeQuota = stats.RechargeQuota
+	summary.RechargeCount = stats.RechargeCount
 }
 
 // escapeRiskLikeLiteral 转义 LIKE 模式中的特殊字符（ESCAPE '!'），
@@ -683,7 +850,7 @@ func listRiskMatchedInvitees(inviterId int, keyword string, searchType string) (
 		}
 	}
 	var users []*User
-	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at").
+	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at, used_quota, request_count, last_login_at").
 		Where("inviter_id = ?", inviterId).
 		Where(condition, args...).
 		Order("id desc").Limit(20).
@@ -715,17 +882,25 @@ func riskInviterBanCondition(banState string) (string, []interface{}) {
 // ListRiskInviters 聚合所有邀请人的直接邀请人数并分页返回。
 // 聚合（COUNT(*) GROUP BY inviter_id）与分页都在数据库侧完成，total 与
 // direct_invite_count 都是真实总数而非当前页统计；当前页再补前 100 个被邀请人、
-// matched_invitees（keyword 命中的被邀请人，最多 20 个）与 shared_ip_count。
+// matched_invitees（keyword 命中的被邀请人，最多 20 个）、recent_invite_count（最近窗口内
+// 新增邀请人数，默认查询也会返回）、shared_ip_count 与用户活跃度/充值统计
+// （H/I，整页各一次批量聚合，禁止 N+1）。
 //
 // searchType=ip 时 keyword 按 IP 精确/前缀匹配「邀请人本人或其被邀请人用过的 IP」；
 // 其余（默认 any）沿用用户字段匹配。新增筛选均在 SQL 侧完成，保证 total 与分页正确：
-//   - suspiciousOnly：邀请人本人或其任一被邀请人存在与他人共享 IP 的记录
-//     （EXISTS 子查询，避免先分页后过滤；注意它覆盖全量被邀请人，见下方行内口径说明）；
+//   - suspiciousOnly：shared_ip_count > 0（与行内口径完全一致，使用 SQL 派生列）；
 //   - minInvites >= 2：direct_invite_count >= minInvites；
-//   - inviterStatus=disabled：邀请人自身 status=2。
+//   - inviterStatus=disabled：邀请人自身 status=2；
+//   - minRecentInvites >= 2：最近 recentInvitesWindow 秒内新增被邀请人 >= 阈值；
+//   - minSharedIPs >= 1：shared_ip_count >= minSharedIPs。
+//
+// 行内 RiskInviter.SharedIPCount / Suspicious 与上述筛选/排序统一使用
+// riskInviterSharedIPCountExpr 的 SQL 派生值（口径 = 邀请人本人 + 全部被邀请人），
+// 不再使用基于当前页前 100 个被邀请人的 Go 侧统计，消除「筛选命中但行内
+// suspicious=false」的历史不一致。
 //
 // 实现只用 GORM 子查询 + JOIN，兼容 SQLite/MySQL/PostgreSQL。
-func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, order string, banState string, searchType string, suspiciousOnly bool, minInvites int, inviterStatus string) ([]*RiskInviter, int64, error) {
+func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, order string, banState string, searchType string, suspiciousOnly bool, minInvites int, inviterStatus string, recentInvitesWindow int, minRecentInvites int, minSharedIPs int) ([]*RiskInviter, int64, error) {
 	if limit <= 0 {
 		limit = common.ItemsPerPage
 	}
@@ -733,8 +908,15 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 	banState = normalizeRiskBanState(banState)
 	searchType = normalizeRiskInviterSearchType(searchType)
 	inviterStatus = normalizeRiskInviterStatus(inviterStatus)
+	recentInvitesWindow = normalizeRiskInviterRecentInvitesWindow(recentInvitesWindow)
 	if minInvites <= 1 {
 		minInvites = 0
+	}
+	if minRecentInvites <= 1 {
+		minRecentInvites = 0
+	}
+	if minSharedIPs <= 0 {
+		minSharedIPs = 0
 	}
 	var keywordCondition string
 	var keywordArgs []interface{}
@@ -750,6 +932,8 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 		}
 	}
 	banCondition, banArgs := riskInviterBanCondition(banState)
+	// 最近邀请窗口的时间阈值只取一次，保证 count 与分页查询使用同一时间基准。
+	recentInvitesCutoff := time.Now().Unix() - int64(recentInvitesWindow)
 	buildQuery := func() *gorm.DB {
 		inviterStats := DB.Model(&User{}).
 			Select("inviter_id, COUNT(*) AS direct_invite_count").
@@ -767,17 +951,15 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 		if minInvites >= 2 {
 			tx = tx.Where("inviter_stats.direct_invite_count >= ?", minInvites)
 		}
+		// 「需复核」与 min_shared_ips 都直接复用 SQL 派生列，保证过滤、排序与行内值一致。
 		if suspiciousOnly {
-			// 「需复核」= 邀请人本人或其任一被邀请人存在与他人共享 IP 的记录，
-			// 与行内 shared_ip_count/suspicious 的口径对齐（而不是只看邀请人本人）。
-			// 必须在 SQL 侧过滤：若先分页再在 Go 里过滤，total 与结果集都会错。
-			// a/b 两侧都 JOIN users 且要求 deleted_at IS NULL，避免已删除账号把邀请人
-			// 误标为需复核；a.ip <> '' 与同 IP 列表的过滤口径保持一致。
-			tx = tx.Where("EXISTS (SELECT 1 FROM risk_ip_records a " +
-				"JOIN risk_ip_records b ON a.ip = b.ip AND a.user_id <> b.user_id " +
-				"JOIN users shared_owner ON shared_owner.id = a.user_id AND shared_owner.deleted_at IS NULL " +
-				"JOIN users shared_peer ON shared_peer.id = b.user_id AND shared_peer.deleted_at IS NULL " +
-				"WHERE a.ip <> '' AND (shared_owner.id = users.id OR shared_owner.inviter_id = users.id))")
+			tx = tx.Where(riskInviterSharedIPCountExpr + " > 0")
+		}
+		if minSharedIPs >= 1 {
+			tx = tx.Where(riskInviterSharedIPCountExpr+" >= ?", minSharedIPs)
+		}
+		if minRecentInvites >= 2 {
+			tx = tx.Where(riskInviterRecentInviteCountExpr+" >= ?", recentInvitesCutoff, minRecentInvites)
 		}
 		if inviterStatus == riskInviterStatusDisabled {
 			tx = tx.Where("users.status = ?", common.UserStatusDisabled)
@@ -792,49 +974,49 @@ func ListRiskInviters(keyword string, startIdx int, limit int, sortBy string, or
 		return []*RiskInviter{}, 0, nil
 	}
 	var rows []*riskInviterAggregateRow
+	// recent_invite_count 是响应字段（E.1），默认查询（不传 min_recent_invites）也必须计算；
+	// 唯一占位符为窗口起点 recentInvitesCutoff。
 	err := buildQuery().
-		Select("users.id AS inviter_id, users.username, users.display_name, users.email, users.status, users.quota, users." + commonGroupCol + ", inviter_stats.direct_invite_count").
+		Select("users.id AS inviter_id, users.username, users.display_name, users.email, users.status, users.quota, users."+commonGroupCol+", inviter_stats.direct_invite_count, "+riskInviterSharedIPCountExpr+" AS risk_shared_ip_count, "+riskInviterRecentInviteCountExpr+" AS recent_invite_count", recentInvitesCutoff).
 		Order(riskInviterOrderClause(sortBy, order)).
 		Offset(startIdx).Limit(limit).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, 0, err
 	}
+	// 整页只做一次 checkins / top_ups 批量聚合（H/I），当前页的被邀请人摘要与
+	// matched_invitees 摘要共用同一次查询结果。
+	pageSummaries := make([]*RiskUserSummary, 0)
 	result := make([]*RiskInviter, 0, len(rows))
 	for _, row := range rows {
 		var invitees []*User
-		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at").
+		if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at, used_quota, request_count, last_login_at").
 			Where("inviter_id = ?", row.InviterId).Order("id desc").Limit(100).Find(&invitees).Error; err != nil {
 			return nil, 0, err
 		}
-		ids := make([]int, 0, len(invitees)+1)
-		ids = append(ids, row.InviterId)
 		summaries := make([]*RiskUserSummary, 0, len(invitees))
 		for _, invitee := range invitees {
-			ids = append(ids, invitee.Id)
 			summaries = append(summaries, riskUserSummaryFromUser(invitee))
-		}
-		// 口径说明：行内 shared_ip_count / suspicious 只统计「邀请人 + 前 100 个被邀请人」
-		// 范围内的共享 IP 数；而 suspicious_only 过滤使用全量被邀请人的 SQL EXISTS。
-		// 被邀请人 > 100 且共享 IP 只出现在第 101 个之后时，可能出现「筛选命中但行内
-		// suspicious=false」的差异（既有 shared_ip_count 实现限制，本次不扩大其范围）。
-		sharedIPs, err := countSharedIPsForUsers(ids)
-		if err != nil {
-			return nil, 0, err
 		}
 		matchedInvitees, err := listRiskMatchedInvitees(row.InviterId, keyword, searchType)
 		if err != nil {
 			return nil, 0, err
 		}
+		pageSummaries = append(pageSummaries, summaries...)
+		pageSummaries = append(pageSummaries, matchedInvitees...)
 		result = append(result, &RiskInviter{
 			InviterId: row.InviterId, Username: row.Username, DisplayName: row.DisplayName,
 			Email: row.Email, Status: row.Status, Quota: row.Quota, Group: row.Group,
 			DirectInviteCount: row.DirectInviteCount,
-			SharedIPCount:     sharedIPs,
-			Suspicious:        sharedIPs > 0,
+			RecentInviteCount: row.RecentInviteCount,
+			SharedIPCount:     row.SharedIPCount,
+			Suspicious:        row.SharedIPCount > 0,
 			Invitees:          summaries,
 			MatchedInvitees:   matchedInvitees,
 		})
+	}
+	if err := hydrateRiskUserSummaries(pageSummaries); err != nil {
+		return nil, 0, err
 	}
 	return result, total, nil
 }
@@ -857,7 +1039,7 @@ func ListRiskInvitees(inviterId int, startIdx int, limit int) ([]*RiskUserSummar
 		return []*RiskUserSummary{}, 0, nil
 	}
 	var users []*User
-	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at").
+	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at, used_quota, request_count, last_login_at").
 		Where("inviter_id = ?", inviterId).
 		Order("id desc").Offset(startIdx).Limit(limit).
 		Find(&users).Error; err != nil {
@@ -879,6 +1061,10 @@ func ListRiskInvitees(inviterId int, startIdx int, limit int) ([]*RiskUserSummar
 			summary.LastSeenAt = record.LastSeenAt
 		}
 		items = append(items, summary)
+	}
+	// 整页一次批量聚合 checkins / top_ups（H/I）。
+	if err := hydrateRiskUserSummaries(items); err != nil {
+		return nil, 0, err
 	}
 	return items, total, nil
 }
@@ -915,15 +1101,19 @@ var riskInviteeGroupTimeWindows = map[int64]struct{}{
 
 // RiskInviteeGroup 是邀请人名下被邀请人的一个分组。
 type RiskInviteeGroup struct {
-	Key              string             `json:"key"`
-	Kind             string             `json:"kind"`         // ip | time | subnet | no_ip
-	Label            string             `json:"label"`        // ip → IP；subnet → 网段；time / no_ip → ""
-	BucketStart      int64              `json:"bucket_start"` // 仅 kind=time
-	UserCount        int64              `json:"user_count"`
-	BannedCount      int64              `json:"banned_count"`
-	FirstSeenAt      int64              `json:"first_seen_at"` // 组内成员最早出现；无 IP 记录为 0
-	LastSeenAt       int64              `json:"last_seen_at"`  // 组内成员最近出现；无 IP 记录为 0
-	UserIds          []int              `json:"user_ids"`      // 组内完整 user_id（上限 2000）
+	Key         string `json:"key"`
+	Kind        string `json:"kind"`         // ip | time | subnet | no_ip
+	Label       string `json:"label"`        // ip → IP；subnet → 网段；time / no_ip → ""
+	BucketStart int64  `json:"bucket_start"` // 仅 kind=time
+	UserCount   int64  `json:"user_count"`
+	BannedCount int64  `json:"banned_count"`
+	// H：活跃度分组计数（Go 侧按成员摘要累加）
+	ZombieCount      int64              `json:"zombie_count"`       // request_count==0 && used_quota==0 && checkin_count==0
+	CheckinOnlyCount int64              `json:"checkin_only_count"` // request_count==0 && checkin_count>0
+	ActiveCount      int64              `json:"active_count"`       // request_count>0
+	FirstSeenAt      int64              `json:"first_seen_at"`      // 组内成员最早出现；无 IP 记录为 0
+	LastSeenAt       int64              `json:"last_seen_at"`       // 组内成员最近出现；无 IP 记录为 0
+	UserIds          []int              `json:"user_ids"`           // 组内完整 user_id（上限 2000）
 	UserIdsTruncated bool               `json:"user_ids_truncated"`
 	Users            []*RiskUserSummary `json:"users"` // 最多 group_users 个成员摘要
 }
@@ -1011,7 +1201,7 @@ func ListRiskInviteeGroups(inviterId int, groupBy string, timeWindow int64, grou
 		return result, nil
 	}
 	var users []*User
-	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at").
+	if err := DB.Select("id, username, display_name, "+commonGroupCol+", role, inviter_id, email, status, quota, created_at, used_quota, request_count, last_login_at").
 		Where("inviter_id = ?", inviterId).
 		Order("id ASC").
 		Limit(riskInviteeGroupMaxLoadedUsers).
@@ -1026,6 +1216,11 @@ func ListRiskInviteeGroups(inviterId int, groupBy string, timeWindow int64, grou
 		userIds = append(userIds, user.Id)
 	}
 	latestRecords, err := listLatestRiskIPRecordsByUserIds(userIds)
+	if err != nil {
+		return nil, err
+	}
+	// 整批（≤2000 人）一次批量聚合 checkins / top_ups（H/I）。
+	userStats, err := loadRiskUserActivityStats(userIds)
 	if err != nil {
 		return nil, err
 	}
@@ -1078,11 +1273,21 @@ func ListRiskInviteeGroups(inviterId int, groupBy string, timeWindow int64, grou
 		}
 		builder.memberIds = append(builder.memberIds, user.Id)
 		summary := riskUserSummaryFromUser(user)
+		applyRiskUserActivityStats(summary, userStats[user.Id])
 		if record != nil {
 			summary.IP = record.IP
 			summary.LastSeenAt = record.LastSeenAt
 		}
 		builder.members = append(builder.members, summary)
+		// H：组级活跃度计数（判据与前端标签一致）。
+		switch {
+		case summary.RequestCount > 0:
+			builder.group.ActiveCount++
+		case summary.CheckinCount > 0:
+			builder.group.CheckinOnlyCount++
+		case summary.UsedQuota == 0:
+			builder.group.ZombieCount++
+		}
 		// 组级 first/last seen 仅对 IP 相关维度有含义；time / no_ip 固定为 0。
 		if record != nil && (kind == RiskInviteeGroupKindIP || kind == RiskInviteeGroupKindSubnet) {
 			if !builder.firstSeenSet || record.FirstSeenAt < builder.group.FirstSeenAt {
@@ -1128,16 +1333,6 @@ func ListRiskInviteeGroups(inviterId int, groupBy string, timeWindow int64, grou
 	result.GroupCount = len(groups)
 	result.Groups = groups
 	return result, nil
-}
-
-func countSharedIPsForUsers(userIds []int) (int64, error) {
-	if len(userIds) < 2 {
-		return 0, nil
-	}
-	var count int64
-	err := DB.Model(&RiskIPRecord{}).Where("user_id IN ? AND ip <> ''", userIds).
-		Select("COUNT(DISTINCT ip)").Where("ip IN (?)", DB.Model(&RiskIPRecord{}).Select("ip").Where("user_id IN ? AND ip <> ''", userIds).Group("ip").Having("COUNT(DISTINCT user_id) > 1")).Scan(&count).Error
-	return count, err
 }
 
 func GetRiskOverview() (*RiskOverview, error) {

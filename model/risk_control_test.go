@@ -73,11 +73,13 @@ func riskTestAssertDBSnapshotColumnLimits(t *testing.T) {
 
 func setupRiskControlTest(t *testing.T) {
 	t.Helper()
-	require.NoError(t, DB.AutoMigrate(&RiskIPRecord{}))
+	require.NoError(t, DB.AutoMigrate(&RiskIPRecord{}, &Checkin{}))
 	riskIPWriteState = sync.Map{}
 	t.Cleanup(func() {
 		riskTestAssertDBSnapshotColumnLimits(t)
 		DB.Exec("DELETE FROM risk_ip_records")
+		DB.Exec("DELETE FROM checkins")
+		DB.Exec("DELETE FROM top_ups")
 		DB.Exec("DELETE FROM users")
 		riskIPWriteState = sync.Map{}
 	})
@@ -112,9 +114,14 @@ func defaultListRiskSharedIPs(source string, searchType string, keyword string, 
 	return ListRiskSharedIPs(source, searchType, keyword, minUsers, startIdx, limit, sortBy, order, banState, false)
 }
 
-// defaultListRiskInviters 封装未使用新增搜索类型/筛选参数的既有调用点。
+// defaultListRiskInviters 封装未使用搜索类型/筛选参数的既有调用点（三期参数全默认）。
 func defaultListRiskInviters(keyword string, startIdx int, limit int, sortBy string, order string, banState string) ([]*RiskInviter, int64, error) {
-	return ListRiskInviters(keyword, startIdx, limit, sortBy, order, banState, "any", false, 0, "")
+	return ListRiskInviters(keyword, startIdx, limit, sortBy, order, banState, "any", false, 0, "", riskInviterDefaultRecentInvitesWindow, 0, 0)
+}
+
+// listRiskInvitersPhase2Defaults 为二期参数调用点补齐三期新增筛选的默认值（不筛选）。
+func listRiskInvitersPhase2Defaults(keyword string, startIdx int, limit int, sortBy string, order string, banState string, searchType string, suspiciousOnly bool, minInvites int, inviterStatus string) ([]*RiskInviter, int64, error) {
+	return ListRiskInviters(keyword, startIdx, limit, sortBy, order, banState, searchType, suspiciousOnly, minInvites, inviterStatus, riskInviterDefaultRecentInvitesWindow, 0, 0)
 }
 
 func riskStatusSkipReason(t *testing.T, skipped []RiskStatusSkip, userId int) string {
@@ -1419,7 +1426,7 @@ func TestListRiskInvitersSearchesByIP(t *testing.T) {
 	require.NoError(t, DB.Create(&records).Error)
 
 	list := func(keyword string, searchType string) ([]*RiskInviter, int64) {
-		items, total, err := ListRiskInviters(keyword, 0, 10, "inviter_id", "asc", "", searchType, false, 0, "")
+		items, total, err := listRiskInvitersPhase2Defaults(keyword, 0, 10, "inviter_id", "asc", "", searchType, false, 0, "")
 		require.NoError(t, err)
 		return items, total
 	}
@@ -1544,7 +1551,7 @@ func TestListRiskInvitersFiltersSuspiciousOnly(t *testing.T) {
 	require.NoError(t, DB.Delete(&User{}, deletedExternal.Id).Error)
 
 	list := func(suspiciousOnly bool, startIdx int, limit int) ([]*RiskInviter, int64) {
-		items, total, err := ListRiskInviters("", startIdx, limit, "inviter_id", "asc", "", "any", suspiciousOnly, 0, "")
+		items, total, err := listRiskInvitersPhase2Defaults("", startIdx, limit, "inviter_id", "asc", "", "any", suspiciousOnly, 0, "")
 		require.NoError(t, err)
 		return items, total
 	}
@@ -1596,7 +1603,7 @@ func TestListRiskInvitersFiltersMinInvites(t *testing.T) {
 	}
 
 	list := func(minInvites int) ([]*RiskInviter, int64) {
-		items, total, err := ListRiskInviters("", 0, 10, "direct_invite_count", "desc", "", "any", false, minInvites, "")
+		items, total, err := listRiskInvitersPhase2Defaults("", 0, 10, "direct_invite_count", "desc", "", "any", false, minInvites, "")
 		require.NoError(t, err)
 		return items, total
 	}
@@ -1634,7 +1641,7 @@ func TestListRiskInvitersFiltersInviterStatus(t *testing.T) {
 	})
 
 	list := func(inviterStatus string) ([]*RiskInviter, int64) {
-		items, total, err := ListRiskInviters("", 0, 10, "inviter_id", "asc", "", "any", false, 0, inviterStatus)
+		items, total, err := listRiskInvitersPhase2Defaults("", 0, 10, "inviter_id", "asc", "", "any", false, 0, inviterStatus)
 		require.NoError(t, err)
 		return items, total
 	}
@@ -1751,4 +1758,595 @@ func TestListRiskInviteeGroupsTruncatesAt2000Users(t *testing.T) {
 	require.EqualValues(t, riskInviteeGroupMaxLoadedUsers, result.Groups[0].UserCount)
 	require.Len(t, result.Groups[0].UserIds, riskInviteeGroupMaxLoadedUsers)
 	require.False(t, result.Groups[0].UserIdsTruncated)
+}
+
+// ---------------------------------------------------------------------------
+// 第三阶段 D：include_inviter
+// ---------------------------------------------------------------------------
+
+func TestBuildRiskInviterBatchUserIds(t *testing.T) {
+	inviteeIds := []int{12, 13, 12, 0, -1}
+	// 默认不包含邀请人本人，行为与旧版一致（去重 + 丢弃非法 id）。
+	require.Equal(t, []int{12, 13}, BuildRiskInviterBatchUserIds(99, inviteeIds, false))
+	// include_inviter=true：邀请人本人放最前。
+	require.Equal(t, []int{99, 12, 13}, BuildRiskInviterBatchUserIds(99, inviteeIds, true))
+	// 邀请人本人与列表重复时只保留最前一个。
+	require.Equal(t, []int{99, 12}, BuildRiskInviterBatchUserIds(99, []int{99, 12}, true))
+	// 无被邀请人时仍可只处理邀请人本人。
+	require.Equal(t, []int{99}, BuildRiskInviterBatchUserIds(99, nil, true))
+	// 非法邀请人 id 被丢弃。
+	require.Equal(t, []int{12}, BuildRiskInviterBatchUserIds(0, []int{12}, true))
+}
+
+func TestBatchUpdateRiskInviterScopeIncludeInviter(t *testing.T) {
+	setupRiskControlTest(t)
+	inviters := createRiskUsers(t, []User{
+		{Username: "risk-inc-admin-inviter", AffCode: "risk-inc-admin-aff", Role: common.RoleAdminUser},
+		{Username: "risk-inc-root-inviter", AffCode: "risk-inc-root-aff", Role: common.RoleRootUser},
+		{Username: "risk-inc-common-inviter", AffCode: "risk-inc-common-aff"},
+		{Username: "risk-inc-rootop-inviter", AffCode: "risk-inc-rootop-aff"},
+	})
+	invitees := createRiskUsers(t, []User{
+		{Username: "risk-inc-admin-invitee", AffCode: "risk-inc-admin-invitee-aff", InviterId: inviters[0].Id},
+		{Username: "risk-inc-root-invitee", AffCode: "risk-inc-root-invitee-aff", InviterId: inviters[1].Id},
+		{Username: "risk-inc-common-invitee", AffCode: "risk-inc-common-invitee-aff", InviterId: inviters[2].Id},
+		{Username: "risk-inc-rootop-invitee", AffCode: "risk-inc-rootop-invitee-aff", InviterId: inviters[3].Id},
+	})
+	reloadStatus := func(userId int) int {
+		var user User
+		require.NoError(t, DB.Select("id, status").First(&user, userId).Error)
+		return user.Status
+	}
+	runInviterScope := func(inviterId int, includeInviter bool, operatorRole int) (int, []RiskStatusSkip) {
+		inviteeIds, err := ResolveRiskUserIDsByInviter(inviterId)
+		require.NoError(t, err)
+		userIds := BuildRiskInviterBatchUserIds(inviterId, inviteeIds, includeInviter)
+		updated, skipped, err := BatchUpdateRiskUserStatus(operatorRole, "disable", userIds)
+		require.NoError(t, err)
+		return updated, skipped
+	}
+
+	// admin 操作者 + include_inviter=true：邀请人本人是同级 admin → skipped，被邀请人成功。
+	updated, skipped := runInviterScope(inviters[0].Id, true, common.RoleAdminUser)
+	require.Equal(t, 1, updated)
+	require.Len(t, skipped, 1)
+	require.Equal(t, RiskStatusSkipInsufficientPrivilege, riskStatusSkipReason(t, skipped, inviters[0].Id))
+	require.Equal(t, common.UserStatusEnabled, reloadStatus(inviters[0].Id))
+	require.Equal(t, common.UserStatusDisabled, reloadStatus(invitees[0].Id))
+
+	// include_inviter=true + 邀请人是 root → root_user skipped，被邀请人成功。
+	updated, skipped = runInviterScope(inviters[1].Id, true, common.RoleAdminUser)
+	require.Equal(t, 1, updated)
+	require.Len(t, skipped, 1)
+	require.Equal(t, RiskStatusSkipRootUser, riskStatusSkipReason(t, skipped, inviters[1].Id))
+	require.Equal(t, common.UserStatusEnabled, reloadStatus(inviters[1].Id))
+	require.Equal(t, common.UserStatusDisabled, reloadStatus(invitees[1].Id))
+
+	// include_inviter=false：只处理被邀请人，邀请人本人完全不参与（不在 skipped）。
+	updated, skipped = runInviterScope(inviters[2].Id, false, common.RoleAdminUser)
+	require.Equal(t, 1, updated)
+	require.Empty(t, skipped)
+	require.Equal(t, common.UserStatusEnabled, reloadStatus(inviters[2].Id))
+	require.Equal(t, common.UserStatusDisabled, reloadStatus(invitees[2].Id))
+
+	// root 操作者 + include_inviter=true：普通邀请人本人也会被禁用。
+	updated, skipped = runInviterScope(inviters[3].Id, true, common.RoleRootUser)
+	require.Equal(t, 2, updated)
+	require.Empty(t, skipped)
+	require.Equal(t, common.UserStatusDisabled, reloadStatus(inviters[3].Id))
+	require.Equal(t, common.UserStatusDisabled, reloadStatus(invitees[3].Id))
+}
+
+// ---------------------------------------------------------------------------
+// 第三阶段 E：shared_ip_count 筛选 / 排序 / 最近邀请窗口
+// ---------------------------------------------------------------------------
+
+// riskUserSummaryMap 把摘要列表转成 user_id → summary 的 map，便于按用户断言。
+func riskUserSummaryMap(summaries []*RiskUserSummary) map[int]*RiskUserSummary {
+	result := make(map[int]*RiskUserSummary, len(summaries))
+	for _, summary := range summaries {
+		if summary != nil {
+			result[summary.UserId] = summary
+		}
+	}
+	return result
+}
+
+// inviteeIdByName 按用户名查询测试用户 id（测试数据辅助）。
+func inviteeIdByName(t *testing.T, username string) int {
+	t.Helper()
+	var user User
+	require.NoError(t, DB.Select("id").Where("username = ?", username).First(&user).Error)
+	require.Positive(t, user.Id)
+	return user.Id
+}
+
+func TestListRiskInvitersFiltersMinSharedIPsAndSharedCountConsistency(t *testing.T) {
+	setupRiskControlTest(t)
+	inviters := createRiskUsers(t, []User{
+		{Username: "risk-sharedcnt-inviter-2", AffCode: "risk-sharedcnt-inv-2-aff"},
+		{Username: "risk-sharedcnt-inviter-1", AffCode: "risk-sharedcnt-inv-1-aff"},
+		{Username: "risk-sharedcnt-inviter-0", AffCode: "risk-sharedcnt-inv-0-aff"},
+	})
+	createRiskUsers(t, []User{
+		{Username: "risk-sharedcnt-a1", AffCode: "risk-sharedcnt-a1-aff", InviterId: inviters[0].Id},
+		{Username: "risk-sharedcnt-a2", AffCode: "risk-sharedcnt-a2-aff", InviterId: inviters[0].Id},
+		{Username: "risk-sharedcnt-b1", AffCode: "risk-sharedcnt-b1-aff", InviterId: inviters[1].Id},
+		{Username: "risk-sharedcnt-c1", AffCode: "risk-sharedcnt-c1-aff", InviterId: inviters[2].Id},
+	})
+	// 外部正常账号：分别与两个邀请人的被邀请人共享不同 IP。
+	external := createRiskUsers(t, []User{
+		{Username: "risk-sharedcnt-external", AffCode: "risk-sharedcnt-ext-aff"},
+	})[0]
+	records := []RiskIPRecord{
+		// inviter-2 的被邀请人共享 2 个 IP。
+		{UserId: inviteeIdByName(t, "risk-sharedcnt-a1"), TokenId: 1, IP: "203.0.113.101", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: inviteeIdByName(t, "risk-sharedcnt-a2"), TokenId: 1, IP: "203.0.113.102", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: external.Id, TokenId: 1, IP: "203.0.113.101", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: external.Id, TokenId: 2, IP: "203.0.113.102", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		// inviter-1 的被邀请人共享 1 个 IP。
+		{UserId: inviteeIdByName(t, "risk-sharedcnt-b1"), TokenId: 1, IP: "198.51.100.201", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: external.Id, TokenId: 3, IP: "198.51.100.201", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		// inviter-0 的被邀请人独享 IP，不构成共享。
+		{UserId: inviteeIdByName(t, "risk-sharedcnt-c1"), TokenId: 1, IP: "10.0.0.99", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+	}
+	require.NoError(t, DB.Create(&records).Error)
+
+	list := func(minSharedIPs int) ([]*RiskInviter, int64) {
+		items, total, err := ListRiskInviters("", 0, 10, "inviter_id", "asc", "", "any", false, 0, "", riskInviterDefaultRecentInvitesWindow, 0, minSharedIPs)
+		require.NoError(t, err)
+		return items, total
+	}
+
+	// 不筛选：行内 SharedIPCount 就是 SQL 派生值（本人 + 全部被邀请人）。
+	items, total := list(0)
+	require.EqualValues(t, 3, total)
+	require.Len(t, items, 3)
+	byId := make(map[int]*RiskInviter, len(items))
+	for _, item := range items {
+		byId[item.InviterId] = item
+	}
+	require.EqualValues(t, 2, byId[inviters[0].Id].SharedIPCount)
+	require.True(t, byId[inviters[0].Id].Suspicious)
+	require.EqualValues(t, 1, byId[inviters[1].Id].SharedIPCount)
+	require.True(t, byId[inviters[1].Id].Suspicious)
+	require.Zero(t, byId[inviters[2].Id].SharedIPCount)
+	require.False(t, byId[inviters[2].Id].Suspicious)
+
+	// min_shared_ips=2 只保留共享 2 个 IP 的邀请人，且行内值与筛选阈值一致。
+	items, total = list(2)
+	require.EqualValues(t, 1, total)
+	require.Len(t, items, 1)
+	require.Equal(t, inviters[0].Id, items[0].InviterId)
+	require.GreaterOrEqual(t, items[0].SharedIPCount, int64(2))
+
+	// min_shared_ips=1：两个有共享 IP 的邀请人，均满足行内 >= 阈值。
+	items, total = list(1)
+	require.EqualValues(t, 2, total)
+	require.Len(t, items, 2)
+	for _, item := range items {
+		require.GreaterOrEqual(t, item.SharedIPCount, int64(1))
+	}
+	// <=0 不筛选。
+	_, total = list(-5)
+	require.EqualValues(t, 3, total)
+
+	// suspicious_only 与 min_shared_ips=1 口径完全一致。
+	suspiciousItems, suspiciousTotal, err := ListRiskInviters("", 0, 10, "inviter_id", "asc", "", "any", true, 0, "", riskInviterDefaultRecentInvitesWindow, 0, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, suspiciousTotal)
+	require.Len(t, suspiciousItems, 2)
+	for _, item := range suspiciousItems {
+		require.True(t, item.Suspicious)
+		require.Positive(t, item.SharedIPCount)
+	}
+}
+
+func TestListRiskInvitersSortsBySharedIPCountAndPaging(t *testing.T) {
+	setupRiskControlTest(t)
+	inviters := createRiskUsers(t, []User{
+		{Username: "risk-sortshared-a", AffCode: "risk-sortshared-a-aff"},
+		{Username: "risk-sortshared-b", AffCode: "risk-sortshared-b-aff"},
+		{Username: "risk-sortshared-c", AffCode: "risk-sortshared-c-aff"},
+		{Username: "risk-sortshared-d", AffCode: "risk-sortshared-d-aff"},
+	})
+	// a：3 个共享 IP；b/c：各 2 个；d：0 个。
+	createRiskUsers(t, []User{
+		{Username: "risk-sortshared-a1", AffCode: "risk-sortshared-a1-aff", InviterId: inviters[0].Id},
+		{Username: "risk-sortshared-a2", AffCode: "risk-sortshared-a2-aff", InviterId: inviters[0].Id},
+		{Username: "risk-sortshared-a3", AffCode: "risk-sortshared-a3-aff", InviterId: inviters[0].Id},
+		{Username: "risk-sortshared-b1", AffCode: "risk-sortshared-b1-aff", InviterId: inviters[1].Id},
+		{Username: "risk-sortshared-b2", AffCode: "risk-sortshared-b2-aff", InviterId: inviters[1].Id},
+		{Username: "risk-sortshared-c1", AffCode: "risk-sortshared-c1-aff", InviterId: inviters[2].Id},
+		{Username: "risk-sortshared-c2", AffCode: "risk-sortshared-c2-aff", InviterId: inviters[2].Id},
+		{Username: "risk-sortshared-d1", AffCode: "risk-sortshared-d1-aff", InviterId: inviters[3].Id},
+	})
+	external := createRiskUsers(t, []User{
+		{Username: "risk-sortshared-external", AffCode: "risk-sortshared-ext-aff"},
+	})[0]
+	records := make([]RiskIPRecord, 0, 16)
+	tokenId := 1
+	addShared := func(inviteeUsername string, ip string) {
+		inviteeId := inviteeIdByName(t, inviteeUsername)
+		records = append(records,
+			RiskIPRecord{UserId: inviteeId, TokenId: tokenId, IP: ip, Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+			RiskIPRecord{UserId: external.Id, TokenId: tokenId, IP: ip, Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		)
+		tokenId++
+	}
+	addShared("risk-sortshared-a1", "203.0.113.1")
+	addShared("risk-sortshared-a2", "203.0.113.2")
+	addShared("risk-sortshared-a3", "203.0.113.3")
+	addShared("risk-sortshared-b1", "203.0.113.4")
+	addShared("risk-sortshared-b2", "203.0.113.5")
+	addShared("risk-sortshared-c1", "203.0.113.6")
+	addShared("risk-sortshared-c2", "203.0.113.7")
+	require.NoError(t, DB.Create(&records).Error)
+
+	list := func(order string, startIdx int, limit int, minSharedIPs int) ([]int, int64) {
+		items, total, err := ListRiskInviters("", startIdx, limit, "shared_ip_count", order, "", "any", false, 0, "", riskInviterDefaultRecentInvitesWindow, 0, minSharedIPs)
+		require.NoError(t, err)
+		ids := make([]int, 0, len(items))
+		for _, item := range items {
+			ids = append(ids, item.InviterId)
+		}
+		return ids, total
+	}
+
+	// desc：3,2,2,0；2 并列时按稳定次序 users.id ASC（b 先于 c）。
+	ids, total := list("desc", 0, 10, 0)
+	require.EqualValues(t, 4, total)
+	require.Equal(t, []int{inviters[0].Id, inviters[1].Id, inviters[2].Id, inviters[3].Id}, ids)
+
+	// asc：0,2,2,3；并列仍按 users.id ASC。
+	ids, total = list("asc", 0, 10, 0)
+	require.EqualValues(t, 4, total)
+	require.Equal(t, []int{inviters[3].Id, inviters[1].Id, inviters[2].Id, inviters[0].Id}, ids)
+
+	// 先排序再分页，翻页无重复/丢失。
+	page0, total := list("desc", 0, 2, 0)
+	require.EqualValues(t, 4, total)
+	page1, total := list("desc", 2, 2, 0)
+	require.EqualValues(t, 4, total)
+	require.Equal(t, []int{inviters[0].Id, inviters[1].Id}, page0)
+	require.Equal(t, []int{inviters[2].Id, inviters[3].Id}, page1)
+
+	// 先按 min_shared_ips 过滤再分页：total=3（a/b/c），逐页 limit=1 正确。
+	expectedFiltered := []int{inviters[0].Id, inviters[1].Id, inviters[2].Id}
+	for page, expected := range expectedFiltered {
+		pageIds, pageTotal := list("desc", page, 1, 2)
+		require.EqualValues(t, 3, pageTotal)
+		require.Equal(t, []int{expected}, pageIds)
+	}
+	emptyIds, emptyTotal := list("desc", 3, 1, 2)
+	require.EqualValues(t, 3, emptyTotal)
+	require.Empty(t, emptyIds)
+}
+
+func TestListRiskInvitersFiltersRecentInvites(t *testing.T) {
+	setupRiskControlTest(t)
+	now := time.Now().Unix()
+	inviters := createRiskUsers(t, []User{
+		{Username: "risk-recent-inviter-a", AffCode: "risk-recent-a-aff"},
+		{Username: "risk-recent-inviter-b", AffCode: "risk-recent-b-aff"},
+		{Username: "risk-recent-inviter-c", AffCode: "risk-recent-c-aff"},
+	})
+	// a：86400 窗口内 3 人（100/7200/80000 秒前）+ 窗口外 2 人（200000/300000 秒前）；
+	// b：窗口内 1 人 + 窗口外 1 人；c：只有窗口外 1 人。
+	createRiskUsers(t, []User{
+		{Username: "risk-recent-a1", AffCode: "risk-recent-a1-aff", InviterId: inviters[0].Id, CreatedAt: now - 100},
+		{Username: "risk-recent-a2", AffCode: "risk-recent-a2-aff", InviterId: inviters[0].Id, CreatedAt: now - 7200},
+		{Username: "risk-recent-a3", AffCode: "risk-recent-a3-aff", InviterId: inviters[0].Id, CreatedAt: now - 80000},
+		{Username: "risk-recent-a4", AffCode: "risk-recent-a4-aff", InviterId: inviters[0].Id, CreatedAt: now - 200000},
+		{Username: "risk-recent-a5", AffCode: "risk-recent-a5-aff", InviterId: inviters[0].Id, CreatedAt: now - 300000},
+		{Username: "risk-recent-b1", AffCode: "risk-recent-b1-aff", InviterId: inviters[1].Id, CreatedAt: now - 7200},
+		{Username: "risk-recent-b2", AffCode: "risk-recent-b2-aff", InviterId: inviters[1].Id, CreatedAt: now - 200000},
+		{Username: "risk-recent-c1", AffCode: "risk-recent-c1-aff", InviterId: inviters[2].Id, CreatedAt: now - 300000},
+	})
+
+	list := func(window int, minRecentInvites int) ([]*RiskInviter, int64) {
+		items, total, err := ListRiskInviters("", 0, 10, "inviter_id", "asc", "", "any", false, 0, "", window, minRecentInvites, 0)
+		require.NoError(t, err)
+		return items, total
+	}
+	recentByInviter := func(items []*RiskInviter) map[int]int64 {
+		result := make(map[int]int64, len(items))
+		for _, item := range items {
+			result[item.InviterId] = item.RecentInviteCount
+		}
+		return result
+	}
+
+	// 响应字段：默认查询（不筛选、window 非法 → 回退 86400）也必须返回 recent_invite_count。
+	items, total := list(0, 0)
+	require.EqualValues(t, 3, total)
+	require.Len(t, items, 3)
+	defaultRecent := recentByInviter(items)
+	require.EqualValues(t, 3, defaultRecent[inviters[0].Id], "a 在 86400 窗口内应为 3")
+	require.EqualValues(t, 1, defaultRecent[inviters[1].Id], "b 在 86400 窗口内应为 1")
+	require.Zero(t, defaultRecent[inviters[2].Id], "c 在 86400 窗口内应为 0")
+	require.EqualValues(t, 3, items[0].RecentInviteCount, "响应结构体字段应与子查询一致")
+
+	// window=86400 + 阈值 2：a(3) 命中，b(1) 不中；字段值必须正确。
+	items, total = list(86400, 2)
+	require.EqualValues(t, 1, total)
+	require.Len(t, items, 1)
+	require.Equal(t, inviters[0].Id, items[0].InviterId)
+	require.EqualValues(t, 3, items[0].RecentInviteCount)
+
+	// 阈值 4 > 窗口内 3 人 → 不命中（契约验收语义）。
+	items, total = list(86400, 4)
+	require.Zero(t, total)
+	require.Empty(t, items)
+
+	// window=3600：a 只有 1 个；不筛选时字段也应反映 3600 窗口。
+	items, total = list(3600, 0)
+	require.EqualValues(t, 3, total)
+	windowRecent := recentByInviter(items)
+	require.EqualValues(t, 1, windowRecent[inviters[0].Id])
+	require.Zero(t, windowRecent[inviters[1].Id])
+
+	// window=3600 + 阈值 2 → 空。
+	items, total = list(3600, 2)
+	require.Zero(t, total)
+	require.Empty(t, items)
+
+	// 非法窗口 1234 回退 86400：过滤与字段值都与 86400 一致。
+	items, total = list(1234, 2)
+	require.EqualValues(t, 1, total)
+	require.EqualValues(t, 3, items[0].RecentInviteCount)
+
+	// window=21600 + 阈值 2：a 窗口内 2 人命中；b 只有 1 人。
+	items, total = list(21600, 2)
+	require.EqualValues(t, 1, total)
+	require.Equal(t, inviters[0].Id, items[0].InviterId)
+	require.EqualValues(t, 2, items[0].RecentInviteCount)
+
+	// window=604800 + 阈值 2：a(5)、b(2) 都命中，字段为窗口内真实人数。
+	items, total = list(604800, 2)
+	require.EqualValues(t, 2, total)
+	weekRecent := recentByInviter(items)
+	require.EqualValues(t, 5, weekRecent[inviters[0].Id])
+	require.EqualValues(t, 2, weekRecent[inviters[1].Id])
+
+	// 阈值 <=1 不筛选。
+	_, total = list(3600, 1)
+	require.EqualValues(t, 3, total)
+}
+
+// TestRiskControlPhase3JSONFieldNames 校验三期新增字段的 JSON key 确实存在：
+// 避免「结构体/DB 值都有了但响应里漏字段」这类只能在真机发现的问题。
+func TestRiskControlPhase3JSONFieldNames(t *testing.T) {
+	inviterJSON, err := common.Marshal(&RiskInviter{
+		RecentInviteCount: 7,
+		SharedIPCount:     2,
+		Suspicious:        true,
+		Invitees:          []*RiskUserSummary{},
+		MatchedInvitees:   []*RiskUserSummary{},
+	})
+	require.NoError(t, err)
+	var inviterFields map[string]interface{}
+	require.NoError(t, common.Unmarshal(inviterJSON, &inviterFields))
+	require.EqualValues(t, 7, inviterFields["recent_invite_count"])
+	require.EqualValues(t, 2, inviterFields["shared_ip_count"])
+	require.Equal(t, true, inviterFields["suspicious"])
+
+	summaryJSON, err := common.Marshal(&RiskUserSummary{
+		UsedQuota: 11, RequestCount: 12, LastLoginAt: 13, CheckinCount: 14,
+		RechargeQuota: 15, RechargeCount: 16,
+	})
+	require.NoError(t, err)
+	var summaryFields map[string]interface{}
+	require.NoError(t, common.Unmarshal(summaryJSON, &summaryFields))
+	require.EqualValues(t, 11, summaryFields["used_quota"])
+	require.EqualValues(t, 12, summaryFields["request_count"])
+	require.EqualValues(t, 13, summaryFields["last_login_at"])
+	require.EqualValues(t, 14, summaryFields["checkin_count"])
+	require.EqualValues(t, 15, summaryFields["recharge_quota"])
+	require.EqualValues(t, 16, summaryFields["recharge_count"])
+
+	groupJSON, err := common.Marshal(&RiskInviteeGroup{
+		ZombieCount: 1, CheckinOnlyCount: 2, ActiveCount: 3,
+		UserIds: []int{}, Users: []*RiskUserSummary{},
+	})
+	require.NoError(t, err)
+	var groupFields map[string]interface{}
+	require.NoError(t, common.Unmarshal(groupJSON, &groupFields))
+	require.EqualValues(t, 1, groupFields["zombie_count"])
+	require.EqualValues(t, 2, groupFields["checkin_only_count"])
+	require.EqualValues(t, 3, groupFields["active_count"])
+}
+
+// ---------------------------------------------------------------------------
+// 第三阶段 H/I：活跃度字段、分组活跃度计数、充值聚合
+// ---------------------------------------------------------------------------
+
+func createRiskCheckins(t *testing.T, userId int, count int) {
+	t.Helper()
+	for index := 0; index < count; index++ {
+		require.NoError(t, DB.Create(&Checkin{
+			UserId:       userId,
+			CheckinDate:  fmt.Sprintf("2026-02-%02d", index+1),
+			QuotaAwarded: 10,
+			CreatedAt:    int64(1000 + index),
+		}).Error)
+	}
+}
+
+func createRiskTopUp(t *testing.T, userId int, amount int64, status string, tradeNo string) {
+	t.Helper()
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:     userId,
+		Amount:     amount,
+		Money:      0,
+		TradeNo:    tradeNo,
+		CreateTime: 1000,
+		Status:     status,
+	}).Error)
+}
+
+func TestListRiskUserActivityAndRechargeFields(t *testing.T) {
+	setupRiskControlTest(t)
+	inviter := createRiskUsers(t, []User{
+		{Username: "risk-activity-inviter", AffCode: "risk-activity-inviter-aff"},
+	})[0]
+	users := createRiskUsers(t, []User{
+		{Username: "risk-activity-a", AffCode: "risk-activity-a-aff", InviterId: inviter.Id, UsedQuota: 500, RequestCount: 3, LastLoginAt: 111},
+		{Username: "risk-activity-b", AffCode: "risk-activity-b-aff", InviterId: inviter.Id},
+	})
+	// a：2 次签到；b：0 次。
+	createRiskCheckins(t, users[0].Id, 2)
+	// a：2 笔成功充值（100+50）+ 1 笔未成功；b：0。
+	createRiskTopUp(t, users[0].Id, 100, common.TopUpStatusSuccess, "risk-activity-trade-a1")
+	createRiskTopUp(t, users[0].Id, 50, common.TopUpStatusSuccess, "risk-activity-trade-a2")
+	createRiskTopUp(t, users[0].Id, 999, "pending", "risk-activity-trade-a3")
+	// 两个用户共享同一 IP，用于验证同 IP 列表也带 H/I 字段。
+	require.NoError(t, DB.Create(&[]RiskIPRecord{
+		{UserId: users[0].Id, TokenId: 1, IP: "203.0.113.120", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+		{UserId: users[1].Id, TokenId: 1, IP: "203.0.113.120", Source: RiskIPSourceToken, FirstSeenAt: 1, LastSeenAt: 10, EventCount: 1},
+	}).Error)
+
+	assertActivity := func(label string, summary *RiskUserSummary) {
+		t.Helper()
+		require.NotNil(t, summary, label)
+		if summary.UserId == users[0].Id {
+			require.Equal(t, 500, summary.UsedQuota, label)
+			require.Equal(t, 3, summary.RequestCount, label)
+			require.EqualValues(t, 111, summary.LastLoginAt, label)
+			require.EqualValues(t, 2, summary.CheckinCount, label)
+			require.EqualValues(t, 150, summary.RechargeQuota, label)
+			require.EqualValues(t, 2, summary.RechargeCount, label)
+			return
+		}
+		require.Zero(t, summary.UsedQuota, label)
+		require.Zero(t, summary.RequestCount, label)
+		require.Zero(t, summary.LastLoginAt, label)
+		require.Zero(t, summary.CheckinCount, label)
+		require.Zero(t, summary.RechargeQuota, label)
+		require.Zero(t, summary.RechargeCount, label)
+	}
+
+	// 1) ListRiskInvitees（平铺列表）
+	invitees, total, err := ListRiskInvitees(inviter.Id, 0, 10)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+	byId := riskUserSummaryMap(invitees)
+	require.Len(t, byId, 2)
+	assertActivity("ListRiskInvitees", byId[users[0].Id])
+	assertActivity("ListRiskInvitees", byId[users[1].Id])
+
+	// 2) ListRiskSharedIPs 的 users 列表
+	sharedRows, _, err := ListRiskSharedIPs(RiskIPSourceToken, "ip", "", 2, 0, 10, "ip", "asc", "", false)
+	require.NoError(t, err)
+	require.Len(t, sharedRows, 1)
+	require.Len(t, sharedRows[0].Users, 2)
+	sharedById := riskUserSummaryMap(sharedRows[0].Users)
+	assertActivity("ListRiskSharedIPs", sharedById[users[0].Id])
+	assertActivity("ListRiskSharedIPs", sharedById[users[1].Id])
+
+	// 3) ListRiskInviters 的 invitees + matched_invitees
+	inviterItems, inviterTotal, err := ListRiskInviters("risk-activity-a", 0, 10, "inviter_id", "asc", "", "any", false, 0, "", riskInviterDefaultRecentInvitesWindow, 0, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, inviterTotal)
+	require.Len(t, inviterItems, 1)
+	inviterInvitees := riskUserSummaryMap(inviterItems[0].Invitees)
+	assertActivity("ListRiskInviters.Invitees", inviterInvitees[users[0].Id])
+	require.Len(t, inviterItems[0].MatchedInvitees, 1)
+	assertActivity("ListRiskInviters.MatchedInvitees", inviterItems[0].MatchedInvitees[0])
+
+	// 4) ListRiskInviteeGroups 的成员摘要 + H 组级计数（a 活跃、b 僵尸）。
+	groupsResult, err := ListRiskInviteeGroups(inviter.Id, "ip", 3600, 50, 200)
+	require.NoError(t, err)
+	require.Equal(t, 1, groupsResult.GroupCount, "两个用户同 IP，归入同一组")
+	allMembers := make([]*RiskUserSummary, 0)
+	for _, group := range groupsResult.Groups {
+		allMembers = append(allMembers, group.Users...)
+	}
+	groupById := riskUserSummaryMap(allMembers)
+	assertActivity("ListRiskInviteeGroups", groupById[users[0].Id])
+	assertActivity("ListRiskInviteeGroups", groupById[users[1].Id])
+	var totalZombie, totalCheckinOnly, totalActive int64
+	for _, group := range groupsResult.Groups {
+		totalZombie += group.ZombieCount
+		totalCheckinOnly += group.CheckinOnlyCount
+		totalActive += group.ActiveCount
+	}
+	require.EqualValues(t, 1, totalActive)
+	require.EqualValues(t, 1, totalZombie)
+	require.Zero(t, totalCheckinOnly)
+}
+
+func TestListRiskInviteeGroupsActivityCounters(t *testing.T) {
+	setupRiskControlTest(t)
+	inviter := createRiskUsers(t, []User{
+		{Username: "risk-counters-inviter", AffCode: "risk-counters-inviter-aff"},
+	})[0]
+	// 同一组（均无 IP 记录，归入 no_ip）内四类成员，判据与前端标签一致。
+	users := createRiskUsers(t, []User{
+		{Username: "risk-counters-zombie", AffCode: "risk-counters-zombie-aff", InviterId: inviter.Id},
+		{Username: "risk-counters-checkin", AffCode: "risk-counters-checkin-aff", InviterId: inviter.Id},
+		{Username: "risk-counters-active", AffCode: "risk-counters-active-aff", InviterId: inviter.Id, RequestCount: 5, UsedQuota: 10},
+		{Username: "risk-counters-used-only", AffCode: "risk-counters-used-aff", InviterId: inviter.Id, UsedQuota: 100},
+	})
+	createRiskCheckins(t, users[1].Id, 1)
+
+	result, err := ListRiskInviteeGroups(inviter.Id, "ip", 3600, 50, 200)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.GroupCount)
+	group := result.Groups[0]
+	require.Equal(t, "no_ip", group.Key)
+	require.EqualValues(t, 4, group.UserCount)
+	require.EqualValues(t, 1, group.ZombieCount, "零请求零消耗零签到")
+	require.EqualValues(t, 1, group.CheckinOnlyCount, "零请求但有签到")
+	require.EqualValues(t, 1, group.ActiveCount, "有请求")
+	// 「有消耗但零请求且无签到」不属于三个计数中的任何一个。
+	require.EqualValues(t, 3, group.ZombieCount+group.CheckinOnlyCount+group.ActiveCount)
+}
+
+func TestListRiskInviteeGroupsActivityCountersExcludeUsedOnly(t *testing.T) {
+	setupRiskControlTest(t)
+	inviter := createRiskUsers(t, []User{
+		{Username: "risk-usedonly-inviter", AffCode: "risk-usedonly-inviter-aff"},
+	})[0]
+	createRiskUsers(t, []User{
+		{Username: "risk-usedonly-user", AffCode: "risk-usedonly-user-aff", InviterId: inviter.Id, UsedQuota: 100},
+	})
+	result, err := ListRiskInviteeGroups(inviter.Id, "time", 3600, 50, 200)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.GroupCount)
+	require.Zero(t, result.Groups[0].ZombieCount)
+	require.Zero(t, result.Groups[0].CheckinOnlyCount)
+	require.Zero(t, result.Groups[0].ActiveCount)
+}
+
+func TestListRiskInviteesRechargeAggregatesOnlySuccess(t *testing.T) {
+	setupRiskControlTest(t)
+	inviter := createRiskUsers(t, []User{
+		{Username: "risk-recharge-inviter", AffCode: "risk-recharge-inviter-aff"},
+	})[0]
+	users := createRiskUsers(t, []User{
+		{Username: "risk-recharge-a", AffCode: "risk-recharge-a-aff", InviterId: inviter.Id},
+		{Username: "risk-recharge-b", AffCode: "risk-recharge-b-aff", InviterId: inviter.Id},
+		{Username: "risk-recharge-c", AffCode: "risk-recharge-c-aff", InviterId: inviter.Id},
+	})
+	// a：两笔 success；另有 pending/failed 不计。
+	createRiskTopUp(t, users[0].Id, 200, common.TopUpStatusSuccess, "risk-recharge-a1")
+	createRiskTopUp(t, users[0].Id, 300, common.TopUpStatusSuccess, "risk-recharge-a2")
+	createRiskTopUp(t, users[0].Id, 999, "pending", "risk-recharge-a3")
+	createRiskTopUp(t, users[0].Id, 888, "failed", "risk-recharge-a4")
+	// b：一笔 success。
+	createRiskTopUp(t, users[1].Id, 50, common.TopUpStatusSuccess, "risk-recharge-b1")
+	// c：只有失败记录 → 充值统计为 0。
+	createRiskTopUp(t, users[2].Id, 77, "failed", "risk-recharge-c1")
+
+	items, total, err := ListRiskInvitees(inviter.Id, 0, 10)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, total)
+	byId := riskUserSummaryMap(items)
+	require.EqualValues(t, 500, byId[users[0].Id].RechargeQuota)
+	require.EqualValues(t, 2, byId[users[0].Id].RechargeCount)
+	require.EqualValues(t, 50, byId[users[1].Id].RechargeQuota)
+	require.EqualValues(t, 1, byId[users[1].Id].RechargeCount)
+	require.Zero(t, byId[users[2].Id].RechargeQuota)
+	require.Zero(t, byId[users[2].Id].RechargeCount)
 }

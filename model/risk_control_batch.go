@@ -44,6 +44,18 @@ func dedupeRiskUserIds(userIds []int) []int {
 	return result
 }
 
+// BuildRiskInviterBatchUserIds 构造「邀请人范围批量封禁/解禁」的目标 user_id 列表。
+// includeInviter=true 时把邀请人本人放在最前（契约 phase3 D），随后并入被邀请人；
+// 返回前统一去重并丢弃非法 id。includeInviter=false 时与旧行为完全一致。
+func BuildRiskInviterBatchUserIds(inviterId int, inviteeIds []int, includeInviter bool) []int {
+	userIds := make([]int, 0, len(inviteeIds)+1)
+	if includeInviter {
+		userIds = append(userIds, inviterId)
+	}
+	userIds = append(userIds, inviteeIds...)
+	return dedupeRiskUserIds(userIds)
+}
+
 // loadRiskUsersByIDs 分块加载目标用户（软删除用户视为不存在）。
 func loadRiskUsersByIDs(userIds []int) (map[int]*User, error) {
 	users := make(map[int]*User, len(userIds))
