@@ -85,4 +85,11 @@ const (
 	ContextKeyTokenAuditParams ContextKey = "token_audit_params"
 	// ContextKeyTokenAuditSucceeded disambiguates token responses that exceed the audit buffer.
 	ContextKeyTokenAuditSucceeded ContextKey = "token_audit_succeeded"
+
+	// ContextKeyHarnessRequestId and ContextKeyHarnessRunId carry the platform's
+	// opaque correlation ids. They live here rather than in middleware so the
+	// service layer can read them without importing middleware, which would be a
+	// cycle because middleware already imports service.
+	ContextKeyHarnessRequestId ContextKey = "harness_request_id"
+	ContextKeyHarnessRunId     ContextKey = "harness_run_id"
 )

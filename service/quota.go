@@ -15,7 +15,6 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -585,6 +584,46 @@ type harnessSettlementUsage struct {
 	CacheWriteTokens int
 }
 
+// harnessSettlementCorrelation carries the platform-side identifiers and the
+// usage provenance for the append-only ledger events. It is kept separate from
+// the snapshot row because the snapshot table is deliberately free of
+// platform-only columns, while the event stream needs them to be queryable by
+// Harness request id.
+type harnessSettlementCorrelation struct {
+	HarnessRequestId string
+	HarnessRunId     string
+	UsageUnit        string
+	UsageSource      string
+	IsEstimated      bool
+}
+
+// harnessUsageUnitToken is the default billing basis. The platform treats token
+// as the implicit unit, so it is used whenever no more specific unit applies.
+const harnessUsageUnitToken = "token"
+
+// harnessUsageSourceUpstream marks usage that came from the upstream response
+// rather than a local estimate.
+const harnessUsageSourceUpstream = "upstream"
+
+// harnessUsageSourceEstimated marks usage the gateway had to estimate.
+const harnessUsageSourceEstimated = "estimated"
+
+// harnessSettlementCorrelationFromContext reads the correlation ids the request
+// middleware stored. A non-Harness caller has none, and the events are still
+// written with empty ids so the cost stream stays complete.
+func harnessSettlementCorrelationFromContext(ctx *gin.Context) harnessSettlementCorrelation {
+	correlation := harnessSettlementCorrelation{
+		UsageUnit:   harnessUsageUnitToken,
+		UsageSource: harnessUsageSourceUpstream,
+	}
+	if ctx == nil {
+		return correlation
+	}
+	correlation.HarnessRequestId = common.GetContextKeyString(ctx, constant.ContextKeyHarnessRequestId)
+	correlation.HarnessRunId = common.GetContextKeyString(ctx, constant.ContextKeyHarnessRunId)
+	return correlation
+}
+
 // harnessSettlementMoney is the resolved procurement cost of one request.
 type harnessSettlementMoney struct {
 	PricingGroup   string
@@ -593,23 +632,17 @@ type harnessSettlementMoney struct {
 	BaseAmount     string
 	TotalAmount    string
 	Currency       string
+	// PriceVersion identifies the pricing snapshot the amount was derived from,
+	// so the platform can tell a price change from a usage change.
+	PriceVersion string
 }
 
-// harnessSettlementCurrency mirrors harnessCatalogDisplayCurrency in
-// controller/intelligent_routing.go so the ledger reports money in the same
-// display currency the catalog quotes. The controller helper is unexported and
-// service/ must not import controller/ (import cycle), so the switch is
-// duplicated here; keep the two in sync.
-func harnessSettlementCurrency() (string, float64) {
-	switch operation_setting.GetQuotaDisplayType() {
-	case operation_setting.QuotaDisplayTypeCNY:
-		return "CNY", operation_setting.GetUsdToCurrencyRate(operation_setting.USDExchangeRate)
-	case operation_setting.QuotaDisplayTypeCustom:
-		return operation_setting.GetCurrencySymbol(), operation_setting.GetUsdToCurrencyRate(operation_setting.USDExchangeRate)
-	default:
-		return "USD", 1
-	}
-}
+// harnessSettlementCurrency is the ledger currency. The procurement ledger is
+// always denominated in USD and is never converted to the site display
+// currency: the agreed contract fixes cost.currency to USD, so any conversion
+// here would silently mislabel the amounts whenever the site switch from USD.
+// Display-currency conversion belongs to the catalog/dashboard path only.
+const harnessSettlementCurrency = "USD"
 
 // harnessSettlementPricing resolves the procurement pricing group of a
 // channel+model, that group's ratio and the channel's supplier tax. It mirrors
@@ -644,18 +677,15 @@ func harnessSettlementPricing(channelId int, modelName string) (pricingGroup str
 
 // harnessSettlementMoneyForQuota converts a final quota into ledger amounts.
 // base is quota / QuotaPerUnit, i.e. the canonical USD procurement base. A
-// resolved pricing group applies its ratio and the supplier tax; when no group
-// resolved the request has no procurement discount, so the total tracks the base
-// instead of collapsing to zero — "no procurement group" must never read as
-// "free". This function only describes money; it never changes a charge.
+// resolved pricing group applies its ratio; the channel's supplier tax is
+// recorded for the caller but never folded into the amount, because the agreed
+// contract forwards the tax to the platform and leaves it out of the cost.
+// When no group resolved the request has no procurement discount, so the total
+// tracks the base instead of collapsing to zero — "no procurement group" must
+// never read as "free". This function only describes money; it never changes a
+// charge.
 func harnessSettlementMoneyForQuota(quota int, channelId int, modelName string) harnessSettlementMoney {
-	money := harnessSettlementMoney{BaseAmount: "0", TotalAmount: "0", Currency: "USD"}
-	currency, currencyRate := harnessSettlementCurrency()
-	if math.IsNaN(currencyRate) || math.IsInf(currencyRate, 0) || currencyRate <= 0 {
-		common.SysLog(common.LogText("harness settlement: ignoring invalid display currency rate %v, falling back to USD", currencyRate))
-		currency, currencyRate = "USD", 1
-	}
-	money.Currency = currency
+	money := harnessSettlementMoney{BaseAmount: "0", TotalAmount: "0", Currency: harnessSettlementCurrency}
 	if quota < 0 {
 		common.SysLog(common.LogText("harness settlement: ignoring negative quota %d (channel=%d model=%s)", quota, channelId, modelName))
 		return money
@@ -671,17 +701,15 @@ func harnessSettlementMoneyForQuota(quota int, channelId int, modelName string) 
 	total := base
 	switch {
 	case pricingGroup == "":
-		// No opt-in procurement group: no discount, no tax. Keep the ratio at
-		// zero so the row shows that no procurement group applied.
+		// No opt-in procurement group: no discount. Keep the ratio at zero so
+		// the row shows that no procurement group applied.
 		groupRatio, taxRatePercent = 0, 0
 	case math.IsNaN(groupRatio) || math.IsInf(groupRatio, 0) || groupRatio < 0:
 		common.SysLog(common.LogText("harness settlement: ignoring invalid group ratio %v (group=%s), no discount applied", groupRatio, pricingGroup))
 		groupRatio, taxRatePercent = 0, 0
 	default:
-		total = base.Mul(decimal.NewFromFloat(groupRatio)).
-			Mul(decimal.NewFromFloat(1 + taxRatePercent/100))
+		total = base.Mul(decimal.NewFromFloat(groupRatio))
 	}
-	total = total.Mul(decimal.NewFromFloat(currencyRate))
 	if total.IsNegative() {
 		common.SysLog(common.LogText("harness settlement: clamping negative total to zero (channel=%d model=%s)", channelId, modelName))
 		total = decimal.Zero
@@ -692,13 +720,41 @@ func harnessSettlementMoneyForQuota(quota int, channelId int, modelName string) 
 	money.TaxRatePercent = taxRatePercent
 	money.BaseAmount = base.Round(harnessSettlementAmountPrecision).String()
 	money.TotalAmount = total.Round(harnessSettlementAmountPrecision).String()
+	money.PriceVersion = harnessProcurementPriceVersion()
 	return money
+}
+
+// harnessProcurementPriceVersion identifies the pricing snapshot the ledger
+// amounts were computed from, so reconciliation can tell a price change apart
+// from a usage change. It is derived from the in-memory pricing cache the amount
+// was actually computed against, and never issues an extra query on the billing
+// path.
+func harnessProcurementPriceVersion() string {
+	pricing := model.GetPricing()
+	if len(pricing) == 0 {
+		return ""
+	}
+	encoded, err := common.Marshal(pricing)
+	if err != nil {
+		return ""
+	}
+	return "pw-" + common.ETagFor("harness-procurement-price:v1", string(encoded))
 }
 
 // recordHarnessSettlement upserts one procurement ledger row. It never returns
 // an error and never panics: a settlement write must never break, slow or fail a
 // relay, so a failure only reaches the server log and the request continues.
-func recordHarnessSettlement(settlement *model.HarnessSettlement, money harnessSettlementMoney) {
+// recordHarnessSettlement upserts one procurement ledger row and appends the
+// matching append-only ledger events. It never returns an error and never
+// panics: a settlement write must never break, slow or fail a relay, so a
+// failure only reaches the server log and the request continues.
+//
+// The snapshot row keeps answering "what is this request worth right now" while
+// the events answer "what changed, in order" for the platform's incremental
+// feed. Both are written from this one choke point, which is why every billing
+// path (synchronous relay, streaming, async task, refund, violation fee) is
+// covered without touching each call site.
+func recordHarnessSettlement(settlement *model.HarnessSettlement, money harnessSettlementMoney, correlation harnessSettlementCorrelation) {
 	if settlement == nil {
 		return
 	}
@@ -722,6 +778,117 @@ func recordHarnessSettlement(settlement *model.HarnessSettlement, money harnessS
 	}()
 	if err := model.UpsertHarnessSettlement(settlement); err != nil {
 		common.SysLog(common.LogText("harness settlement write failed (request=%s task=%s status=%s): %s", settlement.RequestId, settlement.TaskId, settlement.Status, err.Error()))
+	}
+	appendHarnessSettlementEvents(settlement, money, correlation)
+}
+
+// appendHarnessSettlementEvents derives the append-only event rows from a
+// settlement snapshot. A correction or refund is a new event that supersedes the
+// previous one; nothing is ever overwritten, so the platform can follow the
+// stream with a single id cursor.
+//
+// The cost event always carries the cumulative net amount (never a delta): a
+// dropped event then cannot corrupt the total, because the latest event alone
+// states what the request is worth.
+func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money harnessSettlementMoney, correlation harnessSettlementCorrelation) {
+	if settlement == nil || settlement.RequestId == "" {
+		return
+	}
+	observedAtMs := time.Now().UnixMilli()
+	supersedes, recordVersion := previousHarnessLedgerEvent(settlement.RequestId)
+
+	usageEvent := &model.HarnessLedgerEvent{
+		Stream:            model.HarnessLedgerStreamUsage,
+		EventType:         harnessUsageEventTypeForStatus(settlement.Status),
+		HarnessRequestId:  correlation.HarnessRequestId,
+		GatewayRequestId:  settlement.RequestId,
+		RunId:             correlation.HarnessRunId,
+		Status:            settlement.Status,
+		Currency:          money.Currency,
+		UsageUnit:         correlation.UsageUnit,
+		PromptTokens:      settlement.PromptTokens,
+		CompletionTokens:  settlement.CompletionTokens,
+		CacheReadTokens:   settlement.CacheReadTokens,
+		CacheWriteTokens:  settlement.CacheWriteTokens,
+		UsageSource:       correlation.UsageSource,
+		IsEstimated:       correlation.IsEstimated,
+		BillingBasis:      correlation.UsageUnit,
+		PricingVersion:    money.PriceVersion,
+		RecordVersion:     recordVersion,
+		SupersedesEventId: supersedes,
+		ObservedAtMs:      observedAtMs,
+	}
+	if err := model.AppendHarnessLedgerEvent(usageEvent); err != nil {
+		common.SysLog(common.LogText("harness usage event append failed (request=%s): %s", settlement.RequestId, err.Error()))
+	}
+
+	costEvent := &model.HarnessLedgerEvent{
+		Stream:            model.HarnessLedgerStreamCost,
+		EventType:         harnessCostEventTypeForStatus(settlement.Status),
+		HarnessRequestId:  correlation.HarnessRequestId,
+		GatewayRequestId:  settlement.RequestId,
+		RunId:             correlation.HarnessRunId,
+		Status:            settlement.Status,
+		Currency:          money.Currency,
+		UsageUnit:         correlation.UsageUnit,
+		PromptTokens:      settlement.PromptTokens,
+		CompletionTokens:  settlement.CompletionTokens,
+		CacheReadTokens:   settlement.CacheReadTokens,
+		CacheWriteTokens:  settlement.CacheWriteTokens,
+		UsageSource:       correlation.UsageSource,
+		IsEstimated:       correlation.IsEstimated,
+		BaseAmount:        money.BaseAmount,
+		TotalAmount:       money.TotalAmount,
+		GroupRatio:        money.GroupRatio,
+		TaxRatePercent:    money.TaxRatePercent,
+		BillingBasis:      correlation.UsageUnit,
+		PricingVersion:    money.PriceVersion,
+		RecordVersion:     recordVersion,
+		SupersedesEventId: supersedes,
+		ObservedAtMs:      observedAtMs,
+	}
+	if err := model.AppendHarnessLedgerEvent(costEvent); err != nil {
+		common.SysLog(common.LogText("harness cost event append failed (request=%s): %s", settlement.RequestId, err.Error()))
+	}
+}
+
+// previousHarnessLedgerEvent returns the id and version of the most recent cost
+// event recorded for this gateway request, so a correction can point at what it
+// supersedes and advance the record version. A request's first event yields a
+// nil predecessor and version 1.
+func previousHarnessLedgerEvent(gatewayRequestId string) (*string, int) {
+	if gatewayRequestId == "" {
+		return nil, 1
+	}
+	var last model.HarnessLedgerEvent
+	err := model.DB.Where("gateway_request_id = ? AND stream = ?", gatewayRequestId, model.HarnessLedgerStreamCost).
+		Order("id DESC").Limit(1).Find(&last).Error
+	if err != nil || last.EventId == "" {
+		return nil, 1
+	}
+	return &last.EventId, last.RecordVersion + 1
+}
+
+// harnessUsageEventTypeForStatus maps a settlement status to the usage event
+// type the platform expects.
+func harnessUsageEventTypeForStatus(status string) string {
+	if status == model.HarnessSettlementStatusRefunded {
+		return model.HarnessLedgerEventTypeUsageCorrection
+	}
+	return model.HarnessLedgerEventTypeUsage
+}
+
+// harnessCostEventTypeForStatus maps a settlement status to the cost event type.
+func harnessCostEventTypeForStatus(status string) string {
+	switch status {
+	case model.HarnessSettlementStatusRefunded:
+		return model.HarnessLedgerEventTypeRefund
+	case model.HarnessSettlementStatusPending:
+		return model.HarnessLedgerEventTypeCost
+	case model.HarnessSettlementStatusFailed:
+		return model.HarnessLedgerEventTypeStatusChange
+	default:
+		return model.HarnessLedgerEventTypeCost
 	}
 }
 
@@ -759,7 +926,7 @@ func recordRelayHarnessSettlement(ctx *gin.Context, relayInfo *relaycommon.Relay
 	}
 	// The pricing group is resolved against the client-facing model name, which
 	// is what the channel's abilities and the response headers are keyed by.
-	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(quota, relayInfo.ChannelId, relayInfo.OriginModelName))
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(quota, relayInfo.ChannelId, relayInfo.OriginModelName), harnessSettlementCorrelationFromContext(ctx))
 }
 
 // recordTaskHarnessSettlement moves the ledger row of an async task to its final
@@ -795,5 +962,5 @@ func recordTaskHarnessSettlement(task *model.Task, status string, quota int) {
 		}
 	}
 	settlement.Status = status
-	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(quota, task.ChannelId, taskModelName(task)))
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(quota, task.ChannelId, taskModelName(task)), harnessSettlementCorrelation{UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream})
 }
