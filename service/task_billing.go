@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 // LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。
@@ -289,6 +290,37 @@ func taskModelName(task *model.Task) string {
 	return task.Properties.OriginModelName
 }
 
+// frozenTaskModelRatio returns the model ratio frozen at submit time, falling
+// back to liveRatio only for tasks submitted before the context existed. The
+// procurement amount must not follow a configuration edit made while the task
+// runs, which is exactly what reading ratio_setting here would do.
+func frozenTaskModelRatio(task *model.Task, liveRatio float64) float64 {
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.Procurement != nil &&
+		bc.Procurement.Version > 0 && bc.ModelRatio > 0 {
+		return bc.ModelRatio
+	}
+	return liveRatio
+}
+
+// stampFrozenProcurementPreGroupQuota records the pre-group amount a usage-priced
+// task produced at completion, so the ledger books the quantity it actually
+// consumed instead of dividing the charged quota by the customer group ratio.
+// Tasks without a frozen procurement context are left untouched: they keep the
+// legacy ledger path, which is the only safe reading of their zero values.
+func stampFrozenProcurementPreGroupQuota(task *model.Task, preGroupQuota decimal.Decimal) {
+	if task == nil || task.PrivateData.BillingContext == nil {
+		return
+	}
+	frozen := task.PrivateData.BillingContext.Procurement
+	if frozen == nil || frozen.Version <= 0 {
+		return
+	}
+	if preGroupQuota.IsNegative() {
+		return
+	}
+	frozen.PreGroupQuota = preGroupQuota.String()
+}
+
 // RefundTaskQuota 统一的任务失败退款逻辑。
 // 当异步任务失败时，退还资金与令牌额度，并回减用户和渠道用量。
 // 返回资金来源是否已成功退还；失败时保留 quota，供显式重试或人工对账。
@@ -467,6 +499,12 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 
 	// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio * otherMultiplier（饱和转换，防止溢出成负数）
 	actualQuota, clamp := common.QuotaFromFloatChecked(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
+
+	// The customer charge above keeps following the live ratios exactly as
+	// before. The procurement amount is captured separately so this unstable
+	// customer-side recompute can no longer rewrite what the operator paid: it
+	// uses the model ratio frozen at submit time and never the group ratio.
+	stampFrozenProcurementPreGroupQuota(task, decimal.NewFromFloat(float64(totalTokens)*frozenTaskModelRatio(task, modelRatio)*otherMultiplier))
 
 	reason := common.NewMessage("Recalculated from tokens: tokens {{tokens}}, model ratio {{model_ratio}}, group ratio {{group_ratio}}, other multiplier {{other_multiplier}}", map[string]any{
 		"tokens":           totalTokens,

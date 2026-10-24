@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -36,28 +37,32 @@ func appendToolSurchargeLogInfo(other *model.LogOther, items []ToolSurchargeItem
 }
 
 type textQuotaSummary struct {
-	PromptTokens           int
-	CompletionTokens       int
-	TotalTokens            int
-	CacheTokens            int
-	CacheCreationTokens    int
-	CacheCreationTokens5m  int
-	CacheCreationTokens1h  int
-	ImageTokens            int
-	AudioTokens            int
-	ModelName              string
-	TokenName              string
-	UseTimeSeconds         int64
-	CompletionRatio        float64
-	CacheRatio             float64
-	ImageRatio             float64
-	ModelRatio             float64
-	GroupRatio             float64
-	ModelPrice             float64
-	CacheCreationRatio     float64
-	CacheCreationRatio5m   float64
-	CacheCreationRatio1h   float64
-	Quota                  int
+	PromptTokens          int
+	CompletionTokens      int
+	TotalTokens           int
+	CacheTokens           int
+	CacheCreationTokens   int
+	CacheCreationTokens5m int
+	CacheCreationTokens1h int
+	ImageTokens           int
+	AudioTokens           int
+	ModelName             string
+	TokenName             string
+	UseTimeSeconds        int64
+	CompletionRatio       float64
+	CacheRatio            float64
+	ImageRatio            float64
+	ModelRatio            float64
+	GroupRatio            float64
+	ModelPrice            float64
+	CacheCreationRatio    float64
+	CacheCreationRatio5m  float64
+	CacheCreationRatio1h  float64
+	Quota                 int
+	// PreGroupQuota is the billable amount before the customer-side group ratio
+	// and before the tool-call surcharge. It feeds the procurement ledger; Quota
+	// (what the caller is charged) is derived from it plus the ratio and surcharge.
+	PreGroupQuota          decimal.Decimal
 	IsClaudeUsageSemantic  bool
 	UsageSemantic          string
 	AudioInputPrice        float64
@@ -332,8 +337,10 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 			summary.AudioInputPrice = operation_setting.GetGeminiInputAudioPricePerMillionTokens(summary.ModelName)
 			if summary.AudioInputPrice > 0 {
 				baseTokens = baseTokens.Sub(dAudioTokens)
+				// Kept free of the group ratio: it joins the pre-group amount and the
+				// ratio is applied once to the whole sum below.
 				audioInputQuota = decimal.NewFromFloat(summary.AudioInputPrice).
-					Div(decimal.NewFromInt(1000000)).Mul(dAudioTokens).Mul(dGroupRatio).Mul(dQuotaPerUnit)
+					Div(decimal.NewFromInt(1000000)).Mul(dAudioTokens).Mul(dQuotaPerUnit)
 			}
 		}
 
@@ -345,11 +352,18 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 			baseTokens = decimal.Zero
 		}
 
+		// The customer-side group ratio is applied as one factor to the whole
+		// amount instead of being folded into each term. Algebraically identical
+		// on exact decimals -- (base*M*G + audio*G) * other == ((base*M + audio) *
+		// other) * G -- but it exposes the pre-ratio amount the procurement ledger
+		// needs, without ever dividing a rounded quota by the ratio.
 		promptQuota := baseTokens.Add(cachedTokensWithRatio).Add(imageTokensWithRatio).Add(cachedCreationTokensWithRatio)
 		completionQuota := dCompletionTokens.Mul(dCompletionRatio)
-		quotaCalculateDecimal := promptQuota.Add(completionQuota).Mul(ratio)
-		quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
-		quotaCalculateDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(quotaCalculateDecimal)
+		preGroupQuota := promptQuota.Add(completionQuota).Mul(dModelRatio).Add(audioInputQuota)
+		preGroupQuota = relayInfo.PriceData.ApplyOtherRatiosToDecimal(preGroupQuota)
+		summary.PreGroupQuota = preGroupQuota
+
+		quotaCalculateDecimal := preGroupQuota.Mul(dGroupRatio)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(summary.ToolCallSurchargeQuota)
 
 		if !ratio.IsZero() && quotaCalculateDecimal.LessThanOrEqual(decimal.Zero) {
@@ -359,9 +373,11 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		summary.Quota = quota
 		noteQuotaClamp(relayInfo, clamp)
 	} else {
-		quotaCalculateDecimal := dModelPrice.Mul(dQuotaPerUnit).Mul(dGroupRatio)
-		quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
-		quotaCalculateDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(quotaCalculateDecimal)
+		preGroupQuota := dModelPrice.Mul(dQuotaPerUnit).Add(audioInputQuota)
+		preGroupQuota = relayInfo.PriceData.ApplyOtherRatiosToDecimal(preGroupQuota)
+		summary.PreGroupQuota = preGroupQuota
+
+		quotaCalculateDecimal := preGroupQuota.Mul(dGroupRatio)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(summary.ToolCallSurchargeQuota)
 		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
 		summary.Quota = quota
@@ -370,8 +386,17 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 
 	if !summary.hasBillableUsage() {
 		summary.Quota = 0
+		// Nothing was billable, so there is no purchase either. Zeroing the basis
+		// keeps the ledger from reporting a cost for a request that was not
+		// charged.
+		summary.PreGroupQuota = decimal.Zero
 	} else if !ratio.IsZero() && summary.Quota == 0 {
 		summary.Quota = 1
+		// This floor keeps a rounded-to-zero charge from being silently free. It
+		// is a charging rule with no purchase behind it, so the basis must not
+		// inherit the artificial 1: that would book a procurement cost for an
+		// amount that rounded away.
+		summary.PreGroupQuota = decimal.Zero
 	}
 
 	return summary
@@ -424,6 +449,13 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			summary.FixedPriceBilling = isFixedPriceSettlement(relayInfo, tieredRes)
 			if summary.FixedPriceBilling {
 				summary.AudioInputPrice = 0
+			}
+			// The expression already priced the usage; ActualQuotaBeforeGroup is
+			// that price before the customer group ratio, which is exactly the
+			// procurement base. The tool surcharge stays out of it, matching the
+			// order used by the non-tiered branches above.
+			if tieredRes != nil {
+				summary.PreGroupQuota = decimal.NewFromFloat(tieredRes.ActualQuotaBeforeGroup)
 			}
 		}
 	}
@@ -528,6 +560,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 	attachQuotaSaturation(ctx, relayInfo, other)
 
+	// The procurement ledger receives the pre-group amount rather than the
+	// charged quota: the charged quota carries this caller's group ratio, which
+	// must never influence what the operator paid.
+	relayInfo.ProcurementBasis = hosttypes.NewProcurementBasis(summary.PreGroupQuota, summary.GroupRatio)
 	recordRelayHarnessSettlement(ctx, relayInfo, harnessSettlementUsage{
 		PromptTokens:     summary.PromptTokens,
 		CompletionTokens: summary.CompletionTokens,

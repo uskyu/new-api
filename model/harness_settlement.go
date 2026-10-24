@@ -47,6 +47,13 @@ type HarnessSettlement struct {
 	BaseAmount       string  `json:"base_amount" gorm:"type:varchar(64);default:''"`
 	TotalAmount      string  `json:"total_amount" gorm:"type:varchar(64);default:''"`
 	Currency         string  `json:"currency" gorm:"type:varchar(16);default:''"`
+	// CostCalculationVersion identifies the algorithm that produced the amounts,
+	// independent of any price-configuration version. Empty marks a legacy row
+	// whose base_amount still carried the customer-side group ratio.
+	//
+	// json:"-" keeps it internal so the external settlement response schema does
+	// not grow an audit-only field without agreement.
+	CostCalculationVersion string `json:"-" gorm:"type:varchar(32);default:''"`
 	// HarnessRequestId and HarnessRunId record the platform correlation ids on the
 	// snapshot so an async task, which settles long after the request context is
 	// gone, can still be attributed. An empty HarnessRequestId means the request
@@ -99,22 +106,23 @@ func UpsertHarnessSettlementTx(tx *gorm.DB, row *HarnessSettlement) error {
 	return tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "request_id"}},
 		DoUpdates: clause.Assignments(map[string]any{
-			"task_id":            gorm.Expr("excluded.task_id"),
-			"token_id":           gorm.Expr("excluded.token_id"),
-			"user_id":            gorm.Expr("excluded.user_id"),
-			"status":             gorm.Expr("excluded.status"),
-			"model_name":         gorm.Expr("excluded.model_name"),
-			"channel_id":         gorm.Expr("excluded.channel_id"),
-			"pricing_group":      gorm.Expr("excluded.pricing_group"),
-			"group_ratio":        gorm.Expr("excluded.group_ratio"),
-			"tax_rate_percent":   gorm.Expr("excluded.tax_rate_percent"),
-			"prompt_tokens":      gorm.Expr("excluded.prompt_tokens"),
-			"completion_tokens":  gorm.Expr("excluded.completion_tokens"),
-			"cache_read_tokens":  gorm.Expr("excluded.cache_read_tokens"),
-			"cache_write_tokens": gorm.Expr("excluded.cache_write_tokens"),
-			"base_amount":        gorm.Expr("excluded.base_amount"),
-			"total_amount":       gorm.Expr("excluded.total_amount"),
-			"currency":           gorm.Expr("excluded.currency"),
+			"task_id":                  gorm.Expr("excluded.task_id"),
+			"token_id":                 gorm.Expr("excluded.token_id"),
+			"user_id":                  gorm.Expr("excluded.user_id"),
+			"status":                   gorm.Expr("excluded.status"),
+			"model_name":               gorm.Expr("excluded.model_name"),
+			"channel_id":               gorm.Expr("excluded.channel_id"),
+			"pricing_group":            gorm.Expr("excluded.pricing_group"),
+			"group_ratio":              gorm.Expr("excluded.group_ratio"),
+			"tax_rate_percent":         gorm.Expr("excluded.tax_rate_percent"),
+			"prompt_tokens":            gorm.Expr("excluded.prompt_tokens"),
+			"completion_tokens":        gorm.Expr("excluded.completion_tokens"),
+			"cache_read_tokens":        gorm.Expr("excluded.cache_read_tokens"),
+			"cache_write_tokens":       gorm.Expr("excluded.cache_write_tokens"),
+			"base_amount":              gorm.Expr("excluded.base_amount"),
+			"total_amount":             gorm.Expr("excluded.total_amount"),
+			"currency":                 gorm.Expr("excluded.currency"),
+			"cost_calculation_version": gorm.Expr("excluded.cost_calculation_version"),
 			// The platform correlation is written once and then never cleared. A
 			// re-settle can arrive with an empty correlation -- an async task settling
 			// from a path that lost the request context, or a later refund -- and a

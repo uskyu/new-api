@@ -48,13 +48,23 @@ func hasCustomModelRatio(modelName string, currentRatio float64) bool {
 }
 
 func calculateAudioQuota(info QuotaInfo) (int, *common.QuotaClamp) {
+	quota, clamp, _ := calculateAudioQuotaWithBasis(info)
+	return quota, clamp
+}
+
+// calculateAudioQuotaWithBasis additionally returns the amount before the
+// customer-side group ratio, which the procurement ledger needs. The group ratio
+// is applied as one factor to that amount, so the charged quota is unchanged
+// while the purchase cost stops depending on who called.
+func calculateAudioQuotaWithBasis(info QuotaInfo) (int, *common.QuotaClamp, decimal.Decimal) {
 	if info.UsePrice {
 		modelPrice := decimal.NewFromFloat(info.ModelPrice)
 		quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 		groupRatio := decimal.NewFromFloat(info.GroupRatio)
 
-		quota := modelPrice.Mul(quotaPerUnit).Mul(groupRatio)
-		return common.QuotaFromDecimalChecked(quota)
+		preGroupQuota := modelPrice.Mul(quotaPerUnit)
+		quota, clamp := common.QuotaFromDecimalChecked(preGroupQuota.Mul(groupRatio))
+		return quota, clamp, preGroupQuota
 	}
 
 	completionRatio := decimal.NewFromFloat(ratio_setting.GetCompletionRatio(info.ModelName))
@@ -63,7 +73,6 @@ func calculateAudioQuota(info QuotaInfo) (int, *common.QuotaClamp) {
 
 	groupRatio := decimal.NewFromFloat(info.GroupRatio)
 	modelRatio := decimal.NewFromFloat(info.ModelRatio)
-	ratio := groupRatio.Mul(modelRatio)
 
 	inputTextTokens := decimal.NewFromInt(int64(info.InputDetails.TextTokens))
 	outputTextTokens := decimal.NewFromInt(int64(info.OutputDetails.TextTokens))
@@ -76,14 +85,16 @@ func calculateAudioQuota(info QuotaInfo) (int, *common.QuotaClamp) {
 	quota = quota.Add(inputAudioTokens.Mul(audioRatio))
 	quota = quota.Add(outputAudioTokens.Mul(audioRatio).Mul(audioCompletionRatio))
 
-	quota = quota.Mul(ratio)
+	preGroupQuota := quota.Mul(modelRatio)
+	quota = preGroupQuota.Mul(groupRatio)
 
 	// If ratio is not zero and quota is less than or equal to zero, set quota to 1
-	if !ratio.IsZero() && quota.LessThanOrEqual(decimal.Zero) {
+	if !groupRatio.IsZero() && !modelRatio.IsZero() && quota.LessThanOrEqual(decimal.Zero) {
 		quota = decimal.NewFromInt(1)
 	}
 
-	return common.QuotaFromDecimalChecked(quota)
+	intQuota, clamp := common.QuotaFromDecimalChecked(quota)
+	return intQuota, clamp, preGroupQuota
 }
 
 func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage) error {
@@ -136,8 +147,9 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		GroupRatio: actualGroupRatio,
 	}
 
-	quota, clamp := calculateAudioQuota(quotaInfo)
+	quota, clamp, preGroupQuota := calculateAudioQuotaWithBasis(quotaInfo)
 	noteQuotaClamp(relayInfo, clamp)
+	relayInfo.ProcurementBasis = types.NewProcurementBasis(preGroupQuota, actualGroupRatio)
 
 	if userQuota < quota {
 		return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota(userQuota), logger.FormatQuota(quota))
@@ -200,11 +212,17 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		GroupRatio: groupRatio,
 	}
 
-	quota, clamp := calculateAudioQuota(quotaInfo)
+	quota, clamp, preGroupQuota := calculateAudioQuotaWithBasis(quotaInfo)
 	noteQuotaClamp(relayInfo, clamp)
 	if tieredOk {
 		quota = tieredQuota
+		// The expression supersedes the audio estimate; its pre-group amount is
+		// the procurement base.
+		if tieredResult != nil {
+			preGroupQuota = decimal.NewFromFloat(tieredResult.ActualQuotaBeforeGroup)
+		}
 	}
+	relayInfo.ProcurementBasis = types.NewProcurementBasis(preGroupQuota, groupRatio)
 
 	totalTokens := usage.TotalTokens
 	var logContent []*common.Message
@@ -228,6 +246,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		// in this case, must be some error happened
 		// we cannot just return, because we may have to return the pre-consumed quota
 		quota = 0
+		preGroupQuota = decimal.Zero
 		logContent = append(logContent, common.NewMessage("Possibly an upstream timeout"))
 		logger.LogError(ctx, common.LogText("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d",
 			relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, modelName, relayInfo.FinalPreConsumedQuota))
@@ -635,6 +654,10 @@ type harnessSettlementMoney struct {
 	// PriceVersion identifies the pricing snapshot the amount was derived from,
 	// so the platform can tell a price change from a usage change.
 	PriceVersion string
+	// CostCalculationVersion identifies the algorithm that produced the amounts,
+	// separately from the price configuration PriceVersion names. It lets
+	// reconciliation tell a legacy row from a corrected one.
+	CostCalculationVersion string
 }
 
 // harnessSettlementCurrency is the ledger currency. The procurement ledger is
@@ -643,6 +666,16 @@ type harnessSettlementMoney struct {
 // here would silently mislabel the amounts whenever the site switch from USD.
 // Display-currency conversion belongs to the catalog/dashboard path only.
 const harnessSettlementCurrency = "USD"
+
+// ResolveTaskProcurementPricing resolves the procurement pricing parameters an
+// async task must freeze at submit time, so settlement hours later books the
+// price that applied when the task was accepted. A zero ratio and zero tax mean
+// "no procurement discount", exactly as the settlement path reads an unresolved
+// group.
+func ResolveTaskProcurementPricing(channelId int, modelName string) (pricingGroup, priceVersion string, groupRatio, taxRatePercent float64) {
+	pricingGroup, groupRatio, taxRatePercent = harnessSettlementPricing(channelId, modelName)
+	return pricingGroup, harnessProcurementPriceVersion(), groupRatio, taxRatePercent
+}
 
 // harnessSettlementPricing resolves the procurement pricing group of a
 // channel+model, that group's ratio and the channel's supplier tax. It mirrors
@@ -675,9 +708,33 @@ func harnessSettlementPricing(channelId int, modelName string) (pricingGroup str
 	return pricingGroup, groupRatio, taxRatePercent
 }
 
+// harnessCostCalculationVersion records which algorithm produced base_amount.
+// It is deliberately separate from PriceVersion: PriceVersion identifies the
+// price configuration the amount was derived from, while this identifies the
+// calculation itself, so reconciliation can tell an old row (whose base still
+// carried the customer group ratio) from a repaired one.
+const (
+	// harnessCostCalculationLegacy marks a row written before the customer-side
+	// group ratio was lifted out of the procurement base.
+	harnessCostCalculationLegacy = ""
+	// harnessCostCalculationPreGroup marks a row whose base_amount excludes the
+	// customer-side group ratio.
+	harnessCostCalculationPreGroup = "pregroup-v1"
+	// harnessCostCalculationFallback marks a row that should have used the
+	// pre-group amount but had none, so it fell back to quota/QuotaPerUnit.
+	harnessCostCalculationFallback = "pregroup-v1-fallback"
+)
+
 // harnessSettlementMoneyForQuota converts a final quota into ledger amounts.
-// base is quota / QuotaPerUnit, i.e. the canonical USD procurement base. A
-// resolved pricing group applies its ratio and the channel's supplier tax, so
+//
+// base is the amount before the customer-side group ratio. The preferred source
+// is basis, which the billing paths fill with the exact decimal they computed
+// before applying that ratio. Falling back to quota/QuotaPerUnit is only for
+// requests whose path did not fill a basis: it re-imports the caller's ratio and
+// loses the pre-rounding amount, so such a row is tagged as a fallback instead
+// of silently claiming the corrected semantics.
+//
+// A resolved pricing group applies its ratio and the channel's supplier tax, so
 // total is the final procurement cost the platform books directly, matching the
 // contract sample (0.011500 * 0.8 * 1.065 rounds to 0.009800).
 //
@@ -685,8 +742,13 @@ func harnessSettlementPricing(channelId int, modelName string) (pricingGroup str
 // tracks the base instead of collapsing to zero — "no procurement group" must
 // never read as "free". This function only describes money; it never changes a
 // charge.
-func harnessSettlementMoneyForQuota(quota int, channelId int, modelName string) harnessSettlementMoney {
-	money := harnessSettlementMoney{BaseAmount: "0", TotalAmount: "0", Currency: harnessSettlementCurrency}
+func harnessSettlementMoneyForQuota(basis *types.ProcurementBasis, quota int, channelId int, modelName string) harnessSettlementMoney {
+	money := harnessSettlementMoney{
+		BaseAmount:             "0",
+		TotalAmount:            "0",
+		Currency:               harnessSettlementCurrency,
+		CostCalculationVersion: harnessCostCalculationPreGroup,
+	}
 	if quota < 0 {
 		common.SysLog(common.LogText("harness settlement: ignoring negative quota %d (channel=%d model=%s)", quota, channelId, modelName))
 		return money
@@ -697,8 +759,70 @@ func harnessSettlementMoneyForQuota(quota int, channelId int, modelName string) 
 		return money
 	}
 
-	base := decimal.NewFromInt(int64(quota)).Div(decimal.NewFromFloat(quotaPerUnit))
+	var base decimal.Decimal
+	preGroup, hasPreGroup := basis.PreGroupQuotaDecimal()
+	if hasPreGroup {
+		base = preGroup.Div(decimal.NewFromFloat(quotaPerUnit))
+	} else {
+		base = decimal.NewFromInt(int64(quota)).Div(decimal.NewFromFloat(quotaPerUnit))
+		money.CostCalculationVersion = harnessCostCalculationFallback
+		// Only warn when the fallback can actually be wrong: with a unit group
+		// ratio the two amounts coincide, so the warning would be noise on every
+		// request of a default deployment.
+		if basis != nil && basis.CustomerGroupRatio != 0 && basis.CustomerGroupRatio != 1 {
+			common.SysLog(common.LogText("harness settlement: no procurement basis with customer group ratio %v (channel=%d model=%s) - base_amount may include the customer multiplier", basis.CustomerGroupRatio, channelId, modelName))
+		}
+	}
+
 	pricingGroup, groupRatio, taxRatePercent := harnessSettlementPricing(channelId, modelName)
+	return harnessSettlementMoneyFromBase(money, base, pricingGroup, groupRatio, taxRatePercent, harnessProcurementPriceVersion(), channelId, modelName)
+}
+
+// harnessSettlementMoneyWithFrozenPricing derives the ledger amounts of an async
+// task from the procurement parameters frozen at submit time. Reading live
+// configuration here would let an edit made while the task runs retroactively
+// rewrite the cost of a request that was already accepted.
+func harnessSettlementMoneyWithFrozenPricing(basis *types.ProcurementBasis, quota int, channelId int, modelName string, frozen *model.TaskProcurementContext) harnessSettlementMoney {
+	money := harnessSettlementMoney{
+		BaseAmount:             "0",
+		TotalAmount:            "0",
+		Currency:               harnessSettlementCurrency,
+		CostCalculationVersion: harnessCostCalculationPreGroup,
+	}
+	if frozen == nil {
+		return harnessSettlementMoneyForQuota(basis, quota, channelId, modelName)
+	}
+	quotaPerUnit := frozen.QuotaPerUnit
+	if math.IsNaN(quotaPerUnit) || math.IsInf(quotaPerUnit, 0) || quotaPerUnit <= 0 {
+		// A task frozen without a usable conversion rate cannot be priced from its
+		// context; fall back rather than book zero, which would read as free.
+		common.SysLog(common.LogText("harness settlement: frozen quota per unit %v is unusable (task channel=%d model=%s), falling back", quotaPerUnit, channelId, modelName))
+		return harnessSettlementMoneyForQuota(basis, quota, channelId, modelName)
+	}
+
+	base := decimal.Zero
+	if preGroup, ok := basis.PreGroupQuotaDecimal(); ok {
+		base = preGroup.Div(decimal.NewFromFloat(quotaPerUnit))
+	} else if quota <= 0 {
+		// Nothing was charged and no pre-group amount was frozen, so the task
+		// produced no purchase. Stay at zero instead of falling back, which would
+		// divide a zero quota and report a fabricated basis version.
+		return money
+	} else {
+		base = decimal.NewFromInt(int64(quota)).Div(decimal.NewFromFloat(quotaPerUnit))
+		money.CostCalculationVersion = harnessCostCalculationFallback
+		if ratio := frozen.CustomerGroupRatio; ratio != 0 && ratio != 1 {
+			common.SysLog(common.LogText("harness settlement: task has no frozen pre-group amount with customer group ratio %v (channel=%d model=%s) - base_amount may include the customer multiplier", ratio, channelId, modelName))
+		}
+	}
+
+	return harnessSettlementMoneyFromBase(money, base, frozen.PricingGroup, frozen.ProcurementGroupRatio, frozen.TaxRatePercent, frozen.PriceVersion, channelId, modelName)
+}
+
+// harnessSettlementMoneyFromBase applies the procurement discount and supplier
+// tax to a base amount. Both callers above resolve base differently -- live
+// pricing versus a frozen context -- but must compose the money identically.
+func harnessSettlementMoneyFromBase(money harnessSettlementMoney, base decimal.Decimal, pricingGroup string, groupRatio, taxRatePercent float64, priceVersion string, channelId int, modelName string) harnessSettlementMoney {
 	total := base
 	switch {
 	case pricingGroup == "":
@@ -708,7 +832,11 @@ func harnessSettlementMoneyForQuota(quota int, channelId int, modelName string) 
 	case math.IsNaN(groupRatio) || math.IsInf(groupRatio, 0) || groupRatio < 0:
 		common.SysLog(common.LogText("harness settlement: ignoring invalid group ratio %v (group=%s), no discount applied", groupRatio, pricingGroup))
 		groupRatio, taxRatePercent = 0, 0
-	default:
+	case math.IsNaN(taxRatePercent) || math.IsInf(taxRatePercent, 0) || taxRatePercent < 0:
+		common.SysLog(common.LogText("harness settlement: ignoring invalid supplier tax %v (group=%s), tax not applied", taxRatePercent, pricingGroup))
+		taxRatePercent = 0
+	}
+	if pricingGroup != "" && groupRatio >= 0 && !math.IsNaN(groupRatio) && !math.IsInf(groupRatio, 0) {
 		total = base.Mul(decimal.NewFromFloat(groupRatio)).
 			Mul(decimal.NewFromFloat(1 + taxRatePercent/100))
 	}
@@ -722,7 +850,7 @@ func harnessSettlementMoneyForQuota(quota int, channelId int, modelName string) 
 	money.TaxRatePercent = taxRatePercent
 	money.BaseAmount = base.Round(harnessSettlementAmountPrecision).String()
 	money.TotalAmount = total.Round(harnessSettlementAmountPrecision).String()
-	money.PriceVersion = harnessProcurementPriceVersion()
+	money.PriceVersion = priceVersion
 	return money
 }
 
@@ -743,9 +871,6 @@ func harnessProcurementPriceVersion() string {
 	return "pw-" + common.ETagFor("harness-procurement-price:v1", string(encoded))
 }
 
-// recordHarnessSettlement upserts one procurement ledger row. It never returns
-// an error and never panics: a settlement write must never break, slow or fail a
-// relay, so a failure only reaches the server log and the request continues.
 // recordHarnessSettlement upserts one procurement ledger row and appends the
 // matching append-only ledger events. It never returns an error and never
 // panics: a settlement write must never break, slow or fail a relay, so a
@@ -770,6 +895,7 @@ func recordHarnessSettlement(settlement *model.HarnessSettlement, money harnessS
 	settlement.BaseAmount = money.BaseAmount
 	settlement.TotalAmount = money.TotalAmount
 	settlement.Currency = money.Currency
+	settlement.CostCalculationVersion = money.CostCalculationVersion
 	// Persist the platform correlation on the snapshot. An async task settles long
 	// after the request context is gone, so this is the only place the owning
 	// request's identity survives to that point.
@@ -859,29 +985,30 @@ func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money ha
 	}
 
 	costEvent := &model.HarnessLedgerEvent{
-		Stream:            model.HarnessLedgerStreamCost,
-		EventType:         harnessCostEventTypeForStatus(settlement.Status),
-		HarnessRequestId:  correlation.HarnessRequestId,
-		GatewayRequestId:  settlement.RequestId,
-		RunId:             correlation.HarnessRunId,
-		Status:            settlement.Status,
-		Currency:          money.Currency,
-		UsageUnit:         correlation.UsageUnit,
-		PromptTokens:      settlement.PromptTokens,
-		CompletionTokens:  settlement.CompletionTokens,
-		CacheReadTokens:   settlement.CacheReadTokens,
-		CacheWriteTokens:  settlement.CacheWriteTokens,
-		UsageSource:       correlation.UsageSource,
-		IsEstimated:       correlation.IsEstimated,
-		BaseAmount:        money.BaseAmount,
-		TotalAmount:       money.TotalAmount,
-		GroupRatio:        money.GroupRatio,
-		TaxRatePercent:    money.TaxRatePercent,
-		BillingBasis:      correlation.UsageUnit,
-		PricingVersion:    money.PriceVersion,
-		RecordVersion:     costVersion,
-		SupersedesEventId: costSupersedes,
-		ObservedAtMs:      observedAtMs,
+		Stream:                 model.HarnessLedgerStreamCost,
+		EventType:              harnessCostEventTypeForStatus(settlement.Status),
+		HarnessRequestId:       correlation.HarnessRequestId,
+		GatewayRequestId:       settlement.RequestId,
+		RunId:                  correlation.HarnessRunId,
+		Status:                 settlement.Status,
+		Currency:               money.Currency,
+		UsageUnit:              correlation.UsageUnit,
+		PromptTokens:           settlement.PromptTokens,
+		CompletionTokens:       settlement.CompletionTokens,
+		CacheReadTokens:        settlement.CacheReadTokens,
+		CacheWriteTokens:       settlement.CacheWriteTokens,
+		UsageSource:            correlation.UsageSource,
+		IsEstimated:            correlation.IsEstimated,
+		BaseAmount:             money.BaseAmount,
+		TotalAmount:            money.TotalAmount,
+		GroupRatio:             money.GroupRatio,
+		TaxRatePercent:         money.TaxRatePercent,
+		BillingBasis:           correlation.UsageUnit,
+		PricingVersion:         money.PriceVersion,
+		CostCalculationVersion: money.CostCalculationVersion,
+		RecordVersion:          costVersion,
+		SupersedesEventId:      costSupersedes,
+		ObservedAtMs:           observedAtMs,
 	}
 	persistHarnessLedgerEvents(settlement, []*model.HarnessLedgerEvent{usageEvent, costEvent})
 }
@@ -1022,8 +1149,10 @@ func recordRelayHarnessSettlement(ctx *gin.Context, relayInfo *relaycommon.Relay
 		CacheWriteTokens: usage.CacheWriteTokens,
 	}
 	// The pricing group is resolved against the client-facing model name, which
-	// is what the channel's abilities and the response headers are keyed by.
-	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(quota, relayInfo.ChannelId, relayInfo.OriginModelName), harnessSettlementCorrelationFromContext(ctx))
+	// is what the channel's abilities and the response headers are keyed by. The
+	// procurement base comes from the basis the billing path filled, so this
+	// caller's group ratio never reaches the ledger.
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(relayInfo.ProcurementBasis, quota, relayInfo.ChannelId, relayInfo.OriginModelName), harnessSettlementCorrelationFromContext(ctx))
 }
 
 // recordTaskHarnessSettlement moves the ledger row of an async task to its final
@@ -1067,5 +1196,44 @@ func recordTaskHarnessSettlement(task *model.Task, status string, quota int) {
 		correlation.HarnessRequestId = task.PrivateData.Execution.HarnessRequestID
 		correlation.HarnessRunId = task.PrivateData.Execution.HarnessRunID
 	}
-	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(quota, task.ChannelId, taskModelName(task)), correlation)
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForTask(task, status, quota), correlation)
+}
+
+// harnessSettlementMoneyForTask derives the ledger amounts of an async task.
+//
+// A task submitted with a frozen procurement context settles against that
+// context only, so editing a procurement group ratio or a channel tax rate while
+// the task runs cannot rewrite its cost. A task without one (submitted before
+// the context existed, Version == 0) keeps the previous behaviour of reading the
+// live configuration, which is the only safe reading of its zero values.
+func harnessSettlementMoneyForTask(task *model.Task, status string, quota int) harnessSettlementMoney {
+	var frozen *model.TaskProcurementContext
+	if task.PrivateData.BillingContext != nil {
+		frozen = task.PrivateData.BillingContext.Procurement
+	}
+	// A refund means nothing is owed, so there is no purchase to price either.
+	if status == model.HarnessSettlementStatusRefunded {
+		return harnessSettlementMoneyForQuota(nil, 0, task.ChannelId, taskModelName(task))
+	}
+	if frozen != nil && frozen.Version > 0 {
+		var basis *types.ProcurementBasis
+		if preGroup, ok := frozenPrefGroupQuota(frozen); ok {
+			basis = types.NewProcurementBasis(preGroup, frozen.CustomerGroupRatio)
+		}
+		return harnessSettlementMoneyWithFrozenPricing(basis, quota, task.ChannelId, taskModelName(task), frozen)
+	}
+	return harnessSettlementMoneyForQuota(nil, quota, task.ChannelId, taskModelName(task))
+}
+
+// frozenPrefGroupQuota parses the pre-group amount frozen at submit time. ok is
+// false for a usage-priced task, which learns its quantity only at completion.
+func frozenPrefGroupQuota(frozen *model.TaskProcurementContext) (decimal.Decimal, bool) {
+	if frozen == nil || frozen.PreGroupQuota == "" {
+		return decimal.Zero, false
+	}
+	value, err := decimal.NewFromString(frozen.PreGroupQuota)
+	if err != nil {
+		return decimal.Zero, false
+	}
+	return value, true
 }

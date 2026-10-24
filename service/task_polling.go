@@ -21,6 +21,7 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/samber/lo"
+	"github.com/shopspring/decimal"
 )
 
 // TaskPollingAdaptor 定义轮询所需的最小适配器接口，避免 service -> relay 的循环依赖
@@ -719,6 +720,11 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		}
 		bc.TieredSnapshot.UsageFacts = usageFacts
 		bc.TieredSnapshot.EstimatedTier = result.MatchedTier
+		// The expression priced the usage against the frozen snapshot, so its
+		// pre-group amount is the procurement base. Recording it before settlement
+		// keeps the ledger independent of the customer group ratio, which the
+		// expression result already excludes from this field.
+		stampFrozenProcurementPreGroupQuota(task, decimal.NewFromFloat(result.ActualQuotaBeforeGroup))
 		RecalculateTaskQuota(ctx, task, result.ActualQuotaAfterGroup, common.NewMessage("Settled by the task usage expression"), result.Clamp)
 		return true
 	}

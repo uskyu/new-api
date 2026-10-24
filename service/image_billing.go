@@ -10,7 +10,9 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	hosttypes "github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 // PrepareImageBillingForRequest reserves the effective outbound image quantity
@@ -65,7 +67,14 @@ func PrepareImageBillingForRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 		if info.PriceData.UsePrice {
 			base = info.PriceData.ModelPrice * common.QuotaPerUnit
 		}
-		quota, err = common.QuotaFromFloatStrict(info.PriceData.ApplyOtherRatiosToFloat(base * info.PriceData.GroupRatioInfo.GroupRatio))
+		// The pre-group amount is captured before the customer group ratio, so the
+		// procurement ledger never inherits this caller's multiplier.
+		preGroupQuota := info.PriceData.ApplyOtherRatiosToFloat(base)
+		info.ProcurementBasis = hosttypes.NewProcurementBasis(
+			decimal.NewFromFloat(preGroupQuota),
+			info.PriceData.GroupRatioInfo.GroupRatio,
+		)
+		quota, err = common.QuotaFromFloatStrict(preGroupQuota * info.PriceData.GroupRatioInfo.GroupRatio)
 	}
 	if err != nil {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())

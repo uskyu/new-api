@@ -181,6 +181,12 @@ type RelayInfo struct {
 	// ImageQuotaBeforeGroup is the frozen legacy estimate before request ratios.
 	ImageRequestCount     int
 	ImageQuotaBeforeGroup float64
+	// ProcurementBasis is the billable amount before the customer-side group
+	// ratio, captured by whichever billing path settles this request. The
+	// procurement ledger converts it instead of dividing the charged quota by the
+	// group ratio, which would reintroduce rounding and divide by zero on a free
+	// group. Nil when no path filled it, which makes the ledger fall back.
+	ProcurementBasis *hosttypes.ProcurementBasis
 
 	Request dto.Request
 

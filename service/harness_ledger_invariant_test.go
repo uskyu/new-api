@@ -1,13 +1,21 @@
 package service
 
 import (
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	hosttypes "github.com/QuantumNous/new-api/types"
+
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -115,7 +123,7 @@ func TestLedgerSkipsRequestsThatDidNotComeFromHarness(t *testing.T) {
 		PromptTokens: 5,
 	}
 	recordHarnessSettlement(internalSettlement,
-		harnessSettlementMoneyForQuota(500_000, 0, "economy"),
+		harnessSettlementMoneyForQuota(nil, 500_000, 0, "economy"),
 		harnessSettlementCorrelation{UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream})
 
 	var leaked []model.HarnessLedgerEvent
@@ -136,7 +144,7 @@ func TestLedgerSkipsRequestsThatDidNotComeFromHarness(t *testing.T) {
 		PromptTokens: 5,
 	}
 	recordHarnessSettlement(platformSettlement,
-		harnessSettlementMoneyForQuota(500_000, 0, "economy"),
+		harnessSettlementMoneyForQuota(nil, 500_000, 0, "economy"),
 		harnessSettlementCorrelation{HarnessRequestId: "hrq_platform", HarnessRunId: "run_platform", UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream})
 
 	var platformEvents []model.HarnessLedgerEvent
@@ -162,11 +170,11 @@ func TestLedgerCorrectionChainsStayInTheirOwnStream(t *testing.T) {
 	}
 
 	settled := &model.HarnessSettlement{RequestId: "gw-chain", Status: model.HarnessSettlementStatusSettled, ModelName: "economy"}
-	recordHarnessSettlement(settled, harnessSettlementMoneyForQuota(1_000_000, 0, "economy"), correlation)
+	recordHarnessSettlement(settled, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
 
 	// A refund appends a correction in both streams.
 	refunded := &model.HarnessSettlement{RequestId: "gw-chain", Status: model.HarnessSettlementStatusRefunded, ModelName: "economy"}
-	recordHarnessSettlement(refunded, harnessSettlementMoneyForQuota(0, 0, "economy"), correlation)
+	recordHarnessSettlement(refunded, harnessSettlementMoneyForQuota(nil, 0, 0, "economy"), correlation)
 
 	var usageEvents, costEvents []model.HarnessLedgerEvent
 	require.NoError(t, model.DB.Where("gateway_request_id = ? AND stream = ?", "gw-chain", model.HarnessLedgerStreamUsage).Order("id ASC").Find(&usageEvents).Error)
@@ -193,6 +201,237 @@ func TestLedgerCorrectionChainsStayInTheirOwnStream(t *testing.T) {
 	assert.Equal(t, usageEvents[1].RecordVersion, costEvents[1].RecordVersion)
 }
 
+// TestLedgerTaskUsesFrozenProcurementPricing pins historical stability: an async
+// task settles hours after submission, so a procurement ratio or tax-rate edit
+// made in between must not rewrite the cost that was accepted at submit time.
+// The frozen context is the only source the settlement path reads.
+func TestLedgerTaskUsesFrozenProcurementPricing(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	channelId := seedHarnessLedgerChannel(t, "economy", "frozen-task-group", 0.8, 10)
+
+	// The task was accepted when the procurement ratio was 0.8 with 10% tax.
+	task := &model.Task{
+		TaskID:    "task-frozen-pricing",
+		ChannelId: channelId,
+		PrivateData: model.TaskPrivateData{
+			BillingContext: &model.TaskBillingContext{
+				OriginModelName: "economy",
+				ModelRatio:      1,
+				Procurement: &model.TaskProcurementContext{
+					Version:               1,
+					PreGroupQuota:         "1000000",
+					PricingGroup:          "frozen-task-group",
+					ProcurementGroupRatio: 0.8,
+					TaxRatePercent:        10,
+					QuotaPerUnit:          500_000,
+				},
+			},
+		},
+	}
+
+	// Live configuration now says something completely different.
+	changedRatio := ratio_setting.GetGroupRatioCopy()
+	changedRatio["frozen-task-group"] = 0.01
+	encoded, err := common.Marshal(changedRatio)
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(string(encoded)))
+
+	money := harnessSettlementMoneyForTask(task, model.HarnessSettlementStatusSettled, 1_000_000)
+
+	assert.Equal(t, "2", money.BaseAmount)
+	assert.Equal(t, "1.76", money.TotalAmount,
+		"the frozen 0.8 ratio and 10%% tax must win over the live 0.01 ratio")
+	assert.Equal(t, 0.8, money.GroupRatio, "the frozen ratio is reported, not the live one")
+	assert.Equal(t, 10.0, money.TaxRatePercent)
+}
+
+// TestLedgerTaskWithoutFrozenContextKeepsLegacyPricing covers the compatibility
+// rule: a task submitted before the frozen context existed (Version 0) must keep
+// reading live configuration instead of treating its zero values as real prices,
+// which would silently price it as free.
+func TestLedgerTaskWithoutFrozenContextKeepsLegacyPricing(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	channelId := seedHarnessLedgerChannel(t, "economy", "legacy-task-group", 0.8, 0)
+
+	task := &model.Task{
+		TaskID:    "task-legacy-pricing",
+		ChannelId: channelId,
+		PrivateData: model.TaskPrivateData{
+			BillingContext: &model.TaskBillingContext{OriginModelName: "economy"},
+		},
+	}
+
+	money := harnessSettlementMoneyForTask(task, model.HarnessSettlementStatusSettled, 1_000_000)
+
+	assert.Equal(t, "2", money.BaseAmount)
+	assert.Equal(t, 0.8, money.GroupRatio,
+		"a task without a frozen context still resolves the live procurement group")
+	assert.Equal(t, harnessCostCalculationFallback, money.CostCalculationVersion,
+		"and is tagged as a fallback rather than as corrected")
+}
+
+// TestLedgerTaskNeverBooksAPurchaseOnRefund keeps a refunded task at zero cost:
+// the customer being refunded does not retroactively create a purchase.
+func TestLedgerTaskNeverBooksAPurchaseOnRefund(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	channelId := seedHarnessLedgerChannel(t, "economy", "refund-task-group", 0.8, 10)
+
+	task := &model.Task{
+		TaskID:    "task-refunded",
+		ChannelId: channelId,
+		PrivateData: model.TaskPrivateData{
+			BillingContext: &model.TaskBillingContext{
+				OriginModelName: "economy",
+				Procurement: &model.TaskProcurementContext{
+					Version:               1,
+					PreGroupQuota:         "1000000",
+					PricingGroup:          "refund-task-group",
+					ProcurementGroupRatio: 0.8,
+					TaxRatePercent:        10,
+					QuotaPerUnit:          500_000,
+				},
+			},
+		},
+	}
+
+	money := harnessSettlementMoneyForTask(task, model.HarnessSettlementStatusRefunded, 0)
+
+	assert.Equal(t, "0", money.BaseAmount)
+	assert.Equal(t, "0", money.TotalAmount)
+}
+
+// TestTextQuotaSummaryCapturesPreGroupBasis is the end-to-end form of the
+// acceptance invariant: for one usage and one set of model prices, only the
+// caller's group ratio varies, and the captured pre-group amount must stay fixed
+// while the charged quota scales with the ratio.
+//
+// This exercises the real billing formula rather than the ledger helper, so a
+// future reordering of the arithmetic that reintroduces the ratio into the
+// captured amount fails here.
+func TestTextQuotaSummaryCapturesPreGroupBasis(t *testing.T) {
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	usage := &dto.Usage{PromptTokens: 400, CompletionTokens: 100, TotalTokens: 500}
+
+	var preGroupQuota string
+	var chargedQuota int
+	for index, groupRatio := range []float64{1, 2, 0.5} {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+		ctx.Request.URL.Path = "/v1/chat/completions"
+
+		info := &relaycommon.RelayInfo{
+			OriginModelName: "basis-invariant-model",
+			RelayFormat:     types.RelayFormatOpenAI,
+			PriceData: hosttypes.PriceData{
+				ModelRatio:      1,
+				CompletionRatio: 2,
+				GroupRatioInfo:  hosttypes.GroupRatioInfo{GroupRatio: groupRatio},
+			},
+		}
+
+		summary := calculateTextQuotaSummary(ctx, info, usage)
+
+		if index == 0 {
+			preGroupQuota = summary.PreGroupQuota.String()
+			chargedQuota = summary.Quota
+			require.Equal(t, 600, chargedQuota,
+				"400 prompt + 100 completion x2 at model ratio 1 is 600 quota at group ratio 1")
+			continue
+		}
+		assert.Equal(t, preGroupQuota, summary.PreGroupQuota.String(),
+			"customer group ratio %v must not change the captured pre-group amount", groupRatio)
+		assert.Equal(t, int(float64(chargedQuota)*groupRatio), summary.Quota,
+			"the customer is still charged the pre-group amount times their ratio")
+	}
+}
+
+// TestTextQuotaSummaryExcludesToolSurchargeFromBasis pins the decision that a
+// platform-set tool surcharge is customer pricing, not a purchase: the customer
+// keeps paying it, but the procurement base must not include it.
+func TestTextQuotaSummaryExcludesToolSurchargeFromBasis(t *testing.T) {
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	operation_setting.SetToolPriceForTest("web_search", 10)
+	t.Cleanup(func() { operation_setting.DeleteToolPriceForTest("web_search") })
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "basis-tool-model",
+		RelayFormat:     types.RelayFormatOpenAI,
+		PriceData: hosttypes.PriceData{
+			ModelRatio:     1,
+			GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1},
+		},
+		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
+			BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
+				"web_search": {ToolName: "web_search", CallCount: 1},
+			},
+		},
+	}
+
+	summary := calculateTextQuotaSummary(ctx, info, &dto.Usage{PromptTokens: 100, TotalTokens: 100})
+
+	// The surcharge is 10/1000 * 500000 = 5000 quota, and the customer pays it.
+	require.False(t, summary.ToolCallSurchargeQuota.IsZero(),
+		"the tool surcharge must still be charged to the customer")
+	assert.Equal(t, common.QuotaFromDecimal(summary.PreGroupQuota)+common.QuotaFromDecimal(summary.ToolCallSurchargeQuota), summary.Quota,
+		"the customer charge is the pre-group amount plus the surcharge")
+	assert.Equal(t, "100", summary.PreGroupQuota.String(),
+		"the procurement basis must not include the platform tool surcharge")
+}
+
+// TestTextQuotaSummaryFloorChargeBooksNoPurchase covers the minimum-charge rule:
+// a request whose real amount rounds to zero is still charged one quota so it is
+// not silently free, but that artificial unit is a charging rule with no
+// purchase behind it, so the procurement basis must stay zero.
+func TestTextQuotaSummaryFloorChargeBooksNoPurchase(t *testing.T) {
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "floor-model",
+		RelayFormat:     types.RelayFormatOpenAI,
+		PriceData: hosttypes.PriceData{
+			// A tiny per-token price so a one-token request rounds to zero before
+			// the floor applies.
+			ModelRatio:     0.000001,
+			GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+
+	summary := calculateTextQuotaSummary(ctx, info, &dto.Usage{PromptTokens: 1, TotalTokens: 1})
+
+	assert.Equal(t, 1, summary.Quota, "a non-free model still charges at least one quota")
+	assert.True(t, summary.PreGroupQuota.IsZero(),
+		"the artificial minimum charge must not become a procurement cost, got %s", summary.PreGroupQuota)
+}
+
 // TestLedgerTotalAmountIncludesSupplierTax pins the cost formula against the
 // contract sample: base 0.011500, group ratio 0.8 and 6.5% tax must yield 0.0098,
 // not the untaxed 0.0092.
@@ -206,7 +445,7 @@ func TestLedgerTotalAmountIncludesSupplierTax(t *testing.T) {
 
 	channelId := seedHarnessLedgerChannel(t, "economy", "ledger-tax-group", 0.8, 6.5)
 
-	money := harnessSettlementMoneyForQuota(5750, channelId, "economy")
+	money := harnessSettlementMoneyForQuota(nil, 5750, channelId, "economy")
 
 	assert.Equal(t, "0.0115", normalizedDecimal(t, money.BaseAmount))
 	assert.Equal(t, 0.8, money.GroupRatio)

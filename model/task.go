@@ -175,6 +175,37 @@ type TaskBillingContext struct {
 	OriginModelName string                       `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
 	PerCallBilling  bool                         `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
 	TieredSnapshot  *billingexpr.BillingSnapshot `json:"tiered_snapshot,omitempty"`
+	// Procurement freezes the procurement-side pricing inputs so a task that
+	// settles hours after submission books the price that applied when it was
+	// submitted. Without it, editing a procurement group ratio or a channel tax
+	// rate during the task's lifetime would retroactively rewrite its cost.
+	Procurement *TaskProcurementContext `json:"procurement,omitempty"`
+}
+
+// TaskProcurementContext is the frozen procurement pricing context of one async
+// task. It stores inputs, never a derived amount, except when the final billable
+// quantity is already known at submit time.
+type TaskProcurementContext struct {
+	// Version tags the context format. Zero means a task submitted before this
+	// field existed, so settlement must fall back to reading live configuration
+	// rather than treating the zero values as real prices.
+	Version int `json:"version,omitempty"`
+
+	// PreGroupQuota is set only when the final billable quantity is known at
+	// submit time (per-call and fixed-price billing). Usage-priced tasks leave it
+	// empty and compute it at completion from the frozen inputs below.
+	PreGroupQuota string `json:"pre_group_quota,omitempty"`
+
+	// The procurement parameters, frozen so settlement never re-reads them.
+	PricingGroup          string  `json:"pricing_group,omitempty"`
+	ProcurementGroupRatio float64 `json:"procurement_group_ratio,omitempty"`
+	TaxRatePercent        float64 `json:"tax_rate_percent,omitempty"`
+	QuotaPerUnit          float64 `json:"quota_per_unit,omitempty"`
+	PriceVersion          string  `json:"price_version,omitempty"`
+
+	// CustomerGroupRatio is the caller's group ratio, recorded for reconciliation
+	// only. It never multiplies a procurement amount.
+	CustomerGroupRatio float64 `json:"customer_group_ratio,omitempty"`
 }
 
 // ResultRetrievable reports whether retrieval surfaces (native query routes,

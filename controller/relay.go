@@ -31,6 +31,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/shopspring/decimal"
 )
 
 func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
@@ -510,6 +511,42 @@ func RelayTask(c *gin.Context) {
 	presentTaskSubmission(c, outcome)
 }
 
+// newTaskProcurementContext freezes the procurement pricing inputs of an async
+// task at submit time.
+//
+// A task whose final billable quantity is already known (per-call and
+// fixed-price billing) also freezes the derived pre-group amount. A usage-priced
+// task must not: its quantity only exists at completion, so it freezes the
+// inputs and the settlement path derives the amount against actual usage.
+func newTaskProcurementContext(relayInfo *relaycommon.RelayInfo) *model.TaskProcurementContext {
+	if relayInfo == nil {
+		return nil
+	}
+	pricingGroup, priceVersion, groupRatio, taxRatePercent := service.ResolveTaskProcurementPricing(relayInfo.ChannelId, relayInfo.OriginModelName)
+	frozen := &model.TaskProcurementContext{
+		Version:               1,
+		PricingGroup:          pricingGroup,
+		ProcurementGroupRatio: groupRatio,
+		TaxRatePercent:        taxRatePercent,
+		QuotaPerUnit:          common.QuotaPerUnit,
+		PriceVersion:          priceVersion,
+		CustomerGroupRatio:    relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+	}
+	// Only a per-call reservation is final at submit time: its quantity never
+	// changes afterwards. A usage-priced task keeps this empty and settles from
+	// the frozen ratios plus the usage it actually reports.
+	perCallBilling := common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice
+	if perCallBilling && relayInfo.PriceData.UsePrice {
+		// The reservation is the fixed request price scaled by the request
+		// multipliers, before the customer group ratio. Derived from the price
+		// itself rather than by dividing the reservation, which would lose
+		// precision and divide by zero on a free group.
+		preGroup := relayInfo.PriceData.ApplyOtherRatiosToFloat(relayInfo.PriceData.ModelPrice * common.QuotaPerUnit)
+		frozen.PreGroupQuota = decimal.NewFromFloat(preGroup).String()
+	}
+	return frozen
+}
+
 // executeTaskSubmission owns the retry, billing, and persistence lifecycle.
 // It deliberately performs no client response writes so JSON and protocol
 // presenters share the same durable task barrier. Its cancellation semantics
@@ -673,6 +710,9 @@ func executeTaskSubmissionWith(
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 	task.PrivateData.TokenId = relayInfo.TokenId
 	task.PrivateData.NodeName = common.NodeName
+	// The procurement pricing context is frozen before the task row is written,
+	// so a ratio or tax-rate edit made while the task runs cannot retroactively
+	// rewrite the cost this submission was accepted at.
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
 		ModelPrice:      relayInfo.PriceData.ModelPrice,
 		GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
@@ -681,6 +721,7 @@ func executeTaskSubmissionWith(
 		OriginModelName: relayInfo.OriginModelName,
 		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
 		TieredSnapshot:  relayInfo.TieredBillingSnapshot,
+		Procurement:     newTaskProcurementContext(relayInfo),
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData

@@ -13,6 +13,53 @@ type GroupRatioInfo struct {
 	HasSpecialRatio   bool
 }
 
+// ProcurementBasis is the billing amount captured before the customer-side
+// group ratio is applied. The procurement ledger must not inherit that ratio:
+// the same model, usage and procurement configuration must cost the operator the
+// same money whoever the caller is. The billing paths therefore expose the
+// pre-group decimal instead of letting the ledger divide a rounded integer by
+// the ratio, which would lose precision to quota rounding and break outright on
+// a zero ratio.
+//
+// The amount deliberately still carries model price, unit ratios (cache, image,
+// audio), the caller-supplied request multipliers (n, seconds, size) and the
+// tiered expression result: those describe the purchase itself. It excludes the
+// customer group ratio and the tool-call surcharge, which the operator sets as
+// customer-facing pricing rather than a supplier cost.
+type ProcurementBasis struct {
+	// PreGroupQuota is the billable amount before the customer group ratio, in
+	// quota units, as a decimal string. A string keeps the full precision the
+	// ledger stores; float64 would round at 1e-16.
+	PreGroupQuota string `json:"pre_group_quota"`
+	// CustomerGroupRatio is the ratio that was lifted out of PreGroupQuota. It is
+	// recorded for reconciliation only and never multiplies a procurement amount.
+	CustomerGroupRatio float64 `json:"customer_group_ratio"`
+}
+
+// NewProcurementBasis records the pre-group amount produced by a billing path.
+// The decimal is kept as its exact string form so no precision is lost between
+// the calculation and the ledger write.
+func NewProcurementBasis(preGroupQuota decimal.Decimal, customerGroupRatio float64) *ProcurementBasis {
+	return &ProcurementBasis{
+		PreGroupQuota:      preGroupQuota.String(),
+		CustomerGroupRatio: customerGroupRatio,
+	}
+}
+
+// PreGroupQuotaDecimal parses PreGroupQuota. ok is false when the basis is
+// absent or carries an unparseable amount, so a caller falls back instead of
+// booking a zero cost.
+func (b *ProcurementBasis) PreGroupQuotaDecimal() (decimal.Decimal, bool) {
+	if b == nil || b.PreGroupQuota == "" {
+		return decimal.Zero, false
+	}
+	value, err := decimal.NewFromString(b.PreGroupQuota)
+	if err != nil {
+		return decimal.Zero, false
+	}
+	return value, true
+}
+
 type PriceData struct {
 	FreeModel            bool
 	ModelPrice           float64

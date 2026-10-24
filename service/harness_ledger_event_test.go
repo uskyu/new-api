@@ -58,7 +58,7 @@ func TestRecordHarnessSettlementAppendsBothStreams(t *testing.T) {
 		UsageUnit:        harnessUsageUnitToken,
 		UsageSource:      harnessUsageSourceUpstream,
 	}
-	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(1_000_000, 0, "economy"), correlation)
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
 
 	var usageEvents []model.HarnessLedgerEvent
 	require.NoError(t, model.DB.Where("stream = ?", model.HarnessLedgerStreamUsage).Find(&usageEvents).Error)
@@ -98,14 +98,14 @@ func TestRecordHarnessSettlementRefundSupersedes(t *testing.T) {
 		Status:    model.HarnessSettlementStatusSettled,
 		ModelName: "economy",
 	}
-	recordHarnessSettlement(settled, harnessSettlementMoneyForQuota(1_000_000, 0, "economy"), correlation)
+	recordHarnessSettlement(settled, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
 
 	refunded := &model.HarnessSettlement{
 		RequestId: "gw-request-refund",
 		Status:    model.HarnessSettlementStatusRefunded,
 		ModelName: "economy",
 	}
-	recordHarnessSettlement(refunded, harnessSettlementMoneyForQuota(0, 0, "economy"), correlation)
+	recordHarnessSettlement(refunded, harnessSettlementMoneyForQuota(nil, 0, 0, "economy"), correlation)
 
 	var costEvents []model.HarnessLedgerEvent
 	require.NoError(t, model.DB.Where("stream = ?", model.HarnessLedgerStreamCost).Order("id ASC").Find(&costEvents).Error)
@@ -147,7 +147,7 @@ func TestHarnessLedgerReadEndToEnd(t *testing.T) {
 		CompletionTokens: 20,
 	}
 	correlation := harnessSettlementCorrelation{HarnessRequestId: "hrq_e2e", HarnessRunId: "run_e2e", UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream}
-	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(500_000, 0, "economy"), correlation)
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(nil, 500_000, 0, "economy"), correlation)
 
 	// The cursor query applies a 2s visibility waterline: age the rows the way
 	// time would, otherwise the feed legitimately reports nothing yet.
