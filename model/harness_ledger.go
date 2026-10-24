@@ -155,19 +155,56 @@ func AppendHarnessLedgerEvents(events ...*HarnessLedgerEvent) error {
 	if len(events) == 0 {
 		return nil
 	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		return appendHarnessLedgerEventsTx(tx, events...)
+	})
+}
+
+// AppendHarnessLedgerEventsWithSettlement commits the ledger events and the
+// settlement snapshot in a single transaction.
+//
+// This is the only correct ordering for a caller that writes both. Committing the
+// events first and the snapshot second means a snapshot failure leaves the
+// platform's feed ahead of the operator's ledger, and the obvious retry cannot
+// repair it: re-inserting the same events collides with the event_id unique
+// index, so the retry fails before the snapshot is ever attempted. Sharing one
+// transaction makes the retry a genuine second attempt, because a failed attempt
+// rolls everything back.
+//
+// The events are inserted first inside the transaction so a snapshot validation
+// error still aborts the whole unit.
+func AppendHarnessLedgerEventsWithSettlement(events []*HarnessLedgerEvent, settlement *HarnessSettlement) error {
+	if settlement == nil {
+		return ErrHarnessLedgerInvalid
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := appendHarnessLedgerEventsTx(tx, events...); err != nil {
+			return err
+		}
+		return UpsertHarnessSettlementTx(tx, settlement)
+	})
+}
+
+// appendHarnessLedgerEventsTx validates the events and inserts them on the given
+// connection, so the caller decides the transaction boundary.
+func appendHarnessLedgerEventsTx(tx *gorm.DB, events ...*HarnessLedgerEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	if tx == nil {
+		return fmt.Errorf("%w: nil transaction", ErrHarnessLedgerInvalid)
+	}
 	for _, e := range events {
 		if err := prepareHarnessLedgerEvent(e); err != nil {
 			return err
 		}
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
-		for _, e := range events {
-			if err := tx.Create(e).Error; err != nil {
-				return err
-			}
+	for _, e := range events {
+		if err := tx.Create(e).Error; err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // prepareHarnessLedgerEvent validates one event and fills in its defaults.

@@ -886,35 +886,67 @@ func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money ha
 	persistHarnessLedgerEvents(settlement, []*model.HarnessLedgerEvent{usageEvent, costEvent})
 }
 
-// harnessLedgerWriteAttempts bounds the retry of a ledger write. A retry exists
-// because the failure mode that matters is a transient database error: without
-// it the snapshot would keep a status the platform can never see as an event.
+// harnessLedgerWriteAttempts bounds the retry of the ledger transaction. One
+// retry covers the transient failure worth retrying (a lost connection, a
+// deadlock) without hammering a database that is genuinely unavailable.
 const harnessLedgerWriteAttempts = 2
 
-// persistHarnessLedgerEvents writes the events and then the snapshot, retrying
-// the whole attempt once on failure. The snapshot is part of the same attempt
-// because a snapshot that advanced without its events is exactly the permanent
-// mismatch this ordering avoids: events are the platform's source of truth, so
-// they are attempted first and the snapshot only follows when they landed.
+// persistHarnessLedgerEvents commits the ledger events and the settlement
+// snapshot in one transaction, retrying the whole transaction once.
 //
-// A failure is logged with the request id so an operator can reconcile, and it
-// never propagates: a settlement write must not fail a relay that already
-// charged the user.
+// The single transaction is what makes the retry meaningful. Committing the
+// events first and the snapshot afterwards could leave the events durable and the
+// snapshot missing; re-inserting those events then collides with the event_id
+// unique index, so the "retry" fails before it ever reaches the snapshot. Here a
+// failed attempt rolls back both, so the second attempt starts clean.
+//
+// A non-retryable error (a validation failure) is not retried: repeating it cannot
+// succeed and only doubles the write latency on the billing path. A failure never
+// propagates, because a ledger write must not fail a relay that already charged
+// the user; it is logged so an operator can reconcile by hand.
+//
+// The failure logs separate two states an operator must treat differently:
+//   - state=rolled back: the attempt is known to have written nothing, so the rows
+//     are definitely missing and the write can simply be replayed.
+//   - state=uncertain: the commit outcome is unknown, so the rows may already be
+//     present. Verify by request id before repairing, because a blind replay of an
+//     already-committed request could double-book it.
 func persistHarnessLedgerEvents(settlement *model.HarnessSettlement, events []*model.HarnessLedgerEvent) {
 	var lastErr error
 	for attempt := range harnessLedgerWriteAttempts {
-		lastErr = model.AppendHarnessLedgerEvents(events...)
+		lastErr = model.AppendHarnessLedgerEventsWithSettlement(events, settlement)
 		if lastErr == nil {
-			lastErr = model.UpsertHarnessSettlement(settlement)
-			if lastErr == nil {
-				return
-			}
+			return
+		}
+		if !isRetryableHarnessLedgerError(lastErr) {
+			common.SysError(common.LogText("harness ledger write failed with a non-retryable error (request=%s task=%s status=%s, state=rolled back): %v - verify by request id before issuing a correction", settlement.RequestId, settlement.TaskId, settlement.Status, lastErr))
+			return
 		}
 		if attempt+1 < harnessLedgerWriteAttempts {
 			common.SysLog(common.LogText("harness ledger write retrying (request=%s task=%s attempt=%d): %v", settlement.RequestId, settlement.TaskId, attempt+1, lastErr))
 		}
 	}
-	common.SysError(common.LogText("harness ledger write failed after retries (request=%s task=%s status=%s): %v - the snapshot and its events may diverge and need reconciliation by request id", settlement.RequestId, settlement.TaskId, settlement.Status, lastErr))
+	// Every attempt reported an error, but a commit may have succeeded with only its
+	// acknowledgement lost. Report the state as unknown rather than absent: an
+	// operator who assumes absence could book the request twice.
+	common.SysError(common.LogText("harness ledger write failed after retries (request=%s task=%s status=%s, state=uncertain): %v - the transaction may have committed; verify by request id before any repair", settlement.RequestId, settlement.TaskId, settlement.Status, lastErr))
+}
+
+// isRetryableHarnessLedgerError reports whether repeating the transaction could
+// succeed. A validation failure is deterministic, so retrying it only wastes time
+// on the billing path; everything else is treated as transient, which is the
+// safer default because the alternative silently drops a ledger row.
+//
+// A duplicate event_id needs no special case: because the events and the snapshot
+// now share one transaction, a duplicate can only appear when an earlier attempt
+// committed and its acknowledgement was lost. That attempt left both rows
+// durable, which is exactly the desired end state, so the retry failing on the
+// duplicate is harmless and the failure is only logged.
+func isRetryableHarnessLedgerError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return !errors.Is(err, model.ErrHarnessLedgerInvalid) && !errors.Is(err, model.ErrHarnessSettlementInvalid)
 }
 
 // previousHarnessLedgerEvent returns the id and version of the most recent event

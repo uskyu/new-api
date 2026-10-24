@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -69,7 +70,19 @@ func (HarnessSettlement) TableName() string {
 // stored as provided; the caller stamps it when the request reaches a final
 // billing state.
 func UpsertHarnessSettlement(row *HarnessSettlement) error {
+	return UpsertHarnessSettlementTx(DB, row)
+}
+
+// UpsertHarnessSettlementTx upserts one settlement row on the given connection,
+// so the caller can commit it atomically with the ledger events it belongs to.
+// Passing the transaction in is what makes a retry meaningful: a failure rolls
+// back the events too, so the second attempt starts from a clean slate instead of
+// colliding with already-inserted event ids.
+func UpsertHarnessSettlementTx(tx *gorm.DB, row *HarnessSettlement) error {
 	if row == nil {
+		return ErrHarnessSettlementInvalid
+	}
+	if tx == nil {
 		return ErrHarnessSettlementInvalid
 	}
 	if row.RequestId == "" {
@@ -83,26 +96,37 @@ func UpsertHarnessSettlement(row *HarnessSettlement) error {
 		// automatic timestamp so a zero value would stay zero forever.
 		row.CreatedAt = common.GetTimestamp()
 	}
-	return DB.Clauses(clause.OnConflict{
+	return tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "request_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"task_id",
-			"token_id",
-			"user_id",
-			"status",
-			"model_name",
-			"channel_id",
-			"pricing_group",
-			"group_ratio",
-			"tax_rate_percent",
-			"prompt_tokens",
-			"completion_tokens",
-			"cache_read_tokens",
-			"cache_write_tokens",
-			"base_amount",
-			"total_amount",
-			"currency",
-			"settled_at",
+		DoUpdates: clause.Assignments(map[string]any{
+			"task_id":            gorm.Expr("excluded.task_id"),
+			"token_id":           gorm.Expr("excluded.token_id"),
+			"user_id":            gorm.Expr("excluded.user_id"),
+			"status":             gorm.Expr("excluded.status"),
+			"model_name":         gorm.Expr("excluded.model_name"),
+			"channel_id":         gorm.Expr("excluded.channel_id"),
+			"pricing_group":      gorm.Expr("excluded.pricing_group"),
+			"group_ratio":        gorm.Expr("excluded.group_ratio"),
+			"tax_rate_percent":   gorm.Expr("excluded.tax_rate_percent"),
+			"prompt_tokens":      gorm.Expr("excluded.prompt_tokens"),
+			"completion_tokens":  gorm.Expr("excluded.completion_tokens"),
+			"cache_read_tokens":  gorm.Expr("excluded.cache_read_tokens"),
+			"cache_write_tokens": gorm.Expr("excluded.cache_write_tokens"),
+			"base_amount":        gorm.Expr("excluded.base_amount"),
+			"total_amount":       gorm.Expr("excluded.total_amount"),
+			"currency":           gorm.Expr("excluded.currency"),
+			// The platform correlation is written once and then never cleared. A
+			// re-settle can arrive with an empty correlation -- an async task settling
+			// from a path that lost the request context, or a later refund -- and a
+			// plain assignment would wipe the fact that this row belongs to the
+			// platform ledger, silently detaching it from the feed it was reported on.
+			// Keeping the first non-empty value is safe because a request id maps to
+			// exactly one platform request for its whole life.
+			"harness_request_id": gorm.Expr(
+				"CASE WHEN excluded.harness_request_id <> '' THEN excluded.harness_request_id ELSE harness_request_id END"),
+			"harness_run_id": gorm.Expr(
+				"CASE WHEN excluded.harness_run_id <> '' THEN excluded.harness_run_id ELSE harness_run_id END"),
+			"settled_at": gorm.Expr("excluded.settled_at"),
 		}),
 	}).Create(row).Error
 }
