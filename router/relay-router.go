@@ -17,12 +17,26 @@ func SetRelayRouter(router *gin.Engine) {
 	router.Use(middleware.DecompressRequestMiddleware())
 	router.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
 	router.Use(middleware.StatsMiddleware())
+	// Translate a verified Harness JWT into the mapped internal service token
+	// before any TokenAuth runs. TokenAuth splits the credential on "-", which
+	// would truncate a base64url JWT, so the translation has to happen first.
+	// A non-JWT credential passes through untouched, so sk- clients are
+	// unaffected.
+	router.Use(middleware.HarnessJWT())
 	// https://platform.openai.com/docs/api-reference/introduction
 	modelsRouter := router.Group("/v1/models")
 	modelsRouter.Use(middleware.RouteTag("relay"))
 	modelsRouter.Use(middleware.TokenAuth())
 	{
 		modelsRouter.GET("", func(c *gin.Context) {
+			// A verified Harness principal asks for the tier catalog (A3); every
+			// other credential keeps the native model list. Dispatch is by the
+			// context principal, never by the Authorization header, because the
+			// JWT has already been replaced by the mapped service token above.
+			if _, isHarness := middleware.GetHarnessPrincipal(c); isHarness {
+				controller.GetHarnessTierCatalog(c)
+				return
+			}
 			switch {
 			case c.GetHeader("x-api-key") != "" && c.GetHeader("anthropic-version") != "":
 				controller.ListModels(c, constant.ChannelTypeAnthropic)
