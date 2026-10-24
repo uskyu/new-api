@@ -279,6 +279,29 @@ func GetTokenById(id int) (*Token, error) {
 	return &token, err
 }
 
+// GetUniqueTokenByName resolves a token by name for the Harness service-subject
+// mapping. Token names are not unique in this schema, so an ambiguous name is
+// rejected instead of picking one arbitrarily: mapping a platform subject to the
+// wrong credential would silently authorize the wrong quota, group and resource
+// pools.
+func GetUniqueTokenByName(name string) (*Token, error) {
+	if name == "" {
+		return nil, errors.New("token name is empty")
+	}
+	var tokens []Token
+	if err := DB.Where("name = ?", name).Limit(2).Find(&tokens).Error; err != nil {
+		return nil, err
+	}
+	switch len(tokens) {
+	case 0:
+		return nil, gorm.ErrRecordNotFound
+	case 1:
+		return &tokens[0], nil
+	default:
+		return nil, fmt.Errorf("token name %q is ambiguous", name)
+	}
+}
+
 func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 	if !fromDB && common.RedisEnabled {
 		// Try Redis first
