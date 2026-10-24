@@ -357,6 +357,7 @@ func migrateDB() error {
 		&QuotaData{},
 		&Task{},
 		&HarnessSettlement{},
+		&HarnessLedgerEvent{},
 		&TaskPlugin{},
 		&Model{},
 		&Vendor{},
