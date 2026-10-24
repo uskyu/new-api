@@ -677,9 +677,10 @@ func harnessSettlementPricing(channelId int, modelName string) (pricingGroup str
 
 // harnessSettlementMoneyForQuota converts a final quota into ledger amounts.
 // base is quota / QuotaPerUnit, i.e. the canonical USD procurement base. A
-// resolved pricing group applies its ratio; the channel's supplier tax is
-// recorded for the caller but never folded into the amount, because the agreed
-// contract forwards the tax to the platform and leaves it out of the cost.
+// resolved pricing group applies its ratio and the channel's supplier tax, so
+// total is the final procurement cost the platform books directly, matching the
+// contract sample (0.011500 * 0.8 * 1.065 rounds to 0.009800).
+//
 // When no group resolved the request has no procurement discount, so the total
 // tracks the base instead of collapsing to zero — "no procurement group" must
 // never read as "free". This function only describes money; it never changes a
@@ -701,14 +702,15 @@ func harnessSettlementMoneyForQuota(quota int, channelId int, modelName string) 
 	total := base
 	switch {
 	case pricingGroup == "":
-		// No opt-in procurement group: no discount. Keep the ratio at zero so
-		// the row shows that no procurement group applied.
+		// No opt-in procurement group: no discount and no tax. Keep the ratio at
+		// zero so the row shows that no procurement group applied.
 		groupRatio, taxRatePercent = 0, 0
 	case math.IsNaN(groupRatio) || math.IsInf(groupRatio, 0) || groupRatio < 0:
 		common.SysLog(common.LogText("harness settlement: ignoring invalid group ratio %v (group=%s), no discount applied", groupRatio, pricingGroup))
 		groupRatio, taxRatePercent = 0, 0
 	default:
-		total = base.Mul(decimal.NewFromFloat(groupRatio))
+		total = base.Mul(decimal.NewFromFloat(groupRatio)).
+			Mul(decimal.NewFromFloat(1 + taxRatePercent/100))
 	}
 	if total.IsNegative() {
 		common.SysLog(common.LogText("harness settlement: clamping negative total to zero (channel=%d model=%s)", channelId, modelName))
@@ -768,6 +770,13 @@ func recordHarnessSettlement(settlement *model.HarnessSettlement, money harnessS
 	settlement.BaseAmount = money.BaseAmount
 	settlement.TotalAmount = money.TotalAmount
 	settlement.Currency = money.Currency
+	// Persist the platform correlation on the snapshot. An async task settles long
+	// after the request context is gone, so this is the only place the owning
+	// request's identity survives to that point.
+	if correlation.HarnessRequestId != "" {
+		settlement.HarnessRequestId = correlation.HarnessRequestId
+		settlement.HarnessRunId = correlation.HarnessRunId
+	}
 	if settlement.Status != model.HarnessSettlementStatusPending && settlement.SettledAt == 0 {
 		settlement.SettledAt = common.GetTimestamp()
 	}
@@ -776,16 +785,38 @@ func recordHarnessSettlement(settlement *model.HarnessSettlement, money harnessS
 			common.SysLog(common.LogText("harness settlement panicked (request=%s task=%s): %v", settlement.RequestId, settlement.TaskId, recovered))
 		}
 	}()
-	if err := model.UpsertHarnessSettlement(settlement); err != nil {
-		common.SysLog(common.LogText("harness settlement write failed (request=%s task=%s status=%s): %s", settlement.RequestId, settlement.TaskId, settlement.Status, err.Error()))
+	// The snapshot is written for every relayed request because the operator needs
+	// the procurement cost regardless of who called us. Only a platform-originated
+	// request additionally emits ledger events, and the events are attempted first
+	// so a snapshot never advances past an unseen event.
+	if settlement.HarnessRequestId == "" {
+		if err := model.UpsertHarnessSettlement(settlement); err != nil {
+			common.SysLog(common.LogText("harness settlement write failed (request=%s task=%s status=%s): %s", settlement.RequestId, settlement.TaskId, settlement.Status, err.Error()))
+		}
+		return
 	}
-	appendHarnessSettlementEvents(settlement, money, correlation)
+	appendHarnessSettlementEvents(settlement, money, harnessSettlementCorrelation{
+		HarnessRequestId: settlement.HarnessRequestId,
+		HarnessRunId:     settlement.HarnessRunId,
+		UsageUnit:        correlation.UsageUnit,
+		UsageSource:      correlation.UsageSource,
+		IsEstimated:      correlation.IsEstimated,
+	})
 }
 
 // appendHarnessSettlementEvents derives the append-only event rows from a
-// settlement snapshot. A correction or refund is a new event that supersedes the
-// previous one; nothing is ever overwritten, so the platform can follow the
-// stream with a single id cursor.
+// settlement snapshot and inserts them together with the snapshot itself inside
+// one transaction.
+//
+// Only Harness-originated requests produce events. A settlement is still written
+// for every relayed request because the operator needs the cost, but the ledger
+// is the platform's own view of its traffic: admitting internal sk- requests
+// would let the platform read other tenants' usage and procurement cost. The
+// correlation id is the discriminator, and an empty one means "not from
+// Harness".
+//
+// The usage and cost streams each keep their own version chain, so a usage
+// correction never points at a cost event and vice versa.
 //
 // The cost event always carries the cumulative net amount (never a delta): a
 // dropped event then cannot corrupt the total, because the latest event alone
@@ -794,8 +825,16 @@ func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money ha
 	if settlement == nil || settlement.RequestId == "" {
 		return
 	}
+	if correlation.HarnessRequestId == "" {
+		// Not platform traffic: the snapshot row alone records the cost and no
+		// ledger event is emitted, so the platform's feed stays scoped to its own
+		// requests.
+		return
+	}
+
 	observedAtMs := time.Now().UnixMilli()
-	supersedes, recordVersion := previousHarnessLedgerEvent(settlement.RequestId)
+	usageSupersedes, usageVersion := previousHarnessLedgerEvent(model.HarnessLedgerStreamUsage, settlement.RequestId)
+	costSupersedes, costVersion := previousHarnessLedgerEvent(model.HarnessLedgerStreamCost, settlement.RequestId)
 
 	usageEvent := &model.HarnessLedgerEvent{
 		Stream:            model.HarnessLedgerStreamUsage,
@@ -814,12 +853,9 @@ func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money ha
 		IsEstimated:       correlation.IsEstimated,
 		BillingBasis:      correlation.UsageUnit,
 		PricingVersion:    money.PriceVersion,
-		RecordVersion:     recordVersion,
-		SupersedesEventId: supersedes,
+		RecordVersion:     usageVersion,
+		SupersedesEventId: usageSupersedes,
 		ObservedAtMs:      observedAtMs,
-	}
-	if err := model.AppendHarnessLedgerEvent(usageEvent); err != nil {
-		common.SysLog(common.LogText("harness usage event append failed (request=%s): %s", settlement.RequestId, err.Error()))
 	}
 
 	costEvent := &model.HarnessLedgerEvent{
@@ -843,25 +879,54 @@ func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money ha
 		TaxRatePercent:    money.TaxRatePercent,
 		BillingBasis:      correlation.UsageUnit,
 		PricingVersion:    money.PriceVersion,
-		RecordVersion:     recordVersion,
-		SupersedesEventId: supersedes,
+		RecordVersion:     costVersion,
+		SupersedesEventId: costSupersedes,
 		ObservedAtMs:      observedAtMs,
 	}
-	if err := model.AppendHarnessLedgerEvent(costEvent); err != nil {
-		common.SysLog(common.LogText("harness cost event append failed (request=%s): %s", settlement.RequestId, err.Error()))
-	}
+	persistHarnessLedgerEvents(settlement, []*model.HarnessLedgerEvent{usageEvent, costEvent})
 }
 
-// previousHarnessLedgerEvent returns the id and version of the most recent cost
-// event recorded for this gateway request, so a correction can point at what it
-// supersedes and advance the record version. A request's first event yields a
-// nil predecessor and version 1.
-func previousHarnessLedgerEvent(gatewayRequestId string) (*string, int) {
-	if gatewayRequestId == "" {
+// harnessLedgerWriteAttempts bounds the retry of a ledger write. A retry exists
+// because the failure mode that matters is a transient database error: without
+// it the snapshot would keep a status the platform can never see as an event.
+const harnessLedgerWriteAttempts = 2
+
+// persistHarnessLedgerEvents writes the events and then the snapshot, retrying
+// the whole attempt once on failure. The snapshot is part of the same attempt
+// because a snapshot that advanced without its events is exactly the permanent
+// mismatch this ordering avoids: events are the platform's source of truth, so
+// they are attempted first and the snapshot only follows when they landed.
+//
+// A failure is logged with the request id so an operator can reconcile, and it
+// never propagates: a settlement write must not fail a relay that already
+// charged the user.
+func persistHarnessLedgerEvents(settlement *model.HarnessSettlement, events []*model.HarnessLedgerEvent) {
+	var lastErr error
+	for attempt := range harnessLedgerWriteAttempts {
+		lastErr = model.AppendHarnessLedgerEvents(events...)
+		if lastErr == nil {
+			lastErr = model.UpsertHarnessSettlement(settlement)
+			if lastErr == nil {
+				return
+			}
+		}
+		if attempt+1 < harnessLedgerWriteAttempts {
+			common.SysLog(common.LogText("harness ledger write retrying (request=%s task=%s attempt=%d): %v", settlement.RequestId, settlement.TaskId, attempt+1, lastErr))
+		}
+	}
+	common.SysError(common.LogText("harness ledger write failed after retries (request=%s task=%s status=%s): %v - the snapshot and its events may diverge and need reconciliation by request id", settlement.RequestId, settlement.TaskId, settlement.Status, lastErr))
+}
+
+// previousHarnessLedgerEvent returns the id and version of the most recent event
+// in one stream for this gateway request, so a correction points at what it
+// supersedes and advances that stream's record version. Version chains are kept
+// per stream: a usage correction must never reference a cost event.
+func previousHarnessLedgerEvent(stream, gatewayRequestId string) (*string, int) {
+	if gatewayRequestId == "" || stream == "" {
 		return nil, 1
 	}
 	var last model.HarnessLedgerEvent
-	err := model.DB.Where("gateway_request_id = ? AND stream = ?", gatewayRequestId, model.HarnessLedgerStreamCost).
+	err := model.DB.Where("gateway_request_id = ? AND stream = ?", gatewayRequestId, stream).
 		Order("id DESC").Limit(1).Find(&last).Error
 	if err != nil || last.EventId == "" {
 		return nil, 1
@@ -962,5 +1027,13 @@ func recordTaskHarnessSettlement(task *model.Task, status string, quota int) {
 		}
 	}
 	settlement.Status = status
-	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(quota, task.ChannelId, taskModelName(task)), harnessSettlementCorrelation{UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream})
+	// The submit path stamped the platform correlation on the task, and the
+	// polling path settles with no request context, so the task is the source of
+	// truth for whether this task belongs to the platform ledger feed.
+	correlation := harnessSettlementCorrelation{UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream}
+	if task.PrivateData.Execution != nil {
+		correlation.HarnessRequestId = task.PrivateData.Execution.HarnessRequestID
+		correlation.HarnessRunId = task.PrivateData.Execution.HarnessRunID
+	}
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(quota, task.ChannelId, taskModelName(task)), correlation)
 }

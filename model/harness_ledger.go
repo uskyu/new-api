@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
 )
 
 // Harness ledger streams. "ue" carries usage events (B1) and "ce" carries cost
@@ -141,6 +142,36 @@ func NewHarnessEventId(stream string) string {
 // NewHarnessEventId, RecordVersion from 1, ObservedAtMs from the current
 // millisecond, and CreatedAt from common.GetTimestamp.
 func AppendHarnessLedgerEvent(e *HarnessLedgerEvent) error {
+	return AppendHarnessLedgerEvents(e)
+}
+
+// AppendHarnessLedgerEvents inserts the given events in one transaction, so a
+// request's usage and cost events become visible together or not at all. A
+// partial pair would let the platform reconcile usage against a missing cost.
+//
+// The same identifier defaults as AppendHarnessLedgerEvent are applied first, so
+// validation failures reject the whole batch before any row is written.
+func AppendHarnessLedgerEvents(events ...*HarnessLedgerEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	for _, e := range events {
+		if err := prepareHarnessLedgerEvent(e); err != nil {
+			return err
+		}
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		for _, e := range events {
+			if err := tx.Create(e).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// prepareHarnessLedgerEvent validates one event and fills in its defaults.
+func prepareHarnessLedgerEvent(e *HarnessLedgerEvent) error {
 	if e == nil {
 		return fmt.Errorf("%w: nil event", ErrHarnessLedgerInvalid)
 	}
@@ -161,7 +192,7 @@ func AppendHarnessLedgerEvent(e *HarnessLedgerEvent) error {
 	if e.CreatedAt == 0 {
 		e.CreatedAt = common.GetTimestamp()
 	}
-	return DB.Create(e).Error
+	return nil
 }
 
 // harnessLedgerCursor is the wire form of an incremental cursor. The stream is

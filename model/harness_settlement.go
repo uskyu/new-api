@@ -46,8 +46,15 @@ type HarnessSettlement struct {
 	BaseAmount       string  `json:"base_amount" gorm:"type:varchar(64);default:''"`
 	TotalAmount      string  `json:"total_amount" gorm:"type:varchar(64);default:''"`
 	Currency         string  `json:"currency" gorm:"type:varchar(16);default:''"`
-	CreatedAt        int64   `json:"created_at" gorm:"bigint;index;default:0"`
-	SettledAt        int64   `json:"settled_at" gorm:"bigint;default:0"`
+	// HarnessRequestId and HarnessRunId record the platform correlation ids on the
+	// snapshot so an async task, which settles long after the request context is
+	// gone, can still be attributed. An empty HarnessRequestId means the request
+	// did not come from the platform, and such a request must not reach the
+	// platform's ledger feed.
+	HarnessRequestId string `json:"harness_request_id" gorm:"type:varchar(64);index:idx_harness_settlement_harness_request_id;default:''"`
+	HarnessRunId     string `json:"harness_run_id" gorm:"type:varchar(64);default:''"`
+	CreatedAt        int64  `json:"created_at" gorm:"bigint;index;default:0"`
+	SettledAt        int64  `json:"settled_at" gorm:"bigint;default:0"`
 }
 
 func (HarnessSettlement) TableName() string {

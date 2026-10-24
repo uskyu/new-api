@@ -14,7 +14,18 @@ import (
 // itself and clears its own rows.
 func ledgerTestDB(t *testing.T) {
 	t.Helper()
-	require.NoError(t, model.DB.AutoMigrate(&model.HarnessSettlement{}, &model.HarnessLedgerEvent{}))
+	// The pricing lookup the settlement uses joins channels/abilities and reads the
+	// model/vendor metadata, so those tables have to exist even for a test that
+	// only asserts on the ledger rows.
+	require.NoError(t, model.DB.AutoMigrate(
+		&model.HarnessSettlement{},
+		&model.HarnessLedgerEvent{},
+		&model.Channel{},
+		&model.Ability{},
+		&model.Model{},
+		&model.Vendor{},
+		&model.Option{},
+	))
 	t.Cleanup(func() {
 		model.DB.Exec("DELETE FROM harness_settlements")
 		model.DB.Exec("DELETE FROM harness_ledger_events")

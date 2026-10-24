@@ -91,6 +91,20 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
 
+	// Carry the platform correlation onto the task before the settlement row is
+	// written. The polling path settles later with no request context, so this
+	// snapshot is the only surviving evidence that the task came from Harness.
+	if task != nil {
+		harnessRequestId := common.GetContextKeyString(c, constant.ContextKeyHarnessRequestId)
+		if harnessRequestId != "" {
+			if task.PrivateData.Execution == nil {
+				task.PrivateData.Execution = &model.TaskExecutionSnapshot{}
+			}
+			task.PrivateData.Execution.HarnessRequestID = harnessRequestId
+			task.PrivateData.Execution.HarnessRunID = common.GetContextKeyString(c, constant.ContextKeyHarnessRunId)
+		}
+	}
+
 	// Settlement recording runs after the charge so the ledger mirrors the quota
 	// that was actually consumed. A task that is already terminal at submission
 	// is finalised right here: polling never revisits it, so leaving it pending

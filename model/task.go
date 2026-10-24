@@ -142,6 +142,12 @@ type TaskExecutionSnapshot struct {
 	RequestID   string              `json:"request_id,omitempty"`
 	RequestPath string              `json:"request_path,omitempty"`
 	TaskPlugin  *TaskPluginSnapshot `json:"task_plugin,omitempty"`
+	// HarnessRequestID and HarnessRunID record the platform correlation of the
+	// submit call. An async task settles long after the request context is gone,
+	// so this is how the polling path knows whether the task belongs to the
+	// platform ledger feed. Both are opaque ids, never customer content.
+	HarnessRequestID string `json:"harness_request_id,omitempty"`
+	HarnessRunID     string `json:"harness_run_id,omitempty"`
 }
 
 // TaskPluginSnapshot contains credential-free identity only. Plugin source,
