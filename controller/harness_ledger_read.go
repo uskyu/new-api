@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
@@ -164,8 +165,13 @@ func GetHarnessCostRecords(c *gin.Context) {
 }
 
 // harnessUsageBatchGetRequest is the B1-batchGet body.
+//
+// include_corrections defaults to true: the contract example sends true, and a
+// field the caller omitted must not narrow the answer. A pointer keeps an
+// explicit false distinguishable from an absent field.
 type harnessUsageBatchGetRequest struct {
-	RequestIds []string `json:"request_ids"`
+	RequestIds         []string `json:"request_ids"`
+	IncludeCorrections *bool    `json:"include_corrections"`
 }
 
 // harnessUsageBatchGetResponse is the B1-batchGet answer.
@@ -194,9 +200,10 @@ func BatchGetHarnessUsageEvents(c *gin.Context) {
 		writeHarnessReadError(c, failure)
 		return
 	}
-	items, missing, truncated, err := service.BatchGetHarnessUsageEvents(ids)
+	items, missing, truncated, err := service.BatchGetHarnessUsageEvents(ids,
+		service.HarnessUsageBatchOptions{IncludeCorrections: request.IncludeCorrections})
 	if err != nil {
-		writeHarnessInternalError(c)
+		writeHarnessBatchGetError(c, err)
 		return
 	}
 	if missing == nil {
@@ -206,8 +213,14 @@ func BatchGetHarnessUsageEvents(c *gin.Context) {
 }
 
 // harnessCostBatchGetRequest is the B3-batchGet body.
+//
+// include_status_events defaults to true for the same reason as B1's
+// include_corrections. It can only remove pure status transitions: a refund and
+// a cost correction change the amount, so they are answered even when it is
+// false.
 type harnessCostBatchGetRequest struct {
-	RequestIds []string `json:"request_ids"`
+	RequestIds          []string `json:"request_ids"`
+	IncludeStatusEvents *bool    `json:"include_status_events"`
 }
 
 // harnessCostBatchGetResponse is the B3-batchGet answer.
@@ -236,13 +249,26 @@ func BatchGetHarnessCostRecords(c *gin.Context) {
 		writeHarnessReadError(c, failure)
 		return
 	}
-	items, missing, truncated, err := service.BatchGetHarnessCostRecords(ids)
+	items, missing, truncated, err := service.BatchGetHarnessCostRecords(ids,
+		service.HarnessCostBatchOptions{IncludeStatusEvents: request.IncludeStatusEvents})
 	if err != nil {
-		writeHarnessInternalError(c)
+		writeHarnessBatchGetError(c, err)
 		return
 	}
 	if missing == nil {
 		missing = []string{}
 	}
 	c.JSON(http.StatusOK, harnessCostBatchGetResponse{Items: items, MissingRequestIds: missing, Truncated: truncated})
+}
+
+// writeHarnessBatchGetError answers a batchGet failure. A contract error such as
+// EVENT_LIMIT_EXCEEDED carries its own status and details, so it keeps the
+// documented envelope instead of collapsing into GATEWAY_UPSTREAM.
+func writeHarnessBatchGetError(c *gin.Context, err error) {
+	var failure *service.HarnessReadError
+	if errors.As(err, &failure) {
+		writeHarnessReadError(c, failure)
+		return
+	}
+	writeHarnessInternalError(c)
 }

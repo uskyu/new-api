@@ -45,6 +45,9 @@ const (
 	HarnessErrCodeRequestInvalid  = "REQUEST_INVALID"
 	HarnessErrCodeRequestNotFound = "REQUEST_NOT_FOUND"
 	HarnessErrCodeUpstream        = "GATEWAY_UPSTREAM"
+	// HarnessErrCodeEventLimitExceeded reports one request whose own events
+	// cannot fit in a single batchGet page, so retrying cannot complete it.
+	HarnessErrCodeEventLimitExceeded = "EVENT_LIMIT_EXCEEDED"
 )
 
 // HarnessUsageEvent is the B1 event payload. It is the wire shape agreed with
@@ -109,10 +112,18 @@ func formatHarnessObservedAt(ms int64) string {
 	return time.UnixMilli(ms).UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
-// costIdForEvent derives the cost record id from its event id. The contract has
-// both fields, and a cost record is one-to-one with its event, so the event id
-// doubled with a different prefix is enough and stays stable across replays.
-func costIdForEvent(eventId string) string {
+// costIdForEvent derives the cost record id of an event.
+//
+// The id is derived from gateway_request_id, not from event_id: one gateway
+// request owns exactly one cost record, and a correction is a NEW event that
+// supersedes the previous one. Deriving the id from the event would rename the
+// record on every correction, so the platform could not recognize the versions
+// as the same cost. A row without a gateway request id falls back to the event
+// id derivation to keep the field non-empty.
+func costIdForEvent(gatewayRequestId, eventId string) string {
+	if gatewayRequestId = strings.TrimSpace(gatewayRequestId); gatewayRequestId != "" {
+		return "cost_" + gatewayRequestId
+	}
 	trimmed, ok := strings.CutPrefix(eventId, model.HarnessLedgerStreamCost+"_")
 	if !ok {
 		return "cost_" + eventId
@@ -146,7 +157,7 @@ func costRecordFromLedgerEvent(e model.HarnessLedgerEvent) HarnessCostRecord {
 	return HarnessCostRecord{
 		EventId:          e.EventId,
 		EventType:        e.EventType,
-		CostId:           costIdForEvent(e.EventId),
+		CostId:           costIdForEvent(e.GatewayRequestId, e.EventId),
 		RequestId:        e.HarnessRequestId,
 		GatewayRequestId: e.GatewayRequestId,
 		Status:           e.Status,
@@ -318,17 +329,112 @@ type HarnessCostBatchItem struct {
 	Records   []HarnessCostRecord `json:"records"`
 }
 
+// HarnessUsageBatchOptions narrows a B1 batchGet answer.
+//
+// include_corrections defaults to true, so nil keeps the full answer and only an
+// explicit false removes correction events. The option is variadic so a caller
+// that wants the contract default passes nothing.
+type HarnessUsageBatchOptions struct {
+	IncludeCorrections *bool
+}
+
+// HarnessCostBatchOptions narrows a B3 batchGet answer.
+//
+// include_status_events defaults to true and can only remove the pure status
+// transition: a refund and a cost correction change the amount the platform
+// owes, so they are answered even when it is false.
+type HarnessCostBatchOptions struct {
+	IncludeStatusEvents *bool
+}
+
+// queryHarnessBatchEvents loads the batchGet rows of one stream, optionally
+// excluding one event type.
+//
+// A filter must run in SQL rather than after the read, because the row limit
+// would otherwise be consumed by events the caller asked not to see and the
+// answer would silently drop rows the caller did want.
+func queryHarnessBatchEvents(stream string, ids []string, limit int, excludeEventType string) ([]model.HarnessLedgerEvent, error) {
+	if excludeEventType == "" {
+		return model.QueryHarnessLedgerEventsByHarnessRequestIds(stream, ids, limit)
+	}
+	if stream == "" || len(ids) == 0 || limit <= 0 {
+		return []model.HarnessLedgerEvent{}, nil
+	}
+	var events []model.HarnessLedgerEvent
+	err := model.DB.Where("stream = ?", stream).
+		Where("harness_request_id IN ?", ids).
+		Where("event_type <> ?", excludeEventType).
+		// Same ordering as QueryHarnessLedgerEventsByHarnessRequestIds; keep the
+		// two in step so a filtered page and an unfiltered one agree.
+		Order("observed_at_ms ASC, event_id ASC").
+		Limit(limit).
+		Find(&events).Error
+	if err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
+// limitHarnessBatchEvents applies the per-call event cap and rejects a page that
+// a retry cannot repair.
+//
+// A request whose own events exceed the cap can never be completed by asking
+// again with the same ids, so answering it would look complete while dropping
+// events. Requests that only exceed the cap in aggregate are not an error:
+// splitting the ids returns every event, so truncation stays an explicit flag.
+//
+// A group that fills the kept page is only a candidate, since it may hold exactly
+// the cap and merely sort ahead of the others. At most one group can do that in a
+// page of cap rows, so re-reading just that id settles the question exactly
+// instead of guessing.
+func limitHarnessBatchEvents(stream string, ids []string, events []model.HarnessLedgerEvent, excludeEventType string) ([]model.HarnessLedgerEvent, bool, error) {
+	if len(events) <= HarnessBatchGetMaxEvents {
+		return events, false, nil
+	}
+	events = events[:HarnessBatchGetMaxEvents]
+	counts := make(map[string]int, len(ids))
+	for _, event := range events {
+		counts[event.HarnessRequestId]++
+	}
+	for _, id := range ids {
+		if counts[id] < HarnessBatchGetMaxEvents {
+			continue
+		}
+		alone, err := queryHarnessBatchEvents(stream, []string{id}, HarnessBatchGetMaxEvents+1, excludeEventType)
+		if err != nil {
+			return nil, false, err
+		}
+		if len(alone) <= HarnessBatchGetMaxEvents {
+			continue
+		}
+		failure := newHarnessReadError(http.StatusBadRequest, HarnessErrCodeEventLimitExceeded,
+			"a single request has more events than one batchGet page can return")
+		failure.Details = map[string]any{"request_id": id, "max_events": HarnessBatchGetMaxEvents}
+		return nil, false, failure
+	}
+	return events, true, nil
+}
+
 // BatchGetHarnessUsageEvents answers usage events for up to
 // HarnessBatchGetMaxRequestIds requests. Missing ids are reported per id and do
 // not fail the call.
-func BatchGetHarnessUsageEvents(ids []string) ([]HarnessUsageBatchItem, []string, bool, error) {
-	events, err := model.QueryHarnessLedgerEventsByHarnessRequestIds(model.HarnessLedgerStreamUsage, ids, HarnessBatchGetMaxEvents+1)
+func BatchGetHarnessUsageEvents(ids []string, options ...HarnessUsageBatchOptions) ([]HarnessUsageBatchItem, []string, bool, error) {
+	includeCorrections := true
+	if len(options) > 0 && options[0].IncludeCorrections != nil {
+		includeCorrections = *options[0].IncludeCorrections
+	}
+	excludeEventType := ""
+	if !includeCorrections {
+		excludeEventType = model.HarnessLedgerEventTypeUsageCorrection
+	}
+
+	events, err := queryHarnessBatchEvents(model.HarnessLedgerStreamUsage, ids, HarnessBatchGetMaxEvents+1, excludeEventType)
 	if err != nil {
 		return nil, nil, false, err
 	}
-	truncated := len(events) > HarnessBatchGetMaxEvents
-	if truncated {
-		events = events[:HarnessBatchGetMaxEvents]
+	events, truncated, err := limitHarnessBatchEvents(model.HarnessLedgerStreamUsage, ids, events, excludeEventType)
+	if err != nil {
+		return nil, nil, false, err
 	}
 
 	grouped := make(map[string][]HarnessUsageEvent, len(ids))
@@ -339,6 +445,11 @@ func BatchGetHarnessUsageEvents(ids []string) ([]HarnessUsageBatchItem, []string
 	items := make([]HarnessUsageBatchItem, 0, len(ids))
 	missing := make([]string, 0)
 	for _, id := range ids {
+		// With include_corrections=false a request whose events were all
+		// corrections has nothing left to return, so it is reported as missing
+		// rather than found with an empty list: from the caller's narrowed view
+		// the ledger holds no usage for it, which is the same answer as for an
+		// unknown id.
 		eventsForId, found := grouped[id]
 		if !found {
 			missing = append(missing, id)
@@ -350,14 +461,27 @@ func BatchGetHarnessUsageEvents(ids []string) ([]HarnessUsageBatchItem, []string
 
 // BatchGetHarnessCostRecords answers cost records for up to
 // HarnessBatchGetMaxRequestIds requests.
-func BatchGetHarnessCostRecords(ids []string) ([]HarnessCostBatchItem, []string, bool, error) {
-	events, err := model.QueryHarnessLedgerEventsByHarnessRequestIds(model.HarnessLedgerStreamCost, ids, HarnessBatchGetMaxEvents+1)
+func BatchGetHarnessCostRecords(ids []string, options ...HarnessCostBatchOptions) ([]HarnessCostBatchItem, []string, bool, error) {
+	includeStatusEvents := true
+	if len(options) > 0 && options[0].IncludeStatusEvents != nil {
+		includeStatusEvents = *options[0].IncludeStatusEvents
+	}
+	// Only the pure status transition is optional. A refund and a cost
+	// correction are cost changes themselves, so they are returned even when
+	// status events are excluded. A request left without records is reported
+	// as missing, the same as for the usage stream.
+	excludeEventType := ""
+	if !includeStatusEvents {
+		excludeEventType = model.HarnessLedgerEventTypeStatusChange
+	}
+
+	events, err := queryHarnessBatchEvents(model.HarnessLedgerStreamCost, ids, HarnessBatchGetMaxEvents+1, excludeEventType)
 	if err != nil {
 		return nil, nil, false, err
 	}
-	truncated := len(events) > HarnessBatchGetMaxEvents
-	if truncated {
-		events = events[:HarnessBatchGetMaxEvents]
+	events, truncated, err := limitHarnessBatchEvents(model.HarnessLedgerStreamCost, ids, events, excludeEventType)
+	if err != nil {
+		return nil, nil, false, err
 	}
 
 	grouped := make(map[string][]HarnessCostRecord, len(ids))
