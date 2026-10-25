@@ -91,6 +91,34 @@ func TestGetHarnessSettlementScopesByTokenAndStatus(t *testing.T) {
 	assert.Equal(t, "0.000613", billing["total_amount"])
 	assert.Equal(t, "CNY", billing["currency"])
 
+	// The split was observed for this row, so it is published as numbers.
+	usage, ok := data["usage"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, float64(37), usage["input_tokens"])
+	assert.Equal(t, float64(4), usage["output_tokens"])
+	assert.Equal(t, true, usage["split_known"])
+
+	// A settlement that only knows a total answers null for the split rather than
+	// inventing two halves, on this endpoint exactly as on the event stream.
+	require.NoError(t, model.UpsertHarnessSettlement(&model.HarnessSettlement{
+		RequestId:        "req-total-only",
+		TokenId:          owner.Id,
+		Status:           model.HarnessSettlementStatusSettled,
+		ModelName:        "deepseek-v4.1-flash",
+		TotalTokens:      900,
+		TotalTokensKnown: true,
+		SplitUnknown:     true,
+	}))
+	_, totalOnlyBody := query(owner.Id, "req-total-only")
+	totalOnlyData, ok := totalOnlyBody["data"].(map[string]any)
+	require.True(t, ok, "expected a data object, got %v", totalOnlyBody)
+	totalOnlyUsage, ok := totalOnlyData["usage"].(map[string]any)
+	require.True(t, ok)
+	assert.Nil(t, totalOnlyUsage["input_tokens"], "an unmeasured split must be null, not zero")
+	assert.Nil(t, totalOnlyUsage["output_tokens"])
+	assert.Equal(t, float64(900), totalOnlyUsage["total_tokens"])
+	assert.Equal(t, false, totalOnlyUsage["split_known"])
+
 	// A pending request is still a successful response.
 	recorder, body = query(owner.Id, "req-pending")
 	require.Equal(t, http.StatusOK, recorder.Code, "pending must not be an error status")

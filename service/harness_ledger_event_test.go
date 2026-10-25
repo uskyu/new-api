@@ -119,7 +119,11 @@ func TestRecordHarnessSettlementRefundSupersedes(t *testing.T) {
 	require.NotNil(t, second.SupersedesEventId)
 	assert.Equal(t, first.EventId, *second.SupersedesEventId, "the refund must point at the event it supersedes")
 	assert.Equal(t, model.HarnessLedgerEventTypeRefund, second.EventType)
-	assert.Equal(t, "0", second.TotalAmount, "a refund records the cumulative net amount, not a delta")
+	// Each version states the full amount for its status rather than a delta. This
+	// refund is quota-based and therefore zero; a task refund with a frozen
+	// purchase keeps a non-zero amount, so the invariant is "full amount, never a
+	// delta" rather than "a refund is always zero".
+	assert.Equal(t, "0", second.TotalAmount, "a refund states its full amount, not a delta")
 
 	// The snapshot table keeps only the latest state, which is exactly why the
 	// event stream exists.

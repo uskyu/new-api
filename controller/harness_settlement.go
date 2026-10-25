@@ -26,11 +26,20 @@ type harnessSettlementResponse struct {
 	SettledAt    int64                    `json:"settled_at,omitempty"`
 }
 
+// harnessSettlementUsage is the usage block of a single settlement query.
+//
+// The token counts are pointers for the same reason the B1 event stream uses them:
+// a settlement whose split was never observed must answer null, not zero. The two
+// endpoints describe the same settlement, so letting one publish a zero where the
+// other publishes null would make the platform average over a fabricated pair.
 type harnessSettlementUsage struct {
-	InputTokens      int `json:"input_tokens"`
-	OutputTokens     int `json:"output_tokens"`
-	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+	InputTokens      *int `json:"input_tokens"`
+	OutputTokens     *int `json:"output_tokens"`
+	CacheReadTokens  *int `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens *int `json:"cache_write_tokens,omitempty"`
+	TotalTokens      *int `json:"total_tokens,omitempty"`
+	// SplitKnown false means input/output were not reported separately.
+	SplitKnown bool `json:"split_known"`
 }
 
 type harnessSettlementBilling struct {
@@ -39,6 +48,28 @@ type harnessSettlementBilling struct {
 	TaxRatePercent float64 `json:"tax_rate_percent"`
 	TotalAmount    string  `json:"total_amount"`
 	Currency       string  `json:"currency"`
+}
+
+// harnessSettlementUsageFromRow publishes the stored token figures, keeping "not
+// measured" distinct from "measured zero". The split columns are only reported
+// when the split was actually observed, so a total-only settlement answers null
+// for them and carries the total instead.
+func harnessSettlementUsageFromRow(settlement *model.HarnessSettlement) harnessSettlementUsage {
+	usage := harnessSettlementUsage{SplitKnown: !settlement.SplitUnknown}
+	if settlement.TotalTokensKnown {
+		total := settlement.TotalTokens
+		usage.TotalTokens = &total
+	}
+	if settlement.SplitUnknown {
+		return usage
+	}
+	input, output := settlement.PromptTokens, settlement.CompletionTokens
+	cacheRead, cacheWrite := settlement.CacheReadTokens, settlement.CacheWriteTokens
+	usage.InputTokens = &input
+	usage.OutputTokens = &output
+	usage.CacheReadTokens = &cacheRead
+	usage.CacheWriteTokens = &cacheWrite
+	return usage
 }
 
 // GetHarnessSettlement returns the settlement of one relayed request owned by
@@ -79,12 +110,7 @@ func GetHarnessSettlement(c *gin.Context) {
 		Model:        settlement.ModelName,
 		ChannelId:    settlement.ChannelId,
 		PricingGroup: settlement.PricingGroup,
-		Usage: harnessSettlementUsage{
-			InputTokens:      settlement.PromptTokens,
-			OutputTokens:     settlement.CompletionTokens,
-			CacheReadTokens:  settlement.CacheReadTokens,
-			CacheWriteTokens: settlement.CacheWriteTokens,
-		},
+		Usage:        harnessSettlementUsageFromRow(settlement),
 		Billing: harnessSettlementBilling{
 			BaseAmount:     settlement.BaseAmount,
 			GroupRatio:     settlement.GroupRatio,

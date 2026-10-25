@@ -512,6 +512,53 @@ func TestLedgerCostEventTypesFollowTheChain(t *testing.T) {
 	assert.Equal(t, "4", events[2].BaseAmount, "each version states the full amount, never a delta")
 }
 
+// TestLedgerCostEventTypesCoverTheRiskyBranches pins the two transitions the
+// happy-path chain does not reach: a refund arriving as the very first cost event
+// (which must be a plain cost, not a refund with nothing to reverse), and a
+// failure that also changes the amount (which is a correction, because the amount
+// changed, not merely a status change).
+func TestLedgerCostEventTypesCoverTheRiskyBranches(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	correlation := harnessSettlementCorrelation{HarnessRequestId: "hrq_branches", UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream}
+
+	// Case 1: a refund as the first event has nothing to reverse, so it is simply
+	// the first statement of what the request is worth.
+	first := &model.HarnessSettlement{RequestId: "gw-first-refund", Status: model.HarnessSettlementStatusRefunded, ModelName: "economy"}
+	recordHarnessSettlement(first, harnessSettlementMoneyForQuota(nil, 0, 0, "economy"), correlation)
+
+	var firstEvents []model.HarnessLedgerEvent
+	require.NoError(t, model.DB.Where("stream = ? AND gateway_request_id = ?",
+		model.HarnessLedgerStreamCost, "gw-first-refund").Find(&firstEvents).Error)
+	require.Len(t, firstEvents, 1)
+	assert.Equal(t, model.HarnessLedgerEventTypeCost, firstEvents[0].EventType,
+		"a first event is never a refund claim about a prior state")
+	assert.Nil(t, firstEvents[0].SupersedesEventId)
+	assert.Equal(t, 1, firstEvents[0].RecordVersion)
+
+	// Case 2: pending, then failed with a different amount. The amount moved, so
+	// the platform is told the cost was corrected rather than merely re-stated.
+	start := &model.HarnessSettlement{RequestId: "gw-failed", Status: model.HarnessSettlementStatusPending, ModelName: "economy"}
+	recordHarnessSettlement(start, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
+
+	failed := &model.HarnessSettlement{RequestId: "gw-failed", Status: model.HarnessSettlementStatusFailed, ModelName: "economy"}
+	recordHarnessSettlement(failed, harnessSettlementMoneyForQuota(nil, 500_000, 0, "economy"), correlation)
+
+	var failedEvents []model.HarnessLedgerEvent
+	require.NoError(t, model.DB.Where("stream = ? AND gateway_request_id = ?",
+		model.HarnessLedgerStreamCost, "gw-failed").Order("id ASC").Find(&failedEvents).Error)
+	require.Len(t, failedEvents, 2)
+	assert.Equal(t, model.HarnessLedgerEventTypeCostCorrection, failedEvents[1].EventType,
+		"a failure that changes the amount corrects the cost")
+	assert.Equal(t, 2, failedEvents[1].RecordVersion)
+	require.NotNil(t, failedEvents[1].SupersedesEventId)
+	assert.Equal(t, failedEvents[0].EventId, *failedEvents[1].SupersedesEventId)
+}
+
 // TestPostTextConsumeQuotaRecordsUnavailableUsage drives the real text settle path
 // when the upstream returned no usage: the ledger must say unavailable rather than
 // report a measured zero, because the gateway never observed the consumption.

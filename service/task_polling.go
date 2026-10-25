@@ -732,8 +732,14 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 			logger.LogWarn(ctx, common.LogText("task %s expression settlement failed, keeping the pre-consumed quota: %v", task.TaskID, err))
 			// Nothing was refunded: the pre-consumed quota is what this task
 			// actually costs, so the ledger settles at task.Quota rather than
-			// staying pending until reconciliation.
-			recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota)
+			// staying pending until reconciliation. The completion's own total is
+			// still passed through: it is a real measurement even though the
+			// expression could not price it.
+			var completionTotal []int
+			if total := taskResultTotalTokens(taskResult); total > 0 {
+				completionTotal = []int{total}
+			}
+			recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota, completionTotal...)
 			return true
 		}
 		if result.Clamp != nil {
