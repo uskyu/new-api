@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -75,6 +76,10 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 					errChan <- fmt.Errorf("error counting text token: %v", err)
 					return
 				}
+				// This frame carried no usage, so the counts are computed locally.
+				// Marking the request lets the ledger report the settlement as
+				// estimated rather than as an upstream measurement.
+				common.SetContextKey(c, constant.ContextKeyLocalCountTokens, true)
 				logger.LogInfo(c, common.LogText("type: %s, textToken: %d, audioToken: %d", realtimeEvent.Type, textToken, audioToken))
 				localUsage.TotalTokens += textToken + audioToken
 				localUsage.InputTokens += textToken + audioToken
@@ -148,6 +153,11 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 							errChan <- fmt.Errorf("error counting text token: %v", err)
 							return
 						}
+						// This frame carried no usage, so the counts are computed
+						// locally. Marking the request lets the ledger report the
+						// settlement as estimated rather than as an upstream
+						// measurement.
+						common.SetContextKey(c, constant.ContextKeyLocalCountTokens, true)
 						logger.LogInfo(c, common.LogText("type: %s, textToken: %d, audioToken: %d", realtimeEvent.Type, textToken, audioToken))
 						localUsage.TotalTokens += textToken + audioToken
 						info.IsFirstRequest = false
@@ -180,6 +190,10 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 						errChan <- fmt.Errorf("error counting text token: %v", err)
 						return
 					}
+					// This frame carried no usage, so the counts are computed
+					// locally. Marking the request lets the ledger report the
+					// settlement as estimated rather than as an upstream measurement.
+					common.SetContextKey(c, constant.ContextKeyLocalCountTokens, true)
 					logger.LogInfo(c, common.LogText("type: %s, textToken: %d, audioToken: %d", realtimeEvent.Type, textToken, audioToken))
 					localUsage.TotalTokens += textToken + audioToken
 					localUsage.OutputTokens += textToken + audioToken

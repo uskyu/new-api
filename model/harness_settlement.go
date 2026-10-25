@@ -110,43 +110,68 @@ func UpsertHarnessSettlementTx(tx *gorm.DB, row *HarnessSettlement) error {
 		// automatic timestamp so a zero value would stay zero forever.
 		row.CreatedAt = common.GetTimestamp()
 	}
+	// The updated columns are named rather than written as raw expressions so GORM
+	// renders the new-row reference per dialect. A literal `excluded.col` is
+	// PostgreSQL-only spelling; MySQL answers "Unknown column 'excluded.col'", so
+	// writing the expressions by hand silently breaks every MySQL deployment.
+	//
+	// harness_request_id and harness_run_id are excluded from the column list
+	// because they need a keep-first-non-empty rule instead of a plain overwrite.
+	updates := clause.AssignmentColumns([]string{
+		"task_id",
+		"token_id",
+		"user_id",
+		"status",
+		"model_name",
+		"channel_id",
+		"pricing_group",
+		"group_ratio",
+		"tax_rate_percent",
+		"prompt_tokens",
+		"completion_tokens",
+		"cache_read_tokens",
+		"cache_write_tokens",
+		"total_tokens",
+		"total_tokens_known",
+		"split_unknown",
+		"base_amount",
+		"total_amount",
+		"currency",
+		"cost_calculation_version",
+		"settled_at",
+	})
+	// The platform correlation is written once and then never cleared. A re-settle
+	// can arrive with an empty correlation -- an async task settling from a path
+	// that lost the request context, or a later refund -- and a plain assignment
+	// would wipe the fact that this row belongs to the platform ledger, silently
+	// detaching it from the feed it was reported on. Keeping the first non-empty
+	// value is safe because a request id maps to exactly one platform request for
+	// its whole life.
+	newRow := "excluded"
+	if tx.Dialector.Name() == "mysql" {
+		newRow = "VALUES"
+	}
+	updates = append(updates,
+		clause.Assignment{Column: clause.Column{Name: "harness_request_id"},
+			Value: gorm.Expr(keepFirstNonEmpty("harness_request_id", newRow))},
+		clause.Assignment{Column: clause.Column{Name: "harness_run_id"},
+			Value: gorm.Expr(keepFirstNonEmpty("harness_run_id", newRow))},
+	)
 	return tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "request_id"}},
-		DoUpdates: clause.Assignments(map[string]any{
-			"task_id":                  gorm.Expr("excluded.task_id"),
-			"token_id":                 gorm.Expr("excluded.token_id"),
-			"user_id":                  gorm.Expr("excluded.user_id"),
-			"status":                   gorm.Expr("excluded.status"),
-			"model_name":               gorm.Expr("excluded.model_name"),
-			"channel_id":               gorm.Expr("excluded.channel_id"),
-			"pricing_group":            gorm.Expr("excluded.pricing_group"),
-			"group_ratio":              gorm.Expr("excluded.group_ratio"),
-			"tax_rate_percent":         gorm.Expr("excluded.tax_rate_percent"),
-			"prompt_tokens":            gorm.Expr("excluded.prompt_tokens"),
-			"completion_tokens":        gorm.Expr("excluded.completion_tokens"),
-			"cache_read_tokens":        gorm.Expr("excluded.cache_read_tokens"),
-			"cache_write_tokens":       gorm.Expr("excluded.cache_write_tokens"),
-			"total_tokens":             gorm.Expr("excluded.total_tokens"),
-			"total_tokens_known":       gorm.Expr("excluded.total_tokens_known"),
-			"split_unknown":            gorm.Expr("excluded.split_unknown"),
-			"base_amount":              gorm.Expr("excluded.base_amount"),
-			"total_amount":             gorm.Expr("excluded.total_amount"),
-			"currency":                 gorm.Expr("excluded.currency"),
-			"cost_calculation_version": gorm.Expr("excluded.cost_calculation_version"),
-			// The platform correlation is written once and then never cleared. A
-			// re-settle can arrive with an empty correlation -- an async task settling
-			// from a path that lost the request context, or a later refund -- and a
-			// plain assignment would wipe the fact that this row belongs to the
-			// platform ledger, silently detaching it from the feed it was reported on.
-			// Keeping the first non-empty value is safe because a request id maps to
-			// exactly one platform request for its whole life.
-			"harness_request_id": gorm.Expr(
-				"CASE WHEN excluded.harness_request_id <> '' THEN excluded.harness_request_id ELSE harness_request_id END"),
-			"harness_run_id": gorm.Expr(
-				"CASE WHEN excluded.harness_run_id <> '' THEN excluded.harness_run_id ELSE harness_run_id END"),
-			"settled_at": gorm.Expr("excluded.settled_at"),
-		}),
+		Columns:   []clause.Column{{Name: "request_id"}},
+		DoUpdates: updates,
 	}).Create(row).Error
+}
+
+// keepFirstNonEmpty builds the dialect-appropriate expression that keeps an
+// existing non-empty correlation id. newRow names the dialect's reference to the
+// row proposed for insert: PostgreSQL spells it `excluded`, MySQL `VALUES`.
+func keepFirstNonEmpty(column, newRow string) string {
+	incoming := newRow + "." + column
+	if newRow == "VALUES" {
+		incoming = "VALUES(" + column + ")"
+	}
+	return "CASE WHEN " + incoming + " <> '' THEN " + incoming + " ELSE " + column + " END"
 }
 
 // GetHarnessSettlementForToken loads one settlement scoped to the owning token.
