@@ -294,12 +294,17 @@ func taskModelName(task *model.Task) string {
 // back to liveRatio only for tasks submitted before the context existed. The
 // procurement amount must not follow a configuration edit made while the task
 // runs, which is exactly what reading ratio_setting here would do.
+//
+// A frozen zero is a real price (models such as glm-4-flash are configured at
+// ratio 0), so presence is decided by the version tag, never by the value: a
+// value check would treat a deliberately free model as "missing" and silently
+// re-price it from live configuration.
 func frozenTaskModelRatio(task *model.Task, liveRatio float64) float64 {
-	if bc := task.PrivateData.BillingContext; bc != nil && bc.Procurement != nil &&
-		bc.Procurement.Version > 0 && bc.ModelRatio > 0 {
-		return bc.ModelRatio
+	bc := task.PrivateData.BillingContext
+	if bc == nil || bc.Procurement == nil || bc.Procurement.Version <= 0 {
+		return liveRatio
 	}
-	return liveRatio
+	return bc.ModelRatio
 }
 
 // stampFrozenProcurementPreGroupQuota records the pre-group amount a usage-priced

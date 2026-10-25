@@ -31,7 +31,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/shopspring/decimal"
 )
 
 func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
@@ -518,7 +517,7 @@ func RelayTask(c *gin.Context) {
 // fixed-price billing) also freezes the derived pre-group amount. A usage-priced
 // task must not: its quantity only exists at completion, so it freezes the
 // inputs and the settlement path derives the amount against actual usage.
-func newTaskProcurementContext(relayInfo *relaycommon.RelayInfo) *model.TaskProcurementContext {
+func newTaskProcurementContext(relayInfo *relaycommon.RelayInfo, result *relay.TaskSubmitResult) *model.TaskProcurementContext {
 	if relayInfo == nil {
 		return nil
 	}
@@ -532,17 +531,21 @@ func newTaskProcurementContext(relayInfo *relaycommon.RelayInfo) *model.TaskProc
 		PriceVersion:          priceVersion,
 		CustomerGroupRatio:    relayInfo.PriceData.GroupRatioInfo.GroupRatio,
 	}
-	// Only a per-call reservation is final at submit time: its quantity never
-	// changes afterwards. A usage-priced task keeps this empty and settles from
-	// the frozen ratios plus the usage it actually reports.
-	perCallBilling := common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice
-	if perCallBilling && relayInfo.PriceData.UsePrice {
-		// The reservation is the fixed request price scaled by the request
-		// multipliers, before the customer group ratio. Derived from the price
-		// itself rather than by dividing the reservation, which would lose
-		// precision and divide by zero on a free group.
-		preGroup := relayInfo.PriceData.ApplyOtherRatiosToFloat(relayInfo.PriceData.ModelPrice * common.QuotaPerUnit)
-		frozen.PreGroupQuota = decimal.NewFromFloat(preGroup).String()
+	// Only an amount that is final at submit time may be frozen. Three cases
+	// qualify: a fixed request price, a per-request model ratio, and a tiered
+	// expression that already settled against the submit response. Any other task
+	// is usage-priced, so its quantity only exists later and it keeps this empty.
+	//
+	// The value always comes from the billing path that computed it, never from
+	// dividing the charged quota: that division would lose precision and divide by
+	// zero on a free group.
+	finalAtSubmit := common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) ||
+		relayInfo.PriceData.UsePrice ||
+		(result != nil && result.Immediate != nil && result.Immediate.Status == model.TaskStatusSuccess)
+	if finalAtSubmit && relayInfo.ProcurementBasis != nil {
+		if preGroup, ok := relayInfo.ProcurementBasis.PreGroupQuotaDecimal(); ok {
+			frozen.PreGroupQuota = preGroup.String()
+		}
 	}
 	return frozen
 }
@@ -721,7 +724,7 @@ func executeTaskSubmissionWith(
 		OriginModelName: relayInfo.OriginModelName,
 		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
 		TieredSnapshot:  relayInfo.TieredBillingSnapshot,
-		Procurement:     newTaskProcurementContext(relayInfo),
+		Procurement:     newTaskProcurementContext(relayInfo, result),
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData

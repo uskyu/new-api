@@ -25,6 +25,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 type TaskSubmitResult struct {
@@ -329,6 +330,15 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		info.PriceData.Quota = quota
 		noteTaskQuotaClamp(info, clamp)
 	}
+	// The request multipliers (n, seconds, size) describe the quantity actually
+	// purchased, so they belong in the procurement base too. Applied to the
+	// pre-group amount rather than the charged quota, which already carries the
+	// customer group ratio.
+	if preGroup, ok := preTaskBasis(info); ok {
+		preGroup = info.PriceData.ApplyOtherRatiosToFloat(preGroup)
+		info.ProcurementBasis = types.NewProcurementBasis(
+			decimal.NewFromFloat(preGroup), info.PriceData.GroupRatioInfo.GroupRatio)
+	}
 
 	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
 	if info.Billing == nil && !info.PriceData.FreeModel {
@@ -384,6 +394,13 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 				snap.UsageFacts = facts
 				snap.EstimatedTier = settlement.MatchedTier
 				noteTaskQuotaClamp(info, settlement.Clamp)
+				// The expression priced the actual usage here, so its pre-group
+				// amount is the procurement base. Without this the reservation's
+				// pre-group value would be used even though the settlement
+				// superseded it. The task then freezes this final amount at submit
+				// because its quantity is already known.
+				info.ProcurementBasis = types.NewProcurementBasis(
+					decimal.NewFromFloat(settlement.ActualQuotaBeforeGroup), snap.GroupRatio)
 			}
 		}
 	} else {
@@ -408,6 +425,21 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		Immediate:      parsed.Immediate,
 		PluginState:    parsed.PluginState,
 	}, nil
+}
+
+// preTaskBasis returns the pre-group reservation a per-call price helper recorded
+// before the customer group ratio was applied. ok is false when the helper left
+// it unset (a free reservation), in which case there is no purchase to price.
+func preTaskBasis(info *relaycommon.RelayInfo) (float64, bool) {
+	if info == nil || info.ProcurementBasis == nil {
+		return 0, false
+	}
+	preGroup, ok := info.ProcurementBasis.PreGroupQuotaDecimal()
+	if !ok {
+		return 0, false
+	}
+	value, _ := preGroup.Float64()
+	return value, true
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。

@@ -22,6 +22,7 @@ import (
 	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 func modelPriceNotConfiguredError(c *gin.Context, modelName string, userId int) error {
@@ -243,10 +244,15 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 
 	var quota int
 	freeModel := false
+	// quotaBeforeGroup is the reservation before the customer group ratio, which
+	// is the procurement base. Taking the charged quota instead would carry the
+	// caller's ratio into the operator's cost.
+	var quotaBeforeGroup float64
 
 	if usePrice {
 		var err error
-		quota, err = common.QuotaFromFloatStrict(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
+		quotaBeforeGroup = modelPrice * common.QuotaPerUnit
+		quota, err = common.QuotaFromFloatStrict(quotaBeforeGroup * groupRatioInfo.GroupRatio)
 		if err != nil {
 			return hosttypes.PriceData{}, err
 		}
@@ -259,7 +265,8 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 	} else {
 		// 按量计费：以模型倍率的一半作为预扣额度
 		var err error
-		quota, err = common.QuotaFromFloatStrict(modelRatio / 2 * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
+		quotaBeforeGroup = modelRatio / 2 * common.QuotaPerUnit
+		quota, err = common.QuotaFromFloatStrict(quotaBeforeGroup * groupRatioInfo.GroupRatio)
 		if err != nil {
 			return hosttypes.PriceData{}, err
 		}
@@ -279,6 +286,13 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 		UsePrice:       usePrice,
 		Quota:          quota,
 		GroupRatioInfo: groupRatioInfo,
+	}
+	// Per-call billing fixes its amount at submit time, so the pre-group
+	// reservation is already the procurement base. A free reservation has no
+	// purchase behind it and leaves the basis unset.
+	if !freeModel {
+		info.ProcurementBasis = hosttypes.NewProcurementBasis(
+			decimal.NewFromFloat(quotaBeforeGroup), groupRatioInfo.GroupRatio)
 	}
 	return priceData, nil
 }

@@ -391,12 +391,13 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		// charged.
 		summary.PreGroupQuota = decimal.Zero
 	} else if !ratio.IsZero() && summary.Quota == 0 {
+		// The charge rounded to zero and the minimum-charge rule lifts it to one
+		// quota so the request is not silently free. That floor is a charging
+		// rule, not a purchase: only the artificial unit is excluded from the
+		// basis. The real pre-rounding amount survives, because billable usage
+		// did occur and losing it would discard exactly the precision this basis
+		// exists to keep. PreGroupQuota is left untouched here.
 		summary.Quota = 1
-		// This floor keeps a rounded-to-zero charge from being silently free. It
-		// is a charging rule with no purchase behind it, so the basis must not
-		// inherit the artificial 1: that would book a procurement cost for an
-		// amount that rounded away.
-		summary.PreGroupQuota = decimal.Zero
 	}
 
 	return summary

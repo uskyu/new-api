@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -402,11 +403,13 @@ func TestTextQuotaSummaryExcludesToolSurchargeFromBasis(t *testing.T) {
 		"the procurement basis must not include the platform tool surcharge")
 }
 
-// TestTextQuotaSummaryFloorChargeBooksNoPurchase covers the minimum-charge rule:
+// TestTextQuotaSummaryFloorChargeKeepsRealBasis covers the minimum-charge rule:
 // a request whose real amount rounds to zero is still charged one quota so it is
-// not silently free, but that artificial unit is a charging rule with no
-// purchase behind it, so the procurement basis must stay zero.
-func TestTextQuotaSummaryFloorChargeBooksNoPurchase(t *testing.T) {
+// not silently free. That artificial unit is a charging rule, but billable usage
+// did occur, so the real pre-rounding amount must survive in the procurement
+// basis -- dropping it would discard exactly the precision the basis exists to
+// preserve.
+func TestTextQuotaSummaryFloorChargeKeepsRealBasis(t *testing.T) {
 	originalQuotaPerUnit := common.QuotaPerUnit
 	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
 	common.QuotaPerUnit = 500_000
@@ -428,8 +431,159 @@ func TestTextQuotaSummaryFloorChargeBooksNoPurchase(t *testing.T) {
 	summary := calculateTextQuotaSummary(ctx, info, &dto.Usage{PromptTokens: 1, TotalTokens: 1})
 
 	assert.Equal(t, 1, summary.Quota, "a non-free model still charges at least one quota")
+	assert.Equal(t, "0.000001", summary.PreGroupQuota.String(),
+		"the real pre-rounding amount survives; only the artificial floor is not a purchase")
+}
+
+// TestTextQuotaSummaryNoUsageBooksNoPurchase keeps the other half of that rule:
+// with no billable usage at all there is no purchase, so the basis is zero
+// rather than whatever arithmetic happened to produce.
+func TestTextQuotaSummaryNoUsageBooksNoPurchase(t *testing.T) {
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "no-usage-model",
+		RelayFormat:     types.RelayFormatOpenAI,
+		PriceData: hosttypes.PriceData{
+			ModelRatio:     1,
+			GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+
+	summary := calculateTextQuotaSummary(ctx, info, &dto.Usage{})
+
+	assert.Equal(t, 0, summary.Quota)
 	assert.True(t, summary.PreGroupQuota.IsZero(),
-		"the artificial minimum charge must not become a procurement cost, got %s", summary.PreGroupQuota)
+		"nothing was billable, so nothing was purchased, got %s", summary.PreGroupQuota)
+}
+
+// TestPostAudioConsumeQuotaRecordsProcurementBasis drives the real audio settle
+// path, which is a separate entry point from the text one: it used to call the
+// wrapper that discards the pre-group amount, so its ledger row silently fell
+// back to the charged quota and re-imported the customer group ratio.
+func TestPostAudioConsumeQuotaRecordsProcurementBasis(t *testing.T) {
+	truncate(t)
+	const userID, channelID = 71, 71
+	seedUser(t, userID, 10_000_000)
+	seedChannel(t, channelID)
+
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/audio/speech", nil)
+
+	// Group ratio 3 must scale the charge but never the procurement basis.
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		OriginModelName: "audio-basis-model",
+		UsingGroup:      "default",
+		StartTime:       time.Now(),
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: channelID},
+		PriceData: hosttypes.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  hosttypes.GroupRatioInfo{GroupRatio: 3},
+		},
+	}
+
+	// The audio settle path reads the detailed input breakdown, not PromptTokens.
+	usage := &dto.Usage{
+		PromptTokensDetails: dto.InputTokenDetails{TextTokens: 100},
+		TotalTokens:         100,
+	}
+	PostAudioConsumeQuota(ctx, info, usage, nil)
+
+	require.NotNil(t, info.ProcurementBasis, "the audio path must record a procurement basis")
+	preGroup, ok := info.ProcurementBasis.PreGroupQuotaDecimal()
+	require.True(t, ok)
+
+	// 100 input text tokens at model ratio 1 is 100 quota before the ratio.
+	assert.Equal(t, "100", preGroup.String(),
+		"the basis is the amount before the customer group ratio")
+	assert.Equal(t, 3.0, info.ProcurementBasis.CustomerGroupRatio)
+	assert.Equal(t, 300, getLastLog(t).Quota,
+		"the customer is still charged the pre-group amount times the group ratio")
+}
+
+// TestPostWssConsumeQuotaZeroUsageRecordsZeroBasis keeps the basis consistent with
+// the final settlement state: a request with no billable usage is settled at zero,
+// so the basis must be zero too instead of describing an amount that was zeroed.
+func TestPostWssConsumeQuotaZeroUsageRecordsZeroBasis(t *testing.T) {
+	truncate(t)
+	const userID, channelID = 72, 72
+	seedUser(t, userID, 10_000_000)
+	seedChannel(t, channelID)
+
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("GET", "/v1/realtime", nil)
+
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		OriginModelName: "wss-zero-model",
+		UsingGroup:      "default",
+		StartTime:       time.Now(),
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: channelID},
+		PriceData: hosttypes.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  hosttypes.GroupRatioInfo{GroupRatio: 3},
+		},
+	}
+
+	PostWssConsumeQuota(ctx, info, "wss-zero-model", &dto.RealtimeUsage{}, nil)
+
+	require.NotNil(t, info.ProcurementBasis)
+	preGroup, ok := info.ProcurementBasis.PreGroupQuotaDecimal()
+	require.True(t, ok)
+	assert.True(t, preGroup.IsZero(),
+		"no usage means no purchase, got %s", preGroup)
+}
+
+// TestLedgerTaskFrozenZeroModelRatioIsReal pins the boundary between "frozen
+// zero" and "missing". Models such as glm-4-flash are legitimately configured at
+// model ratio 0, so a frozen zero is a real price. Presence is decided by the
+// version tag: treating a zero as missing would silently re-price a deliberately
+// free model from live configuration and break the freeze guarantee.
+func TestLedgerTaskFrozenZeroModelRatioIsReal(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	channelId := seedHarnessLedgerChannel(t, "economy", "zero-ratio-group", 0.8, 0)
+
+	task := &model.Task{
+		TaskID:    "task-zero-ratio",
+		ChannelId: channelId,
+		PrivateData: model.TaskPrivateData{
+			BillingContext: &model.TaskBillingContext{
+				OriginModelName: "glm-4-flash",
+				ModelRatio:      0,
+				Procurement: &model.TaskProcurementContext{
+					Version:               1,
+					PricingGroup:          "zero-ratio-group",
+					ProcurementGroupRatio: 0.8,
+					QuotaPerUnit:          500_000,
+				},
+			},
+		},
+	}
+
+	// The frozen zero must win over a live ratio that says otherwise.
+	changed := ratio_setting.GetModelRatioCopy()
+	changed["glm-4-flash"] = 5
+	encoded, err := common.Marshal(changed)
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(encoded)))
+
+	assert.Equal(t, 0.0, frozenTaskModelRatio(task, 5),
+		"a frozen zero model ratio is a real price, not a missing value")
 }
 
 // TestLedgerTotalAmountIncludesSupplierTax pins the cost formula against the

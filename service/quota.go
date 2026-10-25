@@ -222,7 +222,6 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 			preGroupQuota = decimal.NewFromFloat(tieredResult.ActualQuotaBeforeGroup)
 		}
 	}
-	relayInfo.ProcurementBasis = types.NewProcurementBasis(preGroupQuota, groupRatio)
 
 	totalTokens := usage.TotalTokens
 	var logContent []*common.Message
@@ -254,6 +253,10 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
+	// Recorded after the branches above: a request with no billable usage has no
+	// purchase either, so the basis must agree with the final charged quota
+	// instead of describing an amount that was then zeroed.
+	relayInfo.ProcurementBasis = types.NewProcurementBasis(preGroupQuota, groupRatio)
 
 	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
 		logger.LogError(ctx, common.LogText("error settling billing: %s", err.Error()))
@@ -364,11 +367,19 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		GroupRatio: groupRatio,
 	}
 
-	quota, clamp := calculateAudioQuota(quotaInfo)
+	quota, clamp, preGroupQuota := calculateAudioQuotaWithBasis(quotaInfo)
 	noteQuotaClamp(relayInfo, clamp)
 	if tieredOk {
 		quota = tieredQuota
+		// The expression supersedes the audio estimate entirely; its pre-group
+		// amount is the procurement base. A fixed request price still has a real
+		// purchase behind it, and ActualQuotaBeforeGroup already excludes the
+		// customer group ratio, so no special case is needed here.
+		if tieredResult != nil {
+			preGroupQuota = decimal.NewFromFloat(tieredResult.ActualQuotaBeforeGroup)
+		}
 	}
+	relayInfo.ProcurementBasis = types.NewProcurementBasis(preGroupQuota, groupRatio)
 
 	totalTokens := usage.TotalTokens
 	var logContent []*common.Message
@@ -766,11 +777,17 @@ func harnessSettlementMoneyForQuota(basis *types.ProcurementBasis, quota int, ch
 	} else {
 		base = decimal.NewFromInt(int64(quota)).Div(decimal.NewFromFloat(quotaPerUnit))
 		money.CostCalculationVersion = harnessCostCalculationFallback
-		// Only warn when the fallback can actually be wrong: with a unit group
-		// ratio the two amounts coincide, so the warning would be noise on every
-		// request of a default deployment.
-		if basis != nil && basis.CustomerGroupRatio != 0 && basis.CustomerGroupRatio != 1 {
-			common.SysLog(common.LogText("harness settlement: no procurement basis with customer group ratio %v (channel=%d model=%s) - base_amount may include the customer multiplier", basis.CustomerGroupRatio, channelId, modelName))
+		// Warn whenever the fallback can actually be wrong. Only a unit ratio makes
+		// the two amounts coincide, so that single case stays quiet to avoid noise
+		// on every request of a default deployment; a zero ratio must be reported,
+		// because there the charged quota carries no amount at all and the ledger
+		// silently loses the whole cost.
+		if basis == nil || basis.CustomerGroupRatio != 1 {
+			ratio := 0.0
+			if basis != nil {
+				ratio = basis.CustomerGroupRatio
+			}
+			common.SysLog(common.LogText("harness settlement: no procurement basis (customer group ratio %v, channel=%d model=%s) - base_amount may include the customer multiplier or lose the cost entirely", ratio, channelId, modelName))
 		}
 	}
 
