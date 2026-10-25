@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/controller"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
@@ -291,4 +293,110 @@ func TestHarnessGatewayEndToEnd(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+limitedToken)
 	engine.ServeHTTP(recorder, request)
 	assert.Equal(t, http.StatusForbidden, recorder.Code, "a principal without gateway.usage.read must be refused")
+}
+
+// harnessCatalogTestEngine mounts only the pieces the tier catalog needs: the JWT
+// verifier and the catalog handler. The full relay chain would pull in Redis and
+// upstream distribution, neither of which the catalog touches.
+func harnessCatalogTestEngine() *gin.Engine {
+	engine := gin.New()
+	engine.GET("/v1/models", middleware.HarnessJWT(), func(c *gin.Context) {
+		if _, ok := middleware.GetHarnessPrincipal(c); !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized,
+				gin.H{"error": "a verified Harness credential is required"})
+			return
+		}
+		controller.GetHarnessTierCatalog(c)
+	})
+	return engine
+}
+
+// TestHarnessTierCatalogConditionalGet pins the A3 contract: the first read answers
+// 200 with an ETag, and a second read carrying that ETag answers 304 with no body.
+// It also pins the permission boundary, because a catalog that leaks to an
+// unverified caller would expose an operator's commercial tiers.
+func TestHarnessTierCatalogConditionalGet(t *testing.T) {
+	setupRelayRouterTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Option{}))
+	model.InitOptionMap()
+
+	user := &model.User{Username: "catalog-e2e", Status: common.UserStatusEnabled, Group: "default"}
+	require.NoError(t, model.DB.Create(user).Error)
+	serviceToken := &model.Token{
+		Name: "catalog-e2e-service", Key: "catalog-e2e-key", UserId: user.Id,
+		Status: common.TokenStatusEnabled, ExpiredTime: -1,
+		UnlimitedQuota: true, Group: "default",
+	}
+	require.NoError(t, model.DB.Create(serviceToken).Error)
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	require.NoError(t, model.UpdateOption(setting.HarnessJWKSURLOptionKey, harnessE2EJWKS(t, key, "kid-catalog")))
+	require.NoError(t, model.UpdateOption(setting.HarnessJWTIssuerOptionKey, "harness"))
+	require.NoError(t, model.UpdateOption(setting.HarnessJWTAudienceOptionKey, "new-api"))
+	subjectMap, err := json.Marshal(map[string]int{"harness-gateway": serviceToken.Id})
+	require.NoError(t, err)
+	require.NoError(t, model.UpdateOption(setting.HarnessSubjectTokenMapOptionKey, string(subjectMap)))
+	t.Cleanup(func() {
+		model.DB.Exec("DELETE FROM options WHERE key IN ?", []string{
+			setting.HarnessJWKSURLOptionKey, setting.HarnessJWTIssuerOptionKey,
+			setting.HarnessJWTAudienceOptionKey, setting.HarnessSubjectTokenMapOptionKey,
+		})
+	})
+
+	engine := harnessCatalogTestEngine()
+
+	t.Run("a credential without the catalog scope is refused", func(t *testing.T) {
+		limited := harnessE2ESign(t, key, "kid-catalog", "gateway.usage.read")
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		request.Header.Set("Authorization", "Bearer "+limited)
+		engine.ServeHTTP(recorder, request)
+		assert.Equal(t, http.StatusForbidden, recorder.Code,
+			"the catalog must require its own read scope")
+	})
+
+	t.Run("an unsigned caller is refused", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		engine.ServeHTTP(recorder, request)
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+	})
+
+	t.Run("the catalog answers 200 with an ETag then 304", func(t *testing.T) {
+		jwt := harnessE2ESign(t, key, "kid-catalog", "gateway.catalog.read")
+
+		first := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		request.Header.Set("Authorization", "Bearer "+jwt)
+		engine.ServeHTTP(first, request)
+		require.Equal(t, http.StatusOK, first.Code, "body=%s", first.Body.String())
+
+		etag := first.Header().Get("ETag")
+		require.NotEmpty(t, etag, "A3 must expose an ETag for conditional queries")
+
+		var body struct {
+			Object string `json:"object"`
+			Data   []struct {
+				Id           string   `json:"id"`
+				Object       string   `json:"object"`
+				Capabilities []string `json:"capabilities"`
+			} `json:"data"`
+			CatalogVersion string `json:"catalog_version"`
+			ETag           string `json:"etag"`
+		}
+		require.NoError(t, json.Unmarshal(first.Body.Bytes(), &body))
+		assert.Equal(t, "list", body.Object)
+		assert.NotEmpty(t, body.CatalogVersion, "the catalog carries a version")
+		assert.Equal(t, etag, body.ETag, "the body echoes the header ETag")
+
+		second := httptest.NewRecorder()
+		request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		request.Header.Set("Authorization", "Bearer "+jwt)
+		request.Header.Set("If-None-Match", etag)
+		engine.ServeHTTP(second, request)
+		assert.Equal(t, http.StatusNotModified, second.Code,
+			"a matching If-None-Match must answer 304")
+		assert.Empty(t, second.Body.String(), "304 carries no body")
+	})
 }

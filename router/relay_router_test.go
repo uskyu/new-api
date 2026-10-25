@@ -124,3 +124,46 @@ func setupRelayRouterTestDB(t *testing.T) {
 		}
 	})
 }
+
+// TestRelayProtocolRoutesRequireAuthentication pins the route registration and the
+// authentication boundary for the four model-call protocols the contract names:
+// A1 OpenAI chat, A2 OpenAI Responses, A4 Anthropic Messages and A9 Gemini native.
+//
+// It deliberately stops at the auth boundary. What each handler does with a valid
+// credential depends on a channel that supports that protocol, and asserting a
+// protocol-level failure here would confuse "no such upstream" with "the gateway
+// cannot route this format". The authenticated paths are covered against a real
+// upstream in the acceptance report.
+func TestRelayProtocolRoutesRequireAuthentication(t *testing.T) {
+	setupRelayRouterTestDB(t)
+	engine := gin.New()
+	// SetRouter is the full entry point: it also mounts the task-plugin protocol
+	// routes, and A2 /v1/responses lives there rather than in SetRelayRouter alone.
+	SetRouter(engine, WebAssets{})
+
+	for _, route := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{"A1 OpenAI chat", "/v1/chat/completions", `{"model":"tier","messages":[]}`},
+		{"A2 OpenAI Responses", "/v1/responses", `{"model":"tier","input":"hi"}`},
+		{"A4 Anthropic Messages", "/v1/messages", `{"model":"tier","max_tokens":1,"messages":[]}`},
+		{"A9 Gemini native", "/v1beta/models/tier:generateContent", `{"contents":[]}`},
+	} {
+		t.Run(route.name+" rejects an unauthenticated caller", func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, route.path, strings.NewReader(route.body))
+			request.Header.Set("Content-Type", "application/json")
+			engine.ServeHTTP(recorder, request)
+
+			// A missing credential must never reach a handler. The exact status is
+			// 401 for the authenticated routes; a 404 would mean the route is absent
+			// entirely, which is what this case is guarding against.
+			assert.NotEqual(t, http.StatusNotFound, recorder.Code,
+				"the route must be registered")
+			assert.Equal(t, http.StatusUnauthorized, recorder.Code,
+				"body=%s", recorder.Body.String())
+		})
+	}
+}
