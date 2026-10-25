@@ -1127,7 +1127,7 @@ func harnessCostEventIfChanged(settlement *model.HarnessSettlement, money harnes
 	}
 	return &model.HarnessLedgerEvent{
 		Stream:                 model.HarnessLedgerStreamCost,
-		EventType:              harnessCostEventTypeForStatus(settlement.Status, previous, money.BaseAmount),
+		EventType:              harnessCostEventTypeForStatus(settlement.Status, previous, money),
 		HarnessRequestId:       correlation.HarnessRequestId,
 		GatewayRequestId:       settlement.RequestId,
 		RunId:                  correlation.HarnessRunId,
@@ -1274,10 +1274,17 @@ func previousHarnessLedgerEvent(stream, gatewayRequestId string) *model.HarnessL
 // supersedes_event_id. A request can reach the refunded status as its very first
 // ledger state (a task that is already terminal at submission, or a refund of a
 // zero reservation), and labelling that first event a correction would produce an
-// event that claims a predecessor it does not have. hasPrevious distinguishes the
-// two cases; the amount semantics are identical, only the label differs.
+// event that claims a predecessor it does not have.
+//
+// hasPrevious is therefore the only discriminator, not the status. This function
+// is reached only when the usage stream actually changed -- the caller compares the
+// previous event first and appends nothing otherwise -- so an appended event with a
+// predecessor always replaces a figure the platform already has. Keying on
+// "refunded" alone would label a corrected token count as plain usage while the
+// settlement stayed settled, telling the platform its earlier figure is still
+// current.
 func harnessUsageEventTypeForStatus(status string, hasPrevious bool) string {
-	if status == model.HarnessSettlementStatusRefunded && hasPrevious {
+	if hasPrevious {
 		return model.HarnessLedgerEventTypeUsageCorrection
 	}
 	return model.HarnessLedgerEventTypeUsage
@@ -1290,7 +1297,12 @@ func harnessUsageEventTypeForStatus(status string, hasPrevious bool) string {
 // correction when a previous event exists, and a change that leaves the amount
 // untouched is a status_change rather than a cost change. previous is the most
 // recent event of this request's cost stream, or nil on the first write.
-func harnessCostEventTypeForStatus(status string, previous *model.HarnessLedgerEvent, baseAmount string) string {
+//
+// "The amount" means every figure the platform reconciles against, not just the
+// pre-group base. Editing the procurement group ratio or the supplier tax rate
+// moves total_amount while base_amount stays put, and calling that a status_change
+// would report an unchanged cost for a request whose cost actually changed.
+func harnessCostEventTypeForStatus(status string, previous *model.HarnessLedgerEvent, money harnessSettlementMoney) string {
 	if previous == nil {
 		// The first event of a request is never a correction: there is nothing it
 		// could supersede, whatever state it starts in.
@@ -1299,10 +1311,21 @@ func harnessCostEventTypeForStatus(status string, previous *model.HarnessLedgerE
 	if status == model.HarnessSettlementStatusRefunded {
 		return model.HarnessLedgerEventTypeRefund
 	}
-	if previous.BaseAmount != baseAmount {
+	if harnessCostAmountChanged(previous, money) {
 		return model.HarnessLedgerEventTypeCostCorrection
 	}
 	return model.HarnessLedgerEventTypeStatusChange
+}
+
+// harnessCostAmountChanged reports whether the money a cost event states has moved
+// from the previous version. Every field that reaches B3's billing block counts,
+// so a re-price that only touches the ratio or the tax is still a correction.
+func harnessCostAmountChanged(previous *model.HarnessLedgerEvent, money harnessSettlementMoney) bool {
+	return previous.BaseAmount != money.BaseAmount ||
+		previous.TotalAmount != money.TotalAmount ||
+		previous.GroupRatio != money.GroupRatio ||
+		previous.TaxRatePercent != money.TaxRatePercent ||
+		previous.Currency != money.Currency
 }
 
 // recordRelayHarnessSettlement records the settled cost of one synchronous

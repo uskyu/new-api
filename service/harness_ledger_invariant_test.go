@@ -1118,6 +1118,11 @@ func TestLedgerChangeDetectionIsPerStream(t *testing.T) {
 		assert.Equal(t, costs[0].BaseAmount, costs[1].BaseAmount, "the base did not move")
 		assert.NotEqual(t, costs[0].TotalAmount, costs[1].TotalAmount, "the total did")
 		assert.Equal(t, 2, costs[1].RecordVersion)
+		// A moved total is a correction even though the base is unchanged. Keying
+		// the event type on the base alone would publish status_change here and tell
+		// the platform the amount it already has is still current.
+		assert.Equal(t, model.HarnessLedgerEventTypeCostCorrection, costs[1].EventType,
+			"a changed total_amount is a cost correction, not a status change")
 		require.NotNil(t, costs[1].SupersedesEventId)
 		assert.Equal(t, costs[0].EventId, *costs[1].SupersedesEventId)
 
@@ -1229,4 +1234,58 @@ func TestLedgerChangeDetectionIsPerStream(t *testing.T) {
 		assert.Contains(t, *costs[1].SupersedesEventId, model.HarnessLedgerStreamCost+"_")
 		assert.Equal(t, model.HarnessLedgerEventTypeRefund, costs[1].EventType)
 	})
+}
+
+// TestLedgerUsageCorrectionTypingForNonRefundSettles pins the event type when a
+// usage figure is corrected while the settlement itself stays settled.
+//
+// The contract defines usage_correction as a new event that supersedes the earlier
+// one. A corrected token count is exactly that, regardless of whether the money
+// moved: labelling it plain "usage" would tell the platform the earlier figure is
+// still current, which is the one thing the feed must never say.
+func TestLedgerUsageCorrectionTypingForNonRefundSettles(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	correlation := harnessSettlementCorrelation{
+		HarnessRequestId: "hrq_usage_typing",
+		HarnessRunId:     "run_usage_typing",
+		UsageUnit:        harnessUsageUnitToken,
+		UsageSource:      harnessUsageSourceUpstream,
+	}
+
+	first := &model.HarnessSettlement{
+		RequestId:        "gw-usage-typing",
+		Status:           model.HarnessSettlementStatusSettled,
+		ModelName:        "economy",
+		PromptTokens:     100,
+		CompletionTokens: 20,
+	}
+	recordHarnessSettlement(first, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
+
+	// The same money, a corrected completion count, and the settlement stays settled.
+	corrected := &model.HarnessSettlement{
+		RequestId:        "gw-usage-typing",
+		Status:           model.HarnessSettlementStatusSettled,
+		ModelName:        "economy",
+		PromptTokens:     100,
+		CompletionTokens: 25,
+	}
+	recordHarnessSettlement(corrected, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
+
+	var usageEvents []model.HarnessLedgerEvent
+	require.NoError(t, model.DB.Where("stream = ? AND gateway_request_id = ?",
+		model.HarnessLedgerStreamUsage, "gw-usage-typing").Order("id ASC").Find(&usageEvents).Error)
+	require.Len(t, usageEvents, 2, "a corrected token count is a new usage fact")
+
+	assert.Equal(t, model.HarnessLedgerEventTypeUsage, usageEvents[0].EventType,
+		"the first event states usage rather than correcting anything")
+	assert.Equal(t, model.HarnessLedgerEventTypeUsageCorrection, usageEvents[1].EventType,
+		"a correction must be labelled a correction even when the status did not change")
+	assert.Equal(t, 2, usageEvents[1].RecordVersion)
+	require.NotNil(t, usageEvents[1].SupersedesEventId)
+	assert.Equal(t, usageEvents[0].EventId, *usageEvents[1].SupersedesEventId)
 }
