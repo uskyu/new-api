@@ -85,6 +85,12 @@ func SetRelayRouter(router *gin.Engine) {
 	relayV1Router := router.Group("/v1")
 	relayV1Router.Use(middleware.RouteTag("relay"))
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
+	// A verified Harness principal must hold gateway.chat to call a model. The
+	// check sits before TokenAuth so the request is refused on its own credential
+	// rather than after being rewritten into the mapped service token. Non-Harness
+	// callers pass through untouched, so ordinary sk- clients are unaffected.
+	// /v1/models is registered on its own group above and keeps its catalog scope.
+	relayV1Router.Use(middleware.RequireHarnessScope(middleware.HarnessChatScope))
 	relayV1Router.Use(middleware.TokenAuth())
 	{
 		// Responses WebSocket route. Channel selection happens after the first
@@ -209,6 +215,9 @@ func SetRelayRouter(router *gin.Engine) {
 	})
 	relayGeminiRouter.Use(middleware.RouteTag("relay"))
 	relayGeminiRouter.Use(middleware.SystemPerformanceCheck())
+	// A9 (Gemini native) is a model call, so it needs the same gateway.chat scope
+	// as the other relay formats.
+	relayGeminiRouter.Use(middleware.RequireHarnessScope(middleware.HarnessChatScope))
 	relayGeminiRouter.Use(middleware.TokenAuth())
 	relayGeminiRouter.Use(middleware.ModelRequestRateLimit())
 	relayGeminiRouter.Use(middleware.Distribute())

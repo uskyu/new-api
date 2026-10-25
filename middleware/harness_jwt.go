@@ -120,6 +120,14 @@ func HarnessJWT() gin.HandlerFunc {
 	}
 }
 
+// HarnessChatScope is the scope a Harness principal needs to call a model
+// (A1/A2/A4/A9). It is named by the contract's scope table, not invented here:
+// gateway.chat authorises model calls, gateway.catalog.read the tier catalog,
+// gateway.usage.read / gateway.cost.read the ledgers, and gateway.health.read the
+// health probe. The catalog and ledger routes already enforce their own scope, so
+// this one covers exactly the model-call surface.
+const HarnessChatScope = "gateway.chat"
+
 // RequireHarnessScope rejects a verified Harness principal that lacks the
 // scope. Requests that were not identified as Harness callers pass through, so
 // the middleware is safe on shared routes.

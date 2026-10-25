@@ -411,6 +411,79 @@ func TestRequireHarnessScopeRejectsMissingScope(t *testing.T) {
 	assert.False(t, c.IsAborted())
 }
 
+// TestRequireHarnessChatScopeGatesModelCalls pins the contract's model-call
+// permission. gateway.chat authorises A1/A2/A4/A9, so a Harness principal must
+// hold it to reach a relay route; a principal holding only the read scopes is
+// refused, and a non-Harness caller is untouched.
+func TestRequireHarnessChatScopeGatesModelCalls(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	newContext := func() (*gin.Context, *httptest.ResponseRecorder) {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		return c, recorder
+	}
+
+	for _, tc := range []struct {
+		name      string
+		principal *HarnessPrincipal
+		wantCode  int
+		wantPass  bool
+	}{
+		{
+			name:      "harness principal with gateway.chat passes",
+			principal: &HarnessPrincipal{Subject: "harness-gateway", Scopes: []string{HarnessChatScope}},
+			wantCode:  http.StatusOK,
+			wantPass:  true,
+		},
+		{
+			name:      "harness principal with gateway.chat among others passes",
+			principal: &HarnessPrincipal{Subject: "harness-gateway", Scopes: []string{"gateway.catalog.read", HarnessChatScope}},
+			wantCode:  http.StatusOK,
+			wantPass:  true,
+		},
+		{
+			name:      "harness principal without any scope is refused",
+			principal: &HarnessPrincipal{Subject: "harness-gateway"},
+			wantCode:  http.StatusForbidden,
+		},
+		{
+			name:      "harness principal with only read scopes is refused",
+			principal: &HarnessPrincipal{Subject: "harness-gateway", Scopes: []string{"gateway.usage.read", "gateway.cost.read", "gateway.catalog.read", "gateway.health.read"}},
+			wantCode:  http.StatusForbidden,
+		},
+		{
+			name:      "harness principal with a lookalike scope is refused",
+			principal: &HarnessPrincipal{Subject: "harness-gateway", Scopes: []string{"gateway.chat.write", "chat"}},
+			wantCode:  http.StatusForbidden,
+		},
+		{
+			name:      "non-harness caller passes through untouched",
+			principal: nil,
+			wantCode:  http.StatusOK,
+			wantPass:  true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, recorder := newContext()
+			if tc.principal != nil {
+				c.Set(HarnessPrincipalContextKey, *tc.principal)
+			}
+
+			reached := false
+			handler := RequireHarnessScope(HarnessChatScope)
+			handler(c)
+			if !c.IsAborted() {
+				reached = true
+			}
+
+			assert.Equal(t, tc.wantPass, reached, "handler reachability")
+			assert.Equal(t, tc.wantCode, recorder.Code)
+		})
+	}
+}
+
 func TestRequestIdCorrelatesHarnessHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
