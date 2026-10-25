@@ -209,3 +209,18 @@ func TestHarnessSettlementRejectsRowsWithoutRequestId(t *testing.T) {
 	require.NoError(t, DB.Where("request_id = ?", "req-valid-id").First(&stored).Error)
 	assert.NotZero(t, stored.CreatedAt, "the upsert stamps created_at when the caller leaves it zero")
 }
+
+// TestKeepFirstNonEmptyRendersPerDialect pins the correlation-id guard used by the
+// settlement upsert. MySQL and PostgreSQL reference the proposed row differently,
+// and a wrong reference is not a subtle bug: MySQL answers "Unknown column" and
+// every settlement write fails.
+func TestKeepFirstNonEmptyRendersPerDialect(t *testing.T) {
+	assert.Equal(t,
+		"CASE WHEN excluded.harness_request_id <> '' THEN excluded.harness_request_id ELSE harness_request_id END",
+		keepFirstNonEmpty("harness_request_id", "excluded"),
+		"PostgreSQL and SQLite reference the proposed row as excluded")
+	assert.Equal(t,
+		"CASE WHEN VALUES(harness_run_id) <> '' THEN VALUES(harness_run_id) ELSE harness_run_id END",
+		keepFirstNonEmpty("harness_run_id", "VALUES"),
+		"MySQL references the proposed row through VALUES(col)")
+}
