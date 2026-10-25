@@ -18,8 +18,10 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -468,4 +470,122 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 			assert.JSONEq(t, `{"status":`+strconv.Itoa(tc.status)+`}`, string(result.TaskData))
 		})
 	}
+}
+
+// TestTaskProcurementBasisFollowsAdjustedImageQuantity pins the defect where an
+// upstream-reported quantity replaced the reserved one for the charge but left
+// the procurement base on the reservation's estimate. The base must describe what
+// was actually purchased, and it must never pick up the customer group ratio.
+func TestTaskProcurementBasisFollowsAdjustedImageQuantity(t *testing.T) {
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	// One image at a fixed price of $0.04, so the quantity multiplier is the only
+	// thing that moves between the reservation and the settlement.
+	const imagePrice = 0.04
+	newInfo := func(groupRatio float64) *relaycommon.RelayInfo {
+		priceData := types.PriceData{
+			UsePrice:       true,
+			ModelPrice:     imagePrice,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: groupRatio},
+		}
+		// The reservation assumed the requested 3 images.
+		priceData.AddOtherRatio("n", 3)
+		info := &relaycommon.RelayInfo{PriceData: priceData}
+		info.ProcurementBasis = types.NewProcurementBasis(
+			decimal.NewFromFloat(imagePrice*common.QuotaPerUnit), groupRatio)
+		return info
+	}
+
+	// Applying the reservation's quantity, as RelayTaskSubmit does before submit.
+	applyReservation := func(info *relaycommon.RelayInfo) {
+		preGroup, ok := preTaskBasis(info)
+		require.True(t, ok)
+		info.ProcurementBasis = types.NewProcurementBasis(
+			decimal.NewFromFloat(info.PriceData.ApplyOtherRatiosToFloat(preGroup)),
+			info.PriceData.GroupRatioInfo.GroupRatio)
+		// The reservation's charged quota, including the group ratio.
+		reservedQuota, err := common.QuotaFromFloatStrict(
+			imagePrice * common.QuotaPerUnit * 3 * info.PriceData.GroupRatioInfo.GroupRatio)
+		require.NoError(t, err)
+		info.PriceData.Quota = reservedQuota
+	}
+
+	for _, tc := range []struct {
+		name        string
+		groupRatio  float64
+		actualCount float64
+	}{
+		{name: "unit group ratio", groupRatio: 1, actualCount: 2},
+		{name: "discounted group ratio", groupRatio: 0.5, actualCount: 2},
+		{name: "premium group ratio", groupRatio: 3, actualCount: 2},
+		{name: "single image delivered", groupRatio: 2, actualCount: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			info := newInfo(tc.groupRatio)
+			applyReservation(info)
+
+			// The upstream reports the actual count, which replaces "n".
+			adjusted := map[string]float64{"n": tc.actualCount}
+			basePreGroup, ok := preTaskBasis(info)
+			require.True(t, ok)
+			basePreGroup = info.PriceData.RemoveOtherRatiosFromFloat(basePreGroup)
+
+			quota, ok := recalcQuotaFromRatios(info, adjusted)
+			require.True(t, ok)
+			info.PriceData.ReplaceOtherRatios(adjusted)
+			info.ProcurementBasis = types.NewProcurementBasis(
+				decimal.NewFromFloat(info.PriceData.ApplyOtherRatiosToFloat(basePreGroup)),
+				info.PriceData.GroupRatioInfo.GroupRatio)
+
+			// The procurement base is one image price times the real count, and
+			// crucially identical across group ratios.
+			wantBase := decimal.NewFromFloat(imagePrice * common.QuotaPerUnit * tc.actualCount)
+			actualBase, ok := info.ProcurementBasis.PreGroupQuotaDecimal()
+			require.True(t, ok)
+			assert.True(t, actualBase.Equal(wantBase),
+				"base must be price x actual count (%s), got %s", wantBase, actualBase)
+
+			// The customer is still charged that amount times their own ratio.
+			wantQuota, clampErr := common.QuotaFromFloatStrict(
+				imagePrice * common.QuotaPerUnit * tc.actualCount * tc.groupRatio)
+			require.Nil(t, clampErr)
+			assert.Equal(t, wantQuota, quota,
+				"the charge keeps the customer group ratio")
+		})
+	}
+}
+
+// TestTaskProcurementBasisUnchangedWithoutAdjustment keeps the untouched path:
+// when the adaptor reports no new multipliers, the base the reservation produced
+// must survive submit handling unchanged.
+func TestTaskProcurementBasisUnchangedWithoutAdjustment(t *testing.T) {
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	priceData := types.PriceData{
+		UsePrice:       true,
+		ModelPrice:     0.04,
+		GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 2},
+	}
+	priceData.AddOtherRatio("n", 4)
+	info := &relaycommon.RelayInfo{PriceData: priceData}
+	info.ProcurementBasis = types.NewProcurementBasis(
+		decimal.NewFromFloat(0.04*common.QuotaPerUnit*4), 2)
+
+	before, ok := info.ProcurementBasis.PreGroupQuotaDecimal()
+	require.True(t, ok)
+
+	// No adjustment: nothing in RelayTaskSubmit's adjustment branch runs.
+	assert.Equal(t, "80000", before.String(),
+		"0.04 USD x 500000 quota x 4 images before the group ratio")
+
+	// A nil result leaves the basis exactly as the reservation left it.
+	unchanged, ok := info.ProcurementBasis.PreGroupQuotaDecimal()
+	require.True(t, ok)
+	assert.True(t, unchanged.Equal(before))
+	assert.Equal(t, 2.0, info.ProcurementBasis.CustomerGroupRatio,
+		"the customer ratio is recorded but never multiplies the base")
 }

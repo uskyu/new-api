@@ -405,11 +405,31 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 	} else {
 		if adjustedRatios := adaptor.AdjustBillingOnSubmit(info, parsed.TaskData); len(adjustedRatios) > 0 {
+			// The upstream can report a different quantity than the reservation
+			// assumed (an image model answering with the actual image count). The
+			// charge is recomputed from the new multipliers, so the procurement
+			// base has to follow the same quantity: leaving it on the reservation's
+			// estimate would book a cost for a quantity that was not purchased, and
+			// it would do so silently because a stale basis still looks valid.
+			//
+			// The base is recovered by removing the old multipliers exactly as
+			// recalcQuotaFromRatios does for the charge, then the new ones are
+			// applied once. The customer group ratio is never part of this amount.
+			basePreGroup, hasPreGroup := 0.0, false
+			if preGroup, ok := preTaskBasis(info); ok {
+				basePreGroup = info.PriceData.RemoveOtherRatiosFromFloat(preGroup)
+				hasPreGroup = true
+			}
 			if adjustedQuota, ok := recalcQuotaFromRatios(info, adjustedRatios); ok {
 				// 基于调整后的 ratios 重新计算 quota
 				finalQuota = adjustedQuota
 				info.PriceData.ReplaceOtherRatios(adjustedRatios)
 				info.PriceData.Quota = finalQuota
+				if hasPreGroup {
+					info.ProcurementBasis = types.NewProcurementBasis(
+						decimal.NewFromFloat(info.PriceData.ApplyOtherRatiosToFloat(basePreGroup)),
+						info.PriceData.GroupRatioInfo.GroupRatio)
+				}
 			}
 		}
 	}
