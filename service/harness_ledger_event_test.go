@@ -129,6 +129,66 @@ func TestRecordHarnessSettlementRefundSupersedes(t *testing.T) {
 	assert.Equal(t, model.HarnessSettlementStatusRefunded, snapshots[0].Status)
 }
 
+// TestRecordHarnessSettlementFirstEventIsNotACorrection covers the request that
+// reaches "refunded" as its very first ledger state: a task already terminal at
+// submission, or a refund of a zero reservation.
+//
+// The contract defines usage_correction as a new event that points at the earlier
+// one through supersedes_event_id, so a first event claiming that label would
+// reference a predecessor that never existed. The amount semantics are the same;
+// only the label must reflect that nothing is being corrected.
+func TestRecordHarnessSettlementFirstEventIsNotACorrection(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	correlation := harnessSettlementCorrelation{HarnessRequestId: "hrq_first_refund", UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream}
+
+	// No prior event for this request: this refund is its first appearance.
+	refunded := &model.HarnessSettlement{
+		RequestId: "gw-request-first-refund",
+		Status:    model.HarnessSettlementStatusRefunded,
+		ModelName: "economy",
+	}
+	recordHarnessSettlement(refunded, harnessSettlementMoneyForQuota(nil, 0, 0, "economy"), correlation)
+
+	var usageEvents []model.HarnessLedgerEvent
+	require.NoError(t, model.DB.Where("stream = ? AND gateway_request_id = ?",
+		model.HarnessLedgerStreamUsage, "gw-request-first-refund").Find(&usageEvents).Error)
+	require.Len(t, usageEvents, 1)
+
+	first := usageEvents[0]
+	assert.Nil(t, first.SupersedesEventId, "the first event has nothing to supersede")
+	assert.Equal(t, 1, first.RecordVersion)
+	assert.Equal(t, model.HarnessLedgerEventTypeUsage, first.EventType,
+		"a first event must not claim to correct an earlier one")
+
+	// The same status on a request that DOES have history stays a correction.
+	settled := &model.HarnessSettlement{
+		RequestId: "gw-request-later-refund",
+		Status:    model.HarnessSettlementStatusSettled,
+		ModelName: "economy",
+	}
+	recordHarnessSettlement(settled, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
+	laterRefund := &model.HarnessSettlement{
+		RequestId: "gw-request-later-refund",
+		Status:    model.HarnessSettlementStatusRefunded,
+		ModelName: "economy",
+	}
+	recordHarnessSettlement(laterRefund, harnessSettlementMoneyForQuota(nil, 0, 0, "economy"), correlation)
+
+	var laterEvents []model.HarnessLedgerEvent
+	require.NoError(t, model.DB.Where("stream = ? AND gateway_request_id = ?",
+		model.HarnessLedgerStreamUsage, "gw-request-later-refund").Order("id ASC").Find(&laterEvents).Error)
+	require.Len(t, laterEvents, 2)
+	assert.Equal(t, model.HarnessLedgerEventTypeUsageCorrection, laterEvents[1].EventType,
+		"a refund with history is a correction and points at the earlier event")
+	require.NotNil(t, laterEvents[1].SupersedesEventId)
+	assert.Equal(t, laterEvents[0].EventId, *laterEvents[1].SupersedesEventId)
+}
+
 // TestHarnessLedgerReadEndToEnd reads the appended events back through the same
 // service functions the HTTP handlers use, which is what the platform actually
 // consumes.

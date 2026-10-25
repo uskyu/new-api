@@ -981,7 +981,7 @@ func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money ha
 
 	usageEvent := &model.HarnessLedgerEvent{
 		Stream:            model.HarnessLedgerStreamUsage,
-		EventType:         harnessUsageEventTypeForStatus(settlement.Status),
+		EventType:         harnessUsageEventTypeForStatus(settlement.Status, usageSupersedes != nil),
 		HarnessRequestId:  correlation.HarnessRequestId,
 		GatewayRequestId:  settlement.RequestId,
 		RunId:             correlation.HarnessRunId,
@@ -1112,8 +1112,16 @@ func previousHarnessLedgerEvent(stream, gatewayRequestId string) (*string, int) 
 
 // harnessUsageEventTypeForStatus maps a settlement status to the usage event
 // type the platform expects.
-func harnessUsageEventTypeForStatus(status string) string {
-	if status == model.HarnessSettlementStatusRefunded {
+//
+// A correction is only a correction when it supersedes something: the contract
+// defines usage_correction as a new event that points at the earlier one through
+// supersedes_event_id. A request can reach the refunded status as its very first
+// ledger state (a task that is already terminal at submission, or a refund of a
+// zero reservation), and labelling that first event a correction would produce an
+// event that claims a predecessor it does not have. hasPrevious distinguishes the
+// two cases; the amount semantics are identical, only the label differs.
+func harnessUsageEventTypeForStatus(status string, hasPrevious bool) string {
+	if status == model.HarnessSettlementStatusRefunded && hasPrevious {
 		return model.HarnessLedgerEventTypeUsageCorrection
 	}
 	return model.HarnessLedgerEventTypeUsage
@@ -1205,11 +1213,26 @@ func recordTaskHarnessSettlement(task *model.Task, status string, quota int) {
 		}
 	}
 	settlement.Status = status
-	// The submit path stamped the platform correlation on the task, and the
-	// polling path settles with no request context, so the task is the source of
-	// truth for whether this task belongs to the platform ledger feed.
+	// The correlation comes from two places, and only one of them survives a
+	// process restart.
+	//
+	// The durable source is the settlement row itself: the submit path wrote
+	// harness_request_id on it, polling loads that row by task id, and the
+	// upsert keeps a non-empty correlation on re-settle. The row read above
+	// therefore already carries the request id.
+	//
+	// The task snapshot is only a fallback for the same process: the submit path
+	// assigns Execution.HarnessRequestID in memory after the task row was
+	// inserted, and no production path re-persists private_data for a normal
+	// (non-background) task, so tasks.private_data does not carry the ids. That
+	// assignment is not what makes attribution work, and a settlement row that
+	// went missing leaves the correlation empty here, which suppresses the events
+	// for that task.
 	correlation := harnessSettlementCorrelation{UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream}
-	if task.PrivateData.Execution != nil {
+	if settlement.HarnessRequestId != "" {
+		correlation.HarnessRequestId = settlement.HarnessRequestId
+		correlation.HarnessRunId = settlement.HarnessRunId
+	} else if task.PrivateData.Execution != nil {
 		correlation.HarnessRequestId = task.PrivateData.Execution.HarnessRequestID
 		correlation.HarnessRunId = task.PrivateData.Execution.HarnessRunID
 	}

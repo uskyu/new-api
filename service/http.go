@@ -24,6 +24,13 @@ func CloseResponseBodyGracefully(httpResponse *http.Response) {
 	}
 }
 
+// newAPIRequestIdHeader is the gateway's own request id header. It is declared
+// here as well as in middleware because service must not import middleware (that
+// would be an import cycle), and the two must stay identical: this one guards the
+// write path against an upstream overwrite, the other names the header the
+// engine stamps on every response.
+const newAPIRequestIdHeader = "X-NewAPI-Request-Id"
+
 // ShouldCopyUpstreamHeader checks whether a given upstream response header
 // should be copied to the client response. It returns false for Content-Length
 // (managed separately) and X-Oneapi-Request-Id (to preserve the local instance
@@ -38,6 +45,13 @@ func isIntelligentRoutingResponseHeader(name string) bool {
 
 func ShouldCopyUpstreamHeader(c *gin.Context, k string, v []string) bool {
 	if strings.EqualFold(k, "Content-Length") || isIntelligentRoutingResponseHeader(k) {
+		return false
+	}
+	// The gateway's own request id identifies this call to the platform, so an
+	// upstream must never be able to replace it: a hostile or misconfigured
+	// upstream echoing the header would make the platform attribute the cost to a
+	// request id the gateway never issued.
+	if strings.EqualFold(k, newAPIRequestIdHeader) {
 		return false
 	}
 	if strings.EqualFold(k, common.RequestIdKey) {
