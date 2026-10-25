@@ -171,11 +171,26 @@ func TestLedgerCorrectionChainsStayInTheirOwnStream(t *testing.T) {
 		UsageSource:      harnessUsageSourceUpstream,
 	}
 
-	settled := &model.HarnessSettlement{RequestId: "gw-chain", Status: model.HarnessSettlementStatusSettled, ModelName: "economy"}
+	settled := &model.HarnessSettlement{
+		RequestId:        "gw-chain",
+		Status:           model.HarnessSettlementStatusSettled,
+		ModelName:        "economy",
+		PromptTokens:     100,
+		CompletionTokens: 20,
+	}
 	recordHarnessSettlement(settled, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
 
-	// A refund appends a correction in both streams.
-	refunded := &model.HarnessSettlement{RequestId: "gw-chain", Status: model.HarnessSettlementStatusRefunded, ModelName: "economy"}
+	// A refund that also corrects the measured usage appends one event in each
+	// stream. Both must move for that to happen: with per-stream change detection a
+	// status-only transition appends to the cost stream alone.
+	refunded := &model.HarnessSettlement{
+		RequestId:        "gw-chain",
+		Status:           model.HarnessSettlementStatusRefunded,
+		ModelName:        "economy",
+		PromptTokens:     100,
+		CompletionTokens: 20,
+		CacheReadTokens:  9,
+	}
 	recordHarnessSettlement(refunded, harnessSettlementMoneyForQuota(nil, 0, 0, "economy"), correlation)
 
 	var usageEvents, costEvents []model.HarnessLedgerEvent
@@ -1048,4 +1063,170 @@ func TestLedgerTotalAmountIncludesSupplierTax(t *testing.T) {
 	assert.Equal(t, 6.5, money.TaxRatePercent)
 	assert.Equal(t, "0.009798", normalizedDecimal(t, money.TotalAmount),
 		"total_amount must include the supplier tax, matching the contract sample")
+}
+
+// harnessLedgerStreamCount returns how many events one stream holds for a request.
+func harnessLedgerStreamCount(t *testing.T, gatewayRequestId, stream string) []model.HarnessLedgerEvent {
+	t.Helper()
+	var events []model.HarnessLedgerEvent
+	require.NoError(t, model.DB.Where("gateway_request_id = ? AND stream = ?", gatewayRequestId, stream).
+		Order("id ASC").Find(&events).Error)
+	return events
+}
+
+// TestLedgerChangeDetectionIsPerStream pins the rule that each feed records only
+// its own changes. The two streams answer different questions, so a change in one
+// must leave the other untouched instead of appending an event that repeats what
+// it already said.
+//
+// Every case settles the same request twice and asserts the resulting event count
+// in each stream, which is the observable behaviour the platform depends on: its
+// cursor walk must not see versions that describe no change in that feed.
+func TestLedgerChangeDetectionIsPerStream(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	correlation := harnessSettlementCorrelation{HarnessRequestId: "hrq_detect", UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream}
+
+	// taxChannel applies a 10% supplier tax, so total_amount carries the tax but
+	// base_amount does not.
+	taxChannel := seedHarnessLedgerChannel(t, "economy", "detect-tax-group", 0.8, 10)
+
+	settle := func(requestId string, settlement *model.HarnessSettlement, quota int, channelId int, corr harnessSettlementCorrelation) {
+		settlement.RequestId = requestId
+		settlement.ModelName = "economy"
+		recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(nil, quota, channelId, "economy"), corr)
+	}
+
+	t.Run("base unchanged but total changes", func(t *testing.T) {
+		const requestId = "gw-detect-total"
+		// The same quota prices the same base on both channels; only the supplier
+		// tax differs, so base_amount stays put while total_amount moves. That is
+		// exactly the case a base-only comparison would silently swallow.
+		untaxedChannel := seedHarnessLedgerChannel(t, "economy", "detect-untaxed-group", 0.8, 0)
+
+		settle(requestId, &model.HarnessSettlement{Status: model.HarnessSettlementStatusSettled},
+			1_000_000, untaxedChannel, correlation)
+		settle(requestId, &model.HarnessSettlement{Status: model.HarnessSettlementStatusSettled},
+			1_000_000, taxChannel, correlation)
+
+		costs := harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamCost)
+		require.Len(t, costs, 2, "a changed total_amount is a new cost fact")
+		assert.Equal(t, costs[0].BaseAmount, costs[1].BaseAmount, "the base did not move")
+		assert.NotEqual(t, costs[0].TotalAmount, costs[1].TotalAmount, "the total did")
+		assert.Equal(t, 2, costs[1].RecordVersion)
+		require.NotNil(t, costs[1].SupersedesEventId)
+		assert.Equal(t, costs[0].EventId, *costs[1].SupersedesEventId)
+
+		usages := harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamUsage)
+		assert.Len(t, usages, 1, "the cost change must not append a usage event")
+	})
+
+	t.Run("cost unchanged but usage corrected", func(t *testing.T) {
+		const requestId = "gw-detect-usage"
+		settle(requestId, &model.HarnessSettlement{
+			Status:           model.HarnessSettlementStatusSettled,
+			PromptTokens:     10,
+			CompletionTokens: 5,
+		}, 1_000_000, taxChannel, correlation)
+
+		// Same money, corrected token counts.
+		settle(requestId, &model.HarnessSettlement{
+			Status:           model.HarnessSettlementStatusSettled,
+			PromptTokens:     10,
+			CompletionTokens: 9,
+		}, 1_000_000, taxChannel, correlation)
+
+		usages := harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamUsage)
+		require.Len(t, usages, 2, "a corrected token count is a new usage fact")
+		assert.Equal(t, 2, usages[1].RecordVersion)
+		require.NotNil(t, usages[1].SupersedesEventId)
+		assert.Equal(t, usages[0].EventId, *usages[1].SupersedesEventId)
+		assert.Equal(t, 9, usages[1].CompletionTokens)
+
+		costs := harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamCost)
+		assert.Len(t, costs, 1, "a usage correction must not append a cost event")
+	})
+
+	t.Run("usage unchanged but cost corrected", func(t *testing.T) {
+		const requestId = "gw-detect-cost"
+		const promptTokens, completionTokens = 12, 6
+		settle(requestId, &model.HarnessSettlement{
+			Status:           model.HarnessSettlementStatusSettled,
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+		}, 1_000_000, taxChannel, correlation)
+
+		// The same usage, but the purchase amount moves.
+		settle(requestId, &model.HarnessSettlement{
+			Status:           model.HarnessSettlementStatusSettled,
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+		}, 2_000_000, taxChannel, correlation)
+
+		costs := harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamCost)
+		require.Len(t, costs, 2, "a changed purchase amount is a new cost fact")
+		assert.Equal(t, 2, costs[1].RecordVersion)
+
+		usages := harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamUsage)
+		assert.Len(t, usages, 1, "an unchanged usage must not append a usage event")
+	})
+
+	t.Run("completely repeated settle", func(t *testing.T) {
+		const requestId = "gw-detect-repeat"
+		for range 2 {
+			settle(requestId, &model.HarnessSettlement{
+				Status:           model.HarnessSettlementStatusSettled,
+				PromptTokens:     15,
+				CompletionTokens: 7,
+			}, 1_000_000, taxChannel, correlation)
+		}
+
+		assert.Len(t, harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamUsage), 1,
+			"a repeated settle says nothing new about usage")
+		assert.Len(t, harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamCost), 1,
+			"a repeated settle says nothing new about cost")
+
+		// The snapshot is still refreshed, because this path is its only writer.
+		var rows []model.HarnessSettlement
+		require.NoError(t, model.DB.Where("request_id = ?", requestId).Find(&rows).Error)
+		require.Len(t, rows, 1)
+		assert.Equal(t, 15, rows[0].PromptTokens)
+	})
+
+	t.Run("both streams change together", func(t *testing.T) {
+		const requestId = "gw-detect-both"
+		settle(requestId, &model.HarnessSettlement{
+			Status:           model.HarnessSettlementStatusSettled,
+			PromptTokens:     20,
+			CompletionTokens: 8,
+		}, 1_000_000, taxChannel, correlation)
+
+		// A refund that also reports the usage it finally measured.
+		settle(requestId, &model.HarnessSettlement{
+			Status:           model.HarnessSettlementStatusRefunded,
+			PromptTokens:     20,
+			CompletionTokens: 8,
+			CacheReadTokens:  3,
+		}, 0, taxChannel, correlation)
+
+		usages := harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamUsage)
+		require.Len(t, usages, 2)
+		costs := harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamCost)
+		require.Len(t, costs, 2)
+
+		// Each stream advances and links within itself, never across streams.
+		assert.Equal(t, 2, usages[1].RecordVersion)
+		assert.Equal(t, 2, costs[1].RecordVersion)
+		require.NotNil(t, usages[1].SupersedesEventId)
+		require.NotNil(t, costs[1].SupersedesEventId)
+		assert.Equal(t, usages[0].EventId, *usages[1].SupersedesEventId)
+		assert.Equal(t, costs[0].EventId, *costs[1].SupersedesEventId)
+		assert.Contains(t, *usages[1].SupersedesEventId, model.HarnessLedgerStreamUsage+"_")
+		assert.Contains(t, *costs[1].SupersedesEventId, model.HarnessLedgerStreamCost+"_")
+		assert.Equal(t, model.HarnessLedgerEventTypeRefund, costs[1].EventType)
+	})
 }

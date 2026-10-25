@@ -169,17 +169,25 @@ func TestRecordHarnessSettlementFirstEventIsNotACorrection(t *testing.T) {
 	assert.Equal(t, model.HarnessLedgerEventTypeUsage, first.EventType,
 		"a first event must not claim to correct an earlier one")
 
-	// The same status on a request that DOES have history stays a correction.
+	// The same status on a request that DOES have history stays a correction. The
+	// refund also reports a cache-read count the first settle did not, because with
+	// per-stream change detection a usage event is only appended when the measured
+	// usage actually moves; a pure status transition appends none.
 	settled := &model.HarnessSettlement{
-		RequestId: "gw-request-later-refund",
-		Status:    model.HarnessSettlementStatusSettled,
-		ModelName: "economy",
+		RequestId:        "gw-request-later-refund",
+		Status:           model.HarnessSettlementStatusSettled,
+		ModelName:        "economy",
+		PromptTokens:     100,
+		CompletionTokens: 20,
 	}
 	recordHarnessSettlement(settled, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
 	laterRefund := &model.HarnessSettlement{
-		RequestId: "gw-request-later-refund",
-		Status:    model.HarnessSettlementStatusRefunded,
-		ModelName: "economy",
+		RequestId:        "gw-request-later-refund",
+		Status:           model.HarnessSettlementStatusRefunded,
+		ModelName:        "economy",
+		PromptTokens:     100,
+		CompletionTokens: 20,
+		CacheReadTokens:  7,
 	}
 	recordHarnessSettlement(laterRefund, harnessSettlementMoneyForQuota(nil, 0, 0, "economy"), correlation)
 

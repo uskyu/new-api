@@ -1008,8 +1008,13 @@ func recordHarnessSettlement(settlement *model.HarnessSettlement, money harnessS
 // correlation id is the discriminator, and an empty one means "not from
 // Harness".
 //
-// The usage and cost streams each keep their own version chain, so a usage
-// correction never points at a cost event and vice versa.
+// The two streams are judged independently. They answer different questions --
+// "what did this request consume" versus "what did it cost" -- so a change in one
+// must not append an event to the other. A settle that only learned the missing
+// token split appends a usage event and no cost event; a settle that only changed
+// the procurement tax rate appends a cost event and no usage event. Each stream
+// also keeps its own version chain, so a usage correction never points at a cost
+// event and vice versa.
 //
 // The cost event always carries the cumulative net amount (never a delta): a
 // dropped event then cannot corrupt the total, because the latest event alone
@@ -1025,42 +1030,49 @@ func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money ha
 		return
 	}
 
-	observedAtMs := time.Now().UnixMilli()
 	usagePrevious := previousHarnessLedgerEvent(model.HarnessLedgerStreamUsage, settlement.RequestId)
 	costPrevious := previousHarnessLedgerEvent(model.HarnessLedgerStreamCost, settlement.RequestId)
 
-	usageVersion := 1
-	var usageSupersedes *string
-	if usagePrevious != nil {
-		usageVersion = usagePrevious.RecordVersion + 1
-		usageSupersedes = &usagePrevious.EventId
+	var events []*model.HarnessLedgerEvent
+	if event := harnessUsageEventIfChanged(settlement, money, correlation, usagePrevious); event != nil {
+		events = append(events, event)
+	}
+	if event := harnessCostEventIfChanged(settlement, money, correlation, costPrevious); event != nil {
+		events = append(events, event)
 	}
 
-	// A repeated settle that reports the same state and the same amount is not a
-	// new fact, so it appends no event: the platform would otherwise see a version
-	// chain that grows without describing any change.
-	//
-	// The snapshot still has to be written. This function is the only path that
-	// persists it for platform traffic, so returning here without the upsert would
-	// freeze the row at its first values and silently drop later corrections to the
-	// correlation, the tokens or the settled timestamp.
-	if costPrevious != nil && costPrevious.Status == settlement.Status && costPrevious.BaseAmount == money.BaseAmount {
-		if err := model.UpsertHarnessSettlement(settlement); err != nil {
-			common.SysLog(common.LogText("harness settlement write failed (request=%s task=%s status=%s): %s", settlement.RequestId, settlement.TaskId, settlement.Status, err.Error()))
-		}
+	if len(events) == 0 {
+		// Nothing the platform can see changed. The snapshot is still written: this
+		// function is the only path that persists it for platform traffic, so
+		// skipping the upsert would freeze the row at its first values and silently
+		// drop later corrections to the correlation or the settled timestamp.
+		persistHarnessSettlementSnapshotOnly(settlement)
 		return
 	}
+	persistHarnessLedgerEvents(settlement, events)
+}
 
-	costVersion := 1
-	var costSupersedes *string
-	if costPrevious != nil {
-		costVersion = costPrevious.RecordVersion + 1
-		costSupersedes = &costPrevious.EventId
+// harnessUsageEventIfChanged returns the usage event to append, or nil when this
+// settle says nothing new about consumption.
+//
+// The comparison covers every field that reaches the platform, not just the token
+// counts: a request that first settled with an unknown split and later learned the
+// total carries new information even though the stored prompt/completion columns
+// never moved, and a corrected usage source is likewise a new fact. Comparing the
+// raw token columns alone would drop both.
+func harnessUsageEventIfChanged(settlement *model.HarnessSettlement, money harnessSettlementMoney, correlation harnessSettlementCorrelation, previous *model.HarnessLedgerEvent) *model.HarnessLedgerEvent {
+	version := 1
+	var supersedes *string
+	if previous != nil {
+		if !harnessUsageDiffers(previous, settlement, correlation) {
+			return nil
+		}
+		version = previous.RecordVersion + 1
+		supersedes = &previous.EventId
 	}
-
-	usageEvent := &model.HarnessLedgerEvent{
+	return &model.HarnessLedgerEvent{
 		Stream:            model.HarnessLedgerStreamUsage,
-		EventType:         harnessUsageEventTypeForStatus(settlement.Status, usageSupersedes != nil),
+		EventType:         harnessUsageEventTypeForStatus(settlement.Status, supersedes != nil),
 		HarnessRequestId:  correlation.HarnessRequestId,
 		GatewayRequestId:  settlement.RequestId,
 		RunId:             correlation.HarnessRunId,
@@ -1078,14 +1090,44 @@ func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money ha
 		IsEstimated:       correlation.IsEstimated,
 		BillingBasis:      correlation.UsageUnit,
 		PricingVersion:    money.PriceVersion,
-		RecordVersion:     usageVersion,
-		SupersedesEventId: usageSupersedes,
-		ObservedAtMs:      observedAtMs,
+		RecordVersion:     version,
+		SupersedesEventId: supersedes,
+		ObservedAtMs:      time.Now().UnixMilli(),
 	}
+}
 
-	costEvent := &model.HarnessLedgerEvent{
+// harnessUsageDiffers reports whether a settle changes anything the B1 feed shows.
+// Status is excluded on purpose: a usage event describes consumption, and a status
+// transition that leaves the measured usage untouched is a cost-side fact.
+func harnessUsageDiffers(previous *model.HarnessLedgerEvent, settlement *model.HarnessSettlement, correlation harnessSettlementCorrelation) bool {
+	return previous.PromptTokens != settlement.PromptTokens ||
+		previous.CompletionTokens != settlement.CompletionTokens ||
+		previous.CacheReadTokens != settlement.CacheReadTokens ||
+		previous.CacheWriteTokens != settlement.CacheWriteTokens ||
+		previous.TotalTokens != settlement.TotalTokens ||
+		previous.TotalTokensKnown != settlement.TotalTokensKnown ||
+		previous.SplitUnknown != settlement.SplitUnknown ||
+		previous.UsageSource != correlation.UsageSource ||
+		previous.IsEstimated != correlation.IsEstimated ||
+		previous.UsageUnit != correlation.UsageUnit ||
+		previous.RunId != correlation.HarnessRunId
+}
+
+// harnessCostEventIfChanged returns the cost event to append, or nil when this
+// settle says nothing new about what the request cost.
+func harnessCostEventIfChanged(settlement *model.HarnessSettlement, money harnessSettlementMoney, correlation harnessSettlementCorrelation, previous *model.HarnessLedgerEvent) *model.HarnessLedgerEvent {
+	version := 1
+	var supersedes *string
+	if previous != nil {
+		if !harnessCostDiffers(previous, settlement, money, correlation) {
+			return nil
+		}
+		version = previous.RecordVersion + 1
+		supersedes = &previous.EventId
+	}
+	return &model.HarnessLedgerEvent{
 		Stream:                 model.HarnessLedgerStreamCost,
-		EventType:              harnessCostEventTypeForStatus(settlement.Status, costPrevious, money.BaseAmount),
+		EventType:              harnessCostEventTypeForStatus(settlement.Status, previous, money.BaseAmount),
 		HarnessRequestId:       correlation.HarnessRequestId,
 		GatewayRequestId:       settlement.RequestId,
 		RunId:                  correlation.HarnessRunId,
@@ -1108,11 +1150,39 @@ func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money ha
 		BillingBasis:           correlation.UsageUnit,
 		PricingVersion:         money.PriceVersion,
 		CostCalculationVersion: money.CostCalculationVersion,
-		RecordVersion:          costVersion,
-		SupersedesEventId:      costSupersedes,
-		ObservedAtMs:           observedAtMs,
+		RecordVersion:          version,
+		SupersedesEventId:      supersedes,
+		ObservedAtMs:           time.Now().UnixMilli(),
 	}
-	persistHarnessLedgerEvents(settlement, []*model.HarnessLedgerEvent{usageEvent, costEvent})
+}
+
+// harnessCostDiffers reports whether a settle changes anything the B3 feed shows.
+//
+// The base amount alone is not enough. The purchase price is base x procurement
+// group ratio x (1 + tax), so editing either ratio changes what the operator owes
+// while base_amount stays put; comparing only the base would hide that behind an
+// unchanged event. The price version is compared too, because a re-price against a
+// different configuration is a different fact even when the numbers coincide.
+func harnessCostDiffers(previous *model.HarnessLedgerEvent, settlement *model.HarnessSettlement, money harnessSettlementMoney, correlation harnessSettlementCorrelation) bool {
+	return previous.Status != settlement.Status ||
+		previous.BaseAmount != money.BaseAmount ||
+		previous.TotalAmount != money.TotalAmount ||
+		previous.GroupRatio != money.GroupRatio ||
+		previous.TaxRatePercent != money.TaxRatePercent ||
+		previous.Currency != money.Currency ||
+		previous.PricingVersion != money.PriceVersion ||
+		previous.CostCalculationVersion != money.CostCalculationVersion ||
+		previous.BillingBasis != correlation.UsageUnit ||
+		previous.RunId != correlation.HarnessRunId
+}
+
+// persistHarnessSettlementSnapshotOnly refreshes the settlement row when neither
+// stream has anything new to report. It stays a log-only failure like the event
+// write: a ledger problem must never fail a relay that already charged the user.
+func persistHarnessSettlementSnapshotOnly(settlement *model.HarnessSettlement) {
+	if err := model.UpsertHarnessSettlement(settlement); err != nil {
+		common.SysLog(common.LogText("harness settlement write failed (request=%s task=%s status=%s): %s", settlement.RequestId, settlement.TaskId, settlement.Status, err.Error()))
+	}
 }
 
 // harnessLedgerWriteAttempts bounds the retry of the ledger transaction. One
