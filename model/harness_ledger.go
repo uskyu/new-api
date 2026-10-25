@@ -58,28 +58,38 @@ var (
 // read incrementally with a single id cursor. Money stays a decimal string to
 // keep reconciliation exact.
 type HarnessLedgerEvent struct {
-	Id               int64   `json:"id" gorm:"primaryKey;autoIncrement;index:idx_harness_ledger_stream_id,priority:2;index:idx_harness_ledger_batch,priority:3"`
-	Stream           string  `json:"stream" gorm:"type:varchar(8);index:idx_harness_ledger_stream_id,priority:1;default:''"`
-	EventId          string  `json:"event_id" gorm:"type:varchar(64);uniqueIndex:idx_harness_ledger_event_id;default:''"`
-	EventType        string  `json:"event_type" gorm:"type:varchar(32);default:''"`
-	HarnessRequestId string  `json:"harness_request_id" gorm:"type:varchar(64);index:idx_harness_ledger_harness_request_id;index:idx_harness_ledger_batch,priority:1;default:''"`
-	GatewayRequestId string  `json:"gateway_request_id" gorm:"type:varchar(64);index:idx_harness_ledger_gateway_request_id;default:''"`
-	RunId            string  `json:"run_id" gorm:"type:varchar(64);default:''"`
-	Status           string  `json:"status" gorm:"type:varchar(20);default:''"`
-	Currency         string  `json:"currency" gorm:"type:varchar(16);default:''"`
-	UsageUnit        string  `json:"usage_unit" gorm:"type:varchar(24);default:''"`
-	PromptTokens     int     `json:"prompt_tokens" gorm:"default:0"`
-	CompletionTokens int     `json:"completion_tokens" gorm:"default:0"`
-	CacheReadTokens  int     `json:"cache_read_tokens" gorm:"default:0"`
-	CacheWriteTokens int     `json:"cache_write_tokens" gorm:"default:0"`
-	UsageSource      string  `json:"usage_source" gorm:"type:varchar(16);default:''"`
-	IsEstimated      bool    `json:"is_estimated" gorm:"default:false"`
-	BaseAmount       string  `json:"base_amount" gorm:"type:varchar(64);default:''"`
-	TotalAmount      string  `json:"total_amount" gorm:"type:varchar(64);default:''"`
-	GroupRatio       float64 `json:"group_ratio" gorm:"default:0"`
-	TaxRatePercent   float64 `json:"tax_rate_percent" gorm:"default:0"`
-	BillingBasis     string  `json:"billing_basis" gorm:"type:varchar(24);default:''"`
-	PricingVersion   string  `json:"pricing_version" gorm:"type:varchar(64);default:''"`
+	Id               int64  `json:"id" gorm:"primaryKey;autoIncrement;index:idx_harness_ledger_stream_id,priority:2;index:idx_harness_ledger_batch,priority:3"`
+	Stream           string `json:"stream" gorm:"type:varchar(8);index:idx_harness_ledger_stream_id,priority:1;default:''"`
+	EventId          string `json:"event_id" gorm:"type:varchar(64);uniqueIndex:idx_harness_ledger_event_id;default:''"`
+	EventType        string `json:"event_type" gorm:"type:varchar(32);default:''"`
+	HarnessRequestId string `json:"harness_request_id" gorm:"type:varchar(64);index:idx_harness_ledger_harness_request_id;index:idx_harness_ledger_batch,priority:1;default:''"`
+	GatewayRequestId string `json:"gateway_request_id" gorm:"type:varchar(64);index:idx_harness_ledger_gateway_request_id;default:''"`
+	RunId            string `json:"run_id" gorm:"type:varchar(64);default:''"`
+	Status           string `json:"status" gorm:"type:varchar(20);default:''"`
+	Currency         string `json:"currency" gorm:"type:varchar(16);default:''"`
+	UsageUnit        string `json:"usage_unit" gorm:"type:varchar(24);default:''"`
+	PromptTokens     int    `json:"prompt_tokens" gorm:"default:0"`
+	CompletionTokens int    `json:"completion_tokens" gorm:"default:0"`
+	CacheReadTokens  int    `json:"cache_read_tokens" gorm:"default:0"`
+	CacheWriteTokens int    `json:"cache_write_tokens" gorm:"default:0"`
+	// TotalTokensKnown records whether the upstream actually reported a total.
+	TotalTokens      int  `json:"total_tokens" gorm:"default:0"`
+	TotalTokensKnown bool `json:"total_tokens_known" gorm:"default:false"`
+	// SplitUnknown records whether the prompt/completion split was NOT observed.
+	// It is stored inverted on purpose: the meaningful default is "the split is
+	// known", and a `default:true` boolean would make GORM omit the zero value on
+	// insert, so a row that genuinely means "unknown" would silently become
+	// "known". Keeping the flag false-by-default makes the unknown case the one
+	// that must be written explicitly.
+	SplitUnknown   bool    `json:"split_unknown" gorm:"default:false"`
+	UsageSource    string  `json:"usage_source" gorm:"type:varchar(16);default:''"`
+	IsEstimated    bool    `json:"is_estimated" gorm:"default:false"`
+	BaseAmount     string  `json:"base_amount" gorm:"type:varchar(64);default:''"`
+	TotalAmount    string  `json:"total_amount" gorm:"type:varchar(64);default:''"`
+	GroupRatio     float64 `json:"group_ratio" gorm:"default:0"`
+	TaxRatePercent float64 `json:"tax_rate_percent" gorm:"default:0"`
+	BillingBasis   string  `json:"billing_basis" gorm:"type:varchar(24);default:''"`
+	PricingVersion string  `json:"pricing_version" gorm:"type:varchar(64);default:''"`
 	// CostCalculationVersion identifies the algorithm that produced base_amount.
 	// It is independent of PricingVersion (which price configuration the amount
 	// was derived from): an empty value marks a legacy row whose base still

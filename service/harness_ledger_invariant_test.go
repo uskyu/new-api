@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -281,9 +282,12 @@ func TestLedgerTaskWithoutFrozenContextKeepsLegacyPricing(t *testing.T) {
 		"and is tagged as a fallback rather than as corrected")
 }
 
-// TestLedgerTaskNeverBooksAPurchaseOnRefund keeps a refunded task at zero cost:
-// the customer being refunded does not retroactively create a purchase.
-func TestLedgerTaskNeverBooksAPurchaseOnRefund(t *testing.T) {
+// TestLedgerTaskRefundKeepsFrozenPurchase documents the refund rule: a customer
+// refund does not prove the supplier reversed the charge. Vendors do invoice for
+// tasks that fail after generation or time out, so zeroing the amount here would
+// under-report exactly the anomalies reconciliation exists to find. The frozen
+// purchase is kept and the refund is expressed by the event type and status.
+func TestLedgerTaskRefundKeepsFrozenPurchase(t *testing.T) {
 	ledgerTestDB(t)
 
 	originalQuotaPerUnit := common.QuotaPerUnit
@@ -312,8 +316,320 @@ func TestLedgerTaskNeverBooksAPurchaseOnRefund(t *testing.T) {
 
 	money := harnessSettlementMoneyForTask(task, model.HarnessSettlementStatusRefunded, 0)
 
-	assert.Equal(t, "0", money.BaseAmount)
+	// The purchase the task already incurred: 1,000,000 / 500,000 = 2 base,
+	// times 0.8 procurement ratio, times 1.10 tax.
+	assert.Equal(t, "2", money.BaseAmount,
+		"a customer refund must not erase the purchase the task incurred")
+	assert.Equal(t, "1.76", money.TotalAmount)
+}
+
+// TestLedgerTaskRefundWithoutFrozenAmountStaysZero covers the one case where a
+// refunded task legitimately reports nothing: a usage-priced task refunded before
+// its quantity was ever learned has no purchase amount to state.
+func TestLedgerTaskRefundWithoutFrozenAmountStaysZero(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	channelId := seedHarnessLedgerChannel(t, "economy", "refund-unknown-group", 0.8, 10)
+
+	task := &model.Task{
+		TaskID:    "task-refunded-unknown",
+		ChannelId: channelId,
+		PrivateData: model.TaskPrivateData{
+			BillingContext: &model.TaskBillingContext{
+				OriginModelName: "economy",
+				Procurement: &model.TaskProcurementContext{
+					Version:               1,
+					PricingGroup:          "refund-unknown-group",
+					ProcurementGroupRatio: 0.8,
+					TaxRatePercent:        10,
+					QuotaPerUnit:          500_000,
+				},
+			},
+		},
+	}
+
+	money := harnessSettlementMoneyForTask(task, model.HarnessSettlementStatusRefunded, 0)
+
+	assert.Equal(t, "0", money.BaseAmount,
+		"a task whose quantity was never learned has no purchase amount to report")
 	assert.Equal(t, "0", money.TotalAmount)
+}
+
+// TestLedgerUsageProvenanceClassifiesRealSources pins how the ledger decides where
+// a usage figure came from. The three states are not interchangeable: a locally
+// counted request is an estimate even though it produced a full usage object, and
+// a request that obtained nothing must say so rather than report a measured zero.
+func TestLedgerUsageProvenanceClassifiesRealSources(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		localCount     bool
+		hasMeasurement bool
+		wantSource     string
+		wantEstimated  bool
+	}{
+		{
+			name:           "upstream reported the tokens",
+			hasMeasurement: true,
+			wantSource:     harnessUsageSourceUpstream,
+			wantEstimated:  false,
+		},
+		{
+			name:           "gateway counted the tokens itself",
+			localCount:     true,
+			hasMeasurement: true,
+			wantSource:     harnessUsageSourceEstimated,
+			wantEstimated:  true,
+		},
+		{
+			name:           "no usage obtained at all",
+			hasMeasurement: false,
+			wantSource:     harnessUsageSourceUnavailable,
+			wantEstimated:  false,
+		},
+		{
+			name:           "local counting without a measurement is still unavailable",
+			localCount:     true,
+			hasMeasurement: false,
+			wantSource:     harnessUsageSourceUnavailable,
+			wantEstimated:  false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, estimated := harnessUsageProvenance(tc.localCount, tc.hasMeasurement)
+			assert.Equal(t, tc.wantSource, source)
+			assert.Equal(t, tc.wantEstimated, estimated)
+		})
+	}
+}
+
+// TestLedgerTotalOnlyUsagePublishesNullSplit covers the total-only case: an
+// upstream that reports a total but no input/output split must not be published as
+// a pair of zeros, because zero is a measurement and the split was never measured.
+func TestLedgerTotalOnlyUsagePublishesNullSplit(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	correlation := harnessSettlementCorrelation{HarnessRequestId: "hrq_total_only", UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream}
+	settlement := &model.HarnessSettlement{
+		RequestId:        "gw-total-only",
+		Status:           model.HarnessSettlementStatusSettled,
+		ModelName:        "economy",
+		TotalTokens:      1000,
+		TotalTokensKnown: true,
+		SplitUnknown:     true,
+	}
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
+
+	require.NoError(t, model.DB.Model(&model.HarnessLedgerEvent{}).
+		Where("gateway_request_id = ?", "gw-total-only").
+		Update("observed_at_ms", 1).Error)
+
+	items, _, _, err := ListHarnessUsageEvents(0, 50, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+
+	usage := items[0].Usage
+	assert.False(t, usage.SplitKnown, "the split was never measured")
+	assert.Nil(t, usage.InputTokens, "an unknown input count must not be published as zero")
+	assert.Nil(t, usage.OutputTokens, "an unknown output count must not be published as zero")
+	require.NotNil(t, usage.TotalTokens, "the reported total must survive")
+	assert.Equal(t, 1000, *usage.TotalTokens)
+}
+
+// TestLedgerRepeatedSettleAppendsNothing keeps the ledger from growing versions
+// that describe no change: a settle repeating the same status and the same amount
+// is not a new fact.
+func TestLedgerRepeatedSettleAppendsNothing(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	correlation := harnessSettlementCorrelation{HarnessRequestId: "hrq_repeat", UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream}
+	first := &model.HarnessSettlement{RequestId: "gw-repeat", Status: model.HarnessSettlementStatusSettled, ModelName: "economy"}
+	recordHarnessSettlement(first, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
+
+	repeat := &model.HarnessSettlement{RequestId: "gw-repeat", Status: model.HarnessSettlementStatusSettled, ModelName: "economy"}
+	recordHarnessSettlement(repeat, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
+
+	var costEvents []model.HarnessLedgerEvent
+	require.NoError(t, model.DB.Where("stream = ? AND gateway_request_id = ?",
+		model.HarnessLedgerStreamCost, "gw-repeat").Find(&costEvents).Error)
+	assert.Len(t, costEvents, 1, "a no-change settle must not append another version")
+}
+
+// TestLedgerCostEventTypesFollowTheChain pins the event-type rules on the real
+// append path: the first event is a cost, a change of amount is a correction, and
+// a status change with the same amount is a status_change.
+func TestLedgerCostEventTypesFollowTheChain(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	correlation := harnessSettlementCorrelation{HarnessRequestId: "hrq_chain", UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream}
+
+	first := &model.HarnessSettlement{RequestId: "gw-chain", Status: model.HarnessSettlementStatusPending, ModelName: "economy"}
+	recordHarnessSettlement(first, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
+
+	// Same amount, different status: a status change, not a cost change.
+	statusOnly := &model.HarnessSettlement{RequestId: "gw-chain", Status: model.HarnessSettlementStatusSettled, ModelName: "economy"}
+	recordHarnessSettlement(statusOnly, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
+
+	// Different amount: a correction.
+	corrected := &model.HarnessSettlement{RequestId: "gw-chain", Status: model.HarnessSettlementStatusSettled, ModelName: "economy"}
+	recordHarnessSettlement(corrected, harnessSettlementMoneyForQuota(nil, 2_000_000, 0, "economy"), correlation)
+
+	var events []model.HarnessLedgerEvent
+	require.NoError(t, model.DB.Where("stream = ? AND gateway_request_id = ?",
+		model.HarnessLedgerStreamCost, "gw-chain").Order("id ASC").Find(&events).Error)
+	require.Len(t, events, 3)
+
+	assert.Equal(t, model.HarnessLedgerEventTypeCost, events[0].EventType, "the first event is never a correction")
+	assert.Nil(t, events[0].SupersedesEventId)
+	assert.Equal(t, 1, events[0].RecordVersion)
+
+	assert.Equal(t, model.HarnessLedgerEventTypeStatusChange, events[1].EventType,
+		"an unchanged amount with a new status is a status change")
+	assert.Equal(t, 2, events[1].RecordVersion)
+	require.NotNil(t, events[1].SupersedesEventId)
+	assert.Equal(t, events[0].EventId, *events[1].SupersedesEventId)
+
+	assert.Equal(t, model.HarnessLedgerEventTypeCostCorrection, events[2].EventType,
+		"a changed amount is a correction")
+	assert.Equal(t, 3, events[2].RecordVersion)
+	require.NotNil(t, events[2].SupersedesEventId)
+	assert.Equal(t, events[1].EventId, *events[2].SupersedesEventId)
+	assert.Equal(t, "4", events[2].BaseAmount, "each version states the full amount, never a delta")
+}
+
+// TestPostTextConsumeQuotaRecordsUnavailableUsage drives the real text settle path
+// when the upstream returned no usage: the ledger must say unavailable rather than
+// report a measured zero, because the gateway never observed the consumption.
+func TestPostTextConsumeQuotaRecordsUnavailableUsage(t *testing.T) {
+	ledgerTestDB(t)
+	const userID, channelID = 9103, 9103
+	require.NoError(t, model.DB.Create(&model.User{Id: userID, Username: "no_usage_user", AffCode: "nousg1", Quota: 10_000_000, Status: common.UserStatusEnabled}).Error)
+	seedChannel(t, channelID)
+
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	common.SetContextKey(ctx, constant.ContextKeyHarnessRequestId, "hrq_no_usage")
+	common.SetContextKey(ctx, constant.ContextKeyHarnessRunId, "run_no_usage")
+	// A request id is required for the settlement row to be written at all.
+	common.SetContextKey(ctx, common.RequestIdKey, "gw-no-usage")
+
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		OriginModelName: "no-usage-ledger-model",
+		UsingGroup:      "default",
+		StartTime:       time.Now(),
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: channelID},
+		PriceData: hosttypes.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  hosttypes.GroupRatioInfo{GroupRatio: 1},
+		},
+	}
+
+	// An empty usage object is what a provider that reported nothing looks like.
+	PostTextConsumeQuota(ctx, info, &dto.Usage{}, nil)
+
+	var rows []model.HarnessSettlement
+	require.NoError(t, model.DB.Where("request_id = ?", "gw-no-usage").Find(&rows).Error)
+	require.Len(t, rows, 1, "the settlement row is written regardless of usage")
+
+	require.NoError(t, model.DB.Model(&model.HarnessLedgerEvent{}).
+		Where("gateway_request_id = ?", "gw-no-usage").Update("observed_at_ms", 1).Error)
+	var events []model.HarnessLedgerEvent
+	require.NoError(t, model.DB.Where("stream = ? AND gateway_request_id = ?",
+		model.HarnessLedgerStreamUsage, "gw-no-usage").Find(&events).Error)
+	require.Len(t, events, 1, "the usage stream still records the event")
+
+	assert.Equal(t, harnessUsageSourceUnavailable, events[0].UsageSource,
+		"an empty upstream usage block reported nothing, so the ledger must say unavailable")
+	assert.False(t, events[0].IsEstimated)
+}
+
+// TestLedgerSkippedRequestStillRecordsSnapshot keeps the operator's own view intact:
+// a non-platform request emits no events but still gets a settlement row, which is
+// what lets the gateway report its procurement cost without exposing it to the
+// platform.
+func TestLedgerSkippedRequestStillRecordsSnapshot(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	settlement := &model.HarnessSettlement{
+		RequestId: "gw-internal-only",
+		Status:    model.HarnessSettlementStatusSettled,
+		ModelName: "economy",
+	}
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(nil, 500_000, 0, "economy"),
+		harnessSettlementCorrelation{UsageUnit: harnessUsageUnitToken})
+
+	var events []model.HarnessLedgerEvent
+	require.NoError(t, model.DB.Where("gateway_request_id = ?", "gw-internal-only").Find(&events).Error)
+	assert.Empty(t, events, "a non-platform request must not enter the platform feed")
+
+	var rows []model.HarnessSettlement
+	require.NoError(t, model.DB.Where("request_id = ?", "gw-internal-only").Find(&rows).Error)
+	require.Len(t, rows, 1, "the operator still needs the cost")
+	// The amount follows the charged quota, which the minimum-charge rule lifts to
+	// one quota; the point of the case is that the row exists at all.
+	assert.NotEmpty(t, rows[0].BaseAmount)
+}
+
+// TestLedgerRepeatedSettleStillRefreshesSnapshot pins the other half of the dedup
+// rule: no new event is appended, but the snapshot must still be refreshed. The
+// append path is the only writer of that row for platform traffic, so returning
+// early without the upsert would freeze the row at its first values and silently
+// drop later corrections.
+func TestLedgerRepeatedSettleStillRefreshesSnapshot(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	correlation := harnessSettlementCorrelation{HarnessRequestId: "hrq_refresh", UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream}
+	first := &model.HarnessSettlement{
+		RequestId: "gw-refresh", Status: model.HarnessSettlementStatusSettled,
+		ModelName: "economy", PromptTokens: 10, CompletionTokens: 5,
+	}
+	recordHarnessSettlement(first, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
+
+	// Same status and same amount, but the task later learned its real total.
+	refreshed := &model.HarnessSettlement{
+		RequestId: "gw-refresh", Status: model.HarnessSettlementStatusSettled,
+		ModelName: "economy", TotalTokens: 42, TotalTokensKnown: true, SplitUnknown: true,
+	}
+	recordHarnessSettlement(refreshed, harnessSettlementMoneyForQuota(nil, 1_000_000, 0, "economy"), correlation)
+
+	var events []model.HarnessLedgerEvent
+	require.NoError(t, model.DB.Where("stream = ? AND gateway_request_id = ?",
+		model.HarnessLedgerStreamCost, "gw-refresh").Find(&events).Error)
+	assert.Len(t, events, 1, "a no-change settle appends no event")
+
+	var rows []model.HarnessSettlement
+	require.NoError(t, model.DB.Where("request_id = ?", "gw-refresh").Find(&rows).Error)
+	require.Len(t, rows, 1)
+	assert.Equal(t, 42, rows[0].TotalTokens,
+		"the snapshot must still take the newly learned usage")
+	assert.True(t, rows[0].TotalTokensKnown)
+	assert.True(t, rows[0].SplitUnknown)
 }
 
 // TestTextQuotaSummaryCapturesPreGroupBasis is the end-to-end form of the
@@ -468,8 +784,18 @@ func TestTextQuotaSummaryNoUsageBooksNoPurchase(t *testing.T) {
 // back to the charged quota and re-imported the customer group ratio.
 func TestPostAudioConsumeQuotaRecordsProcurementBasis(t *testing.T) {
 	truncate(t)
-	const userID, channelID = 71, 71
-	seedUser(t, userID, 10_000_000)
+	// The expected amounts are expressed in quota units, so the conversion rate
+	// must be pinned rather than inherited from whatever ran before.
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+	const userID, channelID = 9101, 9101
+	// seedUser writes one row per call with an empty aff_code, so calling it twice
+	// against the same truncated database violates that unique index. Creating the
+	// row here with its own name keeps this case independent of test order.
+	require.NoError(t, model.DB.Create(&model.User{
+		Id: userID, Username: "audio_basis_user", AffCode: "audio01", Quota: 10_000_000, Status: common.UserStatusEnabled,
+	}).Error)
 	seedChannel(t, channelID)
 
 	gin.SetMode(gin.TestMode)
@@ -514,8 +840,8 @@ func TestPostAudioConsumeQuotaRecordsProcurementBasis(t *testing.T) {
 // so the basis must be zero too instead of describing an amount that was zeroed.
 func TestPostWssConsumeQuotaZeroUsageRecordsZeroBasis(t *testing.T) {
 	truncate(t)
-	const userID, channelID = 72, 72
-	seedUser(t, userID, 10_000_000)
+	const userID, channelID = 9102, 9102
+	require.NoError(t, model.DB.Create(&model.User{Id: userID, Username: "wss_zero_user", AffCode: "wss001", Quota: 10_000_000, Status: common.UserStatusEnabled}).Error)
 	seedChannel(t, channelID)
 
 	gin.SetMode(gin.TestMode)

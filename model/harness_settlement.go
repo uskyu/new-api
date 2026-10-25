@@ -44,9 +44,16 @@ type HarnessSettlement struct {
 	CompletionTokens int     `json:"completion_tokens" gorm:"default:0"`
 	CacheReadTokens  int     `json:"cache_read_tokens" gorm:"default:0"`
 	CacheWriteTokens int     `json:"cache_write_tokens" gorm:"default:0"`
-	BaseAmount       string  `json:"base_amount" gorm:"type:varchar(64);default:''"`
-	TotalAmount      string  `json:"total_amount" gorm:"type:varchar(64);default:''"`
-	Currency         string  `json:"currency" gorm:"type:varchar(16);default:''"`
+	// TotalTokensKnown records whether the upstream reported a total.
+	TotalTokens      int  `json:"total_tokens" gorm:"default:0"`
+	TotalTokensKnown bool `json:"total_tokens_known" gorm:"default:false"`
+	// SplitUnknown records that the prompt/completion split was NOT observed. It is
+	// stored inverted so the "known split" case needs no explicit write; a
+	// `default:true` flag would let GORM drop a genuine false on insert.
+	SplitUnknown bool   `json:"split_unknown" gorm:"default:false"`
+	BaseAmount   string `json:"base_amount" gorm:"type:varchar(64);default:''"`
+	TotalAmount  string `json:"total_amount" gorm:"type:varchar(64);default:''"`
+	Currency     string `json:"currency" gorm:"type:varchar(16);default:''"`
 	// CostCalculationVersion identifies the algorithm that produced the amounts,
 	// independent of any price-configuration version. Empty marks a legacy row
 	// whose base_amount still carried the customer-side group ratio.
@@ -119,6 +126,9 @@ func UpsertHarnessSettlementTx(tx *gorm.DB, row *HarnessSettlement) error {
 			"completion_tokens":        gorm.Expr("excluded.completion_tokens"),
 			"cache_read_tokens":        gorm.Expr("excluded.cache_read_tokens"),
 			"cache_write_tokens":       gorm.Expr("excluded.cache_write_tokens"),
+			"total_tokens":             gorm.Expr("excluded.total_tokens"),
+			"total_tokens_known":       gorm.Expr("excluded.total_tokens_known"),
+			"split_unknown":            gorm.Expr("excluded.split_unknown"),
 			"base_amount":              gorm.Expr("excluded.base_amount"),
 			"total_amount":             gorm.Expr("excluded.total_amount"),
 			"currency":                 gorm.Expr("excluded.currency"),

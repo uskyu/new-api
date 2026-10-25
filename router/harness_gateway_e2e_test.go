@@ -194,8 +194,12 @@ func TestHarnessGatewayEndToEnd(t *testing.T) {
 			EventId   string `json:"event_id"`
 			RequestId string `json:"request_id"`
 			Usage     struct {
-				InputTokens  int `json:"input_tokens"`
-				OutputTokens int `json:"output_tokens"`
+				// Pointers on purpose: "not measured" is published as JSON null, and
+				// a plain int would decode null as 0 and let a broken wire pass.
+				InputTokens  *int `json:"input_tokens"`
+				OutputTokens *int `json:"output_tokens"`
+				TotalTokens  *int `json:"total_tokens"`
+				SplitKnown   bool `json:"split_known"`
 			} `json:"usage"`
 		} `json:"items"`
 		HasMore bool `json:"has_more"`
@@ -203,8 +207,11 @@ func TestHarnessGatewayEndToEnd(t *testing.T) {
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &usagePage))
 	require.Len(t, usagePage.Items, 1)
 	assert.Equal(t, "hrq_e2e_http", usagePage.Items[0].RequestId)
-	assert.Equal(t, 11, usagePage.Items[0].Usage.InputTokens)
-	assert.Equal(t, 22, usagePage.Items[0].Usage.OutputTokens)
+	require.NotNil(t, usagePage.Items[0].Usage.InputTokens, "a measured split must serialize as a number")
+	require.NotNil(t, usagePage.Items[0].Usage.OutputTokens)
+	assert.Equal(t, 11, *usagePage.Items[0].Usage.InputTokens)
+	assert.Equal(t, 22, *usagePage.Items[0].Usage.OutputTokens)
+	assert.True(t, usagePage.Items[0].Usage.SplitKnown)
 	assert.False(t, usagePage.HasMore)
 
 	// B3 list must return the cost record with USD amounts.

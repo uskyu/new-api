@@ -275,6 +275,12 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		CompletionTokens: usage.OutputTokens,
 		CacheReadTokens:  usage.InputTokenDetails.CachedTokens,
 		CacheWriteTokens: usage.InputTokenDetails.CacheCreationTokensTotal(),
+		// The realtime frame carries separate input and output counts, so the
+		// split is measured. Leaving these unset would publish null tokens and
+		// label a fully measured request as unavailable.
+		TotalTokens: usage.TotalTokens,
+		TotalKnown:  usage.TotalTokens > 0,
+		SplitKnown:  true,
 	}, quota)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
@@ -428,6 +434,12 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		CompletionTokens: usage.CompletionTokens,
 		CacheReadTokens:  usage.PromptTokensDetails.CachedTokens,
 		CacheWriteTokens: usage.PromptTokensDetails.CacheCreationTokensTotal(),
+		// The audio path receives separate prompt and completion counts, so the
+		// split is measured; leaving the flags unset would publish null tokens and
+		// mislabel a measured request as unavailable.
+		TotalTokens: usage.TotalTokens,
+		TotalKnown:  usage.TotalTokens > 0,
+		SplitKnown:  true,
 	}, quota)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
@@ -607,11 +619,21 @@ func quotaNotifyContent(lang string, notifyType string, prompt string, remaining
 const harnessSettlementAmountPrecision = 10
 
 // harnessSettlementUsage is the token breakdown recorded on a ledger row.
+//
+// SplitKnown distinguishes "the upstream reported an input/output split" from
+// "only a total was available". When it is false the two split fields are not
+// measurements and must be published as unknown rather than as zero.
 type harnessSettlementUsage struct {
 	PromptTokens     int
 	CompletionTokens int
 	CacheReadTokens  int
 	CacheWriteTokens int
+	// TotalTokens is the upstream total when one was reported.
+	TotalTokens int
+	// TotalKnown reports whether TotalTokens is a measurement.
+	TotalKnown bool
+	// SplitKnown reports whether PromptTokens/CompletionTokens are measurements.
+	SplitKnown bool
 }
 
 // harnessSettlementCorrelation carries the platform-side identifiers and the
@@ -631,12 +653,40 @@ type harnessSettlementCorrelation struct {
 // as the implicit unit, so it is used whenever no more specific unit applies.
 const harnessUsageUnitToken = "token"
 
-// harnessUsageSourceUpstream marks usage that came from the upstream response
-// rather than a local estimate.
+// harnessUsageSourceUpstream marks usage that came from the upstream response.
 const harnessUsageSourceUpstream = "upstream"
 
 // harnessUsageSourceEstimated marks usage the gateway had to estimate.
 const harnessUsageSourceEstimated = "estimated"
+
+// harnessUsageSourceUnavailable marks a settlement that could obtain no usage at
+// all. It is distinct from a measured zero: the gateway knows nothing, rather
+// than knowing there was nothing.
+const harnessUsageSourceUnavailable = "unavailable"
+
+// harnessUsageProvenance classifies where the recorded usage came from.
+//
+// A local estimate takes precedence over the presence of a usage object, because
+// an estimated usage still arrives as a usage object and the ledger must not call
+// it upstream. Local counting is flagged by the relay adaptors through
+// ContextKeyLocalCountTokens, which is the same signal the consume log already
+// uses to explain its billing path.
+func harnessUsageProvenance(localCountTokens bool, hasMeasurement bool) (source string, isEstimated bool) {
+	if !hasMeasurement {
+		return harnessUsageSourceUnavailable, false
+	}
+	if localCountTokens {
+		return harnessUsageSourceEstimated, true
+	}
+	return harnessUsageSourceUpstream, false
+}
+
+// harnessUsageHasMeasurement reports whether any token figure was actually
+// obtained. A settlement with no measured figure must be published as
+// unavailable rather than as a measured zero.
+func harnessUsageHasMeasurement(usage harnessSettlementUsage) bool {
+	return usage.SplitKnown || usage.TotalKnown
+}
 
 // harnessSettlementCorrelationFromContext reads the correlation ids the request
 // middleware stored. A non-Harness caller has none, and the events are still
@@ -976,8 +1026,37 @@ func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money ha
 	}
 
 	observedAtMs := time.Now().UnixMilli()
-	usageSupersedes, usageVersion := previousHarnessLedgerEvent(model.HarnessLedgerStreamUsage, settlement.RequestId)
-	costSupersedes, costVersion := previousHarnessLedgerEvent(model.HarnessLedgerStreamCost, settlement.RequestId)
+	usagePrevious := previousHarnessLedgerEvent(model.HarnessLedgerStreamUsage, settlement.RequestId)
+	costPrevious := previousHarnessLedgerEvent(model.HarnessLedgerStreamCost, settlement.RequestId)
+
+	usageVersion := 1
+	var usageSupersedes *string
+	if usagePrevious != nil {
+		usageVersion = usagePrevious.RecordVersion + 1
+		usageSupersedes = &usagePrevious.EventId
+	}
+
+	// A repeated settle that reports the same state and the same amount is not a
+	// new fact, so it appends no event: the platform would otherwise see a version
+	// chain that grows without describing any change.
+	//
+	// The snapshot still has to be written. This function is the only path that
+	// persists it for platform traffic, so returning here without the upsert would
+	// freeze the row at its first values and silently drop later corrections to the
+	// correlation, the tokens or the settled timestamp.
+	if costPrevious != nil && costPrevious.Status == settlement.Status && costPrevious.BaseAmount == money.BaseAmount {
+		if err := model.UpsertHarnessSettlement(settlement); err != nil {
+			common.SysLog(common.LogText("harness settlement write failed (request=%s task=%s status=%s): %s", settlement.RequestId, settlement.TaskId, settlement.Status, err.Error()))
+		}
+		return
+	}
+
+	costVersion := 1
+	var costSupersedes *string
+	if costPrevious != nil {
+		costVersion = costPrevious.RecordVersion + 1
+		costSupersedes = &costPrevious.EventId
+	}
 
 	usageEvent := &model.HarnessLedgerEvent{
 		Stream:            model.HarnessLedgerStreamUsage,
@@ -992,6 +1071,9 @@ func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money ha
 		CompletionTokens:  settlement.CompletionTokens,
 		CacheReadTokens:   settlement.CacheReadTokens,
 		CacheWriteTokens:  settlement.CacheWriteTokens,
+		TotalTokens:       settlement.TotalTokens,
+		TotalTokensKnown:  settlement.TotalTokensKnown,
+		SplitUnknown:      settlement.SplitUnknown,
 		UsageSource:       correlation.UsageSource,
 		IsEstimated:       correlation.IsEstimated,
 		BillingBasis:      correlation.UsageUnit,
@@ -1003,7 +1085,7 @@ func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money ha
 
 	costEvent := &model.HarnessLedgerEvent{
 		Stream:                 model.HarnessLedgerStreamCost,
-		EventType:              harnessCostEventTypeForStatus(settlement.Status),
+		EventType:              harnessCostEventTypeForStatus(settlement.Status, costPrevious, money.BaseAmount),
 		HarnessRequestId:       correlation.HarnessRequestId,
 		GatewayRequestId:       settlement.RequestId,
 		RunId:                  correlation.HarnessRunId,
@@ -1014,6 +1096,9 @@ func appendHarnessSettlementEvents(settlement *model.HarnessSettlement, money ha
 		CompletionTokens:       settlement.CompletionTokens,
 		CacheReadTokens:        settlement.CacheReadTokens,
 		CacheWriteTokens:       settlement.CacheWriteTokens,
+		TotalTokens:            settlement.TotalTokens,
+		TotalTokensKnown:       settlement.TotalTokensKnown,
+		SplitUnknown:           settlement.SplitUnknown,
 		UsageSource:            correlation.UsageSource,
 		IsEstimated:            correlation.IsEstimated,
 		BaseAmount:             money.BaseAmount,
@@ -1093,21 +1178,22 @@ func isRetryableHarnessLedgerError(err error) bool {
 	return !errors.Is(err, model.ErrHarnessLedgerInvalid) && !errors.Is(err, model.ErrHarnessSettlementInvalid)
 }
 
-// previousHarnessLedgerEvent returns the id and version of the most recent event
-// in one stream for this gateway request, so a correction points at what it
-// supersedes and advances that stream's record version. Version chains are kept
-// per stream: a usage correction must never reference a cost event.
-func previousHarnessLedgerEvent(stream, gatewayRequestId string) (*string, int) {
+// previousHarnessLedgerEvent returns the most recent event in one stream for this
+// gateway request. Version chains are kept per stream: a usage correction must
+// never reference a cost event, and vice versa. A nil result means this request
+// has no history in that stream yet, which is what makes the first event of a
+// request distinguishable from a correction.
+func previousHarnessLedgerEvent(stream, gatewayRequestId string) *model.HarnessLedgerEvent {
 	if gatewayRequestId == "" || stream == "" {
-		return nil, 1
+		return nil
 	}
 	var last model.HarnessLedgerEvent
 	err := model.DB.Where("gateway_request_id = ? AND stream = ?", gatewayRequestId, stream).
 		Order("id DESC").Limit(1).Find(&last).Error
 	if err != nil || last.EventId == "" {
-		return nil, 1
+		return nil
 	}
-	return &last.EventId, last.RecordVersion + 1
+	return &last
 }
 
 // harnessUsageEventTypeForStatus maps a settlement status to the usage event
@@ -1127,18 +1213,26 @@ func harnessUsageEventTypeForStatus(status string, hasPrevious bool) string {
 	return model.HarnessLedgerEventTypeUsage
 }
 
-// harnessCostEventTypeForStatus maps a settlement status to the cost event type.
-func harnessCostEventTypeForStatus(status string) string {
-	switch status {
-	case model.HarnessSettlementStatusRefunded:
-		return model.HarnessLedgerEventTypeRefund
-	case model.HarnessSettlementStatusPending:
-		return model.HarnessLedgerEventTypeCost
-	case model.HarnessSettlementStatusFailed:
-		return model.HarnessLedgerEventTypeStatusChange
-	default:
+// harnessCostEventTypeForStatus maps a settlement to the cost event type.
+//
+// The event type describes what this append does, while status describes where the
+// record now stands; they answer different questions. A correction is only a
+// correction when a previous event exists, and a change that leaves the amount
+// untouched is a status_change rather than a cost change. previous is the most
+// recent event of this request's cost stream, or nil on the first write.
+func harnessCostEventTypeForStatus(status string, previous *model.HarnessLedgerEvent, baseAmount string) string {
+	if previous == nil {
+		// The first event of a request is never a correction: there is nothing it
+		// could supersede, whatever state it starts in.
 		return model.HarnessLedgerEventTypeCost
 	}
+	if status == model.HarnessSettlementStatusRefunded {
+		return model.HarnessLedgerEventTypeRefund
+	}
+	if previous.BaseAmount != baseAmount {
+		return model.HarnessLedgerEventTypeCostCorrection
+	}
+	return model.HarnessLedgerEventTypeStatusChange
 }
 
 // recordRelayHarnessSettlement records the settled cost of one synchronous
@@ -1172,19 +1266,36 @@ func recordRelayHarnessSettlement(ctx *gin.Context, relayInfo *relaycommon.Relay
 		CompletionTokens: usage.CompletionTokens,
 		CacheReadTokens:  usage.CacheReadTokens,
 		CacheWriteTokens: usage.CacheWriteTokens,
+		TotalTokens:      usage.TotalTokens,
+		TotalTokensKnown: usage.TotalKnown,
+		SplitUnknown:     !usage.SplitKnown,
 	}
+	// The provenance comes from what actually happened to this request, not from a
+	// constant: a locally counted request is an estimate even though it produced a
+	// full usage object, and a request that obtained no usage at all says so
+	// instead of reporting a measured zero.
+	correlation := harnessSettlementCorrelationFromContext(ctx)
+	correlation.UsageSource, correlation.IsEstimated = harnessUsageProvenance(
+		ctx != nil && common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens),
+		harnessUsageHasMeasurement(usage),
+	)
 	// The pricing group is resolved against the client-facing model name, which
 	// is what the channel's abilities and the response headers are keyed by. The
 	// procurement base comes from the basis the billing path filled, so this
 	// caller's group ratio never reaches the ledger.
-	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(relayInfo.ProcurementBasis, quota, relayInfo.ChannelId, relayInfo.OriginModelName), harnessSettlementCorrelationFromContext(ctx))
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(relayInfo.ProcurementBasis, quota, relayInfo.ChannelId, relayInfo.OriginModelName), correlation)
 }
 
 // recordTaskHarnessSettlement moves the ledger row of an async task to its final
 // billing state. The row is looked up by task id so a row written at submission
 // keeps its request id and creation time; when no row exists one is created.
 // It never returns an error: task billing continues regardless.
-func recordTaskHarnessSettlement(task *model.Task, status string, quota int) {
+//
+// usage optionally carries the total the task actually consumed. A task's
+// completion reports at most a total, never a prompt/completion split, so the
+// caller passes what it has and the row records the split as unknown rather than
+// inventing two halves from one number.
+func recordTaskHarnessSettlement(task *model.Task, status string, quota int, usage ...int) {
 	if task == nil || task.TaskID == "" {
 		return
 	}
@@ -1213,6 +1324,14 @@ func recordTaskHarnessSettlement(task *model.Task, status string, quota int) {
 		}
 	}
 	settlement.Status = status
+	// A completion reports at most a total, so that total is recorded and the
+	// split is marked unknown. Storing zero in the split columns would claim the
+	// gateway measured an input/output pair it never saw.
+	if len(usage) > 0 {
+		settlement.TotalTokens = usage[0]
+		settlement.TotalTokensKnown = true
+		settlement.SplitUnknown = true
+	}
 	// The correlation comes from two places, and only one of them survives a
 	// process restart.
 	//
@@ -1228,7 +1347,20 @@ func recordTaskHarnessSettlement(task *model.Task, status string, quota int) {
 	// assignment is not what makes attribution work, and a settlement row that
 	// went missing leaves the correlation empty here, which suppresses the events
 	// for that task.
-	correlation := harnessSettlementCorrelation{UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream}
+	// An async task does not carry a prompt/completion split through to
+	// settlement: the polling path knows at most a total, and often nothing. The
+	// row therefore states what it actually has instead of borrowing a constant,
+	// so a task with no measured usage reads as unavailable rather than as a
+	// measured zero.
+	correlation := harnessSettlementCorrelation{UsageUnit: harnessUsageUnitToken}
+	correlation.UsageSource, correlation.IsEstimated = harnessUsageProvenance(
+		false,
+		harnessUsageHasMeasurement(harnessSettlementUsage{
+			TotalTokens: settlement.TotalTokens,
+			TotalKnown:  settlement.TotalTokensKnown,
+			SplitKnown:  !settlement.SplitUnknown,
+		}),
+	)
 	if settlement.HarnessRequestId != "" {
 		correlation.HarnessRequestId = settlement.HarnessRequestId
 		correlation.HarnessRunId = settlement.HarnessRunId
@@ -1246,19 +1378,28 @@ func recordTaskHarnessSettlement(task *model.Task, status string, quota int) {
 // the task runs cannot rewrite its cost. A task without one (submitted before
 // the context existed, Version == 0) keeps the previous behaviour of reading the
 // live configuration, which is the only safe reading of its zero values.
+//
+// A refund does NOT zero the purchase. The gateway only knows the customer was
+// reimbursed; whether the supplier still bills for work already performed is a
+// fact it does not hold, and vendors do bill for tasks that fail after generation
+// or time out. Booking zero there would under-report exactly the anomalies
+// reconciliation exists to find, so the frozen purchase is kept and the refund is
+// expressed by the event type and status instead.
 func harnessSettlementMoneyForTask(task *model.Task, status string, quota int) harnessSettlementMoney {
 	var frozen *model.TaskProcurementContext
 	if task.PrivateData.BillingContext != nil {
 		frozen = task.PrivateData.BillingContext.Procurement
 	}
-	// A refund means nothing is owed, so there is no purchase to price either.
-	if status == model.HarnessSettlementStatusRefunded {
-		return harnessSettlementMoneyForQuota(nil, 0, task.ChannelId, taskModelName(task))
-	}
 	if frozen != nil && frozen.Version > 0 {
 		var basis *types.ProcurementBasis
 		if preGroup, ok := frozenPrefGroupQuota(frozen); ok {
 			basis = types.NewProcurementBasis(preGroup, frozen.CustomerGroupRatio)
+		} else if status == model.HarnessSettlementStatusRefunded {
+			// A usage-priced task refunded before its quantity was ever learned has
+			// no purchase amount to state. Zero here is not a claim that the
+			// supplier charged nothing: the matching usage event says unavailable,
+			// which is exactly the fact that the quantity was never observed.
+			return harnessSettlementMoneyWithFrozenPricing(nil, 0, task.ChannelId, taskModelName(task), frozen)
 		}
 		return harnessSettlementMoneyWithFrozenPricing(basis, quota, task.ChannelId, taskModelName(task), frozen)
 	}

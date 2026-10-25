@@ -221,8 +221,13 @@ func TestHarnessLedgerReadEndToEnd(t *testing.T) {
 	assert.Equal(t, "hrq_e2e", items[0].RequestId)
 	assert.Equal(t, "gw-request-e2e", items[0].GatewayRequestId)
 	assert.Equal(t, "run_e2e", items[0].RunId)
-	assert.Equal(t, 10, items[0].Usage.InputTokens)
-	assert.Equal(t, 20, items[0].Usage.OutputTokens)
+	// The counts are published as optional values so "not measured" stays
+	// distinguishable from "measured zero".
+	require.NotNil(t, items[0].Usage.InputTokens)
+	require.NotNil(t, items[0].Usage.OutputTokens)
+	assert.Equal(t, 10, *items[0].Usage.InputTokens)
+	assert.Equal(t, 20, *items[0].Usage.OutputTokens)
+	assert.True(t, items[0].Usage.SplitKnown)
 	assert.Equal(t, 1, items[0].RecordVersion)
 	assert.NotEmpty(t, items[0].ObservedAt)
 	assert.False(t, hasMore)

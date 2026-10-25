@@ -103,6 +103,13 @@ func TestHarnessSettlementPersistenceAcrossDialects(t *testing.T) {
 				CompletionTokens: 60,
 				CacheReadTokens:  10,
 				CacheWriteTokens: 5,
+				// The split was not observed and a total was. SplitUnknown is stored
+				// inverted precisely so this combination survives GORM: a
+				// default:true flag would let the insert drop a genuine false and
+				// silently turn "unknown" into "known".
+				TotalTokens:      999,
+				TotalTokensKnown: true,
+				SplitUnknown:     true,
 				BaseAmount:       "0.0012345678",
 				TotalAmount:      "0.0010470000",
 				Currency:         "USD",
@@ -124,6 +131,10 @@ func TestHarnessSettlementPersistenceAcrossDialects(t *testing.T) {
 			assert.Equal(t, 60, row.CompletionTokens)
 			assert.Equal(t, 10, row.CacheReadTokens)
 			assert.Equal(t, 5, row.CacheWriteTokens)
+			assert.Equal(t, 999, row.TotalTokens)
+			assert.True(t, row.TotalTokensKnown)
+			assert.True(t, row.SplitUnknown,
+				"the inverted flag must round-trip as set, on every dialect")
 			assert.Equal(t, "0.0012345678", row.BaseAmount)
 			assert.Equal(t, "0.0010470000", row.TotalAmount)
 			assert.Equal(t, "USD", row.Currency)

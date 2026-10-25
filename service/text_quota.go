@@ -403,6 +403,19 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	return summary
 }
 
+// summaryHasMeasuredUsage reports whether a usage object carries any real
+// observation. A provider that answered with an empty usage block reported
+// nothing, which is different from reporting zeros, and the ledger must not treat
+// the two the same.
+func summaryHasMeasuredUsage(usage *dto.Usage) bool {
+	if usage == nil {
+		return false
+	}
+	return usage.PromptTokens > 0 || usage.CompletionTokens > 0 ||
+		usage.PromptTokensDetails.CachedTokens > 0 ||
+		usage.PromptTokensDetails.CacheCreationTokensTotal() > 0
+}
+
 func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) string {
 	if usage != nil && usage.UsageSemantic != "" {
 		return usage.UsageSemantic
@@ -416,6 +429,12 @@ func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) 
 func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []*common.Message) {
 	originUsage := usage
 	billingUsage := effectiveBillingUsage(usage)
+	// Whether the provider supplied usage at all is the only reliable provenance
+	// signal on this path: a missing usage object means the numbers the settlement
+	// carries were produced locally, while a present one means they came from the
+	// response. Recorded here because the summary filled from the local estimate
+	// no longer shows the difference.
+	upstreamReportedUsage := usage != nil && summaryHasMeasuredUsage(usage)
 	if usage == nil {
 		extraContent = append(extraContent, common.NewMessage("Upstream returned no usage"))
 	}
@@ -570,6 +589,12 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		CompletionTokens: summary.CompletionTokens,
 		CacheReadTokens:  summary.CacheTokens,
 		CacheWriteTokens: cacheWriteTokens,
+		TotalTokens:      summary.TotalTokens,
+		// The total and the split are both measurements only when the provider
+		// actually supplied usage. When it did not, the summary was filled from the
+		// local prompt estimate and neither figure is an observation.
+		TotalKnown: upstreamReportedUsage,
+		SplitKnown: upstreamReportedUsage,
 	}, summary.Quota)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,

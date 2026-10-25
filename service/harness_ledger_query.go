@@ -69,11 +69,23 @@ type HarnessUsageEvent struct {
 }
 
 // HarnessUsageEventAmounts is the normalized usage block.
+//
+// A token count is a *int because "not measured" is not the same statement as
+// "measured zero", and the contract must be able to express both. A nil means the
+// upstream did not report that figure: emitting 0 there would assert that no
+// tokens were consumed, which is a different and often wrong claim. A reader that
+// only wants a number can treat nil as unknown; a reader that reconciles usage
+// must not.
 type HarnessUsageEventAmounts struct {
-	InputTokens      int `json:"input_tokens"`
-	OutputTokens     int `json:"output_tokens"`
-	CacheReadTokens  int `json:"cache_read_tokens"`
-	CacheWriteTokens int `json:"cache_write_tokens"`
+	InputTokens      *int `json:"input_tokens"`
+	OutputTokens     *int `json:"output_tokens"`
+	CacheReadTokens  *int `json:"cache_read_tokens"`
+	CacheWriteTokens *int `json:"cache_write_tokens"`
+	// TotalTokens is the total the upstream reported, when it reported one.
+	TotalTokens *int `json:"total_tokens,omitempty"`
+	// SplitKnown false means input/output were not reported separately; the two
+	// fields are then null and only total_tokens may carry a value.
+	SplitKnown bool `json:"split_known"`
 }
 
 // HarnessCostBilling mirrors the existing settlement billing block so B3 reuses
@@ -133,24 +145,41 @@ func costIdForEvent(gatewayRequestId, eventId string) string {
 
 func usageEventFromLedgerEvent(e model.HarnessLedgerEvent) HarnessUsageEvent {
 	return HarnessUsageEvent{
-		EventId:          e.EventId,
-		EventType:        e.EventType,
-		RequestId:        e.HarnessRequestId,
-		GatewayRequestId: e.GatewayRequestId,
-		RunId:            e.RunId,
-		UsageUnit:        e.UsageUnit,
-		Usage: HarnessUsageEventAmounts{
-			InputTokens:      e.PromptTokens,
-			OutputTokens:     e.CompletionTokens,
-			CacheReadTokens:  e.CacheReadTokens,
-			CacheWriteTokens: e.CacheWriteTokens,
-		},
+		EventId:           e.EventId,
+		EventType:         e.EventType,
+		RequestId:         e.HarnessRequestId,
+		GatewayRequestId:  e.GatewayRequestId,
+		RunId:             e.RunId,
+		UsageUnit:         e.UsageUnit,
+		Usage:             harnessUsageAmounts(e),
 		UsageSource:       e.UsageSource,
 		IsEstimated:       e.IsEstimated,
 		ObservedAt:        formatHarnessObservedAt(e.ObservedAtMs),
 		RecordVersion:     e.RecordVersion,
 		SupersedesEventId: e.SupersedesEventId,
 	}
+}
+
+// harnessUsageAmounts publishes the stored token figures, keeping "not measured"
+// distinct from "measured zero". The split columns are only reported when the
+// split was actually observed; a total-only row answers null for them so the
+// platform never averages over a fabricated input/output pair.
+func harnessUsageAmounts(e model.HarnessLedgerEvent) HarnessUsageEventAmounts {
+	amounts := HarnessUsageEventAmounts{SplitKnown: !e.SplitUnknown}
+	if e.TotalTokensKnown {
+		total := e.TotalTokens
+		amounts.TotalTokens = &total
+	}
+	if e.SplitUnknown {
+		return amounts
+	}
+	input, output := e.PromptTokens, e.CompletionTokens
+	cacheRead, cacheWrite := e.CacheReadTokens, e.CacheWriteTokens
+	amounts.InputTokens = &input
+	amounts.OutputTokens = &output
+	amounts.CacheReadTokens = &cacheRead
+	amounts.CacheWriteTokens = &cacheWrite
+	return amounts
 }
 
 func costRecordFromLedgerEvent(e model.HarnessLedgerEvent) HarnessCostRecord {

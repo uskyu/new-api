@@ -658,7 +658,28 @@ func finalizeTerminalTask(ctx context.Context, adaptor TaskPollingAdaptor, task 
 	}
 	// Success without a usage settlement (per-request billing, or a task whose
 	// completion carries no billable usage): the reservation is the final cost.
-	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota)
+	// The total the completion reported is passed through when it has one, so the
+	// usage stream states the consumed quantity instead of leaving every async
+	// event at zero.
+	var completionTotal []int
+	if total := taskResultTotalTokens(taskResult); total > 0 {
+		completionTotal = []int{total}
+	}
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota, completionTotal...)
+}
+
+// taskResultTotalTokens returns the total the completion reported, preferring the
+// total field and falling back to the completion count when a provider reports
+// only that. It is used for the usage stream, never for the charge: the charge has
+// its own settlement path.
+func taskResultTotalTokens(taskResult *relaycommon.TaskInfo) int {
+	if taskResult == nil {
+		return 0
+	}
+	if taskResult.TotalTokens > 0 {
+		return taskResult.TotalTokens
+	}
+	return taskResult.CompletionTokens
 }
 
 func redactVideoResponseBody(body []byte) []byte {
