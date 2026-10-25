@@ -586,6 +586,75 @@ func TestLedgerTaskFrozenZeroModelRatioIsReal(t *testing.T) {
 		"a frozen zero model ratio is a real price, not a missing value")
 }
 
+// TestLedgerWarnsWhenProcurementBasisIsMissing pins the operator-visible signal
+// for a silent mis-booking. The fallback re-imports the charged quota, which is
+// only equivalent when the customer group ratio is exactly 1; in every other case
+// the amount is either mis-scaled or, at ratio 0, loses the entire cost. Those
+// cases must be reported instead of writing a plausible-looking number.
+func TestLedgerWarnsWhenProcurementBasisIsMissing(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	const warningFragment = "no procurement basis"
+
+	for _, tc := range []struct {
+		name      string
+		basis     *hosttypes.ProcurementBasis
+		wantWarn  bool
+		reasoning string
+	}{
+		{
+			name:      "no basis at all",
+			basis:     nil,
+			wantWarn:  true,
+			reasoning: "the ratio is unknown, so the fallback cannot be proven equivalent",
+		},
+		{
+			name:      "zero group ratio",
+			basis:     &hosttypes.ProcurementBasis{CustomerGroupRatio: 0},
+			wantWarn:  true,
+			reasoning: "a zero ratio charges nothing, so the fallback loses the whole cost",
+		},
+		{
+			name:      "discounted group ratio",
+			basis:     &hosttypes.ProcurementBasis{CustomerGroupRatio: 0.5},
+			wantWarn:  true,
+			reasoning: "the charged quota is half the pre-group amount, so the fallback under-reports",
+		},
+		{
+			name:      "premium group ratio",
+			basis:     &hosttypes.ProcurementBasis{CustomerGroupRatio: 3},
+			wantWarn:  true,
+			reasoning: "the charged quota is three times the pre-group amount, so the fallback over-reports",
+		},
+		{
+			name:      "unit group ratio is provably equivalent",
+			basis:     &hosttypes.ProcurementBasis{CustomerGroupRatio: 1},
+			wantWarn:  false,
+			reasoning: "with ratio 1 the fallback and the corrected amount are the same number",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured strings.Builder
+			originalWriter := gin.DefaultWriter
+			gin.DefaultWriter = &captured
+			t.Cleanup(func() { gin.DefaultWriter = originalWriter })
+
+			money := harnessSettlementMoneyForQuota(tc.basis, 1_000_000, 0, "model-without-pricing-group")
+
+			warned := strings.Contains(captured.String(), warningFragment)
+			assert.Equal(t, tc.wantWarn, warned, tc.reasoning)
+			assert.Equal(t, harnessCostCalculationFallback, money.CostCalculationVersion,
+				"every fallback row is tagged as one, warned or not")
+			assert.Equal(t, "2", money.BaseAmount,
+				"the fallback still prices the request rather than booking zero")
+		})
+	}
+}
+
 // TestLedgerTotalAmountIncludesSupplierTax pins the cost formula against the
 // contract sample: base 0.011500, group ratio 0.8 and 6.5% tax must yield 0.0098,
 // not the untaxed 0.0092.

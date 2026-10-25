@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -472,7 +473,90 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 	}
 }
 
-// TestTaskProcurementBasisFollowsAdjustedImageQuantity pins the defect where an
+// TestRelayTaskSubmitTieredImmediateSuccessRecordsSettledBasis drives the real
+// submission path for a tiered task that is already terminal when the submit
+// response arrives: the expression prices the actual usage, so the procurement
+// base must be that settled pre-group amount, not the reservation's estimate.
+func TestRelayTaskSubmitTieredImmediateSuccessRecordsSettledBasis(t *testing.T) {
+	service.InitHttpClient()
+	saveBillingConfig(t)
+
+	// 4 images metered at $0.25 each: the expression makes the quantity visible,
+	// so the reservation (which assumes fewer images) and the settlement differ.
+	// fixed() is deliberately not used: task usage expressions reject fixed
+	// pricing because the vendor reports usage, not a per-request price.
+	const imageExpr = `tier("image", u("image_count") * 0.25)`
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode": `{"declared-model":"tiered_expr"}`,
+		"billing_setting.billing_expr": `{"declared-model":` + strconv.Quote(imageExpr) + `}`,
+	}))
+
+	// The usage facts of an immediate result come from the completion hook, not
+	// from parseSubmitResponse, so both are provided here.
+	const source = `
+export const meta = {apiVersion:1,key:"immediate-image",name:"Immediate Image",version:"1.0.0",author:{name:"Test"},models:["declared-model"],fetchMode:"per_task",usageSchema:{image_count:{type:"number",unit:"count"}}};
+export function buildSubmitRequest(ctx) { return {url: ctx.baseUrl+"/submit", method:"POST", body:{model: ctx.model}, action:"image"}; }
+export function extractUsage(){ return {image_count: 1}; }
+export function parseSubmitResponse() {
+  return {taskId:"job-immediate", immediate:{code:0,status:"SUCCESS"}, taskData:{status:"SUCCESS"}};
+}
+export function extractUsageOnComplete(){ return {image_count: 4}; }
+export function buildQueryRequest(ctx) { return {url: ctx.baseUrl+"/query"}; }
+export function parseTaskResult() { return {status:"SUCCESS"}; }
+`
+	registry := pluginruntime.NewRegistry()
+	_, err := registry.Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+
+	// The billing path resolves the group ratio from configuration, so a ratio
+	// set only on PriceData would be overwritten. Pin the real "default" group.
+	originalRatios := ratio_setting.GroupRatio2JSONString()
+	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalRatios)) })
+	ratios := ratio_setting.GetGroupRatioCopy()
+	ratios["default"] = 2
+	encoded, err := common.Marshal(ratios)
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(string(encoded)))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"job-immediate"}`))
+	}))
+	defer server.Close()
+
+	c, info := newTaskSubmitContext(t, "declared-model", "")
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, server.URL)
+	c.Set("group", "default")
+	info.UserGroup, info.UsingGroup = "default", "default"
+	info.OriginModelName = "declared-model"
+	info.Billing = &imageReservation{limit: 1 << 30}
+	plugin, ok := registry.Generation().Get("immediate-image")
+	require.True(t, ok)
+	c.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{Generation: registry.Generation(), Plugin: plugin})
+
+	result, taskErr := RelayTaskSubmit(c, info)
+	require.Nil(t, taskErr, "submission error: %+v", taskErr)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Immediate)
+	assert.Equal(t, "SUCCESS", result.Immediate.Status)
+
+	// The settlement priced 4 images at $0.25 in USD, converted to quota. That
+	// pre-group amount is the procurement base: 4 * 0.25 = $1.00.
+	require.NotNil(t, info.ProcurementBasis, "the settled basis must be recorded")
+	preGroup, ok := info.ProcurementBasis.PreGroupQuotaDecimal()
+	require.True(t, ok)
+	wantBase := decimal.NewFromFloat(1.0 * common.QuotaPerUnit)
+	assert.True(t, preGroup.Equal(wantBase),
+		"base must be the settled pre-group amount (%s), got %s", wantBase, preGroup)
+	assert.Equal(t, 2.0, info.ProcurementBasis.CustomerGroupRatio,
+		"the customer ratio is recorded but never part of the base")
+
+	// The customer is charged that amount times their group ratio.
+	assert.Equal(t, 2*common.QuotaFromDecimal(wantBase), info.PriceData.Quota,
+		"the customer charge keeps the group ratio")
+}
+
 // upstream-reported quantity replaced the reserved one for the charge but left
 // the procurement base on the reservation's estimate. The base must describe what
 // was actually purchased, and it must never pick up the customer group ratio.
