@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -1288,4 +1289,56 @@ func TestLedgerUsageCorrectionTypingForNonRefundSettles(t *testing.T) {
 	assert.Equal(t, 2, usageEvents[1].RecordVersion)
 	require.NotNil(t, usageEvents[1].SupersedesEventId)
 	assert.Equal(t, usageEvents[0].EventId, *usageEvents[1].SupersedesEventId)
+}
+
+// TestHarnessPricingVersionFitsItsColumn pins that the value the billing path
+// produces still fits the column that stores it.
+//
+// The value is "pw-" plus a weak ETag, and a weak ETag is W/ plus a quoted digest,
+// so it is already longer than the digest alone. The column was once sized for the
+// digest and every MySQL ledger write failed with "data too long"; because ledger
+// failures are logged rather than returned, the platform feed stayed empty while
+// settlements kept accumulating. Comparing the produced length against the schema
+// keeps that failure from coming back silently on any dialect.
+func TestHarnessPricingVersionFitsItsColumn(t *testing.T) {
+	ledgerTestDB(t)
+
+	var columnType string
+	err := model.DB.Raw(
+		"SELECT type FROM pragma_table_info('harness_ledger_events') WHERE name = 'pricing_version'",
+	).Scan(&columnType).Error
+	require.NoError(t, err)
+	require.NotEmpty(t, columnType, "the ledger table stores a pricing version")
+
+	// varchar(N) -> N; anything else is a schema change this test should notice.
+	var width int
+	_, err = fmt.Sscanf(columnType, "varchar(%d)", &width)
+	require.NoError(t, err, "unexpected pricing_version column type %q", columnType)
+
+	// The billing path mints "pw-" + ETagFor(...), and ETagFor renders a weak ETag
+	// as W/ plus a quoted 64-character digest. Build that exact shape rather than
+	// calling the function, which needs a pricing cache this fixture does not have.
+	digest := strings.Repeat("a", 64)
+	version := "pw-" + `W/"` + digest + `"`
+	assert.GreaterOrEqual(t, width, len(version),
+		"pricing_version holds %d characters but the column allows %d", len(version), width)
+
+	// The event the billing path builds must actually persist, which is what the
+	// earlier width silently prevented. SQLite does not enforce varchar width, so
+	// this insert passes on the fixture even with the narrow column; the assertion
+	// above is what guards the width.
+	event := &model.HarnessLedgerEvent{
+		Stream:           model.HarnessLedgerStreamCost,
+		EventType:        model.HarnessLedgerEventTypeCost,
+		HarnessRequestId: "hrq_pricing_width",
+		GatewayRequestId: "gw_pricing_width",
+		Status:           model.HarnessLedgerStatusSettled,
+		Currency:         "USD",
+		PricingVersion:   version,
+		BaseAmount:       "0.0000000001",
+		TotalAmount:      "0.0000000001",
+		RecordVersion:    1,
+		ObservedAtMs:     time.Now().UnixMilli(),
+	}
+	require.NoError(t, model.AppendHarnessLedgerEvent(event))
 }

@@ -89,7 +89,12 @@ type HarnessLedgerEvent struct {
 	GroupRatio     float64 `json:"group_ratio" gorm:"default:0"`
 	TaxRatePercent float64 `json:"tax_rate_percent" gorm:"default:0"`
 	BillingBasis   string  `json:"billing_basis" gorm:"type:varchar(24);default:''"`
-	PricingVersion string  `json:"pricing_version" gorm:"type:varchar(64);default:''"`
+	// varchar(96), not 64: the value is "pw-" plus a weak ETag, and a weak ETag is
+	// W/ plus a quoted 64-character digest, so the shortest real value already
+	// exceeds 64. A 64-character column accepted none of them and every ledger
+	// write failed with a "data too long" error on MySQL, which silently left the
+	// platform feed empty while settlements kept accumulating.
+	PricingVersion string `json:"pricing_version" gorm:"type:varchar(96);default:''"`
 	// CostCalculationVersion identifies the algorithm that produced base_amount.
 	// It is independent of PricingVersion (which price configuration the amount
 	// was derived from): an empty value marks a legacy row whose base still
