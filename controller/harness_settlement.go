@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -121,4 +122,135 @@ func GetHarnessSettlement(c *gin.Context) {
 		CreatedAt: settlement.CreatedAt,
 		SettledAt: settlement.SettledAt,
 	})
+}
+
+// harnessSettlementListItem is one row of the operator-facing ledger list. It
+// carries the same figures as the per-request response so the list and the detail
+// view cannot disagree, plus the event counts that tell an operator whether a row
+// has been corrected.
+type harnessSettlementListItem struct {
+	Id               int                      `json:"id"`
+	RequestId        string                   `json:"request_id"`
+	HarnessRequestId string                   `json:"harness_request_id,omitempty"`
+	HarnessRunId     string                   `json:"harness_run_id,omitempty"`
+	Status           string                   `json:"status"`
+	Model            string                   `json:"model"`
+	ChannelId        int                      `json:"channel_id"`
+	PricingGroup     string                   `json:"pricing_group,omitempty"`
+	Usage            harnessSettlementUsage   `json:"usage"`
+	Billing          harnessSettlementBilling `json:"billing"`
+	CreatedAt        int64                    `json:"created_at"`
+	SettledAt        int64                    `json:"settled_at,omitempty"`
+}
+
+// GetHarnessSettlements lists the gateway ledger for the operator console. This is
+// an admin view of the operator's own bookkeeping, not a platform feed: it is
+// reachable only by a browser session, never by a service token, and it shows
+// every request rather than only platform-originated ones.
+//
+// Unlike the admin log list, which silently ignores a malformed filter, this
+// endpoint rejects one. A billing ledger that quietly answers "no filter applied"
+// to a typo answers with the wrong rows while looking correct, and an operator
+// would draw conclusions from them.
+func GetHarnessSettlements(c *gin.Context) {
+	startTime, badStart := parseHarnessLedgerUnixParam(c, "start_time")
+	endTime, badEnd := parseHarnessLedgerUnixParam(c, "end_time")
+	if badStart || badEnd {
+		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid time range"))
+		return
+	}
+	if startTime > 0 && endTime > 0 && startTime >= endTime {
+		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid time range"))
+		return
+	}
+
+	// A multi-value filter accepts both repeated keys and one comma-separated
+	// value, because a URL built by hand and one built by the table both occur.
+	var statuses []string
+	for _, raw := range c.QueryArray("status") {
+		for _, part := range strings.Split(raw, ",") {
+			trimmed := strings.TrimSpace(part)
+			if trimmed == "" {
+				continue
+			}
+			if !isHarnessSettlementStatus(trimmed) {
+				common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Unknown settlement status"))
+				return
+			}
+			statuses = append(statuses, trimmed)
+		}
+	}
+
+	pageInfo := common.GetPageQuery(c)
+	rows, total, err := model.ListHarnessSettlements(model.HarnessSettlementListQuery{
+		RequestId:        c.Query("request_id"),
+		HarnessRequestId: c.Query("harness_request_id"),
+		ModelName:        c.Query("model_name"),
+		Statuses:         statuses,
+		StartTime:        startTime,
+		EndTime:          endTime,
+		Page:             pageInfo.Page,
+		PageSize:         pageInfo.GetPageSize(),
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	items := make([]harnessSettlementListItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, harnessSettlementListItem{
+			Id:               row.Id,
+			RequestId:        row.RequestId,
+			HarnessRequestId: row.HarnessRequestId,
+			HarnessRunId:     row.HarnessRunId,
+			Status:           row.Status,
+			Model:            row.ModelName,
+			ChannelId:        row.ChannelId,
+			PricingGroup:     row.PricingGroup,
+			Usage:            harnessSettlementUsageFromRow(&row),
+			Billing: harnessSettlementBilling{
+				BaseAmount:     row.BaseAmount,
+				GroupRatio:     row.GroupRatio,
+				TaxRatePercent: row.TaxRatePercent,
+				TotalAmount:    row.TotalAmount,
+				Currency:       row.Currency,
+			},
+			CreatedAt: row.CreatedAt,
+			SettledAt: row.SettledAt,
+		})
+	}
+
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(items)
+	common.ApiSuccess(c, pageInfo)
+}
+
+// parseHarnessLedgerUnixParam reads an optional unix-seconds bound. It reports
+// whether the value was present but unparseable, so the caller can reject rather
+// than silently widening the query to all time.
+func parseHarnessLedgerUnixParam(c *gin.Context, key string) (int64, bool) {
+	raw := strings.TrimSpace(c.Query(key))
+	if raw == "" {
+		return 0, false
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < 0 {
+		return 0, true
+	}
+	return value, false
+}
+
+// isHarnessSettlementStatus reports whether a filter value names a real
+// settlement state, so a typo answers 400 instead of an empty page.
+func isHarnessSettlementStatus(value string) bool {
+	switch value {
+	case model.HarnessSettlementStatusPending,
+		model.HarnessSettlementStatusSettled,
+		model.HarnessSettlementStatusRefunded,
+		model.HarnessSettlementStatusFailed:
+		return true
+	default:
+		return false
+	}
 }

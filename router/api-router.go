@@ -216,6 +216,14 @@ func SetApiRouter(router *gin.Engine) {
 		handlePermissionRoute(intelligentRoutingRoute, http.MethodPut, "/token-access/:id", authz.IntelligentRoutingWrite, controller.UpdateIntelligentRoutingTokenAccess)
 		apiRouter.GET("/harness/catalog", middleware.DisableCache(), middleware.TokenAuth(), controller.GetHarnessCatalog)
 		apiRouter.GET("/harness/settlements/:request_id", middleware.DisableCache(), middleware.TokenAuth(), controller.GetHarnessSettlement)
+		// The operator console reads the gateway ledger through a browser session
+		// only, and root only: it shows every request the gateway booked, including
+		// internal ones that the platform feed deliberately excludes.
+		harnessLedgerRoute := apiRouter.Group("/harness/ledger")
+		harnessLedgerRoute.Use(middleware.RootAuth(), middleware.DisableCache())
+		{
+			harnessLedgerRoute.GET("/", controller.GetHarnessSettlements)
+		}
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{

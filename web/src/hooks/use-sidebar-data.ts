@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Activity,
+  BookOpen,
   Box,
   ClipboardList,
   CreditCard,
@@ -167,6 +168,14 @@ export function useSidebarData(): SidebarData {
             title: t('Task Plugins'),
             url: '/task-plugins',
             icon: PlugZap,
+            requiredRole: ROLE.SUPER_ADMIN,
+          },
+          {
+            // The gateway ledger shows what the gateway itself booked, including
+            // the procurement cost of internal requests, so it stays root-only.
+            title: t('Ledger'),
+            url: '/harness-ledger',
+            icon: BookOpen,
             requiredRole: ROLE.SUPER_ADMIN,
           },
           {

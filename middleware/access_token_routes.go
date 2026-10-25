@@ -189,6 +189,11 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"DELETE /api/system-info/stale-instances":      accessTokenScopeRule("ops:write"),
 	"DELETE /api/system-info/instances/:node_name": accessTokenScopeRule("ops:write"),
 
+	// router/api-router.go: /api/harness/ledger. The operator ledger is a read-only
+	// view of what the gateway billed, so it rides the log-read scope rather than
+	// the ops scope: whoever may read usage logs may read the ledger behind them.
+	"GET /api/harness/ledger/": accessTokenScopeRule("log:read"),
+
 	// router/api-router.go: /api/plugin/task
 	"GET /api/plugin/task":                           accessTokenScopeRule("plugin:read"),
 	"POST /api/plugin/task":                          accessTokenScopeRule("plugin:write"),

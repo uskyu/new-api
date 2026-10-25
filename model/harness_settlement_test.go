@@ -224,3 +224,68 @@ func TestKeepFirstNonEmptyRendersPerDialect(t *testing.T) {
 		keepFirstNonEmpty("harness_run_id", "VALUES"),
 		"MySQL references the proposed row through VALUES(col)")
 }
+
+// TestListHarnessSettlementsFiltersAndPages pins the operator list query: the
+// filters must actually narrow the result and the total must describe the filtered
+// set rather than the whole table, because the page and its total are read
+// together.
+func TestListHarnessSettlementsFiltersAndPages(t *testing.T) {
+	useHarnessSettlementDB(t, "sqlite")
+
+	seed := func(id string, status string, createdAt int64, modelName string) {
+		require.NoError(t, DB.Create(&HarnessSettlement{
+			RequestId:   id,
+			Status:      status,
+			ModelName:   modelName,
+			BaseAmount:  "1",
+			TotalAmount: "1",
+			Currency:    "USD",
+			CreatedAt:   createdAt,
+			// The unique index on harness_request_id admits one empty value, so each
+			// row carries its own to keep them distinct.
+			HarnessRequestId: "hrq_" + id,
+		}).Error)
+	}
+	seed("gw-a", HarnessSettlementStatusSettled, 1000, "economy")
+	seed("gw-b", HarnessSettlementStatusPending, 2000, "enterprise")
+	seed("gw-c", HarnessSettlementStatusSettled, 3000, "economy")
+	seed("other-x", HarnessSettlementStatusRefunded, 4000, "economy")
+
+	all, total, err := ListHarnessSettlements(HarnessSettlementListQuery{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), total)
+	assert.Len(t, all, 4)
+	assert.Equal(t, "other-x", all[0].RequestId, "newest first")
+
+	// Request id prefix narrows the result.
+	byPrefix, total, err := ListHarnessSettlements(HarnessSettlementListQuery{RequestId: "gw-"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+	assert.Len(t, byPrefix, 3)
+
+	// Status filter narrows the result.
+	byStatus, total, err := ListHarnessSettlements(HarnessSettlementListQuery{
+		Statuses: []string{HarnessSettlementStatusSettled},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	assert.Len(t, byStatus, 2)
+
+	// Time range is inclusive of the start and exclusive of the end.
+	byTime, total, err := ListHarnessSettlements(HarnessSettlementListQuery{StartTime: 2000, EndTime: 4000})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total, "created_at in [2000, 4000)")
+	assert.Len(t, byTime, 2)
+
+	// Paging keeps the filtered total while returning one page.
+	page2, total, err := ListHarnessSettlements(HarnessSettlementListQuery{Page: 2, PageSize: 2})
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), total, "the total describes the filtered set, not the page")
+	assert.Len(t, page2, 2)
+
+	// A search term containing a LIKE wildcard must not widen the match.
+	wildcard, total, err := ListHarnessSettlements(HarnessSettlementListQuery{RequestId: "g%"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), total, "a literal % must not match as a wildcard")
+	assert.Empty(t, wildcard)
+}

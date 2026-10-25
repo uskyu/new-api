@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -204,4 +205,91 @@ func GetHarnessSettlementByTaskId(taskId string) (*HarnessSettlement, error) {
 		return nil, err
 	}
 	return &settlement, nil
+}
+
+// HarnessSettlementListQuery filters the operator-facing settlement list. Every
+// field is optional; a zero value means that filter is not applied. The list is
+// a read-only operator view of what the gateway booked, so it lives outside the
+// platform contract and carries no cursor or visibility rules.
+type HarnessSettlementListQuery struct {
+	// RequestId matches the gateway request id by prefix.
+	RequestId string
+	// HarnessRequestId matches the platform request id by prefix.
+	HarnessRequestId string
+	// ModelName matches the client-facing model name by prefix.
+	ModelName string
+	// Statuses restricts the result to these settlement states.
+	Statuses []string
+	// StartTime / EndTime bound created_at in unix seconds, inclusive start and
+	// exclusive end. Zero means unbounded.
+	StartTime int64
+	EndTime   int64
+	Page      int
+	PageSize  int
+}
+
+// ListHarnessSettlements returns one page of settlement rows and the total count
+// matching the filter, newest first.
+//
+// Prefix matching is used for the free-text fields because an operator typically
+// pastes the leading part of an id from a log line; an exact match would require
+// the whole value. The like patterns escape their own wildcards so a value
+// containing % or _ cannot widen the search.
+func ListHarnessSettlements(query HarnessSettlementListQuery) ([]HarnessSettlement, int64, error) {
+	page := query.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := query.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	build := func() *gorm.DB {
+		tx := DB.Model(&HarnessSettlement{})
+		if requestId := strings.TrimSpace(query.RequestId); requestId != "" {
+			tx = tx.Where("request_id LIKE ?", escapeLikePrefix(requestId))
+		}
+		if harnessRequestId := strings.TrimSpace(query.HarnessRequestId); harnessRequestId != "" {
+			tx = tx.Where("harness_request_id LIKE ?", escapeLikePrefix(harnessRequestId))
+		}
+		if modelName := strings.TrimSpace(query.ModelName); modelName != "" {
+			tx = tx.Where("model_name LIKE ?", escapeLikePrefix(modelName))
+		}
+		if len(query.Statuses) > 0 {
+			tx = tx.Where("status IN ?", query.Statuses)
+		}
+		if query.StartTime > 0 {
+			tx = tx.Where("created_at >= ?", query.StartTime)
+		}
+		if query.EndTime > 0 {
+			tx = tx.Where("created_at < ?", query.EndTime)
+		}
+		return tx
+	}
+
+	var total int64
+	if err := build().Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var rows []HarnessSettlement
+	err := build().Order("id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&rows).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
+}
+
+// escapeLikePrefix turns a user-supplied search term into a LIKE pattern that
+// matches it as a prefix, with the term's own wildcards neutralized.
+func escapeLikePrefix(term string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(term) + "%"
 }
