@@ -1,7 +1,7 @@
 # Harness 鉴权配置指南
 
 **版本**：V0.9
-**对应网关版本**：`harness-api` 分支 `bfec3fe2e`
+**对应网关版本**：`harness-api` 分支 `725ec9d6d`
 
 本文档说明网关侧的 JWT 校验实现，以及需要 Harness 提供的信息。
 

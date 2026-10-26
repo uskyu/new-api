@@ -1,7 +1,7 @@
 # Harness 网关接口交付包
 
 **版本**：V0.9
-**对应网关版本**：`harness-api` 分支 `bfec3fe2e`
+**对应网关版本**：`harness-api` 分支 `725ec9d6d`
 **交付日期**：2026-10-25
 
 ---
@@ -72,7 +72,9 @@
 | --- | --- |
 | Harness 真实 JWKS 联调 | **正式验收前必须完成** |
 | PostgreSQL 验证 | 若部署用 PG 则必须补验 |
-| Docker 镜像 | 部署准备，不阻塞接口对接 |
+
+**Docker 镜像已完成**：`ghcr.io/uskyu/new-api:harness-latest`，已在部署实例上运行
+并通过端到端验证（JWT 鉴权 → 模型调用 → 结算落库 → 账本事件 → B1/B3 读回）。
 
 ---
 
