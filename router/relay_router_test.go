@@ -1,6 +1,9 @@
 package router
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +13,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -164,6 +168,74 @@ func TestRelayProtocolRoutesRequireAuthentication(t *testing.T) {
 				"the route must be registered")
 			assert.Equal(t, http.StatusUnauthorized, recorder.Code,
 				"body=%s", recorder.Body.String())
+		})
+	}
+}
+
+// TestRelayProtocolRoutesRequireChatScope pins that every model-call protocol a
+// verified Harness principal can reach also demands gateway.chat.
+//
+// This exists because the four protocols are not registered in one place: A1 and A4
+// sit on the /v1 group, A9 on its own /v1beta group, and A2 is registered by the
+// task-plugin protocol router. A2 therefore does not inherit the /v1 scope check and
+// silently accepted any valid Harness credential, whatever its scopes. A route added
+// later in the same way would fail here instead.
+func TestRelayProtocolRoutesRequireChatScope(t *testing.T) {
+	setupRelayRouterTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Option{}))
+	model.InitOptionMap()
+
+	user := &model.User{Username: "scope-router", Status: common.UserStatusEnabled, Group: "default"}
+	require.NoError(t, model.DB.Create(user).Error)
+	serviceToken := &model.Token{
+		Name: "scope-router-service", Key: "scope-router-key", UserId: user.Id,
+		Status: common.TokenStatusEnabled, ExpiredTime: -1,
+		UnlimitedQuota: true, Group: "default",
+	}
+	require.NoError(t, model.DB.Create(serviceToken).Error)
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	require.NoError(t, model.UpdateOption(setting.HarnessJWKSURLOptionKey, harnessE2EJWKS(t, key, "kid-scope")))
+	require.NoError(t, model.UpdateOption(setting.HarnessJWTIssuerOptionKey, "harness"))
+	require.NoError(t, model.UpdateOption(setting.HarnessJWTAudienceOptionKey, "new-api"))
+	subjectMap, err := json.Marshal(map[string]int{"harness-gateway": serviceToken.Id})
+	require.NoError(t, err)
+	require.NoError(t, model.UpdateOption(setting.HarnessSubjectTokenMapOptionKey, string(subjectMap)))
+	t.Cleanup(func() {
+		model.DB.Exec("DELETE FROM options WHERE key IN ?", []string{
+			setting.HarnessJWKSURLOptionKey, setting.HarnessJWTIssuerOptionKey,
+			setting.HarnessJWTAudienceOptionKey, setting.HarnessSubjectTokenMapOptionKey,
+		})
+	})
+
+	engine := gin.New()
+	SetRouter(engine, WebAssets{})
+
+	// A credential with no chat scope. The ledger scopes are present so a refusal
+	// here cannot be mistaken for a missing-token failure.
+	withoutChat := harnessE2ESign(t, key, "kid-scope", "gateway.usage.read", "gateway.cost.read", "gateway.catalog.read")
+
+	for _, route := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{"A1 OpenAI chat", "/v1/chat/completions", `{"model":"tier","messages":[]}`},
+		{"A2 OpenAI Responses", "/v1/responses", `{"model":"tier","input":"hi"}`},
+		{"A4 Anthropic Messages", "/v1/messages", `{"model":"tier","max_tokens":1,"messages":[]}`},
+		{"A9 Gemini native", "/v1beta/models/tier:generateContent", `{"contents":[]}`},
+	} {
+		t.Run(route.name+" refuses a credential without gateway.chat", func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, route.path, strings.NewReader(route.body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Authorization", "Bearer "+withoutChat)
+			engine.ServeHTTP(recorder, request)
+
+			assert.Equal(t, http.StatusForbidden, recorder.Code,
+				"a missing gateway.chat must be refused before channel selection, body=%s",
+				recorder.Body.String())
 		})
 	}
 }

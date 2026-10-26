@@ -27,8 +27,14 @@ func SetTaskPluginProtocolRouter(router *gin.Engine) {
 func taskPluginProtocolHandlers(protocol, operation string) ([]gin.HandlerFunc, error) {
 	switch protocol + "." + operation {
 	case "openai_responses.create":
+		// A2 is a model call, so a verified Harness principal needs the same
+		// gateway.chat scope as every other relay format. This route is registered
+		// here rather than in SetRelayRouter, so it does not inherit the /v1 group's
+		// scope check and has to declare it explicitly. Non-Harness callers pass
+		// through untouched, which keeps ordinary sk- clients working.
 		return []gin.HandlerFunc{
-			middleware.RouteTag("relay"), middleware.SystemPerformanceCheck(), middleware.TokenAuth(),
+			middleware.RouteTag("relay"), middleware.SystemPerformanceCheck(),
+			middleware.RequireHarnessScope(middleware.HarnessChatScope), middleware.TokenAuth(),
 			middleware.ModelRequestRateLimit(), middleware.PinTaskPluginEndpoint(), middleware.PrepareTaskPluginEndpoint(), middleware.Distribute(),
 			func(c *gin.Context) {
 				controller.RelayTaskPluginEndpoint(c, func(c *gin.Context) { controller.Relay(c, types.RelayFormatOpenAIResponses) })
