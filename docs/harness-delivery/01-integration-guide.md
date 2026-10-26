@@ -56,7 +56,12 @@ Messages / Gemini 原生）。网关侧仅在以下方面与官方协议不同�
 | `X-Harness-Run-Id` | Harness → 网关 | ✗ | 关联任务执行过程，建议 `run_<ULID>` |
 | `X-NewAPI-Request-Id` | 网关 → Harness | 响应头 | 网关请求 ID，即账本中的 `gateway_request_id` |
 
-> 缺失 `X-Harness-Request-Id` 的处理策略见「待确认事项」第 4 项，尚未冻结。
+**注意**：网关**不因缺失这两个头而拒绝请求**，模型调用会照常完成并被计费。
+但缺失 `X-Harness-Request-Id` 时，该请求**不会产生 B1/B3 账本事件**，因而无法按
+Request ID 对账。也就是说，它是记账的前提，而不是鉴权的前提。
+
+> 缺失 `X-Harness-Request-Id` 时应当拒绝还是接受，见「待确认事项」第 4 项，
+> 尚未冻结。当前实现为接受但不记账。
 
 ---
 
@@ -428,7 +433,7 @@ Authorization: Bearer <JWT>
 | HTTP | code | 含义 | 是否可重试 |
 | --- | --- | --- | --- |
 | 401 | `GATEWAY_UNAUTHORIZED` | JWT 无效或过期 | 否 |
-| 403 | `GATEWAY_UNAUTHORIZED` | 缺少所需 scope（`details.required_scope`） | 否 |
+| 403 | `GATEWAY_UNAUTHORIZED` | 缺少所需 scope。B1/B3 在 `details.required_scope` 中给出所需 scope；A3 只返回 `code` + `message`，不带 `details` | 否 |
 | 400 | `REQUEST_INVALID` | 请求体不合法 | 否 |
 | 400 | `CURSOR_INVALID` | 游标格式错误或流不匹配 | 否 |
 | 400 | `WINDOW_TOO_LARGE` | 时间窗超过 24h | 否 |
