@@ -113,7 +113,7 @@
 | B1-batchGet | POST | `/internal/v1/gateway/usage-events:batchGet` | `gateway.usage.read` |
 | B3 | GET | `/internal/v1/gateway/cost-records` | `gateway.cost.read` |
 | B3-batchGet | POST | `/internal/v1/gateway/cost-records:batchGet` | `gateway.cost.read` |
-| B4 | GET | `/internal/v1/gateway/health` | `gateway.health.read` |
+| B4 | GET | `/internal/v1/gateway/health` | 无（仅需有效 JWT） |
 
 **B2 本期取消，未实现。**
 

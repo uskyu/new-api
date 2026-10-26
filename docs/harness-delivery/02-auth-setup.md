@@ -141,7 +141,7 @@ JWT 的 `sub` claim，网关用它映射到内部模型令牌。
 | `gateway.catalog.read` | A3（目录） |
 | `gateway.usage.read` | B1、B1-batchGet |
 | `gateway.cost.read` | B3、B3-batchGet |
-| `gateway.health.read` | B4 |
+| （无） | B4：只需有效 JWT，不校验额外 scope |
 
 **Scope 是独立校验的**，不隐含传递。持有 `gateway.chat` 不自动获得
 `gateway.usage.read`。
@@ -195,7 +195,7 @@ curl -sS "http://<gateway>/internal/v1/gateway/health" \
 | 现象 | 原因 |
 | --- | --- |
 | `401 GATEWAY_UNAUTHORIZED` | JWT 签名/iss/aud/exp 任一不通过 |
-| `403` + `required_scope` | JWT 有效，但缺 `gateway.health.read` |
+| `403` + `required_scope` | JWT 有效，但缺该接口所需 scope |
 | `200` | 鉴权链路已通 |
 
 ---

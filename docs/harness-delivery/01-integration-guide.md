@@ -41,7 +41,7 @@ Messages / Gemini 原生）。网关侧仅在以下方面与官方协议不同�
 | B1-batchGet | POST | `/internal/v1/gateway/usage-events:batchGet` | `gateway.usage.read` |
 | B3 | GET | `/internal/v1/gateway/cost-records` | `gateway.cost.read` |
 | B3-batchGet | POST | `/internal/v1/gateway/cost-records:batchGet` | `gateway.cost.read` |
-| B4 | GET | `/internal/v1/gateway/health` | `gateway.health.read` |
+| B4 | GET | `/internal/v1/gateway/health` | 无（仅需有效 JWT） |
 
 **B2 单次详情本期取消**，网关未注册该路由，请求会返回 404。
 
