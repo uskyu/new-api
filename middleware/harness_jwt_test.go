@@ -281,6 +281,9 @@ func TestHarnessJWTRejectsInvalidTokens(t *testing.T) {
 			c, recorder := runHarnessJWT(t, testCase.authorization)
 			assert.True(t, c.IsAborted())
 			assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+			// The code is part of the contract: a client branches on it to tell a
+			// refused platform credential from an unrelated gateway error.
+			assertHarnessUnauthorizedBody(t, recorder.Body.Bytes())
 			assert.NotEqual(t, "Bearer sk-"+serviceToken.Key, c.Request.Header.Get("Authorization"))
 			_, ok := GetHarnessPrincipal(c)
 			assert.False(t, ok)
@@ -529,4 +532,38 @@ func TestRequestIdIgnoresMalformedHarnessHeaders(t *testing.T) {
 			assert.NotEmpty(t, recorder.Header().Get(NewAPIRequestIdHeader))
 		})
 	}
+}
+
+// assertHarnessUnauthorizedBody checks the wire shape a refused platform credential
+// returns. The code matters: the published contract names GATEWAY_UNAUTHORIZED, and
+// a client branching on it must not receive an empty code.
+func assertHarnessUnauthorizedBody(t *testing.T, body []byte) {
+	t.Helper()
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, common.Unmarshal(body, &payload))
+	assert.Equal(t, string(harnessUnauthorizedCode), payload.Error.Code,
+		"a refused credential answers the contract code, not an empty one")
+	assert.NotEmpty(t, payload.Error.Message)
+}
+
+// TestHarnessUnauthorizedResponseCarriesContractCode pins the response a withheld
+// principal produces. RequireHarnessPrincipal is the fail-closed gate on the
+// /internal group, so its rejection is the first thing a caller sees when something
+// is wrong with its credential.
+func TestHarnessUnauthorizedResponseCarriesContractCode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/internal/v1/gateway/health", nil)
+
+	RequireHarnessPrincipal()(c)
+
+	assert.True(t, c.IsAborted())
+	assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+	assertHarnessUnauthorizedBody(t, recorder.Body.Bytes())
 }

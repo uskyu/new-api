@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting"
@@ -155,18 +154,30 @@ func RequireHarnessScope(scope string) gin.HandlerFunc {
 func RequireHarnessPrincipal() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if _, ok := GetHarnessPrincipal(c); !ok {
-			abortWithOpenAiMessage(c, http.StatusUnauthorized,
-				common.TranslateMessage(c, i18n.MsgTokenInvalid))
+			abortWithHarnessUnauthorized(c)
 			return
 		}
 		c.Next()
 	}
 }
 
+// harnessUnauthorizedCode is the contract error code for a refused platform
+// credential. It is duplicated here rather than imported from service: middleware
+// must not depend on service, and the value is part of the wire contract, not an
+// internal detail.
+const harnessUnauthorizedCode = types.ErrorCode("GATEWAY_UNAUTHORIZED")
+
 func abortWithHarnessUnauthorized(c *gin.Context) {
 	// One message for every failure mode (signature, expiry, audience, unknown
 	// subject, disabled token) so callers cannot probe the difference.
-	abortWithOpenAiMessage(c, http.StatusUnauthorized, common.TranslateMessage(c, i18n.MsgTokenInvalid))
+	//
+	// The code is part of the published contract: a rejected platform credential
+	// answers GATEWAY_UNAUTHORIZED, the same code the read scopes use for a missing
+	// permission. Reusing the dashboard's token message here left the code empty,
+	// so a client branching on the contract could not tell a refused credential
+	// from an unrelated gateway error.
+	abortWithOpenAiMessage(c, http.StatusUnauthorized,
+		"a verified Harness credential is required", harnessUnauthorizedCode)
 }
 
 // harnessJWTCredential reports whether the Authorization header looks like a
