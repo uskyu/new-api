@@ -39,13 +39,26 @@ type harnessTierCatalogResponse struct {
 	ETag           string                   `json:"etag"`
 }
 
-// harnessTierCatalogItem is one advertised tier. It deliberately carries no
-// real model name, upstream model list, channel, or price: the contract forbids
-// exposing any of those to the platform, and a caller must only ever see tiers.
+// harnessTierCatalogItem is one advertised resource pool. Each pool lists the
+// real model ids it can route, so the platform can address a model directly and
+// pick the pool it wants; channels, upstream vendors and procurement prices stay
+// internal.
+//
+// Kind and Billing repeat the operator's pool labels so the platform can group
+// the offering without parsing pool ids. They are the pool's own labels rather
+// than something derived from its models: a video pool is advertised while it is
+// still empty, so the platform can integrate against the final shape before the
+// channels exist.
+//
+// Models and Capabilities are always serialised as arrays, never null: the
+// platform iterates them directly, so an absent value would break its parser.
 type harnessTierCatalogItem struct {
 	ID           string   `json:"id"`
 	Object       string   `json:"object"`
 	DisplayName  string   `json:"display_name"`
+	Kind         string   `json:"kind"`
+	Billing      string   `json:"billing,omitempty"`
+	Models       []string `json:"models"`
 	Capabilities []string `json:"capabilities"`
 }
 
@@ -112,34 +125,42 @@ func harnessTierCatalogCapabilities(endpointTypes []constant.EndpointType) []str
 	return capabilities
 }
 
-// buildHarnessTierCatalog renders the tiers that are currently serviceable. A
-// tier is serviceable when at least one of its backing model names is present in
-// model.GetPricing(): that is the same condition the relay uses to decide a model
-// is routable, so an unpriced or unconnected tier is simply not advertised.
+// buildHarnessTierCatalog renders every configured pool, each with the real
+// model ids it can route.
+//
+// Every pool is advertised, including one with no channels yet: the platform has
+// to see the whole offering (text pools plus both video billing modes) before the
+// channels exist, otherwise it cannot build its model picker against the final
+// shape. A pool's model ids come from its channels, never from a stored copy, so
+// the platform's model list follows channel changes automatically and the catalog
+// can never advertise a model the pool cannot route.
 func buildHarnessTierCatalog(pricingByModel map[string]model.Pricing) []harnessTierCatalogItem {
 	config := setting.GetHarnessCatalogConfig()
 	items := make([]harnessTierCatalogItem, 0, len(config.Tiers))
 	for _, tier := range config.Tiers {
+		// ResourcePoolModels returns a non-nil empty slice for a pool that has no
+		// channels, which serialises as [] rather than null.
+		models := model.ResourcePoolModels(tier.ID)
+		// Capabilities are the union over the pool's routable models; a model the
+		// gateway cannot price contributes nothing, matching what A1-A9 can serve.
 		capabilities := make([]string, 0, 3)
-		serviceable := false
-		for _, modelName := range tier.Models {
+		for _, modelName := range models {
 			pricing, ok := pricingByModel[modelName]
 			if !ok {
 				continue
 			}
-			serviceable = true
 			capabilities = harnessTierCatalogMergeCapabilities(
 				capabilities,
 				harnessTierCatalogCapabilities(pricing.SupportedEndpointTypes),
 			)
 		}
-		if !serviceable {
-			continue
-		}
 		items = append(items, harnessTierCatalogItem{
 			ID:           tier.ID,
 			Object:       "model",
 			DisplayName:  tier.DisplayName,
+			Kind:         tier.Kind,
+			Billing:      tier.Billing,
+			Models:       models,
 			Capabilities: capabilities,
 		})
 	}

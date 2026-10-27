@@ -52,6 +52,13 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, invalidRequestStatus(err), i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		// A verified Harness principal may pin the resource pool it wants through
+		// the routing header; the model id itself always comes from the platform
+		// and is never rewritten here.
+		if err := applyHarnessResourcePool(c, modelRequest); err != nil {
+			abortWithOpenAiMessage(c, http.StatusBadRequest, err.Error(), types.ErrorCodeInvalidRequest)
+			return
+		}
 		_, pinned, _ := constraints.ResolvedPin()
 		if !pinned {
 			// Select a channel for the user
@@ -100,6 +107,9 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		if pinned || shouldSelectChannel {
+			// No routing header: fall back to the configured default pool. It is
+			// applied here so an explicit pool, resolved above, always wins.
+			defaultHarnessResourcePool(c, modelRequest)
 			usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 			var selectErr *service.ChannelSelectError
 			channel, _, selectErr = service.SelectChannelForRequest(c, modelRequest.Model, &service.RetryParam{
@@ -130,6 +140,55 @@ func Distribute() func(c *gin.Context) {
 			service.RecordChannelAffinity(c, channel.Id)
 		}
 	}
+}
+
+// applyHarnessResourcePool decides which Harness resource pool serves this call.
+//
+// The platform sends a real model id, never a tier name, so the model is
+// dispatched exactly as asked and is never rewritten here. The pool only decides
+// the candidate channel order: economy favours the cheap channels, enterprise the
+// high-ability ones, and the price follows whichever channel actually serves the
+// request.
+//
+// The pool comes from the routing header when the platform sends one — that is
+// how the same model is callable through either pool — and otherwise from the
+// configured default. An explicit header must name a pool the catalog still
+// advertises, so a stale pool id fails loudly instead of silently falling back.
+func applyHarnessResourcePool(c *gin.Context, modelRequest *ModelRequest) error {
+	if modelRequest == nil || modelRequest.Model == "" {
+		return nil
+	}
+	if _, verified := GetHarnessPrincipal(c); !verified {
+		return nil
+	}
+	requested := strings.TrimSpace(c.GetHeader(setting.IntelligentRoutingGroupHeader))
+	if requested == "" {
+		return nil
+	}
+	if !setting.GetHarnessCatalogConfig().IsResourcePool(requested) {
+		return fmt.Errorf("requested resource pool %q is not available", requested)
+	}
+	common.SetContextKey(c, setting.IntelligentRoutingContextKey, requested)
+	return nil
+}
+
+// defaultHarnessResourcePool applies the configured default pool when the
+// platform sent no routing header. It runs last so an explicit pool always wins.
+func defaultHarnessResourcePool(c *gin.Context, modelRequest *ModelRequest) {
+	if modelRequest == nil || modelRequest.Model == "" {
+		return
+	}
+	if _, verified := GetHarnessPrincipal(c); !verified {
+		return
+	}
+	if common.GetContextKeyString(c, setting.IntelligentRoutingContextKey) != "" {
+		return
+	}
+	poolID := setting.GetHarnessCatalogConfig().DefaultResourcePool()
+	if poolID == "" {
+		return
+	}
+	common.SetContextKey(c, setting.IntelligentRoutingContextKey, poolID)
 }
 
 // noAvailableChannelMessage explains a 503 for a task-plugin-claimed model.

@@ -91,6 +91,10 @@ func SetRelayRouter(router *gin.Engine) {
 	// callers pass through untouched, so ordinary sk- clients are unaffected.
 	// /v1/models is registered on its own group above and keeps its catalog scope.
 	relayV1Router.Use(middleware.RequireHarnessScope(middleware.HarnessChatScope))
+	// A metered Harness call must carry both correlation ids. This is applied at
+	// the group level, before TokenAuth and Distribute, so a rejected request is
+	// proven neither dispatched nor billed. Non-Harness callers pass through.
+	relayV1Router.Use(middleware.RequireHarnessCorrelation())
 	relayV1Router.Use(middleware.TokenAuth())
 	{
 		// Responses WebSocket route. Channel selection happens after the first
@@ -218,6 +222,8 @@ func SetRelayRouter(router *gin.Engine) {
 	// A9 (Gemini native) is a model call, so it needs the same gateway.chat scope
 	// as the other relay formats.
 	relayGeminiRouter.Use(middleware.RequireHarnessScope(middleware.HarnessChatScope))
+	// A9 carries the same correlation requirement as the other model calls.
+	relayGeminiRouter.Use(middleware.RequireHarnessCorrelation())
 	relayGeminiRouter.Use(middleware.TokenAuth())
 	relayGeminiRouter.Use(middleware.ModelRequestRateLimit())
 	relayGeminiRouter.Use(middleware.Distribute())

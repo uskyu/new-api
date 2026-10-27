@@ -680,6 +680,13 @@ func requiresRoutingGroupHeader(c *gin.Context) bool {
 	if c == nil || c.Request == nil || c.GetString(RouteTagKey) != "relay" {
 		return false
 	}
+	// A verified Harness caller must never be asked for a resource-pool header:
+	// the contract leaves grouping entirely to the gateway, which resolves the
+	// requested tier into a pool during dispatch. Keeping this exemption here (and
+	// only for Harness) preserves the rule for every ordinary API token.
+	if _, verified := GetHarnessPrincipal(c); verified {
+		return false
+	}
 	if value, exists := c.Get(pluginruntime.ContextKeyPinnedRoute); exists {
 		if pinned, ok := value.(pluginruntime.PinnedRoute); ok {
 			switch pinned.Route.Type {

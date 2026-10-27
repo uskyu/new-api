@@ -383,3 +383,126 @@ func TestSharedEndpointRebindsToBoundNewAPIExtension(t *testing.T) {
 	assert.Equal(t, "alpha", c.GetString("task_plugin_key"), "the first bound candidate executes regardless of the earlier pin")
 	assert.Equal(t, "alpha", c.MustGet(jsplugin.ContextKeyPinnedEndpoint).(jsplugin.PinnedEndpoint).Plugin.Meta.Key)
 }
+
+// harnessPoolContext builds the smallest context the pool resolver reads: a
+// request naming a model, an optional Harness principal, and an optional routing
+// header.
+func harnessPoolContext(t *testing.T, modelName string, harness bool, header string) *gin.Context {
+	t.Helper()
+	body, err := common.Marshal(map[string]any{"model": modelName})
+	require.NoError(t, err)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	if header != "" {
+		c.Request.Header.Set(setting.IntelligentRoutingGroupHeader, header)
+	}
+	if harness {
+		c.Set(HarnessPrincipalContextKey, HarnessPrincipal{Subject: "harness-gateway"})
+	}
+	return c
+}
+
+// publishHarnessPools installs the pool labels the resolver validates against,
+// then restores the previous option so cases stay independent. The option map is
+// created on demand because a test binary may never have initialised it.
+func publishHarnessPools(t *testing.T) {
+	t.Helper()
+	payload, err := common.Marshal(setting.HarnessCatalogConfig{
+		Tiers: []setting.HarnessCatalogTier{
+			{ID: "economy", DisplayName: "经济档", Kind: setting.HarnessCatalogKindText},
+			{ID: "enterprise", DisplayName: "企业档", Kind: setting.HarnessCatalogKindText},
+		},
+		DefaultTier:           "economy",
+		HarnessCatalogVersion: 1,
+	})
+	require.NoError(t, err)
+
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	previous, hadPrevious := common.OptionMap[setting.HarnessCatalogOptionKey]
+	common.OptionMap[setting.HarnessCatalogOptionKey] = string(payload)
+	common.OptionMapRWMutex.Unlock()
+
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		defer common.OptionMapRWMutex.Unlock()
+		if hadPrevious {
+			common.OptionMap[setting.HarnessCatalogOptionKey] = previous
+			return
+		}
+		delete(common.OptionMap, setting.HarnessCatalogOptionKey)
+	})
+}
+
+// A non-Harness caller is never inspected: its routing header is ignored and its
+// model name passes through untouched.
+func TestApplyHarnessResourcePoolLeavesPlainClientsAlone(t *testing.T) {
+	publishHarnessPools(t)
+	c := harnessPoolContext(t, "deepseek-v4.1-flash", false, "enterprise")
+	request := &ModelRequest{Model: "deepseek-v4.1-flash"}
+
+	require.NoError(t, applyHarnessResourcePool(c, request))
+	defaultHarnessResourcePool(c, request)
+
+	assert.Empty(t, common.GetContextKeyString(c, setting.IntelligentRoutingContextKey),
+		"an sk- client's routing header must not select a Harness pool")
+	assert.Equal(t, "deepseek-v4.1-flash", request.Model)
+}
+
+// The platform selects which pool serves a model by sending the routing header.
+// The model id itself is never rewritten: the pool only changes the candidate
+// channel order.
+func TestApplyHarnessResourcePoolHonoursTheRoutingHeader(t *testing.T) {
+	publishHarnessPools(t)
+	c := harnessPoolContext(t, "deepseek-v4.1-flash", true, "enterprise")
+	request := &ModelRequest{Model: "deepseek-v4.1-flash"}
+
+	require.NoError(t, applyHarnessResourcePool(c, request))
+
+	assert.Equal(t, "enterprise", common.GetContextKeyString(c, setting.IntelligentRoutingContextKey))
+	assert.Equal(t, "deepseek-v4.1-flash", request.Model,
+		"the model id is dispatched exactly as the platform sent it")
+}
+
+// With no routing header the configured default pool applies, so a platform call
+// needs no gateway-specific header at all.
+func TestDefaultHarnessResourcePoolAppliesConfiguredDefault(t *testing.T) {
+	publishHarnessPools(t)
+	c := harnessPoolContext(t, "deepseek-v4.1-flash", true, "")
+	request := &ModelRequest{Model: "deepseek-v4.1-flash"}
+
+	require.NoError(t, applyHarnessResourcePool(c, request))
+	defaultHarnessResourcePool(c, request)
+
+	assert.Equal(t, "economy", common.GetContextKeyString(c, setting.IntelligentRoutingContextKey))
+	assert.Equal(t, "deepseek-v4.1-flash", request.Model)
+}
+
+// An explicit pool always wins over the default, so the two are not both applied.
+func TestDefaultHarnessResourcePoolNeverOverridesAnExplicitPool(t *testing.T) {
+	publishHarnessPools(t)
+	c := harnessPoolContext(t, "deepseek-v4.1-flash", true, "enterprise")
+	request := &ModelRequest{Model: "deepseek-v4.1-flash"}
+
+	require.NoError(t, applyHarnessResourcePool(c, request))
+	defaultHarnessResourcePool(c, request)
+
+	assert.Equal(t, "enterprise", common.GetContextKeyString(c, setting.IntelligentRoutingContextKey))
+}
+
+// A pool id the catalog does not advertise fails loudly instead of silently
+// falling back to another pool, which would bill against unexpected channels.
+func TestApplyHarnessResourcePoolRejectsUnknownPool(t *testing.T) {
+	publishHarnessPools(t)
+	c := harnessPoolContext(t, "deepseek-v4.1-flash", true, "global")
+	request := &ModelRequest{Model: "deepseek-v4.1-flash"}
+
+	err := applyHarnessResourcePool(c, request)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "global")
+	assert.Empty(t, common.GetContextKeyString(c, setting.IntelligentRoutingContextKey))
+}

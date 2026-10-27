@@ -34,7 +34,10 @@ func taskPluginProtocolHandlers(protocol, operation string) ([]gin.HandlerFunc, 
 		// through untouched, which keeps ordinary sk- clients working.
 		return []gin.HandlerFunc{
 			middleware.RouteTag("relay"), middleware.SystemPerformanceCheck(),
-			middleware.RequireHarnessScope(middleware.HarnessChatScope), middleware.TokenAuth(),
+			middleware.RequireHarnessScope(middleware.HarnessChatScope),
+			// A2 is a metered Harness model call, so it carries the same
+			// correlation requirement as the /v1 and /v1beta groups.
+			middleware.RequireHarnessCorrelation(), middleware.TokenAuth(),
 			middleware.ModelRequestRateLimit(), middleware.PinTaskPluginEndpoint(), middleware.PrepareTaskPluginEndpoint(), middleware.Distribute(),
 			func(c *gin.Context) {
 				controller.RelayTaskPluginEndpoint(c, func(c *gin.Context) { controller.Relay(c, types.RelayFormatOpenAIResponses) })

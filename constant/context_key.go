@@ -92,4 +92,10 @@ const (
 	// cycle because middleware already imports service.
 	ContextKeyHarnessRequestId ContextKey = "harness_request_id"
 	ContextKeyHarnessRunId     ContextKey = "harness_run_id"
+
+	// ContextKeyHarnessTier carries the platform-facing tier id a Harness request
+	// asked for, after it has been resolved onto a real upstream model. The
+	// platform is only ever told the tier, so this is the identity that may be
+	// reported back; the resolved model name stays internal.
+	ContextKeyHarnessTier ContextKey = "harness_tier"
 )

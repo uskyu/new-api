@@ -12,12 +12,12 @@ func RequestId() func(c *gin.Context) {
 		id := common.NewRequestId()
 		c.Set(common.RequestIdKey, id)
 		ctx := context.WithValue(c.Request.Context(), common.RequestIdKey, id)
-		harnessRequestId := sanitizeHarnessCorrelationId(c.GetHeader(HarnessRequestIdHeader))
+		harnessRequestId := sanitizeHarnessCorrelationId(c.GetHeader(HarnessRequestIdHeader), harnessRequestIdMaxLength)
 		if harnessRequestId != "" {
 			c.Set(HarnessRequestIdContextKey, harnessRequestId)
 			ctx = context.WithValue(ctx, HarnessRequestIdContextKey, harnessRequestId)
 		}
-		harnessRunId := sanitizeHarnessCorrelationId(c.GetHeader(HarnessRunIdHeader))
+		harnessRunId := sanitizeHarnessCorrelationId(c.GetHeader(HarnessRunIdHeader), harnessRunIdMaxLength)
 		if harnessRunId != "" {
 			c.Set(HarnessRunIdContextKey, harnessRunId)
 			ctx = context.WithValue(ctx, HarnessRunIdContextKey, harnessRunId)

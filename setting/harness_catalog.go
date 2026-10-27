@@ -10,14 +10,39 @@ import (
 // HarnessCatalogOptionKey is the option row holding the Harness tier catalog.
 const HarnessCatalogOptionKey = "HarnessCatalog"
 
-// HarnessCatalogTier is one platform-visible tier. Models lists the gateway
-// model names that back the tier: a tier is advertised only while at least one
-// of those names is present in model.GetPricing(), so an unroutable tier is
-// never offered.
+// Model categories a resource pool can advertise, and the video billing modes.
+//
+// A pool carries exactly one kind, because the platform uses it to choose the
+// calling convention: text pools serve synchronous chat/completions, video pools
+// serve asynchronous tasks. Billing only means something for video, where the
+// same kind of model is metered either per generated clip or per second of
+// output; a text pool leaves it empty.
+const (
+	HarnessCatalogKindText  = "text"
+	HarnessCatalogKindVideo = "video"
+
+	HarnessCatalogBillingPerCall   = "per_call"
+	HarnessCatalogBillingPerSecond = "per_second"
+)
+
+// HarnessCatalogTier is one platform-visible resource pool (a "档位").
+//
+// A tier is a routing policy, not a model, and it never maps onto one fixed
+// upstream model: the pool it names is an Intelligent Routing group, whose
+// channel priority decides the candidates, and whose channels jointly determine
+// the real model ids the pool can serve. Those model ids are derived at request
+// time from the group's channels rather than stored here, so the catalog can
+// never advertise a model the pool cannot actually route.
+//
+// Kind and Billing are labels the operator sets on the pool, not facts derived
+// from its contents: a pool is advertised even while it has no models yet, so the
+// platform can see the full shape of the offering before the channels exist. The
+// labels cost a consistency check — see validateHarnessCatalogTierTag.
 type HarnessCatalogTier struct {
-	ID          string   `json:"id"`
-	DisplayName string   `json:"display_name"`
-	Models      []string `json:"models"`
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	Kind        string `json:"kind,omitempty"`
+	Billing     string `json:"billing,omitempty"`
 }
 
 // HarnessCatalogConfig is the persisted catalog snapshot. HarnessCatalogVersion
@@ -29,19 +54,65 @@ type HarnessCatalogTier struct {
 // keeps it correct: model/channel/pricing writes happen on more than twenty
 // paths in this repository, so hooking every one of them would eventually miss
 // one.
+//
+// DefaultTier names the pool a Harness call uses when it sends no routing
+// header. It is configurable because which pool should be the default is an
+// operating decision, not a property of the protocol.
 type HarnessCatalogConfig struct {
 	Tiers                 []HarnessCatalogTier `json:"tiers"`
+	DefaultTier           string               `json:"default_tier,omitempty"`
 	HarnessCatalogVersion int64                `json:"catalog_version"`
 	Fingerprint           string               `json:"fingerprint"`
 }
 
-// defaultHarnessCatalogTiers advertises the two agreed tiers. Each tier is
-// backed by a model of the same name, which is how the gateway resolves it
-// through the ordinary ability / model-mapping path.
+// defaultHarnessCatalogDefaultTier is the pool a Harness call falls back to when
+// the operator has not chosen one.
+const defaultHarnessCatalogDefaultTier = "economy"
+
+// defaultHarnessCatalogTiers advertises the four pools: two text pools and the
+// two video billing modes. The video pools carry no channels yet, and are listed
+// anyway so the platform can integrate against the final shape.
 func defaultHarnessCatalogTiers() []HarnessCatalogTier {
 	return []HarnessCatalogTier{
-		{ID: "economy", DisplayName: "经济档", Models: []string{"economy"}},
-		{ID: "enterprise", DisplayName: "企业档", Models: []string{"enterprise"}},
+		{ID: "economy", DisplayName: "经济档", Kind: HarnessCatalogKindText},
+		{ID: "enterprise", DisplayName: "企业档", Kind: HarnessCatalogKindText},
+		{ID: "video-per-call", DisplayName: "视频按次", Kind: HarnessCatalogKindVideo, Billing: HarnessCatalogBillingPerCall},
+		{ID: "video-per-second", DisplayName: "视频按秒", Kind: HarnessCatalogKindVideo, Billing: HarnessCatalogBillingPerSecond},
+	}
+}
+
+// NormalizeHarnessCatalogKind returns the canonical kind for a pool label, and
+// reports whether the label is one the contract allows. A pool with no label is
+// treated as a text pool: it is the shape every existing pool already has.
+func NormalizeHarnessCatalogKind(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", HarnessCatalogKindText:
+		return HarnessCatalogKindText, true
+	case HarnessCatalogKindVideo:
+		return HarnessCatalogKindVideo, true
+	default:
+		return "", false
+	}
+}
+
+// NormalizeHarnessCatalogBilling returns the canonical billing mode for a pool
+// label, and reports whether the pair is coherent: only a video pool may declare
+// one, and a video pool must declare exactly one so the platform knows how the
+// model is metered.
+func NormalizeHarnessCatalogBilling(kind, billing string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(billing))
+	switch kind {
+	case HarnessCatalogKindText:
+		return "", normalized == ""
+	case HarnessCatalogKindVideo:
+		switch normalized {
+		case HarnessCatalogBillingPerCall, HarnessCatalogBillingPerSecond:
+			return normalized, true
+		default:
+			return "", false
+		}
+	default:
+		return "", false
 	}
 }
 
@@ -132,6 +203,7 @@ func harnessCatalogApplyOptionLocked(raw string) {
 
 	config := HarnessCatalogConfig{
 		Tiers:                 defaultHarnessCatalogTiers(),
+		DefaultTier:           defaultHarnessCatalogDefaultTier,
 		HarnessCatalogVersion: harnessCatalogConfig.HarnessCatalogVersion,
 		// The fingerprint is inherited rather than cleared: an operator editing
 		// only display names or tier order rewrites this option without one, and
@@ -147,6 +219,9 @@ func harnessCatalogApplyOptionLocked(raw string) {
 		} else {
 			if tiers := sanitizeHarnessCatalogTiers(stored.Tiers); len(tiers) > 0 {
 				config.Tiers = tiers
+			}
+			if defaultTier := strings.TrimSpace(stored.DefaultTier); defaultTier != "" {
+				config.DefaultTier = defaultTier
 			}
 			if stored.HarnessCatalogVersion > config.HarnessCatalogVersion {
 				config.HarnessCatalogVersion = stored.HarnessCatalogVersion
@@ -166,7 +241,11 @@ func harnessCatalogApplyOptionLocked(raw string) {
 }
 
 // sanitizeHarnessCatalogTiers drops entries the platform could not address: an
-// empty or duplicated id, or a tier with no backing model.
+// empty or duplicated id, or a label pair that cannot describe a real pool. A
+// rejected label is dropped rather than published, so the platform never has to
+// guess what an incoherent tag means. Whether the pool can actually serve
+// anything is not decided here, because that depends on live channel
+// configuration and is resolved when the catalog is rendered.
 func sanitizeHarnessCatalogTiers(tiers []HarnessCatalogTier) []HarnessCatalogTier {
 	seen := make(map[string]struct{}, len(tiers))
 	sanitized := make([]HarnessCatalogTier, 0, len(tiers))
@@ -178,13 +257,12 @@ func sanitizeHarnessCatalogTiers(tiers []HarnessCatalogTier) []HarnessCatalogTie
 		if _, exists := seen[id]; exists {
 			continue
 		}
-		models := make([]string, 0, len(tier.Models))
-		for _, modelName := range tier.Models {
-			if name := strings.TrimSpace(modelName); name != "" {
-				models = append(models, name)
-			}
+		kind, ok := NormalizeHarnessCatalogKind(tier.Kind)
+		if !ok {
+			continue
 		}
-		if len(models) == 0 {
+		billing, ok := NormalizeHarnessCatalogBilling(kind, tier.Billing)
+		if !ok {
 			continue
 		}
 		seen[id] = struct{}{}
@@ -192,23 +270,70 @@ func sanitizeHarnessCatalogTiers(tiers []HarnessCatalogTier) []HarnessCatalogTie
 		if displayName == "" {
 			displayName = id
 		}
-		sanitized = append(sanitized, HarnessCatalogTier{ID: id, DisplayName: displayName, Models: models})
+		sanitized = append(sanitized, HarnessCatalogTier{
+			ID:          id,
+			DisplayName: displayName,
+			Kind:        kind,
+			Billing:     billing,
+		})
 	}
 	return sanitized
 }
 
-func cloneHarnessCatalogConfig(config HarnessCatalogConfig) HarnessCatalogConfig {
-	tiers := make([]HarnessCatalogTier, len(config.Tiers))
-	for i, tier := range config.Tiers {
-		tiers[i] = HarnessCatalogTier{
-			ID:          tier.ID,
-			DisplayName: tier.DisplayName,
-			Models:      append([]string(nil), tier.Models...),
+// ResourcePoolIDs lists the pool ids the catalog currently advertises, in
+// catalog order, and reports whether a specific pool is still part of it.
+func (config HarnessCatalogConfig) ResourcePoolIDs() []string {
+	ids := make([]string, 0, len(config.Tiers))
+	for _, tier := range config.Tiers {
+		ids = append(ids, tier.ID)
+	}
+	return ids
+}
+
+// IsResourcePool reports whether poolID is one the catalog advertises.
+func (config HarnessCatalogConfig) IsResourcePool(poolID string) bool {
+	for _, tier := range config.Tiers {
+		if tier.ID == poolID {
+			return true
 		}
 	}
+	return false
+}
+
+// DefaultResourcePool returns the pool a Harness call uses when it sends no
+// routing header. An operator-set default wins when it names a pool that is
+// still advertised; otherwise the first advertised pool is used, so the gateway
+// never falls back to a pool the catalog does not offer.
+func (config HarnessCatalogConfig) DefaultResourcePool() string {
+	if config.IsResourcePool(config.DefaultTier) {
+		return config.DefaultTier
+	}
+	for _, tier := range config.Tiers {
+		return tier.ID
+	}
+	return ""
+}
+
+func cloneHarnessCatalogConfig(config HarnessCatalogConfig) HarnessCatalogConfig {
+	tiers := make([]HarnessCatalogTier, len(config.Tiers))
+	copy(tiers, config.Tiers)
 	return HarnessCatalogConfig{
 		Tiers:                 tiers,
+		DefaultTier:           config.DefaultTier,
 		HarnessCatalogVersion: config.HarnessCatalogVersion,
 		Fingerprint:           config.Fingerprint,
 	}
+}
+
+// TextResourcePoolIDs lists only the pools the platform uses for synchronous
+// text calls, in catalog order, so routing never applies a video pool to a text
+// request.
+func (config HarnessCatalogConfig) TextResourcePoolIDs() []string {
+	ids := make([]string, 0, len(config.Tiers))
+	for _, tier := range config.Tiers {
+		if tier.Kind == HarnessCatalogKindText {
+			ids = append(ids, tier.ID)
+		}
+	}
+	return ids
 }
