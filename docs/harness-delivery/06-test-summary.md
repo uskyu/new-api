@@ -1,8 +1,11 @@
 # Harness 网关对外测试摘要
 
-**版本**：V0.9
+**版本**：V0.9.1
 **对应网关版本**：`harness-api` 分支 `725ec9d6d`
 **测试时间**：2026-10-25 至 2026-10-26
+
+> 本文记录该轮使用**网关自签 JWT** 的本地联调结果，保留作为过程记录。
+> 后续真实 JWT 验收与当前契约状态见 `07-acceptance-evidence.md`（`ec3cdc0`）。
 
 本文档是对外测试摘要。内部完整验收报告（含详细命令、失败排查记录）保留在
 New API 内部，不随交付材料提供。
@@ -44,12 +47,14 @@ New API 内部，不随交付材料提供。
    （才会生成 ability 行）并配置 `model_mapping`，缺一不可。
 3. **档位名缺少定价**。定价按请求的模型名查询，因此档位名本身也需要价格行。
 
-### 未完成
+> 第 2、3 项记录的是当时“用档位名当模型名”的方案。该方案已废弃：现在的契约是
+> `model` 填 A3 返回的真实模型 id，池由 `X-Route-Group` 选择。保留此段仅为记录
+> 问题发现过程。
 
-**未与 Harness 真实鉴权体系联调。**
+### 未完成（本轮回看）
 
-当前所有 JWT 测试的签发方是网关测试代码，不是 Harness 的真实签发服务。
-真实的 JWKS URL、`iss`、`aud`、服务主体 `sub` 均**尚未提供**。
+本轮尚未与 Harness 真实鉴权体系联调。该联调已于 2026-10-26 与 2026-10-29
+两轮完成，见 `07-acceptance-evidence.md`。
 
 因此：
 
@@ -134,14 +139,7 @@ New API 内部，不随交付材料提供。
 | --- | --- | --- |
 | SQLite | 内置 | ✅ 全部测试通过 |
 | MySQL | 8.0.43（真实实例） | ✅ `model` 包全量通过，迁移幂等 |
-| **PostgreSQL** | — | ❌ **未验证**（无可用实例） |
-
-### PostgreSQL 说明
-
-`excluded.` 语法是 PostgreSQL 原生形式，当前实现修复后仍生成该形式，
-**理论兼容但未经实测**。
-
-**部署到 PostgreSQL 前必须补验。** 本文档不声称 PostgreSQL 已验证。
+| PostgreSQL | — | 不在本期范围（部署目标为 MySQL） |
 
 ### MySQL 相关说明
 
@@ -175,8 +173,7 @@ New API 内部，不随交付材料提供。
 
 | 项 | 状态 | 说明 |
 | --- | --- | --- |
-| **Harness 真实 JWKS 联调** | ❌ 未开始 | 等待对方提供 JWKS URL、`iss`、`aud`、`sub` |
-| **PostgreSQL 实测** | ❌ 未开始 | 无可用实例 |
+| **Harness 真实 JWKS 联调** | ✅ 已完成 | 2026-10-26 起使用真实 JWT，见 `07-acceptance-evidence.md` |
 | Docker 镜像 | ✅ 已完成 | `ghcr.io/uskyu/new-api:harness-latest` 已构建并在部署实例上运行 |
 | 500 事件上限触发 | ⚠️ 未触发 | 测试数据量不足，逻辑已实现 |
 | A5 count_tokens | — | 本期不做 |
@@ -208,10 +205,11 @@ New API 内部，不随交付材料提供。
 
 ### 尚需完成才能进入正式验收
 
-1. Harness 提供 JWKS 与主体配置，完成真实鉴权联调
-2. 双方确认四项待确认契约（见 `05-pending-confirmations.md`）
-3. PostgreSQL 验证（若部署使用 PG）
-4. 按 `04-acceptance-checklist.md` 逐项执行验收
+1. 双方确认剩余三项契约（见 `05-pending-confirmations.md`）
+2. 按 `04-acceptance-checklist.md` 逐项执行验收
+
+真实 JWKS 联调已完成（2026-10-26、2026-10-29 两轮）；
+数据库部署目标为 MySQL，PostgreSQL 不在本期范围。
 
 ---
 

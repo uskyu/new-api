@@ -1,7 +1,7 @@
 # Harness 联调验收清单
 
-**版本**：V0.9
-**对应网关版本**：`harness-api` 分支 `725ec9d6d`
+**版本**：V0.9.1
+**对应网关版本**：`harness-api` 分支 `ec3cdc0`
 
 本文档供双方逐项核验。每项包含：执行方、请求、预期响应、通过标准。
 
@@ -11,12 +11,12 @@
 
 | 项 | 提供方 | 状态 |
 | --- | --- | --- |
-| JWKS URL | Harness | ⏳ 待提供 |
-| `iss` 值 | 双方商定 | ⏳ 待提供 |
-| `aud` 值 | 双方商定 | ⏳ 待提供 |
-| 服务主体 `sub` | Harness | ⏳ 待提供 |
-| 网关地址 | New API | ⏳ 待定 |
-| 业务档位名（如 `economy`） | New API | ⏳ 待定 |
+| JWKS URL | Harness | ✅ `https://alphapro-test.xyz/.well-known/jwks.json` |
+| `iss` 值 | 双方商定 | ✅ `harness` |
+| `aud` 值 | 双方商定 | ✅ `new-api` |
+| 服务主体 `sub` | Harness | ✅ `harness-gateway` |
+| 网关地址 | New API | ✅ `https://testapi.soloai.chat` |
+| 资源池 id（`economy` / `enterprise`）与池内模型 id | New API | ✅ A3 动态返回 |
 
 ---
 
@@ -94,6 +94,43 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?limit=1" \
 
 ---
 
+### 2.4 关联头与资源池校验
+
+**执行方**：Harness
+
+```bash
+# 缺失 X-Harness-Run-Id
+curl -sS -X POST "http://<gateway>/v1/chat/completions" \
+  -H "Authorization: Bearer $HARNESS_JWT" \
+  -H "X-Harness-Request-Id: hrq_test_norun" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4.1-flash","messages":[{"role":"user","content":"hi"}]}'
+```
+
+**预期**：`HTTP 400`，`code` 为 `REQUEST_INVALID`，消息含 `X-Harness-Run-Id`
+
+```bash
+# 不存在的资源池
+curl -sS -X POST "http://<gateway>/v1/chat/completions" \
+  -H "Authorization: Bearer $HARNESS_JWT" \
+  -H "X-Harness-Request-Id: hrq_test_nopool" \
+  -H "X-Harness-Run-Id: run_test_nopool" \
+  -H "X-Route-Group: no-such-pool" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4.1-flash","messages":[{"role":"user","content":"hi"}]}'
+```
+
+**预期**：`HTTP 403`，`code` 为 `access_denied`，消息
+`requested resource pool is not configured`
+
+**通过标准**：
+- [ ] 缺失 `X-Harness-Run-Id` → 400 `REQUEST_INVALID`
+- [ ] `X-Harness-Run-Id` 超过 64 字符 → 400
+- [ ] 未知资源池 → 403
+- [ ] 以上拒绝均不产生费用，也不产生 B1/B3 事件
+
+---
+
 ## 三、目录接口 A3（P0）
 
 ### 3.1 首次拉取
@@ -111,9 +148,16 @@ curl -sS -D- "http://<gateway>/v1/models" \
 {
   "object": "list",
   "data": [
-    { "id": "economy", "object": "model", "capabilities": ["chat", "stream", "tools"] }
+    {
+      "id": "economy",
+      "object": "model",
+      "display_name": "经济档",
+      "kind": "text",
+      "models": ["deepseek-v4.1-flash"],
+      "capabilities": ["chat", "stream", "tools"]
+    }
   ],
-  "catalog_version": "1",
+  "catalog_version": "2",
   "etag": "W/\"...\""
 }
 ```
@@ -121,7 +165,8 @@ curl -sS -D- "http://<gateway>/v1/models" \
 **通过标准**：
 - [ ] HTTP 200
 - [ ] `ETag` 响应头非空
-- [ ] `data[].id` 为**业务档位名**，非真实上游模型名
+- [ ] `data[].id` 为**资源池 id**（用作 `X-Route-Group`）
+- [ ] `data[].models` 为**真实模型 id**（用作请求的 `model`）
 - [ ] 响应体 `etag` 与响应头一致
 - [ ] 不含渠道信息、采购价
 
@@ -157,7 +202,7 @@ curl -sS -X POST "http://<gateway>/v1/chat/completions" \
   -H "X-Harness-Request-Id: hrq_test_a1" \
   -H "X-Harness-Run-Id: run_test_a1" \
   -H "Content-Type: application/json" \
-  -d '{"model":"economy","messages":[{"role":"user","content":"hi"}],"max_tokens":10}'
+  -d '{"model":"deepseek-v4.1-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":10}'
 ```
 
 **预期**：`HTTP 200`，OpenAI Chat 格式响应，含 `usage`
@@ -178,7 +223,7 @@ curl -sS -X POST "http://<gateway>/v1/responses" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "X-Harness-Request-Id: hrq_test_a2" \
   -H "Content-Type: application/json" \
-  -d '{"model":"economy","input":"hi"}'
+  -d '{"model":"deepseek-v4.1-flash","input":"hi"}'
 ```
 
 **通过标准**：
@@ -196,7 +241,7 @@ curl -sS -X POST "http://<gateway>/v1/messages" \
   -H "X-Harness-Request-Id: hrq_test_a4" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
-  -d '{"model":"economy","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"deepseek-v4.1-flash","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
 **通过标准**：
@@ -209,7 +254,7 @@ curl -sS -X POST "http://<gateway>/v1/messages" \
 ### 4.4 A9 Gemini 原生
 
 ```bash
-curl -sS -X POST "http://<gateway>/v1beta/models/economy:generateContent" \
+curl -sS -X POST "http://<gateway>/v1beta/models/deepseek-v4.1-flash:generateContent" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "X-Harness-Request-Id: hrq_test_a9" \
   -H "Content-Type: application/json" \
@@ -230,7 +275,7 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "X-Harness-Request-Id: hrq_test_stream" \
   -H "Content-Type: application/json" \
-  -d '{"model":"economy","messages":[{"role":"user","content":"count 1 to 3"}],"stream":true,"stream_options":{"include_usage":true}}'
+  -d '{"model":"deepseek-v4.1-flash","messages":[{"role":"user","content":"count 1 to 3"}],"stream":true,"stream_options":{"include_usage":true}}'
 ```
 
 **通过标准**：
@@ -460,3 +505,4 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?from=2026-10-01T00:0
 | 日期 | 版本 | 内容 |
 | --- | --- | --- |
 | 2026-10-25 | V0.9 | 初版 |
+| 2026-10-29 | V0.9.1 | A3 增加池字段与真实模型 id；调用示例改用真实模型 id；新增 2.4 关联头与资源池校验 |

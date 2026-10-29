@@ -1,11 +1,11 @@
 # Harness 网关接口接入指南
 
-**版本**：V0.9
-**对应网关版本**：`harness-api` 分支 `725ec9d6d`
+**版本**：V0.9.1
+**对应网关版本**：`harness-api` 分支 `ec3cdc0`（镜像 `harness-latest`）
 **面向**：Harness 后端开发与联调
 
 本文档给出网关侧全部对外接口的调用方法。字段语义细节见
-`harness-contract-data-v0.9.md`，鉴权配置见 `harness-auth-setup-v0.9.md`。
+`03-data-contract.md`，鉴权配置见 `02-auth-setup.md`。
 
 ---
 
@@ -18,14 +18,19 @@
 | A1 | POST | `/v1/chat/completions` | `gateway.chat` |
 | A2 | POST | `/v1/responses` | `gateway.chat` |
 | A4 | POST | `/v1/messages` | `gateway.chat` |
-| A9 | POST | `/v1beta/models/{tier}:{action}` | `gateway.chat` |
+| A9 | POST | `/v1beta/models/{model}:{action}` | `gateway.chat` |
 
 请求/响应体遵循各自官方协议（OpenAI Chat / OpenAI Responses / Anthropic
 Messages / Gemini 原生）。网关侧仅在以下方面与官方协议不同：
 
-- `model` 字段填**业务档位名**（如 `economy`、`enterprise`），非真实模型名
+- `model` 字段填 **A3 目录 `models[]` 中的真实模型 id**（如 `deepseek-v4.1-flash`），
+  不是池 id。池由请求头 `X-Route-Group` 选择，见第二节
 - 鉴权用 Harness JWT（见鉴权指南）
 - 响应头返回 `X-NewAPI-Request-Id`
+
+响应体中的 `model` 字段是**上游模型名**（如 `deepseek-flash`），与请求里的 id 不一定
+相同。对账请用 `X-Harness-Request-Id` / `X-NewAPI-Request-Id`，不要用响应体的
+`model` 反查。
 
 ### 1.2 目录类
 
@@ -52,16 +57,42 @@ Messages / Gemini 原生）。网关侧仅在以下方面与官方协议不同�
 | 头 | 方向 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `Authorization` | Harness → 网关 | ✓ | `Bearer <JWT>` |
-| `X-Harness-Request-Id` | Harness → 网关 | ✓ | 关联一次模型调用，建议 `hrq_<ULID>` |
-| `X-Harness-Run-Id` | Harness → 网关 | ✗ | 关联任务执行过程，建议 `run_<ULID>` |
+| `X-Harness-Request-Id` | Harness → 网关 | ✓ | 一次模型调用一个，建议 `hrq_<ULID>`，**≤ 64 字符** |
+| `X-Harness-Run-Id` | Harness → 网关 | ✓ | 一次任务执行一个，建议 `run_<ULID>`，**≤ 64 字符** |
+| `X-Route-Group` | Harness → 网关 | ✗ | 资源池 id（`economy` / `enterprise`），不传走默认池 |
 | `X-NewAPI-Request-Id` | 网关 → Harness | 响应头 | 网关请求 ID，即账本中的 `gateway_request_id` |
 
-**注意**：网关**不因缺失这两个头而拒绝请求**，模型调用会照常完成并被计费。
-但缺失 `X-Harness-Request-Id` 时，该请求**不会产生 B1/B3 账本事件**，因而无法按
-Request ID 对账。也就是说，它是记账的前提，而不是鉴权的前提。
+两个关联 ID 都只允许 `A-Z a-z 0-9 - _`，且都必须非空。缺失或格式不合法时，
+网关在**转发上游之前**返回：
 
-> 缺失 `X-Harness-Request-Id` 时应当拒绝还是接受，见「待确认事项」第 4 项，
-> 尚未冻结。当前实现为接受但不记账。
+```http
+HTTP/1.1 400 Bad Request
+```
+
+```json
+{"error":{"code":"REQUEST_INVALID","message":"X-Harness-Run-Id is required","type":"new_api_error"}}
+```
+
+即：被拒绝的调用不会产生费用，也不会产生账本事件。长度上限是账本列的宽度，
+超过 64 字符的值会被拒绝，而不是截断。
+
+**为什么两个 ID 都必填**：`X-Harness-Request-Id` 是账本主键（B1/B3 都按它查）；
+`X-Harness-Run-Id` 会写入每条账本行并在 B1 事件中返回，让同一轮任务的多次调用
+可以聚合。一个 run 对应 N 次调用，两者不是重复关系。
+
+### 2.1 资源池选择（`X-Route-Group`）
+
+同一个模型可以在多个池里调用，池只决定候选渠道的顺序，不改变模型 id。
+
+| 情况 | 行为 |
+| --- | --- |
+| 不传该头 | 使用运营配置的默认池（当前为 `economy`） |
+| 传目录中的池 id | 固定使用该池，**不会**在池之间自动回退 |
+| 传不存在的池 id | `403 access_denied`，消息 `requested resource pool is not configured` |
+| 池存在但内部令牌未授权 | `403 access_denied`，消息 `token is not authorized for the requested resource pool` |
+
+池是硬绑定：选中的池里没有该模型的可用渠道时直接失败，不会改用另一个池。
+采购税率和渠道成本随实际服务的池变化，并体现在 B3 的 `billing` 里。
 
 ---
 
@@ -81,7 +112,7 @@ Authorization: Bearer <JWT>
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
-ETag: W/"57cf3c14fd04a4c6d3b0e62f40b648c78861d74fb38e64bf2a4546a04700bf28"
+ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
 ```
 
 ```json
@@ -91,25 +122,60 @@ ETag: W/"57cf3c14fd04a4c6d3b0e62f40b648c78861d74fb38e64bf2a4546a04700bf28"
     {
       "id": "economy",
       "object": "model",
+      "display_name": "经济档",
+      "kind": "text",
+      "models": ["deepseek-v4-pro", "deepseek-v4.1-flash"],
       "capabilities": ["chat", "stream", "tools"]
     },
     {
       "id": "enterprise",
       "object": "model",
+      "display_name": "企业档",
+      "kind": "text",
+      "models": ["deepseek-v4-pro", "deepseek-v4.1-flash"],
       "capabilities": ["chat", "stream", "tools"]
+    },
+    {
+      "id": "video-per-call",
+      "object": "model",
+      "display_name": "视频按次",
+      "kind": "video",
+      "billing": "per_call",
+      "models": [],
+      "capabilities": []
+    },
+    {
+      "id": "video-per-second",
+      "object": "model",
+      "display_name": "视频按秒",
+      "kind": "video",
+      "billing": "per_second",
+      "models": [],
+      "capabilities": []
     }
   ],
-  "catalog_version": "1",
-  "etag": "W/\"57cf3c14fd04a4c6d3b0e62f40b648c78861d74fb38e64bf2a4546a04700bf28\""
+  "catalog_version": "2",
+  "etag": "W/\"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3\""
 }
 ```
+
+| 字段 | 说明 |
+| --- | --- |
+| `data[].id` | **资源池 id**，也是 `X-Route-Group` 的取值 |
+| `data[].display_name` | 运营配置的显示名，仅用于界面展示 |
+| `data[].kind` | `text` / `video` |
+| `data[].billing` | 仅视频池返回：`per_call` / `per_second` |
+| `data[].models` | 该池可路由的**真实模型 id**，直接用作请求的 `model` 字段；空数组表示该池尚无可调模型 |
+| `data[].capabilities` | 该池支持的能力枚举：`chat` / `stream` / `tools`，按池聚合，不区分单个模型 |
+| `catalog_version` | 单调递增的整数（字符串形式），不是时间戳 |
+| `etag` | 弱 ETag，同时出现在响应体和 `ETag` 响应头 |
 
 ### 3.3 条件查询（304）
 
 ```http
 GET /v1/models
 Authorization: Bearer <JWT>
-If-None-Match: W/"57cf3c14fd04a4c6d3b0e62f40b648c78861d74fb38e64bf2a4546a04700bf28"
+If-None-Match: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
 ```
 
 ```http
@@ -120,8 +186,12 @@ HTTP/1.1 304 Not Modified
 
 ### 3.4 约束
 
-- 只返回运营配置的**业务档位**，不含真实上游模型名、渠道信息、采购价
+- 只返回**可路由且已配置价格**的模型：列表里的模型都可以直接调用；渠道被删除、
+  价格被移除后，该模型会从列表消失
+- 返回真实模型 id，但**不返回渠道、上游厂商和采购价**
+- 池即使暂时没有可调模型也会返回（`models: []`），便于对接方按最终结构开发
 - 目录变更时 `etag` 与 `catalog_version` 同时变化
+- 目录是**调用能力**的快照，不保证当时有可用渠道；限流或额度耗尽仍可能返回 503
 
 ---
 
@@ -477,18 +547,29 @@ curl -sS -D- "http://<gateway>/v1/models" \
 # 拿到 ETag 后
 curl -sS -D- "http://<gateway>/v1/models" \
   -H "Authorization: Bearer $HARNESS_JWT" \
-  -H 'If-None-Match: W/"57cf3c14..."'
+  -H 'If-None-Match: W/"e10bdade..."'
 ```
 
 ### 11.5 发起模型调用
 
 ```bash
+# 先拉目录，从 data[].models 里选一个真实模型 id
 curl -sS -X POST "http://<gateway>/v1/chat/completions" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "X-Harness-Request-Id: hrq_01H8X2K9" \
   -H "X-Harness-Run-Id: run_01H8Z3M1" \
+  -H "X-Route-Group: economy" \
   -H "Content-Type: application/json" \
-  -d '{"model":"economy","messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"deepseek-v4.1-flash","messages":[{"role":"user","content":"hi"}]}'
+
+# 流式：同一模型，加 "stream": true
+curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
+  -H "Authorization: Bearer $HARNESS_JWT" \
+  -H "X-Harness-Request-Id: hrq_01H8X2KA" \
+  -H "X-Harness-Run-Id: run_01H8Z3M1" \
+  -H "X-Route-Group: enterprise" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4.1-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
 ---
@@ -499,3 +580,4 @@ curl -sS -X POST "http://<gateway>/v1/chat/completions" \
 | --- | --- | --- |
 | 2026-10-25 | V0.9 | 初版 |
 | 2026-10-26 | V0.9 | 对应网关 `725ec9d6d`；样例与线上实测结果一致 |
+| 2026-10-29 | V0.9.1 | 对应网关 `ec3cdc0`。`model` 改为真实模型 id；A3 增加 `display_name`/`kind`/`billing`/`models`；`X-Harness-Run-Id` 改为必填且两个 ID 均 ≤64；缺失关联头改为 400；补充 `X-Route-Group` 与默认池规则 |

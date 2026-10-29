@@ -1,7 +1,10 @@
 # Harness ⇄ New API 网关接口交付说明（V0.9）
 
-本文档对应 `harness-api` 分支提交 `3a1afb154`，说明 New API 网关侧对外开放的
+本文档对应 `harness-api` 分支提交 `ec3cdc0`，说明 New API 网关侧对外开放的
 接口清单、鉴权配置、请求/响应契约和实测结论。
+
+> 字段级细节与最新验收记录以 `docs/harness-delivery/` 交付包为准（V0.9.1）；
+> 本文档是其摘要版本。
 
 **本文档区分三类状态：**
 
@@ -63,12 +66,14 @@ A1/A2/A4/A9/A3 使用标准 `Bearer sk-...` 模型令牌。Harness JWT 会被网
 
 | 头 | 方向 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `Authorization` | Harness → New API | ✓ | `Bearer <JWT>` 或 `Bearer sk-...` |
-| `X-Harness-Request-Id` | Harness → New API | ✓ | 关联一次模型调用，格式建议 `hrq_<ULID>` |
-| `X-Harness-Run-Id` | Harness → New API | ✗ | 关联更大的任务执行过程，建议 `run_<ULID>` |
+| `Authorization` | Harness → New API | ✓ | `Bearer <JWT>` |
+| `X-Harness-Request-Id` | Harness → New API | ✓ | 一次模型调用一个，建议 `hrq_<ULID>`，≤64 字符 |
+| `X-Harness-Run-Id` | Harness → New API | ✓ | 一次任务执行一个，建议 `run_<ULID>`，≤64 字符 |
+| `X-Route-Group` | Harness → New API | ✗ | 资源池 id；不传走默认池，传未知池返回 403 |
 | `X-NewAPI-Request-Id` | New API → Harness | 响应头 | 网关请求 ID，账本 `gateway_request_id` 即此值 |
 
-**缺失 `X-Harness-Request-Id` 时的行为**：见「六、待确认事项」第 3 项，尚未冻结。
+**缺失任一关联头时的行为**：网关在转发上游之前返回 `400 REQUEST_INVALID`，
+不产生费用，也不产生账本事件（已定案，不再是待确认项）。
 
 ---
 
@@ -85,19 +90,26 @@ A1/A2/A4/A9/A3 使用标准 `Bearer sk-...` 模型令牌。Harness JWT 会被网
     {
       "id": "economy",
       "object": "model",
+      "display_name": "经济档",
+      "kind": "text",
+      "models": ["deepseek-v4-pro", "deepseek-v4.1-flash"],
       "capabilities": ["chat", "stream", "tools"]
     }
   ],
-  "catalog_version": "1",
-  "etag": "W/\"57cf3c14fd04a4c6d3b0e62f40b648c78861d74fb38e64bf2a4546a04700bf28\""
+  "catalog_version": "2",
+  "etag": "W/\"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3\""
 }
 ```
 
-**响应头**：`ETag: W/"57cf3c..."`
+`data[].id` 是资源池 id（用作 `X-Route-Group`），`data[].models` 是该池可路由的
+真实模型 id（用作请求的 `model`）。空数组表示该池暂无可调模型。
+
+**响应头**：`ETag: W/"e10bdade..."`
 
 **条件查询**：携带 `If-None-Match: <etag>`，未变化返回 `304 Not Modified`，**无响应体**。
 
-**约束**：只返回运营配置的业务档位，不返回真实上游模型名、渠道或采购价。
+**约束**：只返回可路由且已配置价格的模型；不返回渠道、上游厂商或采购价。
+目录是能力快照，不保证当时有可用渠道。
 
 ### 4.2 B1 日常增量（`GET /internal/v1/gateway/usage-events`）
 
@@ -288,9 +300,10 @@ A1/A2/A4/A9/A3 使用标准 `Bearer sk-...` 模型令牌。Harness JWT 会被网
 
 ---
 
-## 八、需要双方确认的事项（尚未冻结）
+## 八、需要双方确认的事项
 
-以下四项是网关侧实现需要对方明确的部分，**不是已冻结的正式合同**：
+以下前三项是网关侧实现需要对方明确的部分，**不是已冻结的正式合同**；
+8.4 已定案为拒绝，网关已实施。
 
 ### 8.1 usage 字段的 null 语义
 
@@ -329,16 +342,12 @@ A1/A2/A4/A9/A3 使用标准 `Bearer sk-...` 模型令牌。Harness JWT 会被网
 
 **需确认**：接受「`refunded` ⇒ `total_amount` 可非零」这一语义。
 
-### 8.4 缺失 X-Harness-Request-Id 时的策略
+### 8.4 缺失关联头时的策略（已定案）
 
-**现状**：未明确。
+**结论**：拒绝请求，返回 `400 REQUEST_INVALID`。网关已实施，不再等待确认。
 
-**可选**：
-- 拒绝请求（400）
-- 接受但不记账
-
-**需确认**：采取哪种。网关倾向拒绝，因为无关联 ID 的请求无法进入账本，
-对账时必然缺失。
+拒绝发生在转发上游之前，不产生费用，也不产生账本事件。`X-Harness-Request-Id`
+与 `X-Harness-Run-Id` 都必填，均 ≤64 字符。
 
 ---
 

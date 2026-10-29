@@ -1,7 +1,7 @@
 # Harness 账本数据契约说明
 
-**版本**：V0.9
-**对应网关版本**：`harness-api` 分支 `725ec9d6d`
+**版本**：V0.9.1
+**对应网关版本**：`harness-api` 分支 `ec3cdc0`
 
 本文档说明 B1 用量事件与 B3 成本记录的字段语义、事件模型和金额口径。
 
@@ -35,7 +35,7 @@ Harness 不能假设"每条 B3 事件都对应一条 B1 事件"。
 | `event_type` | string | ✓ | `usage` / `usage_correction` |
 | `request_id` | string | ✓ | Harness Request ID（`X-Harness-Request-Id`） |
 | `gateway_request_id` | string | ✓ | New API 请求 ID |
-| `run_id` | string | ✓ | Harness Run ID，无则为空串 |
+| `run_id` | string | ✓ | Harness Run ID（`X-Harness-Run-Id`），≤64 字符，恒非空 |
 | `usage_unit` | string | ✓ | 本期恒为 `token`（见第五节） |
 | `usage` | object | ✓ | 见 2.1 |
 | `usage_source` | string | ✓ | `upstream` / `estimated` / `unavailable` |
@@ -43,6 +43,13 @@ Harness 不能假设"每条 B3 事件都对应一条 B1 事件"。
 | `observed_at` | string | ✓ | RFC3339 UTC 毫秒 |
 | `record_version` | int | ✓ | 从 1 开始 |
 | `supersedes_event_id` | string\|null | ✓ | 首次为 `null` |
+
+`run_id` 来自请求头 `X-Harness-Run-Id`。该头是模型调用的必填头，缺失或超过 64 字符时
+网关在转发上游之前返回 400，因此账本里不会出现 `run_id` 为空的事件。一个 run 可以
+包含多次模型调用，B1 事件按 `request_id` 唯一、按 `run_id` 可聚合。
+
+B3 成本记录按第四轮冻结的字段表**不返回** `run_id`，但账本行仍存储该值；需要时可由
+网关侧补充输出。
 
 ### 2.1 usage 对象
 
@@ -280,3 +287,4 @@ Harness 更新自己的账本时应：
 | 日期 | 版本 | 内容 |
 | --- | --- | --- |
 | 2026-10-25 | V0.9 | 初版 |
+| 2026-10-29 | V0.9.1 | 明确 `run_id` 必填且 ≤64、缺失时调用被拒绝；说明 B3 不返回 `run_id` 但账本仍存储 |
