@@ -1,6 +1,6 @@
 # Harness ⇄ New API 网关接口交付说明（V0.9）
 
-本文档对应 `harness-api` 分支提交 `ec3cdc0`，说明 New API 网关侧对外开放的
+本文档对应 `harness-api` 分支提交 `fd00dae`，说明 New API 网关侧对外开放的
 接口清单、鉴权配置、请求/响应契约和实测结论。
 
 > 字段级细节与最新验收记录以 `docs/harness-delivery/` 交付包为准（V0.9.1）；

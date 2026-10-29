@@ -1,7 +1,8 @@
 # Harness 联调验收结果（真实 JWT）
 
 **日期**：2026-10-26（2026-10-29 复测）
-**网关版本**：`ec3cdc0`（镜像 `harness-latest`，版本头 `harness-api-20261029-ec3cdc0`）
+**网关版本**：复测记录为 `ec3cdc0`（版本头 `harness-api-20261029-ec3cdc0`）；
+当前交付构建为 `fd00dae`（含 run id 校验补丁）
 **JWT 来源**：Harness 正式签发（JWKS `https://alphapro-test.xyz/.well-known/jwks.json`）
 **Token 有效期**：至 2026-11-18
 
@@ -156,8 +157,9 @@ B1/B3 另含 `details.required_scope`。这是当前契约定义，不是缺陷�
 请求——MySQL 严格模式写入报 `data too long`，而账本写入失败只记服务端日志、
 不返回给调用方，结果是一笔已计费却无法对账的请求。
 
-修复：校验上限对齐列宽为 64，并加回归测试防止再次漂移。修复后**尚未重新部署**；
-在部署前，调用方必须保证 run id ≤64 字符（`run_<ULID>` 为 30 字符，符合要求）。
+修复：校验上限对齐列宽为 64，并加回归测试防止再次漂移。补丁已包含在构建
+`fd00dae` 中（`ghcr.io/uskyu/new-api:harness-api-20261029-fd00dae`）。
+无论是否已切换到该构建，调用方都应保证 run id ≤64 字符（`run_<ULID>` 为 30 字符）。
 
 ### 延迟现象
 

@@ -1,7 +1,7 @@
 # Harness 网关接口接入指南
 
 **版本**：V0.9.1
-**对应网关版本**：`harness-api` 分支 `ec3cdc0`（镜像 `harness-latest`）
+**对应网关版本**：`harness-api` 分支 `fd00dae`（镜像 `harness-api-20261029-fd00dae`）
 **面向**：Harness 后端开发与联调
 
 本文档给出网关侧全部对外接口的调用方法。字段语义细节见
@@ -580,4 +580,4 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
 | --- | --- | --- |
 | 2026-10-25 | V0.9 | 初版 |
 | 2026-10-26 | V0.9 | 对应网关 `725ec9d6d`；样例与线上实测结果一致 |
-| 2026-10-29 | V0.9.1 | 对应网关 `ec3cdc0`。`model` 改为真实模型 id；A3 增加 `display_name`/`kind`/`billing`/`models`；`X-Harness-Run-Id` 改为必填且两个 ID 均 ≤64；缺失关联头改为 400；补充 `X-Route-Group` 与默认池规则 |
+| 2026-10-29 | V0.9.1 | 对应网关 `fd00dae`。`model` 改为真实模型 id；A3 增加 `display_name`/`kind`/`billing`/`models`；`X-Harness-Run-Id` 改为必填且两个 ID 均 ≤64；缺失关联头改为 400；补充 `X-Route-Group` 与默认池规则 |

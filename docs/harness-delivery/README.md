@@ -1,7 +1,7 @@
 # Harness 网关接口交付包
 
 **版本**：V0.9.1
-**对应网关版本**：`harness-api` 分支 `ec3cdc0`（镜像 `harness-latest`）
+**对应网关版本**：`harness-api` 分支 `fd00dae`（镜像 `harness-api-20261029-fd00dae`）
 **交付日期**：2026-10-25（2026-10-29 更新）
 
 ---
