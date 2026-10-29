@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -144,6 +145,23 @@ func configureHarnessTierCatalogTiers(t *testing.T, tiers []setting.HarnessCatal
 	common.OptionMapRWMutex.Unlock()
 }
 
+// priceHarnessTierCatalogModels gives every named model a configured ratio, so
+// the catalog treats it as billable and actually advertises it. A model with no
+// price is deliberately not advertised, which is a separate test.
+func priceHarnessTierCatalogModels(t *testing.T, modelNames ...string) {
+	t.Helper()
+	payload := make(map[string]float64, len(modelNames))
+	for _, name := range modelNames {
+		payload[name] = 1.5
+	}
+	encoded, err := common.Marshal(payload)
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(encoded)))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{}`))
+	})
+}
+
 // harnessTierCatalogTestRouter serves the handler through a throwaway gin engine.
 // A real engine is required rather than calling the handler directly: gin defers
 // writing the status line until the engine's ServeHTTP runs, so a directly
@@ -214,6 +232,7 @@ func TestGetHarnessTierCatalogWireContract(t *testing.T) {
 		"economy":    {harnessTierCatalogTestTextModelA},
 		"enterprise": {harnessTierCatalogTestTextModelB},
 	})
+	priceHarnessTierCatalogModels(t, harnessTierCatalogTestTextModelA, harnessTierCatalogTestTextModelB)
 	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
 		{ID: "economy", DisplayName: "经济档", Kind: setting.HarnessCatalogKindText},
 		{ID: "enterprise", DisplayName: "企业档", Kind: setting.HarnessCatalogKindText},
@@ -494,6 +513,7 @@ func TestBuildHarnessTierCatalogUnionsPoolCapabilities(t *testing.T) {
 	setupHarnessTierCatalogTestDB(t, map[string][]string{
 		"economy": {harnessTierCatalogTestTextModelA, harnessTierCatalogTestVideoModel},
 	})
+	priceHarnessTierCatalogModels(t, harnessTierCatalogTestTextModelA, harnessTierCatalogTestVideoModel)
 	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
 		{ID: "economy", DisplayName: "经济档", Kind: setting.HarnessCatalogKindText},
 		{ID: "video-per-call", DisplayName: "视频按次", Kind: setting.HarnessCatalogKindVideo, Billing: setting.HarnessCatalogBillingPerCall},
@@ -519,6 +539,48 @@ func TestBuildHarnessTierCatalogUnionsPoolCapabilities(t *testing.T) {
 	assert.Equal(t, "video-per-call", items[1].ID)
 	assert.Equal(t, []string{}, items[1].Models)
 	assert.Equal(t, []string{}, items[1].Capabilities)
+}
+
+// A channel may list a model the gateway has no price for. Advertising it would
+// hand the platform a model that fails on the first call with "model price is not
+// configured", so the catalog must omit it instead.
+func TestBuildHarnessTierCatalogOmitsUnpricedModels(t *testing.T) {
+	setupHarnessTierCatalogTestDB(t, map[string][]string{
+		"economy": {"priced-model", "unpriced-model"},
+	})
+	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
+		{ID: "economy", DisplayName: "经济档", Kind: setting.HarnessCatalogKindText},
+	})
+
+	pricing := map[string]model.Pricing{
+		"priced-model": {
+			ModelName:              "priced-model",
+			SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAI},
+		},
+		"unpriced-model": {
+			ModelName:              "unpriced-model",
+			SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAI},
+		},
+	}
+
+	// With no price configured for either model, nothing may be advertised: an
+	// unpriced model is not callable, so listing it would be a false promise.
+	items := buildHarnessTierCatalog(pricing)
+	require.Len(t, items, 1)
+	assert.Equal(t, []string{}, items[0].Models,
+		"models without any configured price must not be advertised")
+
+	// Pricing one of them makes exactly that model appear.
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"priced-model": 1.5}`))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{}`))
+	})
+
+	items = buildHarnessTierCatalog(pricing)
+	require.Len(t, items, 1)
+	assert.Equal(t, []string{"priced-model"}, items[0].Models,
+		"only the priced model is advertised")
+	assert.Equal(t, []string{"chat", "stream", "tools"}, items[0].Capabilities)
 }
 
 // TestGetHarnessHealthStatusBranches pins B4's three states and the exact body.

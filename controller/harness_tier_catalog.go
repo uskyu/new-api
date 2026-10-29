@@ -10,6 +10,8 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -138,17 +140,19 @@ func buildHarnessTierCatalog(pricingByModel map[string]model.Pricing) []harnessT
 	config := setting.GetHarnessCatalogConfig()
 	items := make([]harnessTierCatalogItem, 0, len(config.Tiers))
 	for _, tier := range config.Tiers {
-		// ResourcePoolModels returns a non-nil empty slice for a pool that has no
-		// channels, which serialises as [] rather than null.
-		models := model.ResourcePoolModels(tier.ID)
-		// Capabilities are the union over the pool's routable models; a model the
-		// gateway cannot price contributes nothing, matching what A1-A9 can serve.
+		// A channel can list a model the gateway has no price for. Advertising it
+		// would send the platform a model it can never call, so it is dropped
+		// here: the catalog lists exactly the models that are both routable and
+		// billable, which is the set A1-A9 can actually serve.
+		routable := model.ResourcePoolModels(tier.ID)
+		models := make([]string, 0, len(routable))
 		capabilities := make([]string, 0, 3)
-		for _, modelName := range models {
+		for _, modelName := range routable {
 			pricing, ok := pricingByModel[modelName]
-			if !ok {
+			if !ok || !harnessTierCatalogModelIsBillable(modelName) {
 				continue
 			}
+			models = append(models, modelName)
 			capabilities = harnessTierCatalogMergeCapabilities(
 				capabilities,
 				harnessTierCatalogCapabilities(pricing.SupportedEndpointTypes),
@@ -165,6 +169,25 @@ func buildHarnessTierCatalog(pricingByModel map[string]model.Pricing) []harnessT
 		})
 	}
 	return items
+}
+
+// harnessTierCatalogModelIsBillable reports whether a price is configured for
+// modelName, which is what makes a call succeed rather than fail with "model
+// price is not configured".
+//
+// A model counts as billable when any of the three supported pricing mechanisms
+// is set up for it: an explicit ratio, a per-request price, or a billing
+// expression (configured or built in). Self-use fallback ratios do not count —
+// they are a last resort that does not describe a real price for this pool.
+func harnessTierCatalogModelIsBillable(modelName string) bool {
+	if ratio_setting.HasConfiguredModelRatio(modelName) {
+		return true
+	}
+	if _, configured := ratio_setting.GetModelPrice(modelName, false); configured {
+		return true
+	}
+	_, hasExpression := billing_setting.GetBillingExpr(modelName)
+	return hasExpression
 }
 
 // harnessTierCatalogMergeCapabilities unions two enum slices while keeping the
