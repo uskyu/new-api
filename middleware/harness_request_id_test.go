@@ -1,14 +1,18 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm/schema"
 )
 
 // newHarnessCorrelationEngine builds a router whose handler runs
@@ -63,22 +67,16 @@ func TestRequireHarnessCorrelationRejectsMissingOrMalformedIds(t *testing.T) {
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name:       "run id at 80 stays accepted",
+			name:       "run id at 64 stays accepted",
 			requestId:  strPtr("hrq_01ABC"),
-			runId:      strPtr(strings.Repeat("r", 80)),
+			runId:      strPtr(strings.Repeat("r", 64)),
 			wantStatus: http.StatusOK,
 		},
 		{
-			name:       "run id at 81 is rejected",
+			name:       "run id at 65 is rejected",
 			requestId:  strPtr("hrq_01ABC"),
-			runId:      strPtr(strings.Repeat("r", 81)),
+			runId:      strPtr(strings.Repeat("r", 65)),
 			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name:       "run id longer than the request id limit is still fine",
-			requestId:  strPtr("hrq_01ABC"),
-			runId:      strPtr(strings.Repeat("r", 70)),
-			wantStatus: http.StatusOK,
 		},
 	}
 
@@ -131,16 +129,47 @@ func TestRequireHarnessCorrelationLeavesNonHarnessCallersUntouched(t *testing.T)
 	assert.True(t, *reached)
 }
 
-// A run id longer than 64 characters used to be silently dropped from the
-// correlation context. It must now be retained, because the ledger echoes it.
 func TestSanitizeHarnessCorrelationIdHonoursPerHeaderLimits(t *testing.T) {
-	seventy := strings.Repeat("r", 70)
-	assert.Equal(t, seventy, sanitizeHarnessCorrelationId(seventy, harnessRunIdMaxLength),
-		"a 70-character run id is within the run id limit")
-	assert.Empty(t, sanitizeHarnessCorrelationId(seventy, harnessRequestIdMaxLength),
-		"the same value exceeds the request id limit")
+	sixtyFour := strings.Repeat("r", 64)
+	assert.Equal(t, sixtyFour, sanitizeHarnessCorrelationId(sixtyFour, harnessRunIdMaxLength),
+		"a 64-character run id fits the ledger column and is kept")
+	assert.Empty(t, sanitizeHarnessCorrelationId(sixtyFour+"r", harnessRunIdMaxLength),
+		"a value one character over the column width is dropped rather than truncated")
 	assert.Empty(t, sanitizeHarnessCorrelationId("abc def", harnessRunIdMaxLength))
 	assert.Empty(t, sanitizeHarnessCorrelationId("", harnessRunIdMaxLength))
+}
+
+// TestHarnessCorrelationIdLimitsFitTheirColumns pins that every id this
+// middleware accepts still fits the column that stores it.
+//
+// A longer value would pass the header check, the call would succeed and be
+// billed, and the ledger insert would then fail on MySQL with "data too long".
+// Ledger failures are logged rather than returned, so the platform would see a
+// 200 for a request it can never reconcile — the outcome the required headers
+// exist to prevent.
+func TestHarnessCorrelationIdLimitsFitTheirColumns(t *testing.T) {
+	for _, tc := range []struct {
+		value any
+		field string
+		max   int
+	}{
+		{&model.HarnessLedgerEvent{}, "HarnessRequestId", harnessRequestIdMaxLength},
+		{&model.HarnessLedgerEvent{}, "RunId", harnessRunIdMaxLength},
+		{&model.HarnessSettlement{}, "HarnessRequestId", harnessRequestIdMaxLength},
+		{&model.HarnessSettlement{}, "HarnessRunId", harnessRunIdMaxLength},
+	} {
+		parsed, err := schema.Parse(tc.value, &sync.Map{}, schema.NamingStrategy{})
+		require.NoError(t, err)
+		field := parsed.LookUpField(tc.field)
+		require.NotNil(t, field, "%T has no field %s", tc.value, tc.field)
+		var width int
+		_, err = fmt.Sscanf(field.TagSettings["TYPE"], "varchar(%d)", &width)
+		require.NoError(t, err, "%T.%s has unexpected column type %q",
+			tc.value, tc.field, field.TagSettings["TYPE"])
+		assert.GreaterOrEqual(t, width, tc.max,
+			"%T.%s stores %d characters but the middleware accepts %d",
+			tc.value, tc.field, width, tc.max)
+	}
 }
 
 func strPtr(value string) *string { return &value }
