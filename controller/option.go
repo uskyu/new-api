@@ -404,6 +404,11 @@ func UpdateOption(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
+	case "ContactWidget":
+		if err = validateContactWidgetConfig(option.Value.(string)); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	if model.IsPasskeyDomainOption(option.Key) {
 		change, updateErr := model.UpdatePasskeyDomainOptions(map[string]string{option.Key: option.Value.(string)}, false, "")

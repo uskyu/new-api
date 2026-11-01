@@ -23,6 +23,7 @@ import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
 import { RichContent } from '@/components/rich-content'
 import { useTheme } from '@/context/theme-provider'
+import { ContactWidget } from '@/features/contact-widget'
 import { isLikelyHtml } from '@/lib/content-format'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -128,6 +129,7 @@ export function Home() {
       <HowItWorks />
       <CTA isAuthenticated={isAuthenticated} />
       <Footer />
+      <ContactWidget />
     </PublicLayout>
   )
 }
