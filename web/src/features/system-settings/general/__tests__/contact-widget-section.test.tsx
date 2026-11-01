@@ -51,10 +51,10 @@ function renderSection(defaultValue = storedConfig) {
 }
 
 /** The dialog chrome also renders an sr-only "Close", so scope to the footer. */
-function dialogSubmitButton() {
+function dialogSubmitButton(name: 'Add' | 'Update') {
   const footer = document.querySelector('[data-slot=dialog-footer]')
   if (!footer) throw new Error('dialog footer not found')
-  return within(footer as HTMLElement).getByRole('button', { name: 'Add' })
+  return within(footer as HTMLElement).getByRole('button', { name })
 }
 
 beforeEach(() => {
@@ -65,7 +65,7 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-test('renders the enabled switch and the stored contact row', () => {
+test('renders the switches and the stored contact row without a save button', () => {
   renderSection()
 
   expect(screen.getByRole('switch', { name: 'Enabled' })).toBeChecked()
@@ -74,19 +74,21 @@ test('renders the enabled switch and the stored contact row', () => {
   ).not.toBeChecked()
   expect(screen.getByRole('cell', { name: 'Support' })).toBeVisible()
   expect(screen.getByText('support@example.com')).toBeVisible()
-  expect(screen.getByRole('button', { name: 'Save Settings' })).toBeDisabled()
+  expect(
+    screen.queryByRole('button', { name: 'Save Settings' })
+  ).not.toBeInTheDocument()
 })
 
-test('toggling the default expansion switch marks the form dirty', async () => {
+test('toggling the default expansion switch saves immediately', async () => {
   const user = userEvent.setup()
   renderSection()
 
   await user.click(screen.getByRole('switch', { name: 'Expand by default' }))
 
-  expect(
-    screen.getByRole('switch', { name: 'Expand by default' })
-  ).toBeChecked()
-  expect(screen.getByRole('button', { name: 'Save Settings' })).toBeEnabled()
+  await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+  const request = mutateAsync.mock.calls[0][0]
+  expect(request.key).toBe('ContactWidget')
+  expect(JSON.parse(request.value).default_open).toBe(true)
 })
 
 test('submitting the dialog with an empty name shows a field error', async () => {
@@ -96,7 +98,7 @@ test('submitting the dialog with an empty name shows a field error', async () =>
   await user.click(screen.getByRole('button', { name: 'Add Contact' }))
   expect(await screen.findByRole('dialog')).toBeVisible()
 
-  await user.click(dialogSubmitButton())
+  await user.click(dialogSubmitButton('Add'))
 
   expect(await screen.findByText('Name is required')).toBeVisible()
   expect(mutateAsync).not.toHaveBeenCalled()
@@ -110,7 +112,7 @@ test('submitting the dialog without a contact ID or link shows a field error', a
   const dialog = await screen.findByRole('dialog')
 
   await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Billing')
-  await user.click(dialogSubmitButton())
+  await user.click(dialogSubmitButton('Add'))
 
   expect(
     await screen.findByText('Contact ID or link is required')
@@ -119,7 +121,7 @@ test('submitting the dialog without a contact ID or link shows a field error', a
   expect(mutateAsync).not.toHaveBeenCalled()
 })
 
-test('adding a contact with a name and contact ID appends a row and enables saving', async () => {
+test('adding a contact persists it immediately with contact_id fields', async () => {
   const user = userEvent.setup()
   renderSection()
 
@@ -129,25 +131,9 @@ test('adding a contact with a name and contact ID appends a row and enables savi
     screen.getByRole('textbox', { name: 'Contact ID' }),
     'billing@example.com'
   )
-  await user.click(dialogSubmitButton())
+  await user.click(dialogSubmitButton('Add'))
 
   expect(await screen.findByRole('cell', { name: 'Billing' })).toBeVisible()
-  expect(screen.getByText('billing@example.com')).toBeVisible()
-  expect(screen.getByRole('button', { name: 'Save Settings' })).toBeEnabled()
-})
-
-test('saving persists the contacts as a JSON value with contact_id fields', async () => {
-  const user = userEvent.setup()
-  renderSection()
-
-  await user.click(screen.getByRole('button', { name: 'Add Contact' }))
-  await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Billing')
-  await user.type(
-    screen.getByRole('textbox', { name: 'Contact ID' }),
-    'billing@example.com'
-  )
-  await user.click(dialogSubmitButton())
-  await user.click(screen.getByRole('button', { name: 'Save Settings' }))
 
   await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
   const request = mutateAsync.mock.calls[0][0]
@@ -161,4 +147,42 @@ test('saving persists the contacts as a JSON value with contact_id fields', asyn
     name: 'Billing',
     contact_id: 'billing@example.com',
   })
+})
+
+test('editing a contact persists the change immediately', async () => {
+  const user = userEvent.setup()
+  renderSection()
+
+  await user.click(screen.getByRole('button', { name: 'Edit' }))
+  const nameInput = await screen.findByRole('textbox', { name: 'Name' })
+  await user.clear(nameInput)
+  await user.type(nameInput, 'Support Team')
+  await user.click(dialogSubmitButton('Update'))
+
+  expect(await screen.findByRole('cell', { name: 'Support Team' })).toBeVisible()
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  )
+
+  await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+  const parsed = JSON.parse(mutateAsync.mock.calls[0][0].value)
+  expect(parsed.contacts).toHaveLength(1)
+  expect(parsed.contacts[0]).toMatchObject({
+    id: 1,
+    name: 'Support Team',
+    contact_id: 'support@example.com',
+  })
+})
+
+test('blurring the title field saves the edited title', async () => {
+  const user = userEvent.setup()
+  renderSection()
+
+  const titleInput = screen.getByRole('textbox', { name: 'Widget Title' })
+  await user.clear(titleInput)
+  await user.type(titleInput, 'Reach us')
+  await user.tab()
+
+  await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+  expect(JSON.parse(mutateAsync.mock.calls[0][0].value).title).toBe('Reach us')
 })

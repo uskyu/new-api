@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Save } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { Plus } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -63,7 +63,6 @@ import {
   type ContactWidgetContact,
 } from '@/features/contact-widget/types'
 import { isHttpUrl } from '@/lib/content-format'
-import { handleServerError } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
 
 import { SettingsSwitchField } from '../components/settings-form-layout'
@@ -91,7 +90,14 @@ export function ContactWidgetSection(props: ContactWidgetSectionProps) {
       parseContactWidgetConfig(props.defaultValue) ??
       createEmptyContactWidgetConfig()
   )
-  const [isDirty, setIsDirty] = useState(false)
+  // configRef mirrors the newest config synchronously so consecutive actions
+  // (a field blur followed by a dialog submit) always persist the full state.
+  const configRef = useRef<ContactWidgetConfig>(config)
+  // Serialized form of the last config sent to the server; incoming option
+  // refetches that match it must not clobber newer local edits.
+  const lastSavedRef = useRef(serializeContactWidgetConfig(config))
+  // Saves run sequentially so the last enqueued snapshot wins.
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve())
   const [showDialog, setShowDialog] = useState(false)
   const [editingContact, setEditingContact] =
     useState<ContactWidgetContact | null>(null)
@@ -148,11 +154,14 @@ export function ContactWidgetSection(props: ContactWidgetSectionProps) {
   })
 
   useEffect(() => {
-    setConfig(
+    const incoming =
       parseContactWidgetConfig(props.defaultValue) ??
-        createEmptyContactWidgetConfig()
-    )
-    setIsDirty(false)
+      createEmptyContactWidgetConfig()
+    const serialized = serializeContactWidgetConfig(incoming)
+    if (serialized === lastSavedRef.current) return
+    lastSavedRef.current = serialized
+    configRef.current = incoming
+    setConfig(incoming)
   }, [props.defaultValue])
 
   const iconOptions = useMemo(
@@ -167,14 +176,49 @@ export function ContactWidgetSection(props: ContactWidgetSectionProps) {
 
   const watchedName = form.watch('name')
 
+  const applyConfig = (
+    updater: (prev: ContactWidgetConfig) => ContactWidgetConfig
+  ) => {
+    const next = updater(configRef.current)
+    configRef.current = next
+    setConfig(next)
+    return next
+  }
+
+  // Every discrete admin action is saved on its own, so the form no longer
+  // needs a separate "Save Settings" step. Saves run sequentially and the last
+  // enqueued snapshot wins.
+  const persistConfig = (next: ContactWidgetConfig) => {
+    if (next.enabled && next.title.trim() === '') {
+      toast.error(t('Contact widget title is required when enabled'))
+      return
+    }
+    const result = contactsSchema.safeParse(next.contacts)
+    if (!result.success) {
+      toast.error(
+        result.error.issues[0]?.message ?? t('Failed to save contact widget')
+      )
+      return
+    }
+    const serialized = serializeContactWidgetConfig(next)
+    lastSavedRef.current = serialized
+    saveChainRef.current = saveChainRef.current
+      .catch(() => undefined)
+      .then(() =>
+        updateOption.mutateAsync({
+          key: CONTACT_WIDGET_OPTION_KEY,
+          value: serialized,
+        })
+      )
+      .catch(() => undefined)
+  }
+
   const handleToggleEnabled = (checked: boolean) => {
-    setConfig((prev) => ({ ...prev, enabled: checked }))
-    setIsDirty(true)
+    persistConfig(applyConfig((prev) => ({ ...prev, enabled: checked })))
   }
 
   const handleToggleDefaultOpen = (checked: boolean) => {
-    setConfig((prev) => ({ ...prev, defaultOpen: checked }))
-    setIsDirty(true)
+    persistConfig(applyConfig((prev) => ({ ...prev, defaultOpen: checked })))
   }
 
   const handleAdd = () => {
@@ -201,22 +245,24 @@ export function ContactWidgetSection(props: ContactWidgetSectionProps) {
 
   const handleSubmitForm = (values: ContactFormValues) => {
     if (editingContact) {
-      setConfig((prev) => ({
+      const next = applyConfig((prev) => ({
         ...prev,
         contacts: prev.contacts.map((item) =>
           item.id === editingContact.id ? { ...item, ...values } : item
         ),
       }))
-      toast.success(t('Contact updated. Click "Save Settings" to apply.'))
+      toast.success(t('Contact updated'))
+      persistConfig(next)
     } else {
-      const newId = Math.max(...config.contacts.map((item) => item.id), 0) + 1
-      setConfig((prev) => ({
+      const newId =
+        Math.max(...configRef.current.contacts.map((item) => item.id), 0) + 1
+      const next = applyConfig((prev) => ({
         ...prev,
         contacts: [...prev.contacts, { id: newId, ...values }],
       }))
-      toast.success(t('Contact added. Click "Save Settings" to apply.'))
+      toast.success(t('Contact added'))
+      persistConfig(next)
     }
-    setIsDirty(true)
     setShowDialog(false)
   }
 
@@ -226,37 +272,23 @@ export function ContactWidgetSection(props: ContactWidgetSectionProps) {
 
   const confirmDelete = () => {
     if (deleteTarget) {
-      setConfig((prev) => ({
+      const next = applyConfig((prev) => ({
         ...prev,
         contacts: prev.contacts.filter((item) => item.id !== deleteTarget.id),
       }))
-      setIsDirty(true)
-      toast.success(t('Contact deleted. Click "Save Settings" to apply.'))
+      persistConfig(next)
+      toast.success(t('Contact deleted'))
     }
     setDeleteTarget(null)
   }
 
-  const handleSave = async () => {
-    if (config.enabled && config.title.trim() === '') {
-      toast.error(t('Contact widget title is required when enabled'))
-      return
-    }
-    const result = contactsSchema.safeParse(config.contacts)
-    if (!result.success) {
-      toast.error(
-        result.error.issues[0]?.message ?? t('Failed to save contact widget')
-      )
-      return
-    }
-    try {
-      await updateOption.mutateAsync({
-        key: CONTACT_WIDGET_OPTION_KEY,
-        value: serializeContactWidgetConfig(config),
-      })
-      setIsDirty(false)
-      toast.success(t('Contact widget saved successfully'))
-    } catch (error) {
-      handleServerError(error, t('Failed to save contact widget'))
+  // Title and description have no save button: persisting on blur keeps them
+  // in step with the server without a request per keystroke.
+  const handleTextBlur = () => {
+    if (
+      serializeContactWidgetConfig(configRef.current) !== lastSavedRef.current
+    ) {
+      persistConfig(configRef.current)
     }
   }
 
@@ -268,15 +300,6 @@ export function ContactWidgetSection(props: ContactWidgetSectionProps) {
             <Button onClick={handleAdd} size='sm'>
               <Plus className='mr-2 h-4 w-4' />
               {t('Add Contact')}
-            </Button>
-            <Button
-              onClick={handleSave}
-              size='sm'
-              variant='secondary'
-              disabled={!isDirty || updateOption.isPending}
-            >
-              <Save className='mr-2 h-4 w-4' />
-              {updateOption.isPending ? t('Saving...') : t('Save Settings')}
             </Button>
           </div>
           <div className='flex flex-wrap items-center gap-x-6 gap-y-2'>
@@ -305,9 +328,13 @@ export function ContactWidgetSection(props: ContactWidgetSectionProps) {
               value={config.title}
               maxLength={CONTACT_WIDGET_LIMITS.title}
               onChange={(event) => {
-                setConfig((prev) => ({ ...prev, title: event.target.value }))
-                setIsDirty(true)
+                setConfig((prev) => {
+                  const next = { ...prev, title: event.target.value }
+                  configRef.current = next
+                  return next
+                })
               }}
+              onBlur={handleTextBlur}
               placeholder={t('Contact Us')}
             />
             <p className='text-muted-foreground text-xs'>
@@ -325,12 +352,13 @@ export function ContactWidgetSection(props: ContactWidgetSectionProps) {
               value={config.description}
               maxLength={CONTACT_WIDGET_LIMITS.description}
               onChange={(event) => {
-                setConfig((prev) => ({
-                  ...prev,
-                  description: event.target.value,
-                }))
-                setIsDirty(true)
+                setConfig((prev) => {
+                  const next = { ...prev, description: event.target.value }
+                  configRef.current = next
+                  return next
+                })
               }}
+              onBlur={handleTextBlur}
               placeholder={t('Choose your preferred contact method')}
             />
             <p className='text-muted-foreground text-xs'>
