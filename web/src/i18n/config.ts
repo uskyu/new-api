@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import i18n from 'i18next'
+import i18n, { type InitOptions } from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 
+import { applyEnglishDefault } from './default-language'
 import { convertDetectedLanguage } from './languages'
 import en from './locales/en.json'
 import fr from './locales/fr.json'
@@ -39,26 +40,32 @@ export const resources = {
   zhTW,
 } as const
 
-i18n
-  .use(LanguageDetector)
-  .use(initReactI18next)
-  .init({
-    resources,
-    fallbackLng: 'en',
-    supportedLngs: ['en', 'zhCN', 'fr', 'ru', 'ja', 'vi', 'zhTW'],
-    load: 'currentOnly',
-    nsSeparator: false, // Allow literal colons in keys (e.g., URLs, labels)
-    debug: import.meta.env.DEV,
-    interpolation: {
-      escapeValue: false, // not needed for react as it escapes by default
-    },
-    detection: {
-      order: ['localStorage', 'navigator'],
-      caches: ['localStorage'],
-      // Browsers report `zh-CN`/`zh-TW`/`zh`; map them onto our `zhCN`/`zhTW`
-      // codes (non-Chinese codes pass through for normal supportedLngs matching).
-      convertDetectedLanguage,
-    },
-  })
+// English is the default interface language for every first-time visitor.
+applyEnglishDefault()
+
+export const i18nOptions: InitOptions = {
+  resources,
+  fallbackLng: 'en',
+  supportedLngs: ['en', 'zhCN', 'fr', 'ru', 'ja', 'vi', 'zhTW'],
+  load: 'currentOnly',
+  nsSeparator: false, // Allow literal colons in keys (e.g., URLs, labels)
+  debug: import.meta.env.DEV,
+  interpolation: {
+    escapeValue: false, // not needed for react as it escapes by default
+  },
+  detection: {
+    // Only an explicit choice (cached by the language switcher / profile page)
+    // may override the English default. `navigator.language` is deliberately not
+    // consulted: a zh-CN browser would otherwise start in Chinese before anyone
+    // picks a language.
+    order: ['localStorage'],
+    caches: ['localStorage'],
+    // Cached values from older builds can still be BCP-47 tags (`zh-CN`); map
+    // them onto our `zhCN`/`zhTW` codes (other codes pass through unchanged).
+    convertDetectedLanguage,
+  },
+}
+
+i18n.use(LanguageDetector).use(initReactI18next).init(i18nOptions)
 
 export default i18n

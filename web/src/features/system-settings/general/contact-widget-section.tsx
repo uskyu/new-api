@@ -204,12 +204,12 @@ export function ContactWidgetSection(props: ContactWidgetSectionProps) {
     lastSavedRef.current = serialized
     saveChainRef.current = saveChainRef.current
       .catch(() => undefined)
-      .then(() =>
-        updateOption.mutateAsync({
+      .then(async () => {
+        await updateOption.mutateAsync({
           key: CONTACT_WIDGET_OPTION_KEY,
           value: serialized,
         })
-      )
+      })
       .catch(() => undefined)
   }
 
