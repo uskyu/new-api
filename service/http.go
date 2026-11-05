@@ -39,8 +39,7 @@ const newAPIRequestIdHeader = "X-NewAPI-Request-Id"
 func isIntelligentRoutingResponseHeader(name string) bool {
 	return strings.EqualFold(name, setting.IntelligentRoutingGroupHeader) ||
 		strings.EqualFold(name, setting.IntelligentRoutingChannelIDHeader) ||
-		strings.EqualFold(name, setting.IntelligentRoutingGroupRatioHeader) ||
-		strings.EqualFold(name, setting.IntelligentRoutingTaxRatePercentHeader)
+		strings.EqualFold(name, setting.IntelligentRoutingGroupRatioHeader)
 }
 
 func ShouldCopyUpstreamHeader(c *gin.Context, k string, v []string) bool {

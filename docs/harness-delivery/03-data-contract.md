@@ -1,7 +1,7 @@
 # Harness 账本数据契约说明
 
-**版本**：V0.9.1
-**对应网关版本**：`harness-api` 分支 `fd00dae`
+**版本**：V0.10
+**对应网关版本**：`harness-api` 分支，本轮构建（待发布）
 
 本文档说明 B1 用量事件与 B3 成本记录的字段语义、事件模型和金额口径。
 
@@ -140,7 +140,7 @@ B3 成本记录按第四轮冻结的字段表**不返回** `run_id`，但账本�
 ```json
 {
   "base_amount": "0.00003304",
-  "group_ratio": 0,
+  "group_ratio": 1,
   "tax_rate_percent": 0,
   "total_amount": "0.00003304"
 }
@@ -149,25 +149,32 @@ B3 成本记录按第四轮冻结的字段表**不返回** `run_id`，但账本�
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `base_amount` | **string** | 采购基础金额（客户分组倍率影响之前） |
-| `group_ratio` | float | 采购分组倍率 |
-| `tax_rate_percent` | float | 供应商税率（百分比） |
+| `group_ratio` | float | 采购分组倍率（由网关按实际服务的资源池决定，Harness 不参与选择） |
+| `tax_rate_percent` | float | **恒为 `0`，已废弃（legacy）**。供应商税率已取消，保留字段仅为兼容旧解析器，后续版本移除 |
 | `total_amount` | **string** | 最终采购成本 |
 
 **金额必须是字符串十进制**，不可当 float 解析——十进制精度会在转换中丢失。
 
+样例中 `group_ratio = 1`（无采购折扣），因此 `total_amount` 等于 `base_amount`；
+`tax_rate_percent` 恒为 `0`，是废弃字段。
+
 ### 3.2 金额计算口径
 
 ```
-base_amount = PreGroupQuota / QuotaPerUnit
-total_amount = base_amount × group_ratio × (1 + tax_rate_percent / 100)
+base_amount  = PreGroupQuota / QuotaPerUnit
+total_amount = base_amount × group_ratio
 ```
+
+**税额乘数已取消**：V0.10 起不存在供应商税率，`total_amount` 不再乘以
+`(1 + tax_rate_percent / 100)`，`tax_rate_percent` 在报文中恒为 `0`。Harness 若已
+按旧公式计算，需要去掉税额项，否则会与账本不一致。
 
 **关键**：`base_amount` 在**客户分组倍率生效之前**取得，因此采购成本与客户售价
 完全解耦。修改客户分组倍率不影响采购成本。
 
 ### 3.3 金额口径的重要限制
 
-`total_amount` 是**网关按自身配置的模型价格、采购倍率和税率计算出的金额**，
+`total_amount` 是**网关按自身配置的模型价格和采购倍率计算出的金额**，
 **不等于**供应商最终出具的实际账单。
 
 Harness 应将其视为「网关计价结果」，而非「供应商已确认的实付金额」。
@@ -191,7 +198,7 @@ Harness 应将其视为「网关计价结果」，而非「供应商已确认的
 | 场景 | event_type |
 | --- | --- |
 | 首次成本记录（无论初始状态） | `cost` |
-| 金额变化（含倍率/税率导致的 total 变化） | `cost_correction` |
+| 金额变化（含倍率导致的 total 变化） | `cost_correction` |
 | 金额不变，仅状态变化 | `status_change` |
 | 已有记录 → `refunded` | `refund` |
 
@@ -202,10 +209,10 @@ Harness 应将其视为「网关计价结果」，而非「供应商已确认的
 3. 金额任一字段变化 → `cost_correction`
 4. 其余 → `status_change`
 
-**「金额变化」包含**：`base_amount`、`total_amount`、`group_ratio`、
-`tax_rate_percent`、`currency` 任一变化。
+**「金额变化」包含**：`base_amount`、`total_amount`、`group_ratio`、`currency` 任一变化。
+`tax_rate_percent` 恒为 `0`，不会再产生变化，保留在字段表中仅为兼容。
 
-这很重要：修改采购倍率或税率时 `base_amount` 不变，但 `total_amount` 会变，
+这很重要：修改采购倍率时 `base_amount` 不变，但 `total_amount` 会变，
 此时必须是 `cost_correction` 而非 `status_change`。
 
 ---
@@ -264,7 +271,7 @@ Harness 更新自己的账本时应：
 | --- | --- |
 | `usage_unit` | **只产生 `token`** |
 | `currency` | **固定 `USD`** |
-| 计费对象 | 仅模型 Token |
+| 计费对象 | 仅模型 Token（`plan` 池的按次计费已定义，渠道尚未接入，本期不产生此类事件） |
 | 独立工具计费 | 不做 |
 | 图像/音频计费 | 不做 |
 | `status = failed` | 内部状态，**不会出现在 B3** |
@@ -288,3 +295,4 @@ Harness 更新自己的账本时应：
 | --- | --- | --- |
 | 2026-10-25 | V0.9 | 初版 |
 | 2026-10-29 | V0.9.1 | 明确 `run_id` 必填且 ≤64、缺失时调用被拒绝；说明 B3 不返回 `run_id` 但账本仍存储 |
+| 2026-11-05 | V0.10 | 金额口径改为 `total_amount = base_amount × group_ratio`，取消供应商税率；`tax_rate_percent` 恒 0 并标记废弃；事件类型判定去掉税率项；补充 `group_ratio` 由网关按资源池决定 |

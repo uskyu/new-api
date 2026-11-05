@@ -706,12 +706,11 @@ func harnessSettlementCorrelationFromContext(ctx *gin.Context) harnessSettlement
 
 // harnessSettlementMoney is the resolved procurement cost of one request.
 type harnessSettlementMoney struct {
-	PricingGroup   string
-	GroupRatio     float64
-	TaxRatePercent float64
-	BaseAmount     string
-	TotalAmount    string
-	Currency       string
+	PricingGroup string
+	GroupRatio   float64
+	BaseAmount   string
+	TotalAmount  string
+	Currency     string
 	// PriceVersion identifies the pricing snapshot the amount was derived from,
 	// so the platform can tell a price change from a usage change.
 	PriceVersion string
@@ -730,60 +729,58 @@ const harnessSettlementCurrency = "USD"
 
 // ResolveTaskProcurementPricing resolves the procurement pricing parameters an
 // async task must freeze at submit time, so settlement hours later books the
-// price that applied when the task was accepted. A zero ratio and zero tax mean
-// "no procurement discount", exactly as the settlement path reads an unresolved
+// price that applied when the task was accepted. A zero ratio means "no
+// procurement discount", exactly as the settlement path reads an unresolved
 // group.
-func ResolveTaskProcurementPricing(channelId int, modelName string) (pricingGroup, priceVersion string, groupRatio, taxRatePercent float64) {
-	pricingGroup, groupRatio, taxRatePercent = harnessSettlementPricing(channelId, modelName)
-	return pricingGroup, harnessProcurementPriceVersion(), groupRatio, taxRatePercent
+func ResolveTaskProcurementPricing(channelId int, modelName string) (pricingGroup, priceVersion string, groupRatio float64) {
+	pricingGroup, groupRatio = harnessSettlementPricing(channelId, modelName)
+	return pricingGroup, harnessProcurementPriceVersion(), groupRatio
 }
 
 // harnessSettlementPricing resolves the procurement pricing group of a
-// channel+model, that group's ratio and the channel's supplier tax. It mirrors
+// channel+model and that group's ratio. It mirrors
 // setIntelligentRoutingResponseHeaders in controller/relay.go, which is the
 // source of truth for the per-request X-Route-* headers. It never errors: an
 // unresolved group yields zeros and the caller treats the request as having no
 // procurement discount.
-func harnessSettlementPricing(channelId int, modelName string) (pricingGroup string, groupRatio, taxRatePercent float64) {
+func harnessSettlementPricing(channelId int, modelName string) (pricingGroup string, groupRatio float64) {
 	pricingGroup, valid, err := model.GetPreferredPricingGroupForChannelModel(channelId, modelName)
 	if err != nil {
 		common.SysLog(common.LogText("harness settlement: resolving pricing group failed (channel=%d model=%s): %s", channelId, modelName, err.Error()))
-		return "", 0, 0
+		return "", 0
 	}
 	if !valid {
-		return "", 0, 0
+		return "", 0
 	}
-	groupRatio = ratio_setting.GetGroupRatio(pricingGroup)
-	// The selected channel can be a partial stub for the first attempt, so read
-	// the cached channel row for the supplier tax, exactly like the controller.
-	channel, err := model.CacheGetChannel(channelId)
-	if err != nil {
-		common.SysLog(common.LogText("harness settlement: reading supplier tax failed (channel=%d): %s", channelId, err.Error()))
-		return pricingGroup, groupRatio, 0
-	}
-	taxRatePercent = channel.GetOtherSettings().SupplierTaxRatePercent
-	if math.IsNaN(taxRatePercent) || math.IsInf(taxRatePercent, 0) || taxRatePercent < 0 {
-		common.SysLog(common.LogText("harness settlement: ignoring invalid supplier tax %v (channel=%d)", taxRatePercent, channelId))
-		taxRatePercent = 0
-	}
-	return pricingGroup, groupRatio, taxRatePercent
+	return pricingGroup, ratio_setting.GetGroupRatio(pricingGroup)
 }
 
 // harnessCostCalculationVersion records which algorithm produced base_amount.
 // It is deliberately separate from PriceVersion: PriceVersion identifies the
 // price configuration the amount was derived from, while this identifies the
 // calculation itself, so reconciliation can tell an old row (whose base still
-// carried the customer group ratio) from a repaired one.
+// carried the customer group ratio, or whose total still carried the supplier
+// tax) from a current one.
 const (
 	// harnessCostCalculationLegacy marks a row written before the customer-side
 	// group ratio was lifted out of the procurement base.
 	harnessCostCalculationLegacy = ""
 	// harnessCostCalculationPreGroup marks a row whose base_amount excludes the
-	// customer-side group ratio.
+	// customer-side group ratio but whose total still carried the supplier tax.
+	// Retained so historical rows stay identifiable; new rows never use it.
 	harnessCostCalculationPreGroup = "pregroup-v1"
-	// harnessCostCalculationFallback marks a row that should have used the
-	// pre-group amount but had none, so it fell back to quota/QuotaPerUnit.
+	// harnessCostCalculationFallback marks a pregroup-v1 row that should have used
+	// the pre-group amount but had none, so it fell back to quota/QuotaPerUnit.
 	harnessCostCalculationFallback = "pregroup-v1-fallback"
+	// harnessCostCalculationPreGroupNoTax marks a row whose base_amount excludes
+	// the customer-side group ratio and whose total is base_amount times the
+	// procurement group ratio, with no supplier tax. This is the current
+	// algorithm.
+	harnessCostCalculationPreGroupNoTax = "pregroup-v2"
+	// harnessCostCalculationFallbackNoTax marks a pregroup-v2 row that should have
+	// used the pre-group amount but had none, so it fell back to
+	// quota/QuotaPerUnit.
+	harnessCostCalculationFallbackNoTax = "pregroup-v2-fallback"
 )
 
 // harnessSettlementMoneyForQuota converts a final quota into ledger amounts.
@@ -795,9 +792,9 @@ const (
 // loses the pre-rounding amount, so such a row is tagged as a fallback instead
 // of silently claiming the corrected semantics.
 //
-// A resolved pricing group applies its ratio and the channel's supplier tax, so
-// total is the final procurement cost the platform books directly, matching the
-// contract sample (0.011500 * 0.8 * 1.065 rounds to 0.009800).
+// A resolved pricing group applies its ratio, so total is base_amount times the
+// group ratio, matching the contract sample (0.011500 * 0.8 rounds to 0.009200).
+// The supplier tax is no longer part of the procurement cost.
 //
 // When no group resolved the request has no procurement discount, so the total
 // tracks the base instead of collapsing to zero — "no procurement group" must
@@ -808,7 +805,7 @@ func harnessSettlementMoneyForQuota(basis *types.ProcurementBasis, quota int, ch
 		BaseAmount:             "0",
 		TotalAmount:            "0",
 		Currency:               harnessSettlementCurrency,
-		CostCalculationVersion: harnessCostCalculationPreGroup,
+		CostCalculationVersion: harnessCostCalculationPreGroupNoTax,
 	}
 	if quota < 0 {
 		common.SysLog(common.LogText("harness settlement: ignoring negative quota %d (channel=%d model=%s)", quota, channelId, modelName))
@@ -826,7 +823,7 @@ func harnessSettlementMoneyForQuota(basis *types.ProcurementBasis, quota int, ch
 		base = preGroup.Div(decimal.NewFromFloat(quotaPerUnit))
 	} else {
 		base = decimal.NewFromInt(int64(quota)).Div(decimal.NewFromFloat(quotaPerUnit))
-		money.CostCalculationVersion = harnessCostCalculationFallback
+		money.CostCalculationVersion = harnessCostCalculationFallbackNoTax
 		// Warn whenever the fallback can actually be wrong. Only a unit ratio makes
 		// the two amounts coincide, so that single case stays quiet to avoid noise
 		// on every request of a default deployment; a zero ratio must be reported,
@@ -841,8 +838,8 @@ func harnessSettlementMoneyForQuota(basis *types.ProcurementBasis, quota int, ch
 		}
 	}
 
-	pricingGroup, groupRatio, taxRatePercent := harnessSettlementPricing(channelId, modelName)
-	return harnessSettlementMoneyFromBase(money, base, pricingGroup, groupRatio, taxRatePercent, harnessProcurementPriceVersion(), channelId, modelName)
+	pricingGroup, groupRatio := harnessSettlementPricing(channelId, modelName)
+	return harnessSettlementMoneyFromBase(money, base, pricingGroup, groupRatio, harnessProcurementPriceVersion(), channelId, modelName)
 }
 
 // harnessSettlementMoneyWithFrozenPricing derives the ledger amounts of an async
@@ -854,7 +851,7 @@ func harnessSettlementMoneyWithFrozenPricing(basis *types.ProcurementBasis, quot
 		BaseAmount:             "0",
 		TotalAmount:            "0",
 		Currency:               harnessSettlementCurrency,
-		CostCalculationVersion: harnessCostCalculationPreGroup,
+		CostCalculationVersion: harnessCostCalculationPreGroupNoTax,
 	}
 	if frozen == nil {
 		return harnessSettlementMoneyForQuota(basis, quota, channelId, modelName)
@@ -877,35 +874,31 @@ func harnessSettlementMoneyWithFrozenPricing(basis *types.ProcurementBasis, quot
 		return money
 	} else {
 		base = decimal.NewFromInt(int64(quota)).Div(decimal.NewFromFloat(quotaPerUnit))
-		money.CostCalculationVersion = harnessCostCalculationFallback
+		money.CostCalculationVersion = harnessCostCalculationFallbackNoTax
 		if ratio := frozen.CustomerGroupRatio; ratio != 0 && ratio != 1 {
 			common.SysLog(common.LogText("harness settlement: task has no frozen pre-group amount with customer group ratio %v (channel=%d model=%s) - base_amount may include the customer multiplier", ratio, channelId, modelName))
 		}
 	}
 
-	return harnessSettlementMoneyFromBase(money, base, frozen.PricingGroup, frozen.ProcurementGroupRatio, frozen.TaxRatePercent, frozen.PriceVersion, channelId, modelName)
+	return harnessSettlementMoneyFromBase(money, base, frozen.PricingGroup, frozen.ProcurementGroupRatio, frozen.PriceVersion, channelId, modelName)
 }
 
-// harnessSettlementMoneyFromBase applies the procurement discount and supplier
-// tax to a base amount. Both callers above resolve base differently -- live
-// pricing versus a frozen context -- but must compose the money identically.
-func harnessSettlementMoneyFromBase(money harnessSettlementMoney, base decimal.Decimal, pricingGroup string, groupRatio, taxRatePercent float64, priceVersion string, channelId int, modelName string) harnessSettlementMoney {
+// harnessSettlementMoneyFromBase applies the procurement discount to a base
+// amount. Both callers above resolve base differently -- live pricing versus a
+// frozen context -- but must compose the money identically.
+func harnessSettlementMoneyFromBase(money harnessSettlementMoney, base decimal.Decimal, pricingGroup string, groupRatio float64, priceVersion string, channelId int, modelName string) harnessSettlementMoney {
 	total := base
 	switch {
 	case pricingGroup == "":
-		// No opt-in procurement group: no discount and no tax. Keep the ratio at
-		// zero so the row shows that no procurement group applied.
-		groupRatio, taxRatePercent = 0, 0
+		// No opt-in procurement group: no discount. Keep the ratio at zero so the
+		// row shows that no procurement group applied.
+		groupRatio = 0
 	case math.IsNaN(groupRatio) || math.IsInf(groupRatio, 0) || groupRatio < 0:
 		common.SysLog(common.LogText("harness settlement: ignoring invalid group ratio %v (group=%s), no discount applied", groupRatio, pricingGroup))
-		groupRatio, taxRatePercent = 0, 0
-	case math.IsNaN(taxRatePercent) || math.IsInf(taxRatePercent, 0) || taxRatePercent < 0:
-		common.SysLog(common.LogText("harness settlement: ignoring invalid supplier tax %v (group=%s), tax not applied", taxRatePercent, pricingGroup))
-		taxRatePercent = 0
+		groupRatio = 0
 	}
 	if pricingGroup != "" && groupRatio >= 0 && !math.IsNaN(groupRatio) && !math.IsInf(groupRatio, 0) {
-		total = base.Mul(decimal.NewFromFloat(groupRatio)).
-			Mul(decimal.NewFromFloat(1 + taxRatePercent/100))
+		total = base.Mul(decimal.NewFromFloat(groupRatio))
 	}
 	if total.IsNegative() {
 		common.SysLog(common.LogText("harness settlement: clamping negative total to zero (channel=%d model=%s)", channelId, modelName))
@@ -914,7 +907,6 @@ func harnessSettlementMoneyFromBase(money harnessSettlementMoney, base decimal.D
 
 	money.PricingGroup = pricingGroup
 	money.GroupRatio = groupRatio
-	money.TaxRatePercent = taxRatePercent
 	money.BaseAmount = base.Round(harnessSettlementAmountPrecision).String()
 	money.TotalAmount = total.Round(harnessSettlementAmountPrecision).String()
 	money.PriceVersion = priceVersion
@@ -958,7 +950,10 @@ func recordHarnessSettlement(settlement *model.HarnessSettlement, money harnessS
 	}
 	settlement.PricingGroup = money.PricingGroup
 	settlement.GroupRatio = money.GroupRatio
-	settlement.TaxRatePercent = money.TaxRatePercent
+	// tax_rate_percent is a legacy column kept for wire compatibility. The
+	// supplier tax is no longer part of the procurement cost, so every new
+	// settlement writes zero.
+	settlement.TaxRatePercent = 0
 	settlement.BaseAmount = money.BaseAmount
 	settlement.TotalAmount = money.TotalAmount
 	settlement.Currency = money.Currency
@@ -1012,7 +1007,7 @@ func recordHarnessSettlement(settlement *model.HarnessSettlement, money harnessS
 // "what did this request consume" versus "what did it cost" -- so a change in one
 // must not append an event to the other. A settle that only learned the missing
 // token split appends a usage event and no cost event; a settle that only changed
-// the procurement tax rate appends a cost event and no usage event. Each stream
+// the procurement group ratio appends a cost event and no usage event. Each stream
 // also keeps its own version chain, so a usage correction never points at a cost
 // event and vice versa.
 //
@@ -1126,27 +1121,29 @@ func harnessCostEventIfChanged(settlement *model.HarnessSettlement, money harnes
 		supersedes = &previous.EventId
 	}
 	return &model.HarnessLedgerEvent{
-		Stream:                 model.HarnessLedgerStreamCost,
-		EventType:              harnessCostEventTypeForStatus(settlement.Status, previous, money),
-		HarnessRequestId:       correlation.HarnessRequestId,
-		GatewayRequestId:       settlement.RequestId,
-		RunId:                  correlation.HarnessRunId,
-		Status:                 settlement.Status,
-		Currency:               money.Currency,
-		UsageUnit:              correlation.UsageUnit,
-		PromptTokens:           settlement.PromptTokens,
-		CompletionTokens:       settlement.CompletionTokens,
-		CacheReadTokens:        settlement.CacheReadTokens,
-		CacheWriteTokens:       settlement.CacheWriteTokens,
-		TotalTokens:            settlement.TotalTokens,
-		TotalTokensKnown:       settlement.TotalTokensKnown,
-		SplitUnknown:           settlement.SplitUnknown,
-		UsageSource:            correlation.UsageSource,
-		IsEstimated:            correlation.IsEstimated,
-		BaseAmount:             money.BaseAmount,
-		TotalAmount:            money.TotalAmount,
-		GroupRatio:             money.GroupRatio,
-		TaxRatePercent:         money.TaxRatePercent,
+		Stream:           model.HarnessLedgerStreamCost,
+		EventType:        harnessCostEventTypeForStatus(settlement.Status, previous, money),
+		HarnessRequestId: correlation.HarnessRequestId,
+		GatewayRequestId: settlement.RequestId,
+		RunId:            correlation.HarnessRunId,
+		Status:           settlement.Status,
+		Currency:         money.Currency,
+		UsageUnit:        correlation.UsageUnit,
+		PromptTokens:     settlement.PromptTokens,
+		CompletionTokens: settlement.CompletionTokens,
+		CacheReadTokens:  settlement.CacheReadTokens,
+		CacheWriteTokens: settlement.CacheWriteTokens,
+		TotalTokens:      settlement.TotalTokens,
+		TotalTokensKnown: settlement.TotalTokensKnown,
+		SplitUnknown:     settlement.SplitUnknown,
+		UsageSource:      correlation.UsageSource,
+		IsEstimated:      correlation.IsEstimated,
+		BaseAmount:       money.BaseAmount,
+		TotalAmount:      money.TotalAmount,
+		GroupRatio:       money.GroupRatio,
+		// Legacy field kept in the B3 payload for wire compatibility; the supplier
+		// tax was removed from billing, so it is always zero.
+		TaxRatePercent:         0,
 		BillingBasis:           correlation.UsageUnit,
 		PricingVersion:         money.PriceVersion,
 		CostCalculationVersion: money.CostCalculationVersion,
@@ -1159,8 +1156,8 @@ func harnessCostEventIfChanged(settlement *model.HarnessSettlement, money harnes
 // harnessCostDiffers reports whether a settle changes anything the B3 feed shows.
 //
 // The base amount alone is not enough. The purchase price is base x procurement
-// group ratio x (1 + tax), so editing either ratio changes what the operator owes
-// while base_amount stays put; comparing only the base would hide that behind an
+// group ratio, so editing the ratio changes what the operator owes while
+// base_amount stays put; comparing only the base would hide that behind an
 // unchanged event. The price version is compared too, because a re-price against a
 // different configuration is a different fact even when the numbers coincide.
 func harnessCostDiffers(previous *model.HarnessLedgerEvent, settlement *model.HarnessSettlement, money harnessSettlementMoney, correlation harnessSettlementCorrelation) bool {
@@ -1168,7 +1165,6 @@ func harnessCostDiffers(previous *model.HarnessLedgerEvent, settlement *model.Ha
 		previous.BaseAmount != money.BaseAmount ||
 		previous.TotalAmount != money.TotalAmount ||
 		previous.GroupRatio != money.GroupRatio ||
-		previous.TaxRatePercent != money.TaxRatePercent ||
 		previous.Currency != money.Currency ||
 		previous.PricingVersion != money.PriceVersion ||
 		previous.CostCalculationVersion != money.CostCalculationVersion ||
@@ -1299,9 +1295,9 @@ func harnessUsageEventTypeForStatus(status string, hasPrevious bool) string {
 // recent event of this request's cost stream, or nil on the first write.
 //
 // "The amount" means every figure the platform reconciles against, not just the
-// pre-group base. Editing the procurement group ratio or the supplier tax rate
-// moves total_amount while base_amount stays put, and calling that a status_change
-// would report an unchanged cost for a request whose cost actually changed.
+// pre-group base. Editing the procurement group ratio moves total_amount while
+// base_amount stays put, and calling that a status_change would report an
+// unchanged cost for a request whose cost actually changed.
 func harnessCostEventTypeForStatus(status string, previous *model.HarnessLedgerEvent, money harnessSettlementMoney) string {
 	if previous == nil {
 		// The first event of a request is never a correction: there is nothing it
@@ -1319,12 +1315,11 @@ func harnessCostEventTypeForStatus(status string, previous *model.HarnessLedgerE
 
 // harnessCostAmountChanged reports whether the money a cost event states has moved
 // from the previous version. Every field that reaches B3's billing block counts,
-// so a re-price that only touches the ratio or the tax is still a correction.
+// so a re-price that only touches the ratio is still a correction.
 func harnessCostAmountChanged(previous *model.HarnessLedgerEvent, money harnessSettlementMoney) bool {
 	return previous.BaseAmount != money.BaseAmount ||
 		previous.TotalAmount != money.TotalAmount ||
 		previous.GroupRatio != money.GroupRatio ||
-		previous.TaxRatePercent != money.TaxRatePercent ||
 		previous.Currency != money.Currency
 }
 
@@ -1467,10 +1462,10 @@ func recordTaskHarnessSettlement(task *model.Task, status string, quota int, usa
 // harnessSettlementMoneyForTask derives the ledger amounts of an async task.
 //
 // A task submitted with a frozen procurement context settles against that
-// context only, so editing a procurement group ratio or a channel tax rate while
-// the task runs cannot rewrite its cost. A task without one (submitted before
-// the context existed, Version == 0) keeps the previous behaviour of reading the
-// live configuration, which is the only safe reading of its zero values.
+// context only, so editing a procurement group ratio while the task runs cannot
+// rewrite its cost. A task without one (submitted before the context existed,
+// Version == 0) keeps the previous behaviour of reading the live configuration,
+// which is the only safe reading of its zero values.
 //
 // A refund does NOT zero the purchase. The gateway only knows the customer was
 // reimbursed; whether the supplier still bills for work already performed is a

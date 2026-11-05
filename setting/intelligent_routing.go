@@ -16,11 +16,10 @@ const (
 	IntelligentRoutingGlobalGroupID   = "global"
 	IntelligentRoutingGlobalGroupName = "Global priority"
 
-	IntelligentRoutingGroupHeader          = "X-Route-Group"
-	IntelligentRoutingChannelIDHeader      = "X-Route-Channel-ID"
-	IntelligentRoutingGroupRatioHeader     = "X-Route-Group-Ratio"
-	IntelligentRoutingPricingGroupHeader   = "X-Route-Pricing-Group-ID"
-	IntelligentRoutingTaxRatePercentHeader = "X-Route-Tax-Rate-Percent"
+	IntelligentRoutingGroupHeader        = "X-Route-Group"
+	IntelligentRoutingChannelIDHeader    = "X-Route-Channel-ID"
+	IntelligentRoutingGroupRatioHeader   = "X-Route-Group-Ratio"
+	IntelligentRoutingPricingGroupHeader = "X-Route-Pricing-Group-ID"
 )
 
 type IntelligentRoutingGroup struct {

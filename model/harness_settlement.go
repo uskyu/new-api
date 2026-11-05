@@ -30,16 +30,19 @@ var ErrHarnessSettlementInvalid = errors.New("invalid harness settlement")
 // an async task reaches its final billing state. Money is stored as a decimal
 // string so reconciliation never loses precision to float rounding.
 type HarnessSettlement struct {
-	Id               int     `json:"id" gorm:"primaryKey;autoIncrement"`
-	RequestId        string  `json:"request_id" gorm:"type:varchar(64);uniqueIndex:idx_harness_settlement_request_id;default:''"`
-	TaskId           string  `json:"task_id" gorm:"type:varchar(191);index:idx_harness_settlement_task_id;default:''"`
-	TokenId          int     `json:"token_id" gorm:"index:idx_harness_settlement_token_id;default:0"`
-	UserId           int     `json:"user_id" gorm:"index;default:0"`
-	Status           string  `json:"status" gorm:"type:varchar(20);index;default:'pending'"`
-	ModelName        string  `json:"model_name" gorm:"type:varchar(191);default:''"`
-	ChannelId        int     `json:"channel_id" gorm:"default:0"`
-	PricingGroup     string  `json:"pricing_group" gorm:"type:varchar(64);default:''"`
-	GroupRatio       float64 `json:"group_ratio" gorm:"default:0"`
+	Id           int     `json:"id" gorm:"primaryKey;autoIncrement"`
+	RequestId    string  `json:"request_id" gorm:"type:varchar(64);uniqueIndex:idx_harness_settlement_request_id;default:''"`
+	TaskId       string  `json:"task_id" gorm:"type:varchar(191);index:idx_harness_settlement_task_id;default:''"`
+	TokenId      int     `json:"token_id" gorm:"index:idx_harness_settlement_token_id;default:0"`
+	UserId       int     `json:"user_id" gorm:"index;default:0"`
+	Status       string  `json:"status" gorm:"type:varchar(20);index;default:'pending'"`
+	ModelName    string  `json:"model_name" gorm:"type:varchar(191);default:''"`
+	ChannelId    int     `json:"channel_id" gorm:"default:0"`
+	PricingGroup string  `json:"pricing_group" gorm:"type:varchar(64);default:''"`
+	GroupRatio   float64 `json:"group_ratio" gorm:"default:0"`
+	// TaxRatePercent is legacy: the supplier tax was removed from procurement
+	// billing. The column and its JSON field are kept for wire compatibility with
+	// existing consumers, and new rows always write zero.
 	TaxRatePercent   float64 `json:"tax_rate_percent" gorm:"default:0"`
 	PromptTokens     int     `json:"prompt_tokens" gorm:"default:0"`
 	CompletionTokens int     `json:"completion_tokens" gorm:"default:0"`

@@ -27,9 +27,9 @@ func TestHarnessSettlementCurrencyIsAlwaysUsd(t *testing.T) {
 
 // TestHarnessSettlementMoneyAppliesGroupRatioOnly documents the amount formula
 // the ledger guarantees: base is quota divided by QuotaPerUnit, and the only
-// multiplier folded into the total is the procurement group ratio. The supplier
-// tax is reported separately and never charged, and no display-currency rate is
-// applied, so total == base when no pricing group resolves.
+// multiplier folded into the total is the procurement group ratio. No supplier
+// tax and no display-currency rate is applied, so total == base when no pricing
+// group resolves.
 //
 // This asserts the arithmetic invariants on the numbers the function returns
 // rather than on channel/routing fixtures, because the pricing-group lookup is
@@ -53,7 +53,6 @@ func TestHarnessSettlementMoneyAppliesGroupRatioOnly(t *testing.T) {
 	assert.True(t, total.Equal(base),
 		"without a procurement group the total must equal the base with no tax or conversion, got %s", money.TotalAmount)
 	assert.Equal(t, 0.0, money.GroupRatio)
-	assert.Equal(t, 0.0, money.TaxRatePercent)
 }
 
 // TestHarnessSettlementMoneyRejectsNegativeQuota keeps the defensive branch: a
@@ -78,12 +77,13 @@ func TestHarnessProcurementBasisSurvivesEveryCustomerGroupRatio(t *testing.T) {
 	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
 	common.QuotaPerUnit = 500_000
 
-	channelId := seedHarnessLedgerChannel(t, "economy", "invariant-group", 0.8, 6.5)
+	channelId := seedHarnessLedgerChannel(t, "economy", "invariant-group", 0.8)
 	preGroup := decimal.NewFromInt(1_000_000)
 
-	// Expected procurement cost for this one usage, independent of the caller.
+	// Expected procurement cost for this one usage, independent of the caller:
+	// base 2 times the 0.8 group ratio.
 	wantBase := "2"
-	wantTotal := "1.704"
+	wantTotal := "1.6"
 
 	for _, ratio := range []float64{1, 2, 0.9, 0.1, 0} {
 		money := harnessSettlementMoneyForQuota(hosttypes.NewProcurementBasis(preGroup, ratio), 0, channelId, "economy")
@@ -98,8 +98,8 @@ func TestHarnessProcurementBasisSurvivesEveryCustomerGroupRatio(t *testing.T) {
 }
 
 // TestHarnessProcurementBasisKeepsProcurementInputsIndependent proves the fix
-// stripped only the customer multiplier. The procurement group ratio, the
-// channel tax rate and the pre-group amount must each still drive the result.
+// stripped only the customer multiplier. The procurement group ratio and the
+// pre-group amount must each still drive the result.
 func TestHarnessProcurementBasisKeepsProcurementInputsIndependent(t *testing.T) {
 	originalQuotaPerUnit := common.QuotaPerUnit
 	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
@@ -113,13 +113,13 @@ func TestHarnessProcurementBasisKeepsProcurementInputsIndependent(t *testing.T) 
 		hosttypes.NewProcurementBasis(decimal.NewFromInt(2_000_000), 1), 0, 0, "no-group-model")
 	assert.Equal(t, "4", doubled.BaseAmount, "the pre-group amount must drive the base")
 
-	// The procurement ratio and tax apply on their own, with no customer ratio.
-	discounted := seedHarnessLedgerChannel(t, "economy", "procurement-only-group", 0.5, 10)
+	// The procurement ratio applies on its own, with no customer ratio and no
+	// supplier tax.
+	discounted := seedHarnessLedgerChannel(t, "economy", "procurement-only-group", 0.5)
 	money := harnessSettlementMoneyForQuota(
 		hosttypes.NewProcurementBasis(preGroup, 1), 0, discounted, "economy")
 	assert.Equal(t, "2", money.BaseAmount)
-	assert.Equal(t, "1.1", money.TotalAmount,
-		"0.5 procurement ratio with 10%% tax must still produce 1.1")
+	assert.Equal(t, "1", money.TotalAmount,
+		"0.5 procurement ratio with no tax must produce 1")
 	assert.Equal(t, 0.5, money.GroupRatio)
-	assert.Equal(t, 10.0, money.TaxRatePercent)
 }

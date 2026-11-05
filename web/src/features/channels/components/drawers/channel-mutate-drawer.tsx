@@ -288,7 +288,6 @@ const SENSITIVE_FORM_FIELDS = [
   'param_override',
   'header_override',
   'settings',
-  'supplier_tax_rate_percent',
   'setting',
   'advanced_custom',
   'is_enterprise_account',
@@ -3534,36 +3533,6 @@ export function ChannelMutateDrawer({
                         placeholder={t(FIELD_PLACEHOLDERS.GROUP)}
                       />
                     )}
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name='supplier_tax_rate_percent'
-              render={({ field }) => (
-                <FormItem className='mt-4 space-y-3'>
-                  <div className='space-y-1'>
-                    <FormLabel>{t('Supplier tax rate (%)')}</FormLabel>
-                    <FormDescription>
-                      {t(
-                        'Procurement tax rate of this channel, forwarded to Harness in the routed response headers. New API does not charge it.'
-                      )}
-                    </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Input
-                      type='number'
-                      min={0}
-                      max={100}
-                      step={0.01}
-                      placeholder='0'
-                      disabled={sensitiveLocked}
-                      value={field.value ?? 0}
-                      onChange={(e) => field.onChange(Number(e.target.value))}
-                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

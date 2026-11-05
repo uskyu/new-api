@@ -14,12 +14,14 @@ const HarnessCatalogOptionKey = "HarnessCatalog"
 //
 // A pool carries exactly one kind, because the platform uses it to choose the
 // calling convention: text pools serve synchronous chat/completions, video pools
-// serve asynchronous tasks. Billing only means something for video, where the
-// same kind of model is metered either per generated clip or per second of
-// output; a text pool leaves it empty.
+// serve asynchronous tasks, and audio pools are reserved for speech/TTS, which
+// the platform does not call yet. Billing only means something for video, where
+// the same kind of model is metered either per generated clip or per second of
+// output; text and audio pools carry no billing label.
 const (
 	HarnessCatalogKindText  = "text"
 	HarnessCatalogKindVideo = "video"
+	HarnessCatalogKindAudio = "audio"
 
 	HarnessCatalogBillingPerCall   = "per_call"
 	HarnessCatalogBillingPerSecond = "per_second"
@@ -67,17 +69,19 @@ type HarnessCatalogConfig struct {
 
 // defaultHarnessCatalogDefaultTier is the pool a Harness call falls back to when
 // the operator has not chosen one.
-const defaultHarnessCatalogDefaultTier = "economy"
+const defaultHarnessCatalogDefaultTier = "chat"
 
-// defaultHarnessCatalogTiers advertises the four pools: two text pools and the
-// two video billing modes. The video pools carry no channels yet, and are listed
-// anyway so the platform can integrate against the final shape.
+// defaultHarnessCatalogTiers advertises the four pools the platform integrates
+// against: the general chat pool, the single video pool holding both token- and
+// second-billed models, the reserved audio pool, and the plan pool, which is a
+// video pool billed per call. The video and audio pools carry no channels yet,
+// and are listed anyway so the platform can integrate against the final shape.
 func defaultHarnessCatalogTiers() []HarnessCatalogTier {
 	return []HarnessCatalogTier{
-		{ID: "economy", DisplayName: "经济档", Kind: HarnessCatalogKindText},
-		{ID: "enterprise", DisplayName: "企业档", Kind: HarnessCatalogKindText},
-		{ID: "video-per-call", DisplayName: "视频按次", Kind: HarnessCatalogKindVideo, Billing: HarnessCatalogBillingPerCall},
-		{ID: "video-per-second", DisplayName: "视频按秒", Kind: HarnessCatalogKindVideo, Billing: HarnessCatalogBillingPerSecond},
+		{ID: "chat", DisplayName: "通用对话", Kind: HarnessCatalogKindText},
+		{ID: "video", DisplayName: "视频", Kind: HarnessCatalogKindVideo},
+		{ID: "audio", DisplayName: "语音", Kind: HarnessCatalogKindAudio},
+		{ID: "plan", DisplayName: "畅用计划", Kind: HarnessCatalogKindVideo, Billing: HarnessCatalogBillingPerCall},
 	}
 }
 
@@ -90,23 +94,27 @@ func NormalizeHarnessCatalogKind(value string) (string, bool) {
 		return HarnessCatalogKindText, true
 	case HarnessCatalogKindVideo:
 		return HarnessCatalogKindVideo, true
+	case HarnessCatalogKindAudio:
+		return HarnessCatalogKindAudio, true
 	default:
 		return "", false
 	}
 }
 
 // NormalizeHarnessCatalogBilling returns the canonical billing mode for a pool
-// label, and reports whether the pair is coherent: only a video pool may declare
-// one, and a video pool must declare exactly one so the platform knows how the
-// model is metered.
+// label, and reports whether the pair is coherent. Text and audio pools declare
+// none: neither is metered per clip or per second. A video pool may leave the
+// label empty, because the single video pool holds both token- and second-billed
+// models and therefore has no pool-level billing; a video pool that does label
+// itself, such as the plan pool, must name a mode the platform understands.
 func NormalizeHarnessCatalogBilling(kind, billing string) (string, bool) {
 	normalized := strings.ToLower(strings.TrimSpace(billing))
 	switch kind {
-	case HarnessCatalogKindText:
+	case HarnessCatalogKindText, HarnessCatalogKindAudio:
 		return "", normalized == ""
 	case HarnessCatalogKindVideo:
 		switch normalized {
-		case HarnessCatalogBillingPerCall, HarnessCatalogBillingPerSecond:
+		case "", HarnessCatalogBillingPerCall, HarnessCatalogBillingPerSecond:
 			return normalized, true
 		default:
 			return "", false

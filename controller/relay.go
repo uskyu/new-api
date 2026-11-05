@@ -322,7 +322,6 @@ func setIntelligentRoutingResponseHeaders(c *gin.Context, channel *model.Channel
 		setting.IntelligentRoutingChannelIDHeader,
 		setting.IntelligentRoutingGroupRatioHeader,
 		setting.IntelligentRoutingPricingGroupHeader,
-		setting.IntelligentRoutingTaxRatePercentHeader,
 	} {
 		c.Writer.Header().Del(name)
 	}
@@ -336,12 +335,7 @@ func setIntelligentRoutingResponseHeaders(c *gin.Context, channel *model.Channel
 	if !valid {
 		return types.NewError(errors.New("selected channel has no opted-in pricing group"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
-	// First channel selection can be a partial stub: always read selected channel settings.
-	actual, err := model.CacheGetChannel(channel.Id)
-	if err != nil {
-		return types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-	}
-	middleware.SetIntelligentRoutingResponseHeaders(c, channel.Id, group, ratio_setting.GetGroupRatio(group), actual.GetOtherSettings().SupplierTaxRatePercent)
+	middleware.SetIntelligentRoutingResponseHeaders(c, channel.Id, group, ratio_setting.GetGroupRatio(group))
 	return nil
 }
 
@@ -521,12 +515,11 @@ func newTaskProcurementContext(relayInfo *relaycommon.RelayInfo, result *relay.T
 	if relayInfo == nil {
 		return nil
 	}
-	pricingGroup, priceVersion, groupRatio, taxRatePercent := service.ResolveTaskProcurementPricing(relayInfo.ChannelId, relayInfo.OriginModelName)
+	pricingGroup, priceVersion, groupRatio := service.ResolveTaskProcurementPricing(relayInfo.ChannelId, relayInfo.OriginModelName)
 	frozen := &model.TaskProcurementContext{
 		Version:               1,
 		PricingGroup:          pricingGroup,
 		ProcurementGroupRatio: groupRatio,
-		TaxRatePercent:        taxRatePercent,
 		QuotaPerUnit:          common.QuotaPerUnit,
 		PriceVersion:          priceVersion,
 		CustomerGroupRatio:    relayInfo.PriceData.GroupRatioInfo.GroupRatio,
@@ -714,8 +707,8 @@ func executeTaskSubmissionWith(
 	task.PrivateData.TokenId = relayInfo.TokenId
 	task.PrivateData.NodeName = common.NodeName
 	// The procurement pricing context is frozen before the task row is written,
-	// so a ratio or tax-rate edit made while the task runs cannot retroactively
-	// rewrite the cost this submission was accepted at.
+	// so a ratio edit made while the task runs cannot retroactively rewrite the
+	// cost this submission was accepted at.
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
 		ModelPrice:      relayInfo.PriceData.ModelPrice,
 		GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,

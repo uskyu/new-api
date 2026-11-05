@@ -22,7 +22,7 @@ func TestHarnessBaseAmountIgnoresCustomerGroupRatio(t *testing.T) {
 	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
 	common.QuotaPerUnit = 500_000
 
-	channelId := seedHarnessLedgerChannel(t, "economy", "procurement-probe-group", 1.0, 0)
+	channelId := seedHarnessLedgerChannel(t, "economy", "procurement-probe-group", 1.0)
 
 	// One usage, two customer group ratios. The billing path charges
 	// pre-group * ratio, and reports the same pre-group amount to the ledger.
@@ -47,7 +47,7 @@ func TestHarnessBaseAmountStillAppliesProcurementRatio(t *testing.T) {
 	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
 	common.QuotaPerUnit = 500_000
 
-	channelId := seedHarnessLedgerChannel(t, "economy", "procurement-compose-group", 0.8, 0)
+	channelId := seedHarnessLedgerChannel(t, "economy", "procurement-compose-group", 0.8)
 
 	// Customer ratio 2 on the charge, but the ledger is told the pre-group amount.
 	preGroup := decimal.NewFromInt(1_000_000)
@@ -76,7 +76,7 @@ func TestHarnessBaseAmountFallsBackWithoutBasis(t *testing.T) {
 
 	assert.Equal(t, "2", money.BaseAmount,
 		"the fallback still prices the request instead of booking zero")
-	assert.Equal(t, harnessCostCalculationFallback, money.CostCalculationVersion,
+	assert.Equal(t, harnessCostCalculationFallbackNoTax, money.CostCalculationVersion,
 		"a missing basis must be visible in the row")
 }
 
@@ -90,7 +90,7 @@ func TestHarnessBaseAmountRecordsPreGroupVersion(t *testing.T) {
 	basis := hosttypes.NewProcurementBasis(decimal.NewFromInt(1_000_000), 1)
 	money := harnessSettlementMoneyForQuota(basis, 1_000_000, 0, "model-without-pricing-group")
 
-	assert.Equal(t, harnessCostCalculationPreGroup, money.CostCalculationVersion,
-		"a corrected row must be distinguishable from a legacy one")
+	assert.Equal(t, harnessCostCalculationPreGroupNoTax, money.CostCalculationVersion,
+		"a current row must be distinguishable from a legacy one")
 	assert.NotEqual(t, harnessCostCalculationLegacy, money.CostCalculationVersion)
 }

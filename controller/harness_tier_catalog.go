@@ -131,8 +131,8 @@ func harnessTierCatalogCapabilities(endpointTypes []constant.EndpointType) []str
 // model ids it can route.
 //
 // Every pool is advertised, including one with no channels yet: the platform has
-// to see the whole offering (text pools plus both video billing modes) before the
-// channels exist, otherwise it cannot build its model picker against the final
+// to see the whole offering (chat, video, audio and the 畅用计划 plan pool) before
+// the channels exist, otherwise it cannot build its model picker against the final
 // shape. A pool's model ids come from its channels, never from a stored copy, so
 // the platform's model list follows channel changes automatically and the catalog
 // can never advertise a model the pool cannot route.

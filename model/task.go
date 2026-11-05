@@ -177,8 +177,8 @@ type TaskBillingContext struct {
 	TieredSnapshot  *billingexpr.BillingSnapshot `json:"tiered_snapshot,omitempty"`
 	// Procurement freezes the procurement-side pricing inputs so a task that
 	// settles hours after submission books the price that applied when it was
-	// submitted. Without it, editing a procurement group ratio or a channel tax
-	// rate during the task's lifetime would retroactively rewrite its cost.
+	// submitted. Without it, editing a procurement group ratio during the task's
+	// lifetime would retroactively rewrite its cost.
 	Procurement *TaskProcurementContext `json:"procurement,omitempty"`
 }
 
@@ -199,9 +199,12 @@ type TaskProcurementContext struct {
 	// The procurement parameters, frozen so settlement never re-reads them.
 	PricingGroup          string  `json:"pricing_group,omitempty"`
 	ProcurementGroupRatio float64 `json:"procurement_group_ratio,omitempty"`
-	TaxRatePercent        float64 `json:"tax_rate_percent,omitempty"`
-	QuotaPerUnit          float64 `json:"quota_per_unit,omitempty"`
-	PriceVersion          string  `json:"price_version,omitempty"`
+	// TaxRatePercent is a legacy frozen field kept for wire compatibility with
+	// tasks written before the supplier tax was removed from billing. It is
+	// always zero for new tasks and never multiplies a procurement amount.
+	TaxRatePercent float64 `json:"tax_rate_percent,omitempty"`
+	QuotaPerUnit   float64 `json:"quota_per_unit,omitempty"`
+	PriceVersion   string  `json:"price_version,omitempty"`
 
 	// CustomerGroupRatio is the caller's group ratio, recorded for reconciliation
 	// only. It never multiplies a procurement amount.

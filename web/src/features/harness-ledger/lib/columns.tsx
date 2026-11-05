@@ -122,8 +122,7 @@ export function useLedgerColumns(): ColumnDef<LedgerRow, unknown>[] {
               {billing.total_amount} {billing.currency}
             </span>
             <span className='text-muted-foreground text-[11px] tabular-nums'>
-              {billing.base_amount} x {billing.group_ratio} +{' '}
-              {billing.tax_rate_percent}%
+              {billing.base_amount} x {billing.group_ratio}
             </span>
           </div>
         )

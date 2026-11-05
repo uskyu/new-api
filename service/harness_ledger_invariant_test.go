@@ -26,7 +26,7 @@ import (
 // seedHarnessLedgerChannel creates a channel whose ability exposes the pricing
 // group for the model and registers that group as a procurement group with the
 // given ratio, which is what harnessSettlementPricing resolves through.
-func seedHarnessLedgerChannel(t *testing.T, modelName, group string, groupRatio, supplierTaxPercent float64) int {
+func seedHarnessLedgerChannel(t *testing.T, modelName, group string, groupRatio float64) int {
 	t.Helper()
 
 	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Ability{}))
@@ -51,12 +51,11 @@ func seedHarnessLedgerChannel(t *testing.T, modelName, group string, groupRatio,
 	})
 
 	channel := &model.Channel{
-		Name:          "ledger-tax-channel",
-		Type:          1,
-		Status:        common.ChannelStatusEnabled,
-		Models:        modelName,
-		Group:         group,
-		OtherSettings: `{"supplier_tax_rate_percent":` + formatTestFloat(supplierTaxPercent) + `}`,
+		Name:   "ledger-channel",
+		Type:   1,
+		Status: common.ChannelStatusEnabled,
+		Models: modelName,
+		Group:  group,
 	}
 	require.NoError(t, model.DB.Create(channel).Error)
 	require.NoError(t, model.DB.Create(&model.Ability{
@@ -77,16 +76,6 @@ func seedHarnessLedgerChannel(t *testing.T, modelName, group string, groupRatio,
 	routing.PricingGroupOrder = append(append([]string{}, originalRouting.PricingGroupOrder...), group)
 	require.NoError(t, setting.UpdateIntelligentRoutingConfig(routing))
 	return channel.Id
-}
-
-// formatTestFloat renders a float for the JSON settings literal without an
-// exponent or a trailing zero, which keeps the fixture readable.
-func formatTestFloat(value float64) string {
-	encoded, err := common.Marshal(value)
-	if err != nil {
-		return "0"
-	}
-	return string(encoded)
 }
 
 // normalizedDecimal trims insignificant trailing zeros so a fixed-precision
@@ -220,9 +209,9 @@ func TestLedgerCorrectionChainsStayInTheirOwnStream(t *testing.T) {
 }
 
 // TestLedgerTaskUsesFrozenProcurementPricing pins historical stability: an async
-// task settles hours after submission, so a procurement ratio or tax-rate edit
-// made in between must not rewrite the cost that was accepted at submit time.
-// The frozen context is the only source the settlement path reads.
+// task settles hours after submission, so a procurement ratio edit made in
+// between must not rewrite the cost that was accepted at submit time. The frozen
+// context is the only source the settlement path reads.
 func TestLedgerTaskUsesFrozenProcurementPricing(t *testing.T) {
 	ledgerTestDB(t)
 
@@ -230,9 +219,9 @@ func TestLedgerTaskUsesFrozenProcurementPricing(t *testing.T) {
 	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
 	common.QuotaPerUnit = 500_000
 
-	channelId := seedHarnessLedgerChannel(t, "economy", "frozen-task-group", 0.8, 10)
+	channelId := seedHarnessLedgerChannel(t, "economy", "frozen-task-group", 0.8)
 
-	// The task was accepted when the procurement ratio was 0.8 with 10% tax.
+	// The task was accepted when the procurement ratio was 0.8.
 	task := &model.Task{
 		TaskID:    "task-frozen-pricing",
 		ChannelId: channelId,
@@ -245,7 +234,6 @@ func TestLedgerTaskUsesFrozenProcurementPricing(t *testing.T) {
 					PreGroupQuota:         "1000000",
 					PricingGroup:          "frozen-task-group",
 					ProcurementGroupRatio: 0.8,
-					TaxRatePercent:        10,
 					QuotaPerUnit:          500_000,
 				},
 			},
@@ -262,10 +250,9 @@ func TestLedgerTaskUsesFrozenProcurementPricing(t *testing.T) {
 	money := harnessSettlementMoneyForTask(task, model.HarnessSettlementStatusSettled, 1_000_000)
 
 	assert.Equal(t, "2", money.BaseAmount)
-	assert.Equal(t, "1.76", money.TotalAmount,
-		"the frozen 0.8 ratio and 10%% tax must win over the live 0.01 ratio")
+	assert.Equal(t, "1.6", money.TotalAmount,
+		"the frozen 0.8 ratio must win over the live 0.01 ratio")
 	assert.Equal(t, 0.8, money.GroupRatio, "the frozen ratio is reported, not the live one")
-	assert.Equal(t, 10.0, money.TaxRatePercent)
 }
 
 // TestLedgerTaskWithoutFrozenContextKeepsLegacyPricing covers the compatibility
@@ -279,7 +266,7 @@ func TestLedgerTaskWithoutFrozenContextKeepsLegacyPricing(t *testing.T) {
 	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
 	common.QuotaPerUnit = 500_000
 
-	channelId := seedHarnessLedgerChannel(t, "economy", "legacy-task-group", 0.8, 0)
+	channelId := seedHarnessLedgerChannel(t, "economy", "legacy-task-group", 0.8)
 
 	task := &model.Task{
 		TaskID:    "task-legacy-pricing",
@@ -294,7 +281,7 @@ func TestLedgerTaskWithoutFrozenContextKeepsLegacyPricing(t *testing.T) {
 	assert.Equal(t, "2", money.BaseAmount)
 	assert.Equal(t, 0.8, money.GroupRatio,
 		"a task without a frozen context still resolves the live procurement group")
-	assert.Equal(t, harnessCostCalculationFallback, money.CostCalculationVersion,
+	assert.Equal(t, harnessCostCalculationFallbackNoTax, money.CostCalculationVersion,
 		"and is tagged as a fallback rather than as corrected")
 }
 
@@ -310,7 +297,7 @@ func TestLedgerTaskRefundKeepsFrozenPurchase(t *testing.T) {
 	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
 	common.QuotaPerUnit = 500_000
 
-	channelId := seedHarnessLedgerChannel(t, "economy", "refund-task-group", 0.8, 10)
+	channelId := seedHarnessLedgerChannel(t, "economy", "refund-task-group", 0.8)
 
 	task := &model.Task{
 		TaskID:    "task-refunded",
@@ -323,7 +310,6 @@ func TestLedgerTaskRefundKeepsFrozenPurchase(t *testing.T) {
 					PreGroupQuota:         "1000000",
 					PricingGroup:          "refund-task-group",
 					ProcurementGroupRatio: 0.8,
-					TaxRatePercent:        10,
 					QuotaPerUnit:          500_000,
 				},
 			},
@@ -333,10 +319,10 @@ func TestLedgerTaskRefundKeepsFrozenPurchase(t *testing.T) {
 	money := harnessSettlementMoneyForTask(task, model.HarnessSettlementStatusRefunded, 0)
 
 	// The purchase the task already incurred: 1,000,000 / 500,000 = 2 base,
-	// times 0.8 procurement ratio, times 1.10 tax.
+	// times 0.8 procurement ratio.
 	assert.Equal(t, "2", money.BaseAmount,
 		"a customer refund must not erase the purchase the task incurred")
-	assert.Equal(t, "1.76", money.TotalAmount)
+	assert.Equal(t, "1.6", money.TotalAmount)
 }
 
 // TestLedgerTaskRefundWithoutFrozenAmountStaysZero covers the one case where a
@@ -349,7 +335,7 @@ func TestLedgerTaskRefundWithoutFrozenAmountStaysZero(t *testing.T) {
 	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
 	common.QuotaPerUnit = 500_000
 
-	channelId := seedHarnessLedgerChannel(t, "economy", "refund-unknown-group", 0.8, 10)
+	channelId := seedHarnessLedgerChannel(t, "economy", "refund-unknown-group", 0.8)
 
 	task := &model.Task{
 		TaskID:    "task-refunded-unknown",
@@ -361,7 +347,6 @@ func TestLedgerTaskRefundWithoutFrozenAmountStaysZero(t *testing.T) {
 					Version:               1,
 					PricingGroup:          "refund-unknown-group",
 					ProcurementGroupRatio: 0.8,
-					TaxRatePercent:        10,
 					QuotaPerUnit:          500_000,
 				},
 			},
@@ -945,7 +930,7 @@ func TestLedgerTaskFrozenZeroModelRatioIsReal(t *testing.T) {
 	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
 	common.QuotaPerUnit = 500_000
 
-	channelId := seedHarnessLedgerChannel(t, "economy", "zero-ratio-group", 0.8, 0)
+	channelId := seedHarnessLedgerChannel(t, "economy", "zero-ratio-group", 0.8)
 
 	task := &model.Task{
 		TaskID:    "task-zero-ratio",
@@ -1036,7 +1021,7 @@ func TestLedgerWarnsWhenProcurementBasisIsMissing(t *testing.T) {
 
 			warned := strings.Contains(captured.String(), warningFragment)
 			assert.Equal(t, tc.wantWarn, warned, tc.reasoning)
-			assert.Equal(t, harnessCostCalculationFallback, money.CostCalculationVersion,
+			assert.Equal(t, harnessCostCalculationFallbackNoTax, money.CostCalculationVersion,
 				"every fallback row is tagged as one, warned or not")
 			assert.Equal(t, "2", money.BaseAmount,
 				"the fallback still prices the request rather than booking zero")
@@ -1044,10 +1029,11 @@ func TestLedgerWarnsWhenProcurementBasisIsMissing(t *testing.T) {
 	}
 }
 
-// TestLedgerTotalAmountIncludesSupplierTax pins the cost formula against the
-// contract sample: base 0.011500, group ratio 0.8 and 6.5% tax must yield 0.0098,
-// not the untaxed 0.0092.
-func TestLedgerTotalAmountIncludesSupplierTax(t *testing.T) {
+// TestLedgerTotalAmountAppliesGroupRatioWithoutTax pins the cost formula: base
+// 0.011500 times the 0.8 procurement group ratio must yield 0.0092. The supplier
+// tax no longer multiplies the total, so 0.009798 (the old tax-inclusive figure)
+// must not come back.
+func TestLedgerTotalAmountAppliesGroupRatioWithoutTax(t *testing.T) {
 	ledgerTestDB(t)
 
 	originalQuotaPerUnit := common.QuotaPerUnit
@@ -1055,15 +1041,14 @@ func TestLedgerTotalAmountIncludesSupplierTax(t *testing.T) {
 	// quota 5750 / 500000 = 0.0115 base, matching the contract sample.
 	common.QuotaPerUnit = 500_000
 
-	channelId := seedHarnessLedgerChannel(t, "economy", "ledger-tax-group", 0.8, 6.5)
+	channelId := seedHarnessLedgerChannel(t, "economy", "ledger-no-tax-group", 0.8)
 
 	money := harnessSettlementMoneyForQuota(nil, 5750, channelId, "economy")
 
 	assert.Equal(t, "0.0115", normalizedDecimal(t, money.BaseAmount))
 	assert.Equal(t, 0.8, money.GroupRatio)
-	assert.Equal(t, 6.5, money.TaxRatePercent)
-	assert.Equal(t, "0.009798", normalizedDecimal(t, money.TotalAmount),
-		"total_amount must include the supplier tax, matching the contract sample")
+	assert.Equal(t, "0.0092", normalizedDecimal(t, money.TotalAmount),
+		"total_amount must be base times the group ratio, with no supplier tax")
 }
 
 // harnessLedgerStreamCount returns how many events one stream holds for a request.
@@ -1092,9 +1077,9 @@ func TestLedgerChangeDetectionIsPerStream(t *testing.T) {
 
 	correlation := harnessSettlementCorrelation{HarnessRequestId: "hrq_detect", UsageUnit: harnessUsageUnitToken, UsageSource: harnessUsageSourceUpstream}
 
-	// taxChannel applies a 10% supplier tax, so total_amount carries the tax but
-	// base_amount does not.
-	taxChannel := seedHarnessLedgerChannel(t, "economy", "detect-tax-group", 0.8, 10)
+	// ratioChannel prices the same base at a different procurement ratio, which is
+	// the only procurement multiplier left after the supplier tax was removed.
+	ratioChannel := seedHarnessLedgerChannel(t, "economy", "detect-ratio-group", 0.8)
 
 	settle := func(requestId string, settlement *model.HarnessSettlement, quota int, channelId int, corr harnessSettlementCorrelation) {
 		settlement.RequestId = requestId
@@ -1104,15 +1089,15 @@ func TestLedgerChangeDetectionIsPerStream(t *testing.T) {
 
 	t.Run("base unchanged but total changes", func(t *testing.T) {
 		const requestId = "gw-detect-total"
-		// The same quota prices the same base on both channels; only the supplier
-		// tax differs, so base_amount stays put while total_amount moves. That is
+		// The same quota prices the same base on both channels; only the procurement
+		// ratio differs, so base_amount stays put while total_amount moves. That is
 		// exactly the case a base-only comparison would silently swallow.
-		untaxedChannel := seedHarnessLedgerChannel(t, "economy", "detect-untaxed-group", 0.8, 0)
+		discountedChannel := seedHarnessLedgerChannel(t, "economy", "detect-discounted-group", 0.5)
 
 		settle(requestId, &model.HarnessSettlement{Status: model.HarnessSettlementStatusSettled},
-			1_000_000, untaxedChannel, correlation)
+			1_000_000, ratioChannel, correlation)
 		settle(requestId, &model.HarnessSettlement{Status: model.HarnessSettlementStatusSettled},
-			1_000_000, taxChannel, correlation)
+			1_000_000, discountedChannel, correlation)
 
 		costs := harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamCost)
 		require.Len(t, costs, 2, "a changed total_amount is a new cost fact")
@@ -1137,14 +1122,14 @@ func TestLedgerChangeDetectionIsPerStream(t *testing.T) {
 			Status:           model.HarnessSettlementStatusSettled,
 			PromptTokens:     10,
 			CompletionTokens: 5,
-		}, 1_000_000, taxChannel, correlation)
+		}, 1_000_000, ratioChannel, correlation)
 
 		// Same money, corrected token counts.
 		settle(requestId, &model.HarnessSettlement{
 			Status:           model.HarnessSettlementStatusSettled,
 			PromptTokens:     10,
 			CompletionTokens: 9,
-		}, 1_000_000, taxChannel, correlation)
+		}, 1_000_000, ratioChannel, correlation)
 
 		usages := harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamUsage)
 		require.Len(t, usages, 2, "a corrected token count is a new usage fact")
@@ -1164,14 +1149,14 @@ func TestLedgerChangeDetectionIsPerStream(t *testing.T) {
 			Status:           model.HarnessSettlementStatusSettled,
 			PromptTokens:     promptTokens,
 			CompletionTokens: completionTokens,
-		}, 1_000_000, taxChannel, correlation)
+		}, 1_000_000, ratioChannel, correlation)
 
 		// The same usage, but the purchase amount moves.
 		settle(requestId, &model.HarnessSettlement{
 			Status:           model.HarnessSettlementStatusSettled,
 			PromptTokens:     promptTokens,
 			CompletionTokens: completionTokens,
-		}, 2_000_000, taxChannel, correlation)
+		}, 2_000_000, ratioChannel, correlation)
 
 		costs := harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamCost)
 		require.Len(t, costs, 2, "a changed purchase amount is a new cost fact")
@@ -1188,7 +1173,7 @@ func TestLedgerChangeDetectionIsPerStream(t *testing.T) {
 				Status:           model.HarnessSettlementStatusSettled,
 				PromptTokens:     15,
 				CompletionTokens: 7,
-			}, 1_000_000, taxChannel, correlation)
+			}, 1_000_000, ratioChannel, correlation)
 		}
 
 		assert.Len(t, harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamUsage), 1,
@@ -1209,7 +1194,7 @@ func TestLedgerChangeDetectionIsPerStream(t *testing.T) {
 			Status:           model.HarnessSettlementStatusSettled,
 			PromptTokens:     20,
 			CompletionTokens: 8,
-		}, 1_000_000, taxChannel, correlation)
+		}, 1_000_000, ratioChannel, correlation)
 
 		// A refund that also reports the usage it finally measured.
 		settle(requestId, &model.HarnessSettlement{
@@ -1217,7 +1202,7 @@ func TestLedgerChangeDetectionIsPerStream(t *testing.T) {
 			PromptTokens:     20,
 			CompletionTokens: 8,
 			CacheReadTokens:  3,
-		}, 0, taxChannel, correlation)
+		}, 0, ratioChannel, correlation)
 
 		usages := harnessLedgerStreamCount(t, requestId, model.HarnessLedgerStreamUsage)
 		require.Len(t, usages, 2)

@@ -13,7 +13,6 @@ func TestShouldCopyUpstreamHeaderPreservesLocalIntelligentRoutingPricing(t *test
 		setting.IntelligentRoutingGroupHeader,
 		setting.IntelligentRoutingChannelIDHeader,
 		setting.IntelligentRoutingGroupRatioHeader,
-		setting.IntelligentRoutingTaxRatePercentHeader,
 	} {
 		assert.False(t, ShouldCopyUpstreamHeader(nil, name, []string{"upstream-value"}), "upstream must not override %s", name)
 	}

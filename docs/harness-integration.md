@@ -4,6 +4,19 @@
 >
 > 文档版本：对应 New API 构建 `harness-api-20261018-a25f1f5`；**2026-10-19 起 catalog 改为返回 `pricing` 价格对象**（详见第十章变更记录）。
 
+> **2026-11-05（V0.10）重要变更：供应商税率已取消。** 本文第三章 3.4「配置渠道税率」、
+> 第五章 `X-Route-Tax-Rate-Percent` 响应头、第六章含税点项的计价公式以及第八章 Q5，
+> 都描述的是旧行为，**不再代表当前实现**：
+>
+> - 采购成本口径改为 `total_amount = base_amount × group_ratio`，**不再有税额乘数**
+> - `X-Route-Tax-Rate-Percent` 不再随路由变化；B3 的 `tax_rate_percent` 恒为 `0`，
+>   属废弃（legacy）字段，仅为兼容保留，后续版本移除
+> - 资源池改为产品线 `chat`（默认，text）/ `video`（video，无池级计费）/
+>   `audio`（audio，占位）/ `plan`（video，`per_call`，畅用计划）；经济/企业档
+>   不存在，路由完全由网关决定，`X-Route-Group` 仅 `plan` 有业务含义
+>
+> 当前对外契约与验收状态以 `docs/harness-delivery/` 交付包（V0.10）为准。
+
 ---
 
 ## 一、环境信息

@@ -28,7 +28,7 @@ func TestSetIntelligentRoutingResponseHeadersReturnsFinalChannelPricingForStream
 	c.Set(common.RequestIdKey, "request-123")
 	common.SetContextKey(c, setting.IntelligentRoutingContextKey, "global")
 
-	SetIntelligentRoutingResponseHeaders(c, 42, "group-a", 0.8, 8)
+	SetIntelligentRoutingResponseHeaders(c, 42, "group-a", 0.8)
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.WriteHeaderNow()
 
@@ -36,7 +36,6 @@ func TestSetIntelligentRoutingResponseHeadersReturnsFinalChannelPricingForStream
 	assert.Equal(t, "42", recorder.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 	assert.Equal(t, "0.8", recorder.Header().Get(setting.IntelligentRoutingGroupRatioHeader))
 	assert.Equal(t, "group-a", recorder.Header().Get(setting.IntelligentRoutingPricingGroupHeader))
-	assert.Equal(t, "8", recorder.Header().Get(setting.IntelligentRoutingTaxRatePercentHeader))
 	assert.Equal(t, "request-123", recorder.Header().Get(common.RequestIdKey))
 	assert.Contains(t, recorder.Header().Get("Access-Control-Expose-Headers"), setting.IntelligentRoutingChannelIDHeader)
 	assert.Contains(t, recorder.Header().Get("Access-Control-Expose-Headers"), setting.IntelligentRoutingPricingGroupHeader)
@@ -46,19 +45,19 @@ func TestSetIntelligentRoutingResponseHeadersSkipsNonRoutedAndCommittedResponses
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	SetIntelligentRoutingResponseHeaders(c, 42, "group-a", 0.8, 5)
+	SetIntelligentRoutingResponseHeaders(c, 42, "group-a", 0.8)
 	assert.Empty(t, recorder.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 
 	common.SetContextKey(c, setting.IntelligentRoutingContextKey, "global")
-	SetIntelligentRoutingResponseHeaders(c, 42, "group-a", 0.8, 5)
+	SetIntelligentRoutingResponseHeaders(c, 42, "group-a", 0.8)
 	assert.Equal(t, "42", c.Writer.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 	ClearIntelligentRoutingResponseHeaders(c)
 	assert.Empty(t, c.Writer.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 	assert.Empty(t, c.Writer.Header().Get(setting.IntelligentRoutingGroupHeader))
 
-	SetIntelligentRoutingResponseHeaders(c, 42, "group-a", 0.8, 5)
+	SetIntelligentRoutingResponseHeaders(c, 42, "group-a", 0.8)
 	c.Writer.WriteHeaderNow()
-	SetIntelligentRoutingResponseHeaders(c, 42, "group-a", 0.8, 5)
+	SetIntelligentRoutingResponseHeaders(c, 42, "group-a", 0.8)
 	assert.Equal(t, "42", recorder.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 }
 
@@ -410,10 +409,10 @@ func publishHarnessPools(t *testing.T) {
 	t.Helper()
 	payload, err := common.Marshal(setting.HarnessCatalogConfig{
 		Tiers: []setting.HarnessCatalogTier{
-			{ID: "economy", DisplayName: "经济档", Kind: setting.HarnessCatalogKindText},
-			{ID: "enterprise", DisplayName: "企业档", Kind: setting.HarnessCatalogKindText},
+			{ID: "chat", DisplayName: "通用对话", Kind: setting.HarnessCatalogKindText},
+			{ID: "plan", DisplayName: "畅用计划", Kind: setting.HarnessCatalogKindVideo, Billing: setting.HarnessCatalogBillingPerCall},
 		},
-		DefaultTier:           "economy",
+		DefaultTier:           "chat",
 		HarnessCatalogVersion: 1,
 	})
 	require.NoError(t, err)
@@ -441,7 +440,7 @@ func publishHarnessPools(t *testing.T) {
 // model name passes through untouched.
 func TestApplyHarnessResourcePoolLeavesPlainClientsAlone(t *testing.T) {
 	publishHarnessPools(t)
-	c := harnessPoolContext(t, "deepseek-v4.1-flash", false, "enterprise")
+	c := harnessPoolContext(t, "deepseek-v4.1-flash", false, "plan")
 	request := &ModelRequest{Model: "deepseek-v4.1-flash"}
 
 	require.NoError(t, applyHarnessResourcePool(c, request))
@@ -457,12 +456,12 @@ func TestApplyHarnessResourcePoolLeavesPlainClientsAlone(t *testing.T) {
 // channel order.
 func TestApplyHarnessResourcePoolHonoursTheRoutingHeader(t *testing.T) {
 	publishHarnessPools(t)
-	c := harnessPoolContext(t, "deepseek-v4.1-flash", true, "enterprise")
+	c := harnessPoolContext(t, "deepseek-v4.1-flash", true, "plan")
 	request := &ModelRequest{Model: "deepseek-v4.1-flash"}
 
 	require.NoError(t, applyHarnessResourcePool(c, request))
 
-	assert.Equal(t, "enterprise", common.GetContextKeyString(c, setting.IntelligentRoutingContextKey))
+	assert.Equal(t, "plan", common.GetContextKeyString(c, setting.IntelligentRoutingContextKey))
 	assert.Equal(t, "deepseek-v4.1-flash", request.Model,
 		"the model id is dispatched exactly as the platform sent it")
 }
@@ -477,20 +476,20 @@ func TestDefaultHarnessResourcePoolAppliesConfiguredDefault(t *testing.T) {
 	require.NoError(t, applyHarnessResourcePool(c, request))
 	defaultHarnessResourcePool(c, request)
 
-	assert.Equal(t, "economy", common.GetContextKeyString(c, setting.IntelligentRoutingContextKey))
+	assert.Equal(t, "chat", common.GetContextKeyString(c, setting.IntelligentRoutingContextKey))
 	assert.Equal(t, "deepseek-v4.1-flash", request.Model)
 }
 
 // An explicit pool always wins over the default, so the two are not both applied.
 func TestDefaultHarnessResourcePoolNeverOverridesAnExplicitPool(t *testing.T) {
 	publishHarnessPools(t)
-	c := harnessPoolContext(t, "deepseek-v4.1-flash", true, "enterprise")
+	c := harnessPoolContext(t, "deepseek-v4.1-flash", true, "plan")
 	request := &ModelRequest{Model: "deepseek-v4.1-flash"}
 
 	require.NoError(t, applyHarnessResourcePool(c, request))
 	defaultHarnessResourcePool(c, request)
 
-	assert.Equal(t, "enterprise", common.GetContextKeyString(c, setting.IntelligentRoutingContextKey))
+	assert.Equal(t, "plan", common.GetContextKeyString(c, setting.IntelligentRoutingContextKey))
 }
 
 // A pool id the catalog does not advertise fails loudly instead of silently

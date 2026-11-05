@@ -44,8 +44,11 @@ type harnessSettlementUsage struct {
 }
 
 type harnessSettlementBilling struct {
-	BaseAmount     string  `json:"base_amount"`
-	GroupRatio     float64 `json:"group_ratio"`
+	BaseAmount string  `json:"base_amount"`
+	GroupRatio float64 `json:"group_ratio"`
+	// TaxRatePercent is legacy and always zero: the supplier tax was removed from
+	// procurement billing. The field stays in the JSON contract for wire
+	// compatibility with existing consumers.
 	TaxRatePercent float64 `json:"tax_rate_percent"`
 	TotalAmount    string  `json:"total_amount"`
 	Currency       string  `json:"currency"`

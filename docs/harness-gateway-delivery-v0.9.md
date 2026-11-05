@@ -1,9 +1,28 @@
 # Harness ⇄ New API 网关接口交付说明（V0.9）
 
+> **本文档已被 `docs/harness-delivery/` 交付包 V0.10（2026-11-05）取代。**
+> 本文作为 V0.9 历史快照保留，内容不再更新。以下三处与 V0.10 不一致，
+> 一律以 V0.10 交付包为准：
+>
+> 1. **资源池 id**：第 4.1 节的 `economy` / `enterprise` 已取消。V0.10 的池是
+>    产品线 `chat`（默认，text）/ `video`（video，无池级计费）/ `audio`（audio，
+>    占位）/ `plan`（video，`per_call`，畅用计划）。`video` / `audio` 渠道尚未
+>    接入，`models: []` 属预期，**不可调用**。
+> 2. **供应商税率**：已取消。V0.10 的金额口径是
+>    `total_amount = base_amount × group_ratio`，不含税额乘数；
+>    `tax_rate_percent` 仍出现在报文里但恒为 `0`，属废弃（legacy）字段，
+>    后续版本移除。
+> 3. **`X-Route-Group`**：已改为可选，且只有 `plan`（畅用计划）有业务含义；
+>    普通 chat/video/audio 调用不传该头，使用默认 `chat` 池。经济/企业档划分
+>    不存在，路由完全由网关决定。
+>
+> 本文中的 A3 样例（`economy`）、B3 样例的 `tax_rate_percent` 以及第七节的
+> 「税率/倍率导致 total 变化」表述均属 V0.9 事实，不再代表当前行为。
+
 本文档对应 `harness-api` 分支提交 `fd00dae`，说明 New API 网关侧对外开放的
 接口清单、鉴权配置、请求/响应契约和实测结论。
 
-> 字段级细节与最新验收记录以 `docs/harness-delivery/` 交付包为准（V0.9.1）；
+> 字段级细节与最新验收记录以 `docs/harness-delivery/` 交付包为准（V0.10）；
 > 本文档是其摘要版本。
 
 **本文档区分三类状态：**
@@ -371,3 +390,4 @@ A1/A2/A4/A9/A3 使用标准 `Bearer sk-...` 模型令牌。Harness JWT 会被网
 | 日期 | 版本 | 内容 |
 | --- | --- | --- |
 | 2026-10-25 | V0.9 | 初版交付说明，对应提交 `3a1afb154` |
+| 2026-11-05 | — | 顶部增加取代说明：V0.10 交付包（`docs/harness-delivery/`）取代本文；池 id、`X-Route-Group`、供应商税率三处差异以 V0.10 为准。正文保持 V0.9 历史原样 |

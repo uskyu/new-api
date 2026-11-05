@@ -34,7 +34,6 @@ export interface LedgerUsage {
 export interface LedgerBilling {
   base_amount: string
   group_ratio: number
-  tax_rate_percent: number
   total_amount: string
   currency: string
 }

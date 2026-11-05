@@ -229,13 +229,13 @@ func catalogItems(t *testing.T, recorder *httptest.ResponseRecorder) (map[string
 // channels or pricing leaks.
 func TestGetHarnessTierCatalogWireContract(t *testing.T) {
 	setupHarnessTierCatalogTestDB(t, map[string][]string{
-		"economy":    {harnessTierCatalogTestTextModelA},
-		"enterprise": {harnessTierCatalogTestTextModelB},
+		"chat":  {harnessTierCatalogTestTextModelA},
+		"audio": {harnessTierCatalogTestTextModelB},
 	})
 	priceHarnessTierCatalogModels(t, harnessTierCatalogTestTextModelA, harnessTierCatalogTestTextModelB)
 	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
-		{ID: "economy", DisplayName: "经济档", Kind: setting.HarnessCatalogKindText},
-		{ID: "enterprise", DisplayName: "企业档", Kind: setting.HarnessCatalogKindText},
+		{ID: "chat", DisplayName: "通用对话", Kind: setting.HarnessCatalogKindText},
+		{ID: "audio", DisplayName: "语音", Kind: setting.HarnessCatalogKindAudio},
 	})
 
 	recorder := requestHarnessTierCatalog(t, "", true)
@@ -249,9 +249,9 @@ func TestGetHarnessTierCatalogWireContract(t *testing.T) {
 
 	require.Len(t, items, 2)
 	first := items[0]
-	assert.Equal(t, "economy", first["id"])
+	assert.Equal(t, "chat", first["id"])
 	assert.Equal(t, "model", first["object"])
-	assert.Equal(t, "经济档", first["display_name"])
+	assert.Equal(t, "通用对话", first["display_name"])
 	assert.Equal(t, "text", first["kind"])
 	assert.Equal(t, []any{harnessTierCatalogTestTextModelA}, first["models"],
 		"a pool must advertise the real model ids it can route")
@@ -286,21 +286,17 @@ func TestGetHarnessTierCatalogWireContract(t *testing.T) {
 // arrays rather than null: the platform iterates them directly.
 func TestGetHarnessTierCatalogAdvertisesEmptyVideoPools(t *testing.T) {
 	setupHarnessTierCatalogTestDB(t, map[string][]string{
-		"economy": {harnessTierCatalogTestTextModelA},
+		"chat": {harnessTierCatalogTestTextModelA},
 	})
 	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
-		{ID: "economy", DisplayName: "经济档", Kind: setting.HarnessCatalogKindText},
+		{ID: "chat", DisplayName: "通用对话", Kind: setting.HarnessCatalogKindText},
+		{ID: "video", DisplayName: "视频", Kind: setting.HarnessCatalogKindVideo},
+		{ID: "audio", DisplayName: "语音", Kind: setting.HarnessCatalogKindAudio},
 		{
-			ID:          "video-per-call",
-			DisplayName: "视频按次",
+			ID:          "plan",
+			DisplayName: "畅用计划",
 			Kind:        setting.HarnessCatalogKindVideo,
 			Billing:     setting.HarnessCatalogBillingPerCall,
-		},
-		{
-			ID:          "video-per-second",
-			DisplayName: "视频按秒",
-			Kind:        setting.HarnessCatalogKindVideo,
-			Billing:     setting.HarnessCatalogBillingPerSecond,
 		},
 	})
 
@@ -308,21 +304,30 @@ func TestGetHarnessTierCatalogAdvertisesEmptyVideoPools(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 
 	_, items := catalogItems(t, recorder)
-	require.Len(t, items, 3, "a pool with no channels is still advertised")
+	require.Len(t, items, 4, "a pool with no channels is still advertised")
 
 	byID := make(map[string]map[string]any, len(items))
 	for _, item := range items {
 		byID[item["id"].(string)] = item
 	}
 
-	videoCall := byID["video-per-call"]
-	require.NotNil(t, videoCall)
-	assert.Equal(t, "video", videoCall["kind"])
-	assert.Equal(t, "per_call", videoCall["billing"])
+	// The single video pool has no pool-level billing: it holds both token- and
+	// second-billed models, so the label is omitted rather than guessed.
+	video := byID["video"]
+	require.NotNil(t, video)
+	assert.Equal(t, "video", video["kind"])
+	assert.NotContains(t, video, "billing")
 
-	videoSecond := byID["video-per-second"]
-	require.NotNil(t, videoSecond)
-	assert.Equal(t, "per_second", videoSecond["billing"])
+	// The reserved audio pool carries no billing label either.
+	audio := byID["audio"]
+	require.NotNil(t, audio)
+	assert.Equal(t, "audio", audio["kind"])
+	assert.NotContains(t, audio, "billing")
+
+	plan := byID["plan"]
+	require.NotNil(t, plan)
+	assert.Equal(t, "video", plan["kind"])
+	assert.Equal(t, "per_call", plan["billing"])
 
 	serialized := recorder.Body.String()
 	assert.Contains(t, serialized, `"models":[]`, "empty models must be an array, not null")
@@ -336,12 +341,12 @@ func TestGetHarnessTierCatalogAdvertisesEmptyVideoPools(t *testing.T) {
 // a body, and a changed catalog answers a fresh 200.
 func TestGetHarnessTierCatalogRevalidation(t *testing.T) {
 	setupHarnessTierCatalogTestDB(t, map[string][]string{
-		"economy":    {harnessTierCatalogTestTextModelA},
-		"enterprise": {harnessTierCatalogTestTextModelB},
+		"chat":  {harnessTierCatalogTestTextModelA},
+		"audio": {harnessTierCatalogTestTextModelB},
 	})
 	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
-		{ID: "economy", DisplayName: "经济档", Kind: setting.HarnessCatalogKindText},
-		{ID: "enterprise", DisplayName: "企业档", Kind: setting.HarnessCatalogKindText},
+		{ID: "chat", DisplayName: "通用对话", Kind: setting.HarnessCatalogKindText},
+		{ID: "audio", DisplayName: "语音", Kind: setting.HarnessCatalogKindAudio},
 	})
 
 	first := requestHarnessTierCatalog(t, "", true)
@@ -366,8 +371,8 @@ func TestGetHarnessTierCatalogRevalidation(t *testing.T) {
 	// Changing a display name changes the content, so the same validator must no
 	// longer match.
 	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
-		{ID: "economy", DisplayName: "经济档（新）", Kind: setting.HarnessCatalogKindText},
-		{ID: "enterprise", DisplayName: "企业档", Kind: setting.HarnessCatalogKindText},
+		{ID: "chat", DisplayName: "通用对话（新）", Kind: setting.HarnessCatalogKindText},
+		{ID: "audio", DisplayName: "语音", Kind: setting.HarnessCatalogKindAudio},
 	})
 
 	changed := requestHarnessTierCatalog(t, etag, true)
@@ -380,12 +385,12 @@ func TestGetHarnessTierCatalogRevalidation(t *testing.T) {
 // change advances it.
 func TestGetHarnessTierCatalogVersionAdvancesOnlyOnContentChange(t *testing.T) {
 	setupHarnessTierCatalogTestDB(t, map[string][]string{
-		"economy":    {harnessTierCatalogTestTextModelA},
-		"enterprise": {harnessTierCatalogTestTextModelB},
+		"chat":  {harnessTierCatalogTestTextModelA},
+		"audio": {harnessTierCatalogTestTextModelB},
 	})
 	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
-		{ID: "economy", DisplayName: "经济档", Kind: setting.HarnessCatalogKindText},
-		{ID: "enterprise", DisplayName: "企业档", Kind: setting.HarnessCatalogKindText},
+		{ID: "chat", DisplayName: "通用对话", Kind: setting.HarnessCatalogKindText},
+		{ID: "audio", DisplayName: "语音", Kind: setting.HarnessCatalogKindAudio},
 	})
 
 	catalogVersion := func(recorder *httptest.ResponseRecorder) int64 {
@@ -406,8 +411,8 @@ func TestGetHarnessTierCatalogVersionAdvancesOnlyOnContentChange(t *testing.T) {
 		"repeated reads must never advance the version")
 
 	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
-		{ID: "economy", DisplayName: "经济档（新）", Kind: setting.HarnessCatalogKindText},
-		{ID: "enterprise", DisplayName: "企业档", Kind: setting.HarnessCatalogKindText},
+		{ID: "chat", DisplayName: "通用对话（新）", Kind: setting.HarnessCatalogKindText},
+		{ID: "audio", DisplayName: "语音", Kind: setting.HarnessCatalogKindAudio},
 	})
 
 	advanced := catalogVersion(requestHarnessTierCatalog(t, "", true))
@@ -421,10 +426,10 @@ func TestGetHarnessTierCatalogVersionAdvancesOnlyOnContentChange(t *testing.T) {
 // nothing about it.
 func TestGetHarnessTierCatalogRejectsUnverifiedCaller(t *testing.T) {
 	setupHarnessTierCatalogTestDB(t, map[string][]string{
-		"economy": {harnessTierCatalogTestTextModelA},
+		"chat": {harnessTierCatalogTestTextModelA},
 	})
 	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
-		{ID: "economy", DisplayName: "经济档", Kind: setting.HarnessCatalogKindText},
+		{ID: "chat", DisplayName: "通用对话", Kind: setting.HarnessCatalogKindText},
 	})
 
 	recorder := requestHarnessTierCatalog(t, "", false)
@@ -435,7 +440,7 @@ func TestGetHarnessTierCatalogRejectsUnverifiedCaller(t *testing.T) {
 	assert.Equal(t, "GATEWAY_UNAUTHORIZED", body.Error.Code)
 	assert.NotEmpty(t, body.Error.Message)
 	assert.False(t, body.Error.Retryable)
-	assert.NotContains(t, recorder.Body.String(), "economy")
+	assert.NotContains(t, recorder.Body.String(), "chat")
 }
 
 // TestHarnessTierCatalogCapabilitiesMapping pins the endpoint-type to capability
@@ -511,12 +516,12 @@ func TestHarnessTierCatalogCapabilitiesMapping(t *testing.T) {
 // and an empty pool reports empty arrays rather than an invented capability.
 func TestBuildHarnessTierCatalogUnionsPoolCapabilities(t *testing.T) {
 	setupHarnessTierCatalogTestDB(t, map[string][]string{
-		"economy": {harnessTierCatalogTestTextModelA, harnessTierCatalogTestVideoModel},
+		"chat": {harnessTierCatalogTestTextModelA, harnessTierCatalogTestVideoModel},
 	})
 	priceHarnessTierCatalogModels(t, harnessTierCatalogTestTextModelA, harnessTierCatalogTestVideoModel)
 	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
-		{ID: "economy", DisplayName: "经济档", Kind: setting.HarnessCatalogKindText},
-		{ID: "video-per-call", DisplayName: "视频按次", Kind: setting.HarnessCatalogKindVideo, Billing: setting.HarnessCatalogBillingPerCall},
+		{ID: "chat", DisplayName: "通用对话", Kind: setting.HarnessCatalogKindText},
+		{ID: "video", DisplayName: "视频", Kind: setting.HarnessCatalogKindVideo},
 	})
 
 	items := buildHarnessTierCatalog(map[string]model.Pricing{
@@ -531,12 +536,12 @@ func TestBuildHarnessTierCatalogUnionsPoolCapabilities(t *testing.T) {
 	})
 
 	require.Len(t, items, 2, "both pools are advertised")
-	assert.Equal(t, "economy", items[0].ID)
+	assert.Equal(t, "chat", items[0].ID)
 	assert.Equal(t, []string{"chat", "stream", "tools"}, items[0].Capabilities,
 		"capabilities are unioned over the pool's models")
 
 	// The video pool has no channels yet, so it reports empty arrays.
-	assert.Equal(t, "video-per-call", items[1].ID)
+	assert.Equal(t, "video", items[1].ID)
 	assert.Equal(t, []string{}, items[1].Models)
 	assert.Equal(t, []string{}, items[1].Capabilities)
 }
@@ -546,10 +551,10 @@ func TestBuildHarnessTierCatalogUnionsPoolCapabilities(t *testing.T) {
 // configured", so the catalog must omit it instead.
 func TestBuildHarnessTierCatalogOmitsUnpricedModels(t *testing.T) {
 	setupHarnessTierCatalogTestDB(t, map[string][]string{
-		"economy": {"priced-model", "unpriced-model"},
+		"chat": {"priced-model", "unpriced-model"},
 	})
 	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
-		{ID: "economy", DisplayName: "经济档", Kind: setting.HarnessCatalogKindText},
+		{ID: "chat", DisplayName: "通用对话", Kind: setting.HarnessCatalogKindText},
 	})
 
 	pricing := map[string]model.Pricing{
@@ -599,7 +604,7 @@ func TestGetHarnessHealthStatusBranches(t *testing.T) {
 
 	t.Run("ok when the database answers and a channel is enabled", func(t *testing.T) {
 		setupHarnessTierCatalogTestDB(t, map[string][]string{
-			"economy": {harnessTierCatalogTestTextModelA},
+			"chat": {harnessTierCatalogTestTextModelA},
 		})
 		recorder := requestHealth()
 		require.Equal(t, http.StatusOK, recorder.Code)

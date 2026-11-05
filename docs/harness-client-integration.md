@@ -1,5 +1,12 @@
 # Harness 调用方联调指南
 
+> **2026-11-05（V0.10）起本文的计费口径已过时。** 供应商税率已取消，B3 金额为
+> `total_amount = base_amount × group_ratio`；`X-Route-Tax-Rate-Percent` 不再返回，
+> `tax_rate_percent` 恒为 `0`（废弃字段）。资源池改为 `chat`（默认）/`video`/`audio`/`plan`，
+> 经济/企业档已取消，路由完全由网关决定。
+>
+> 当前对外契约以 `docs/harness-delivery/` 交付包（V0.10）为准；本文其余内容仅作历史参考。
+
 本文仅说明 Harness 如何作为调用方接入 New API；不包含 New API 管理员的渠道、路由、价格或令牌配置步骤。管理端配置由 New API 团队负责。
 
 ## 接入前向 New API 团队获取

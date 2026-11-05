@@ -556,7 +556,7 @@ export function parseTaskResult() { return {}; }
 	assert.Equal(t, modelExpression, models[0].BillingPluginVariants[0].Pricing.Expression)
 }
 
-func TestSetIntelligentRoutingResponseHeadersUsesCheckedPricingGroupAndChannelTax(t *testing.T) {
+func TestSetIntelligentRoutingResponseHeadersUsesCheckedPricingGroup(t *testing.T) {
 	oldDB := model.DB
 	oldMainDatabaseType := common.MainDatabaseType()
 	oldMemoryCache := common.MemoryCacheEnabled
@@ -577,10 +577,8 @@ func TestSetIntelligentRoutingResponseHeadersUsesCheckedPricingGroupAndChannelTa
 	})
 
 	oldRatios := ratio_setting.GroupRatio2JSONString()
-	oldTaxRates := ratio_setting.GroupTaxRate2JSONString()
 	t.Cleanup(func() {
 		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(oldRatios))
-		require.NoError(t, ratio_setting.UpdateGroupTaxRateByJSONString(oldTaxRates))
 	})
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"group-a":0.8,"group-b":0.8,"group-c":0.7}`))
 	oldConfig := setting.GetIntelligentRoutingConfig()
@@ -589,7 +587,6 @@ func TestSetIntelligentRoutingResponseHeadersUsesCheckedPricingGroupAndChannelTa
 	}
 	t.Cleanup(func() { require.NoError(t, setting.UpdateIntelligentRoutingConfig(oldConfig)) })
 	require.NoError(t, setting.UpdateIntelligentRoutingConfig(setting.IntelligentRoutingConfig{GlobalChannelOrder: []int{}, PricingGroupOrder: []string{"group-c", "group-a"}}))
-	require.NoError(t, ratio_setting.UpdateGroupTaxRateByJSONString(`{"group-a":8,"group-b":8,"group-c":5}`))
 
 	for _, ability := range []model.Ability{
 		{Group: "group-a", Model: "model-x", ChannelId: 42, Enabled: true},
@@ -605,28 +602,15 @@ func TestSetIntelligentRoutingResponseHeadersUsesCheckedPricingGroupAndChannelTa
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	common.SetContextKey(c, setting.IntelligentRoutingContextKey, setting.IntelligentRoutingGlobalGroupID)
 
-	channel := &model.Channel{Id: 42, OtherSettings: `{"supplier_tax_rate_percent":6.5}`}
+	channel := &model.Channel{Id: 42}
 	require.NoError(t, db.Create(channel).Error)
 	apiErr := setIntelligentRoutingResponseHeaders(c, channel, "model-y")
 	require.Nil(t, apiErr)
 	assert.Equal(t, "42", c.Writer.Header().Get(setting.IntelligentRoutingChannelIDHeader))
 	assert.Equal(t, "0.7", c.Writer.Header().Get(setting.IntelligentRoutingGroupRatioHeader))
 	assert.Equal(t, "group-c", c.Writer.Header().Get(setting.IntelligentRoutingPricingGroupHeader))
-	assert.Equal(t, "6.5", c.Writer.Header().Get(setting.IntelligentRoutingTaxRatePercentHeader))
 
 	apiErr = setIntelligentRoutingResponseHeaders(c, channel, "model-x")
 	require.Nil(t, apiErr)
-	assert.Equal(t, "group-c", c.Writer.Header().Get(setting.IntelligentRoutingPricingGroupHeader))
-
-	recorder = httptest.NewRecorder()
-	c, _ = gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	common.SetContextKey(c, setting.IntelligentRoutingContextKey, setting.IntelligentRoutingGlobalGroupID)
-	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"group-a":0.8,"group-b":0.8,"group-c":0.8}`))
-	require.NoError(t, ratio_setting.UpdateGroupTaxRateByJSONString(`{"group-a":8,"group-b":8,"group-c":8}`))
-	apiErr = setIntelligentRoutingResponseHeaders(c, channel, "model-x")
-	require.Nil(t, apiErr)
-	assert.Equal(t, "42", c.Writer.Header().Get(setting.IntelligentRoutingChannelIDHeader))
-	assert.Equal(t, "6.5", c.Writer.Header().Get(setting.IntelligentRoutingTaxRatePercentHeader))
 	assert.Equal(t, "group-c", c.Writer.Header().Get(setting.IntelligentRoutingPricingGroupHeader))
 }

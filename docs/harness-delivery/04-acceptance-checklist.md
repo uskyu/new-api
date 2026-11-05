@@ -1,7 +1,7 @@
 # Harness 联调验收清单
 
-**版本**：V0.9.1
-**对应网关版本**：`harness-api` 分支 `fd00dae`
+**版本**：V0.10
+**对应网关版本**：`harness-api` 分支，本轮构建（待发布）
 
 本文档供双方逐项核验。每项包含：执行方、请求、预期响应、通过标准。
 
@@ -16,7 +16,7 @@
 | `aud` 值 | 双方商定 | ✅ `new-api` |
 | 服务主体 `sub` | Harness | ✅ `harness-gateway` |
 | 网关地址 | New API | ✅ `https://testapi.soloai.chat` |
-| 资源池 id（`economy` / `enterprise`）与池内模型 id | New API | ✅ A3 动态返回 |
+| 资源池 id（`chat` / `video` / `audio` / `plan`）与池内模型 id | New API | ✅ A3 动态返回；`video` / `audio` 渠道未接入，`models` 暂为空属预期 |
 
 ---
 
@@ -45,7 +45,7 @@ curl -sS "http://<gateway>/internal/v1/gateway/health" \
 **通过标准**：
 - [ ] HTTP 200
 - [ ] `interface_version` 为 `v2`
-- [ ] `upstream_baseline` 为 `45fbb149`
+- [ ] `upstream_baseline` 为 `45fbb149`（V0.9.1 构建的基线；若本轮构建基线已变化，以部署实例实际返回为准并记录）
 
 ---
 
@@ -129,6 +129,32 @@ curl -sS -X POST "http://<gateway>/v1/chat/completions" \
 - [ ] 未知资源池 → 403
 - [ ] 以上拒绝均不产生费用，也不产生 B1/B3 事件
 
+### 2.5 `plan` 池被识别（P1）
+
+**执行方**：双方
+
+```bash
+# plan（畅用计划）是唯一需要 X-Route-Group 的业务场景
+curl -sS -X POST "http://<gateway>/v1/chat/completions" \
+  -H "Authorization: Bearer $HARNESS_JWT" \
+  -H "X-Harness-Request-Id: hrq_test_plan" \
+  -H "X-Harness-Run-Id: run_test_plan" \
+  -H "X-Route-Group: plan" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4.1-flash","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
+```
+
+**预期**：`plan` 是已配置的池，**不会**返回
+`403 requested resource pool is not configured`。
+
+**通过标准**：
+- [ ] 不出现 `requested resource pool is not configured`
+- [ ] 若该池渠道尚未接入，返回渠道/模型不可用类错误属预期；记录实际 `code` 与 `message`
+- [ ] 被拒绝时不产生费用，也不产生 B1/B3 事件
+
+> `video` / `audio` 池当前没有可用渠道，不在本轮调用验收范围内。它们只需在 A3
+> 中以 `models: []` 出现，不要求可调用。
+
 ---
 
 ## 三、目录接口 A3（P0）
@@ -149,15 +175,40 @@ curl -sS -D- "http://<gateway>/v1/models" \
   "object": "list",
   "data": [
     {
-      "id": "economy",
+      "id": "chat",
       "object": "model",
-      "display_name": "经济档",
+      "display_name": "通用对话",
       "kind": "text",
-      "models": ["deepseek-v4.1-flash"],
+      "models": ["claude-opus-5", "glm-5.3", "deepseek-v4-pro"],
       "capabilities": ["chat", "stream", "tools"]
+    },
+    {
+      "id": "video",
+      "object": "model",
+      "display_name": "视频",
+      "kind": "video",
+      "models": [],
+      "capabilities": []
+    },
+    {
+      "id": "audio",
+      "object": "model",
+      "display_name": "语音",
+      "kind": "audio",
+      "models": [],
+      "capabilities": []
+    },
+    {
+      "id": "plan",
+      "object": "model",
+      "display_name": "畅用计划",
+      "kind": "video",
+      "billing": "per_call",
+      "models": [],
+      "capabilities": []
     }
   ],
-  "catalog_version": "2",
+  "catalog_version": "<整数>",
   "etag": "W/\"...\""
 }
 ```
@@ -165,8 +216,10 @@ curl -sS -D- "http://<gateway>/v1/models" \
 **通过标准**：
 - [ ] HTTP 200
 - [ ] `ETag` 响应头非空
-- [ ] `data[].id` 为**资源池 id**（用作 `X-Route-Group`）
+- [ ] `data[].id` 为**资源池 id**（`chat` / `video` / `audio` / `plan`）
 - [ ] `data[].models` 为**真实模型 id**（用作请求的 `model`）
+- [ ] `chat` 池含实际可调的模型 id；`video` / `audio` 允许 `models: []`
+- [ ] `plan` 池返回 `billing: per_call`；`video` 池不返回池级 `billing`
 - [ ] 响应体 `etag` 与响应头一致
 - [ ] 不含渠道信息、采购价
 
@@ -222,6 +275,7 @@ curl -sS -X POST "http://<gateway>/v1/chat/completions" \
 curl -sS -X POST "http://<gateway>/v1/responses" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "X-Harness-Request-Id: hrq_test_a2" \
+  -H "X-Harness-Run-Id: run_test_a2" \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4.1-flash","input":"hi"}'
 ```
@@ -239,6 +293,7 @@ curl -sS -X POST "http://<gateway>/v1/responses" \
 curl -sS -X POST "http://<gateway>/v1/messages" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "X-Harness-Request-Id: hrq_test_a4" \
+  -H "X-Harness-Run-Id: run_test_a4" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4.1-flash","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
@@ -257,6 +312,7 @@ curl -sS -X POST "http://<gateway>/v1/messages" \
 curl -sS -X POST "http://<gateway>/v1beta/models/deepseek-v4.1-flash:generateContent" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "X-Harness-Request-Id: hrq_test_a9" \
+  -H "X-Harness-Run-Id: run_test_a9" \
   -H "Content-Type: application/json" \
   -d '{"contents":[{"parts":[{"text":"hi"}]}]}'
 ```
@@ -274,6 +330,7 @@ curl -sS -X POST "http://<gateway>/v1beta/models/deepseek-v4.1-flash:generateCon
 curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "X-Harness-Request-Id: hrq_test_stream" \
+  -H "X-Harness-Run-Id: run_test_stream" \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4.1-flash","messages":[{"role":"user","content":"count 1 to 3"}],"stream":true,"stream_options":{"include_usage":true}}'
 ```
@@ -320,6 +377,8 @@ curl -sS "http://<gateway>/internal/v1/gateway/cost-records?limit=10" \
 - [ ] `currency` 为 `USD`
 - [ ] 金额为**字符串**（非数字）
 - [ ] `status` 为 `settled` 或 `pending`
+- [ ] `total_amount` 等于 `base_amount × group_ratio`（**无税额乘数**）
+- [ ] `tax_rate_percent` 为 `0`（已废弃字段，仅保留兼容；不参与计算）
 
 ---
 
@@ -477,6 +536,7 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?from=2026-10-01T00:0
 | 2.1 | 健康检查连通 | Harness | P0 | ⏳ |
 | 2.2 | 无效 JWT 拒绝 | Harness | P0 | ⏳ |
 | 2.3 | Scope 隔离 | Harness | P0 | ⏳ |
+| 2.5 | `plan` 池被识别 | 双方 | P1 | ⏳ |
 | 3.1 | 目录首次拉取 | Harness | P0 | ⏳ |
 | 3.2 | 目录条件查询 304 | Harness | P0 | ⏳ |
 | 4.1 | A1 模型调用 | 双方 | P0 | ⏳ |
@@ -506,3 +566,4 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?from=2026-10-01T00:0
 | --- | --- | --- |
 | 2026-10-25 | V0.9 | 初版 |
 | 2026-10-29 | V0.9.1 | A3 增加池字段与真实模型 id；调用示例改用真实模型 id；新增 2.4 关联头与资源池校验 |
+| 2026-11-05 | V0.10 | 前置条件与 A3 样例改为 `chat`/`video`/`audio`/`plan` 四个池；新增 2.5 `plan` 池校验；B3 校验改为 `total_amount = base_amount × group_ratio`，取消税率检查；说明 `video`/`audio` 暂不可调用 |
