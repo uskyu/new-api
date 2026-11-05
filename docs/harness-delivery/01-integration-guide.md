@@ -26,8 +26,9 @@ Messages / Gemini 原生）。网关侧仅在以下方面与官方协议不同�
 - `model` 字段填 **A3 目录 `models[]` 中的真实模型 id**（如 `deepseek-v4.1-flash`），
   不是池 id。**路由完全由网关负责**：Harness 只需要调一个模型 id，不需要区分
   经济/企业档，也不需要按档位选择渠道
-- 请求头 `X-Route-Group` 为**可选**，仅 `plan`（畅用计划）有业务含义；普通
-  chat/video/audio 调用不传该头，使用默认 `chat` 池，见第二节
+- 请求头 `X-Route-Group` 为**可选**，仅通过 Harness JWT 校验的调用方可以使用，
+  且只有 `plan`（畅用计划）有业务含义；普通 chat/video/audio 调用不传该头，使用
+  默认 `chat` 池，见第二节
 - 鉴权用 Harness JWT（见鉴权指南）
 - 响应头返回 `X-NewAPI-Request-Id`
 
@@ -62,7 +63,7 @@ Messages / Gemini 原生）。网关侧仅在以下方面与官方协议不同�
 | `Authorization` | Harness → 网关 | ✓ | `Bearer <JWT>` |
 | `X-Harness-Request-Id` | Harness → 网关 | ✓ | 一次模型调用一个，建议 `hrq_<ULID>`，**≤ 64 字符** |
 | `X-Harness-Run-Id` | Harness → 网关 | ✓ | 一次任务执行一个，建议 `run_<ULID>`，**≤ 64 字符** |
-| `X-Route-Group` | Harness → 网关 | ✗ | 可选。仅 `plan`（畅用计划）需要；普通 chat/video/audio 调用不传，落默认 `chat` 池 |
+| `X-Route-Group` | Harness → 网关 | ✗ | 可选。仅通过 Harness JWT 校验的调用方可以使用，且只有 `plan`（畅用计划）需要；普通 chat/video/audio 调用不传，落默认 `chat` 池 |
 | `X-NewAPI-Request-Id` | 网关 → Harness | 响应头 | 网关请求 ID，即账本中的 `gateway_request_id` |
 
 两个关联 ID 都只允许 `A-Z a-z 0-9 - _`，且都必须非空。缺失或格式不合法时，
@@ -89,7 +90,8 @@ HTTP/1.1 400 Bad Request
 由网关自行决定走哪个渠道、哪个上游。Harness **不需要**为普通调用选择资源池，
 也不需要感知池的划分。
 
-资源池是产品线，不是价格档位。当前有四个池：
+**只有通过 Harness JWT 校验的调用方才能使用该头**；普通 API 令牌即使携带，也不
+参与资源池选择。资源池是产品线，不是价格档位。当前有四个池：
 
 | 池 id | 显示名 | `kind` | 说明 |
 | --- | --- | --- | --- |
@@ -102,15 +104,19 @@ HTTP/1.1 400 Bad Request
 | --- | --- |
 | 不传该头 | 使用默认池 `chat` |
 | 传 `plan` | 使用畅用计划池 —— 这是该头**唯一**有业务含义的用法 |
+| 传其他已配置池 id（`chat` / `video` / `audio`） | 普通调用应省略该头；显式传入只会把请求硬绑定到该池，不改变模型 id |
 | 传不存在的池 id | `403 access_denied`，消息 `requested resource pool is not configured` |
-| 池存在但内部令牌未授权 | `403 access_denied`，消息 `token is not authorized for the requested resource pool` |
 
-池是硬绑定：选中的池里没有该模型的可用渠道时直接失败，不会改用另一个池。
+不存在「全渠道优先级」全局池：`global_channel_order` 已移除，资源池的渠道顺序
+是唯一的路由顺序，也没有 `global` 池可供选择。池是硬绑定：选中的池里没有该模型
+的可用渠道时直接失败，不会改用另一个池。
 
 `video` 与 `audio` 的渠道尚未配置，这两个池的 `models` 可能合法地返回空数组，
 此时该池不可调用。池的存在只表示产品线已定义，不表示已经可以接单。
 
-供应商税率已取消，B3 金额不再含税额；`billing.group_ratio` 仍随实际服务的池变化。
+供应商税率已取消，B3 金额不再含税额。`billing.group_ratio` 来自采购计价分组，
+不是资源池的倍率；`pricing_group_order` 只判断哪些渠道+模型能力具备采购分组
+资格，并给出对应倍率，当前仅 `default` 一个分组，因此 `group_ratio = 1`。
 
 ---
 
@@ -180,7 +186,7 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
 
 | 字段 | 说明 |
 | --- | --- |
-| `data[].id` | **资源池 id**（`chat` / `video` / `audio` / `plan`），也是 `X-Route-Group` 的取值 |
+| `data[].id` | **资源池 id**（`chat` / `video` / `audio` / `plan`）；其中仅 `plan` 有 `X-Route-Group` 业务含义，普通调用不需要该头 |
 | `data[].display_name` | 运营配置的显示名，仅用于界面展示 |
 | `data[].kind` | `text` / `video` / `audio` |
 | `data[].billing` | 仅 `plan` 池返回 `per_call`；`video` 池混合两种计费方式，不标注池级 `billing` |
@@ -596,7 +602,8 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
 ```
 
 > `X-Route-Group` 只用于畅用计划：需要在该计划下调用时传
-> `-H "X-Route-Group: plan"`。普通 chat/video/audio 调用不要传该头——传了也不会
+> `-H "X-Route-Group: plan"`。该头仅对通过 Harness JWT 校验的调用方生效，
+> 不需要额外的令牌授权。普通 chat/video/audio 调用不要传该头——传了也不会
 > 改变模型 id，只会把请求硬绑定到该池。`video` / `audio` 池当前没有可用渠道，
 > 不要用它们发起调用。
 
@@ -610,3 +617,4 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
 | 2026-10-26 | V0.9 | 对应网关 `725ec9d6d`；样例与线上实测结果一致 |
 | 2026-10-29 | V0.9.1 | 对应网关 `fd00dae`。`model` 改为真实模型 id；A3 增加 `display_name`/`kind`/`billing`/`models`；`X-Harness-Run-Id` 改为必填且两个 ID 均 ≤64；缺失关联头改为 400；补充 `X-Route-Group` 与默认池规则 |
 | 2026-11-05 | V0.10 | 取消经济/企业档，路由完全归网关；资源池改为产品线 `chat`（默认）/`video`/`audio`/`plan`；`X-Route-Group` 改为仅 `plan` 有业务含义；A3 样例改为四个池；取消供应商税率，`total_amount = base_amount × group_ratio`，`tax_rate_percent` 恒 0 并标记废弃。对应本轮构建（待发布），尚未部署验证 |
+| 2026-11-06 | V0.10（修订） | 路由简化：移除 `global_channel_order` / 全渠道优先级全局池与 `token_group_access` / 令牌授权，资源池成为唯一路由顺序；`X-Route-Group` 仅经验证的 Harness 调用方可使用；补充 `pricing_group_order` 是采购分组资格与倍率来源、不是渠道路由顺序。移除令牌未授权 403 行。代码已改，未构建、未部署、未验证 |

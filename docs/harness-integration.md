@@ -4,18 +4,28 @@
 >
 > 文档版本：对应 New API 构建 `harness-api-20261018-a25f1f5`；**2026-10-19 起 catalog 改为返回 `pricing` 价格对象**（详见第十章变更记录）。
 
-> **2026-11-05（V0.10）重要变更：供应商税率已取消。** 本文第三章 3.4「配置渠道税率」、
-> 第五章 `X-Route-Tax-Rate-Percent` 响应头、第六章含税点项的计价公式以及第八章 Q5，
-> 都描述的是旧行为，**不再代表当前实现**：
+> **2026-11-05 / 11-06（V0.10）重要变更：路由与金额口径已简化。** 本文是旧版
+> 联调记录，以下内容**不再代表当前实现**：
 >
 > - 采购成本口径改为 `total_amount = base_amount × group_ratio`，**不再有税额乘数**
 > - `X-Route-Tax-Rate-Percent` 不再随路由变化；B3 的 `tax_rate_percent` 恒为 `0`，
 >   属废弃（legacy）字段，仅为兼容保留，后续版本移除
 > - 资源池改为产品线 `chat`（默认，text）/ `video`（video，无池级计费）/
 >   `audio`（audio，占位）/ `plan`（video，`per_call`，畅用计划）；经济/企业档
->   不存在，路由完全由网关决定，`X-Route-Group` 仅 `plan` 有业务含义
+>   不存在，路由完全由网关决定
+> - **`global_channel_order` / 「全渠道优先级」全局池已移除**，不再有 `global`
+>   池；资源池的渠道顺序是唯一路由顺序
+> - **`token_group_access` / 「令牌授权」已移除**，Harness 不需要按资源池授权，
+>   运营方也不再需要为用户令牌配置路由授权
+> - **`X-Route-Group` 仅对通过 Harness JWT 校验的调用方生效**，且只有 `plan`
+>   有业务含义；普通 chat/video/audio 调用不传该头，落默认 `chat` 池
+> - `pricing_group_order` 保留，但它只决定哪些渠道+模型能力具备采购分组资格并
+>   提供 `group_ratio`，**不是**渠道路由顺序；当前仅 `["default"]`，倍率为 `1`
 >
-> 当前对外契约与验收状态以 `docs/harness-delivery/` 交付包（V0.10）为准。
+> 因此本文第三章 3.2「配置全渠道优先级」、3.4「配置渠道税率」与 3.5「授权令牌」、
+> 第五章 5.5 的历史实测、第七章 `token-access` 管理接口以及第八章 Q2，均为已废弃
+> 的旧行为，**不要照此配置**。当前对外契约与验收状态以
+> `docs/harness-delivery/` 交付包（V0.10）为准。
 
 ---
 
@@ -64,16 +74,17 @@
 
 **职责划分**：
 
-- **New API** 负责：维护渠道、模型标准价格（`pricing`，含 token 单价 / 按次价 / 计费表达式）、采购折扣规则（计价分组倍率）、渠道税率；根据优先级选择上游渠道
-- **Harness** 负责：用 catalog 的基础价格 × 本次响应头返回的实际倍率与税点，计算采购成本与税费
+- **New API** 负责：维护渠道、模型标准价格（`pricing`，含 token 单价 / 按次价 / 计费表达式）、采购折扣规则（计价分组倍率）；按资源池的渠道顺序选择上游渠道
+- **Harness** 负责：用 catalog 的基础价格 × 本次响应头返回的采购分组倍率计算采购成本；税额已取消
 
-New API **不参与税费核算**，仅把税点作为元数据通过响应头传出。catalog **不返回**计价分组倍率与税点，这两项只随每次调用的响应头下发。
+catalog **不返回**计价分组倍率，该值只随每次调用的响应头下发。
 
 ---
 
 ## 三、前置准备（New API 管理端配置）
 
-Harness 接入前，New API 管理员必须完成以下配置。**顺序不能颠倒**。
+Harness 接入前，New API 管理员按下述步骤配置。全局池与令牌授权已移除，
+3.2、3.5 仅为历史记录。
 
 > ### ⚠️ 当前实例配置状态（截至 2026-10-18）
 >
@@ -81,12 +92,11 @@ Harness 接入前，New API 管理员必须完成以下配置。**顺序不能�
 >
 > | 配置项 | 状态 | 未完成时的表现 |
 > | --- | --- | --- |
-> | 全渠道优先级 | ❌ 未配置 | 带 `X-Route-Group` 的请求返回 403 `requested resource pool is not configured` |
-> | 计价分组优先级 | ❌ 未配置 | 即使配置了渠道顺序，也会因无可用计价组而返回 503 |
-> | 渠道税率 | ❌ 全部渠道均未填写 | 响应头 `X-Route-Tax-Rate-Percent` 返回 `0` |
-> | 服务令牌授权 | ❌ 未授权任何令牌 | catalog 返回 403 `Token has no authorized resource pools` |
+> | 计价分组优先级 | ❌ 未配置 | 没有渠道+模型能力满足采购分组资格时返回 503；这是采购资格，不是渠道路由顺序 |
+> | 渠道税率 | ❌ 全部渠道均未填写 | 响应头 `X-Route-Tax-Rate-Percent` 返回 `0`（该字段已废弃） |
 >
-> **联调前必须先在 New API 管理界面完成 3.1 – 3.5 全部步骤。**
+> 「全渠道优先级」与「令牌授权」两项配置已随 V0.10 移除，不再需要设置。
+> 联调前只需完成 3.1、3.3；3.2、3.4、3.5 保留仅为历史记录，**不要执行**。
 
 ### 3.1 创建服务令牌
 
@@ -99,41 +109,35 @@ Harness 接入前，New API 管理员必须完成以下配置。**顺序不能�
 
 > 错误示例：令牌分组填 `default,vip,group_1` 会导致所有调用返回 403，且报错与智能路由无关，排查时容易误判。
 
-### 3.2 配置全渠道优先级
+### 3.2 配置全渠道优先级（已取消）
 
-在「系统设置 → 智能路由 → 全渠道优先级设置」中：
-
-1. 勾选允许参与路由的渠道
-2. 拖动调整顺序（越靠前优先级越高）
-3. 保存
+V0.10 起已移除 `global_channel_order` / 「全渠道优先级」全局池，不再有 `global`
+池可供选择。资源池自己的渠道顺序是唯一路由顺序。**本节旧步骤不再需要执行。**
 
 ### 3.3 配置计价分组优先级
 
 在「系统设置 → 智能路由 → 计价分组优先级」中：
 
-1. 勾选允许参与路由计价的 New API 分组
+1. 勾选允许参与采购计价的 New API 分组
 2. 拖动调整顺序（越靠前优先级越高）
 3. 保存
 
-> **重要**：如果这里没有勾选任何分组，智能路由将**没有可用渠道**，所有带 `X-Route-Group` 的请求都会返回 503。
+> **重要**：如果这里没有勾选任何分组，就没有渠道+模型能力满足采购分组资格，
+> 请求会返回 503。该配置只决定采购资格与 `group_ratio` 的来源，**不决定**
+> 资源池，也不决定池内渠道顺序。当前只有 `default` 一个分组，配置为
+> `["default"]`，倍率为 `1`。
 
-### 3.4 配置渠道税率
+### 3.4 配置渠道税率（已取消）
 
-在「渠道 → 编辑渠道 → 连接与模型 → 模型与分组」卡片底部，填写「供应商税点（%）」：
+供应商税率已取消，本节的「供应商税点（%）」配置不再参与金额计算，
+`tax_rate_percent` 恒为 `0` 且属废弃字段。**该配置项已不再需要，保留标题仅为
+历史对照。**
 
-- 取值范围：`0 ~ 100`，支持两位小数（如 `6.5`）
-- 未填写时默认按 `0%` 处理
-- 该值会通过 `X-Route-Tax-Rate-Percent` 响应头传出
+### 3.5 授权令牌（已取消）
 
-### 3.5 授权令牌
-
-在「系统设置 → 智能路由 → 全渠道优先级设置」页面底部「Harness 路由令牌」区块：
-
-1. 在令牌列表中勾选刚创建的服务令牌
-2. 点击「授权 N 个令牌」
-3. 授权后该令牌自动获得**全部**路由分组（`global` + 所有资源池）的访问权限
-
-授权后可在此处看到已授权令牌列表，支持**复制密钥**（自动带 `sk-` 前缀）和**撤销**。
+V0.10 起已移除 `token_group_access` / 「令牌授权」。Harness 不需要按资源池
+授权，运营方也不需要为 Harness 的服务令牌配置「令牌授权」。服务令牌能调用什么，
+只由 JWT 校验、Scope 与 A3 目录决定。**本节旧步骤不再需要执行。**
 
 ---
 
@@ -152,11 +156,13 @@ Authorization: Bearer sk-<token-key>
 | --- | --- | --- |
 | Token 无效或不存在 | 401 | `Invalid service token` |
 | 令牌限制了模型范围 | 403 | `Harness catalog requires a full-model service token` |
-| 令牌未被授权任何路由分组 | 403 | `Token has no authorized resource pools` |
+| （已废弃）令牌未被授权任何路由分组 | 403 | `Token has no authorized resource pools`；V0.10 起令牌授权移除，不再产生 |
 
 ### 4.3 成功响应结构
 
-以下为结构示例（模型名与数值由部署实例决定）。catalog 返回的是**采购价格**，不再返回倍率：
+以下为 V0.9 旧构建的结构示例（模型名与数值由部署实例决定），其中的 `global`
+池已随 V0.10 移除；当前池 id 见 V0.10 交付包。catalog 返回的是**采购价格**，
+不再返回倍率：
 
 ```json
 {
@@ -246,13 +252,13 @@ Claude 模型会额外给出 1 小时缓存写入价格（`cache_write_1h` 只�
 >
 > `quota_per_unit` 仍然返回，但只作为诊断信息保留，**不再参与价格换算**。不要再用 `价格 / quota_per_unit` 之类的公式推导金额。
 
-> **关键**：`groups` 不是"全量模型列表"，而是**按分组过滤后的模型视图**。`global` 分组和各资源池分组的模型列表可以不同——某模型只被某个池的渠道支持时，它只出现在那个池下面。
+> **关键**：`groups` 不是"全量模型列表"，而是**按资源池过滤后的模型视图**。各资源池的模型列表可以不同——某模型只被某个池的渠道支持时，它只出现在那个池下面。
 
 #### 分组字段 `groups[]`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `id` | string | 分组 ID。`global` 为全局路由，其他为管理员创建的资源池 ID |
+| `id` | string | 分组 ID。旧构建中 `global` 为全局路由；V0.10 起全局池已移除，只有资源池 `chat` / `video` / `audio` / `plan` |
 | `name` | string | 分组显示名称 |
 | `models` | array | 该分组下可调用且已配置有效价格的模型列表 |
 | `unpriced_models` | array | 渠道支持但未配置有效价格、因此从 `models` 中排除的诊断列表；不可调用 |
@@ -399,7 +405,6 @@ len <= 128000 ? tier("base", p * 3 + c * 9) : tier("long", p * 5 + c * 15)
 ```http
 POST /v1/chat/completions
 Authorization: Bearer sk-<token-key>
-X-Route-Group: global
 Content-Type: application/json
 
 {
@@ -408,27 +413,36 @@ Content-Type: application/json
 }
 ```
 
-### 5.2 `X-Route-Group` 的作用
+> V0.10 起普通调用**不传** `X-Route-Group`，自动落默认 `chat` 池。只有畅用计划
+> 需要 `X-Route-Group: plan`，且该头仅对通过 Harness JWT 校验的调用方生效。
 
-| 情况 | 行为 |
+### 5.2 `X-Route-Group` 的作用（V0.10）
+
+| 情况 | 当前行为 |
 | --- | --- |
-| **不携带** | 未授权令牌保持原有普通路由；已授权令牌对需要选择模型/上游渠道的请求返回 403。模型列表和只读任务结果查询无需此头 |
-| 携带 `global` | 使用「全渠道优先级」中配置的渠道顺序 |
-| 携带资源池 ID（如 `pool-fast`） | 使用该资源池中配置的渠道顺序 |
+| **不携带** | 使用默认 `chat` 池。普通 chat/video/audio 调用都属于这种情况 |
+| 携带 `plan` | 使用畅用计划池——这是该头**唯一**有业务含义的用法 |
+| 携带其他池 id | 普通调用不应携带；显式传入只会把请求硬绑定到该池，不改变模型 id |
+| 携带 `global` | 不再支持。全局池已移除，`global` 不是有效路由取值 |
+| 携带未配置的池 id | 403 `requested resource pool is not configured` |
 
-浏览器 WebSocket API 无法设置自定义 HTTP 请求头，可在 `Sec-WebSocket-Protocol` 中增加 `openai-insecure-route-group.<group-id>`（例如 `openai-insecure-route-group.global`）。服务端会按普通 `X-Route-Group` 规则验证令牌授权。
+该头仅对通过 Harness JWT 校验的调用方生效；不存在按令牌的资源池授权。浏览器
+WebSocket API 无法设置自定义 HTTP 请求头，可在 `Sec-WebSocket-Protocol` 中增加
+`openai-insecure-route-group.<pool-id>`（仅 `plan` 有业务含义）。服务端按普通
+`X-Route-Group` 规则处理。
 
-> **这是最关键的一点**：已授权令牌漏传路由分组会被拒绝，不会静默回退到普通路由；普通未授权令牌仍保持原有调用行为。
+> 旧的「已授权令牌漏传路由分组会被拒绝」规则已随令牌授权一并移除。普通调用
+> 不传该头时，就是正常的默认 `chat` 路由。
 
-### 5.3 鉴权失败响应
+### 5.3 鉴权失败响应（V0.10）
 
 | 场景 | HTTP | 响应体 `message` |
 | --- | --- | --- |
-| 授权令牌未携带必需的路由分组 | 403 | `this token requires X-Route-Group for routed requests; choose an authorized resource pool` |
-| 令牌限制了模型范围 | 403 | `request-level resource pool selection requires a full-model service token` |
-| 令牌未授权任何路由分组 | 403 | `token is not configured for intelligent routing` |
-| 请求的分组未配置 | 403 | `requested resource pool is not configured` |
-| 令牌未被授权该分组 | 403 | `token is not authorized for the requested resource pool` |
+| 显式请求了未配置的资源池 | 403 | `requested resource pool is not configured` |
+| 非 Harness 调用方携带 `X-Route-Group` | — | 不参与资源池选择，普通 API 令牌不应依赖该头 |
+
+旧的「未携带路由分组」「未授权任何路由分组」「未被授权该分组」三类 403 已随
+`token_group_access` 移除，不再产生。
 
 ### 5.4 成功响应头
 
@@ -436,21 +450,21 @@ Content-Type: application/json
 
 | 响应头 | 类型 | 说明 | 示例 |
 | --- | --- | --- | --- |
-| `X-Route-Group` | string | 本次使用的路由分组 ID | `global` |
+| `X-Route-Group` | string | 本次使用的资源池 id | `chat` |
 | `X-Route-Channel-ID` | integer | 实际选中的上游渠道 ID | `9` |
-| `X-Route-Pricing-Group-ID` | string | 选中渠道命中的 New API 计价分组 | `default` |
-| `X-Route-Group-Ratio` | number | 该计价分组的倍率（折扣系数） | `1` |
-| `X-Route-Tax-Rate-Percent` | number | 该渠道的供应商税点（百分比） | `6.5` |
+| `X-Route-Pricing-Group-ID` | string | 选中渠道命中的 New API 采购计价分组 | `default` |
+| `X-Route-Group-Ratio` | number | 该采购计价分组的倍率（折扣系数） | `1` |
+| `X-Route-Tax-Rate-Percent` | number | **已废弃，恒为 `0`**；供应商税率已取消 | `0` |
 
 此外还会返回 `X-Oneapi-Request-Id` 用于问题追踪。
 
-> **分工再确认**：`X-Route-Group-Ratio`（采购折扣）和 `X-Route-Tax-Rate-Percent`（税点）**只从本次响应的响应头读取**，catalog 中不返回这两项。catalog 给的是基础价格，响应头给的是本次实际生效的折扣与税率。
+> **分工再确认**：`X-Route-Group-Ratio`（采购分组倍率）**只从本次响应的响应头读取**，catalog 中不返回该值。catalog 给的是基础价格，响应头给的是本次实际生效的倍率。`X-Route-Tax-Rate-Percent` 已废弃，忽略即可。
 
 以上响应头**均已加入 CORS 暴露列表**（`Access-Control-Expose-Headers`），浏览器端可直接读取。
 
-### 5.5 实测样例
+### 5.5 实测样例（V0.9 历史）
 
-以下为本地验证环境的真实调用返回：
+以下为旧构建的本地验证返回，`global` 路由与税点均已废弃，仅作历史记录：
 
 ```
 HTTP 200
@@ -466,14 +480,14 @@ X-Route-Tax-Rate-Percent: 6.5
 - 渠道 1 同时属于 `default` 和 `vip` 两个分组
 - 管理员配置的计价分组优先级为 `group_1 > vip > default`
 - 因此选中 `vip`（比 `default` 优先级更高）
-- 税点 `6.5` 来自渠道 1 的配置
+- 税点 `6.5` 来自渠道 1 的配置，该字段现已废弃
 
 ### 5.6 重试时的行为
 
 如果第一次选中的渠道调用失败，系统会按优先级自动切换到下一个渠道重试。此时：
 
 - **响应头会被清空并重新写入**，最终返回的是**实际成功那个渠道**的信息
-- 例如渠道 A（税点 6.5%）失败、渠道 B（税点 12%）成功，则 `X-Route-Tax-Rate-Percent` 返回 `12`
+- 例如渠道 A 失败、渠道 B 成功，则 `X-Route-Channel-ID` 等响应头反映渠道 B
 
 Harness 必须按**最终返回的响应头**计价，不能缓存首次选择结果。
 
@@ -589,15 +603,15 @@ final_cost  = 3.552 + 0.23088 = 3.78288 CNY
 | 接口 | 方法 | 鉴权 | 用途 |
 | --- | --- | --- | --- |
 | `/api/harness/catalog` | GET | 服务令牌 | 获取分组与模型标准价格 |
-| `/v1/chat/completions` | POST | 服务令牌 + `X-Route-Group` | 发起调用并获取路由定价响应头 |
+| `/v1/chat/completions` | POST | 服务令牌 | 发起调用并获取路由定价响应头；普通调用不传 `X-Route-Group` |
 
 管理端接口（Harness **不需要**调用）：
 
 | 接口 | 方法 | 用途 |
 | --- | --- | --- |
-| `/api/intelligent-routing` | GET / PUT | 读写路由配置 |
-| `/api/intelligent-routing/token-access` | GET | 读令牌授权 |
-| `/api/intelligent-routing/token-access/:id` | PUT | 写令牌授权 |
+| `/api/intelligent-routing` | GET / PUT | 读写资源配置（资源池、采购计价分组） |
+
+> `/api/intelligent-routing/token-access` 令牌授权接口已随 V0.10 移除，不再存在。
 
 ---
 
@@ -605,15 +619,16 @@ final_cost  = 3.552 + 0.23088 = 3.78288 CNY
 
 ### Q1：调用返回 503，提示无可用渠道
 
-**原因**：`pricing_group_order` 为空，或请求的分组里没有任何渠道同时满足「已勾选计价分组」条件。
+**原因**：`pricing_group_order` 为空，或没有任何渠道+模型能力同时满足「已勾选采购计价分组」条件。
 
-**处理**：检查「计价分组优先级」页是否已勾选分组并保存。
+**处理**：检查「计价分组优先级」页是否已勾选分组并保存。该配置只影响采购资格与倍率，不决定资源池或池内渠道顺序。
 
-### Q2：catalog 返回 403 `Token has no authorized resource pools`
+### Q2：catalog 返回 403 `Token has no authorized resource pools`（已废弃）
 
-**原因**：令牌还没被授权。
+**原因**：这是 V0.9 及更早构建的令牌授权校验。V0.10 起 `token_group_access` /
+「令牌授权」已移除，该错误不再产生。
 
-**处理**：到「智能路由 → 全渠道优先级」页面底部的令牌区块，勾选该令牌并点击授权。
+**处理**：无需授权；若仍看到此错误，说明调用的是旧构建，应升级到包含路由简化的构建。
 
 ### Q3：所有调用返回 403，报错提到分组
 
@@ -621,11 +636,13 @@ final_cost  = 3.552 + 0.23088 = 3.78288 CNY
 
 **处理**：把令牌分组改为**单个**有效分组名。
 
-### Q4：响应头里没有 `X-Route-*`
+### Q4：响应头里没有 `X-Route-*`（已调整）
 
-**原因**：请求没有带 `X-Route-Group` 头，或者带了空值。
+**原因**：旧行为要求请求携带 `X-Route-Group`。V0.10 起普通调用不传该头，落默认
+`chat` 池；该头仅对通过 Harness JWT 校验的调用方生效，且只有 `plan` 有业务含义。
 
-**处理**：确认请求头中存在 `X-Route-Group: global` 或具体的资源池 ID。
+**处理**：普通 chat/video/audio 调用不要携带 `X-Route-Group`。需要畅用计划时传
+`X-Route-Group: plan`；`global` 已不是有效取值。
 
 ### Q5：`X-Route-Tax-Rate-Percent` 返回 0，但渠道配了税点
 
@@ -638,10 +655,10 @@ final_cost  = 3.552 + 0.23088 = 3.78288 CNY
 ## 九、联调建议步骤
 
 1. **确认令牌可用**：用服务令牌调用 `GET /api/harness/catalog`，应返回 200 和分组列表
-2. **确认分组存在**：检查 `groups[].id` 中是否包含 `global` 或目标资源池
+2. **确认分组存在**：检查 `groups[].id` 是否为 `chat`/`video`/`audio`/`plan` 之一；不再有 `global` 池
 3. **确认价格形态**：检查 `models[].pricing.mode` 是否在 `token`/`fixed`/`tiered_expr` 之内，并确认 `pricing.currency` 与 Harness 内部账本币种一致
-4. **发起一次非流式调用**：带 `X-Route-Group` 调用 `/v1/chat/completions`，检查五个响应头是否齐全
-5. **对照计价**：用响应头中的倍率和税点，按第六章公式与 catalog 中的价格核对计算结果
+4. **发起一次非流式调用**：普通调用不传 `X-Route-Group`，调用 `/v1/chat/completions`，确认落默认 `chat` 池并检查响应头
+5. **对照计价**：用响应头中的倍率（当前为 `1`）按 `total_amount = base_amount × group_ratio` 核对；税额已取消
 6. **验证缺失字段**：挑一个没有缓存价格的模型，确认缺字段时按「价格未暴露」处理（不按 0、也不自行折算），并能走通与 New API 团队的确认流程
 7. **验证重试**：故意让一个渠道失败，确认切换后响应头反映的是新渠道
 8. **接入流式**：确认 `stream: true` 时响应头仍可正常读取
@@ -652,6 +669,7 @@ final_cost  = 3.552 + 0.23088 = 3.78288 CNY
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-11-06 | 标记路由简化：`global_channel_order` / 全渠道优先级与 `token_group_access` / 令牌授权已移除；`X-Route-Group` 仅经验证 Harness 调用方可用、仅 `plan` 有业务含义；`pricing_group_order` 改为采购资格/倍率来源而非路由顺序。旧步骤与旧令牌授权接口保留为历史记录并标注废弃 |
 | 2026-10-19 | catalog 改为返回价格（`pricing`），移除全部倍率字段；`price_unit` 改为 `display_currency`；补充价格缺失语义、币种规则、`tiered_expr` 恒为 USD 及其两种换算语义、新的成本公式与三个已知缺口；修正旧文档对 `model_price` 单位的错误描述 |
 | 2026-10-18 | catalog 仅公开有效定价模型，按分组增加未定价模型诊断字段 |
 | 2026-10-18 | 初版。对应构建 `harness-api-20261018-a25f1f5` |

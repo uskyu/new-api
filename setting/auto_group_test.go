@@ -29,7 +29,7 @@ func TestUpdateMaxTokenAutoGroupsRejectsInvalidValuesWithoutChangingState(t *tes
 	}
 }
 
-func TestIntelligentRoutingConfigIgnoresLegacyPricingAndKeepsTokenAccess(t *testing.T) {
+func TestIntelligentRoutingConfigIgnoresLegacyPricingFields(t *testing.T) {
 	var config IntelligentRoutingConfig
 	require.NoError(t, common.UnmarshalJsonStr(`{"global_channel_order":[1],"global_cost_group":"old","groups":[{"id":"pool","name":"Pool","cost_group":"old","discount_percent":100,"tax_rate_percent":8,"channel_order":[2]}]}`, &config))
 	require.NoError(t, ValidateIntelligentRoutingConfig(config))
@@ -39,8 +39,17 @@ func TestIntelligentRoutingConfigIgnoresLegacyPricingAndKeepsTokenAccess(t *test
 	assert.NotContains(t, serialized, "cost_group")
 	assert.NotContains(t, serialized, "discount_percent")
 	assert.NotContains(t, serialized, "tax_rate_percent")
-	config.TokenGroupAccess = map[int][]string{7: {"pool"}}
-	assert.True(t, TokenCanUseIntelligentRoutingGroupForConfig(config, 7, "pool"))
-	assert.False(t, TokenCanUseIntelligentRoutingGroupForConfig(config, 7, "another-pool"))
-	assert.False(t, TokenCanUseIntelligentRoutingGroupForConfig(config, 7, "unknown"))
+	assert.NotContains(t, serialized, "global_channel_order")
+	assert.NotContains(t, serialized, "token_group_access")
+}
+
+func TestIntelligentRoutingDefaultJSONNeedsNoGlobalChannelOrder(t *testing.T) {
+	const defaultJSON = `{"pricing_group_order":[],"groups":[]}`
+	require.NoError(t, ValidateIntelligentRoutingJSON(defaultJSON))
+
+	var config IntelligentRoutingConfig
+	require.NoError(t, common.UnmarshalJsonStr(defaultJSON, &config))
+	assert.Empty(t, config.PricingGroupOrder)
+	assert.Empty(t, config.Groups)
+	assert.Empty(t, IntelligentRoutingGroups(config))
 }

@@ -25,7 +25,7 @@ export const Route = createFileRoute(
     if (location.pathname !== '/system-settings/intelligent-routing') return
     throw redirect({
       to: '/system-settings/intelligent-routing/$section',
-      params: { section: 'global-priority' },
+      params: { section: 'resource-pools' },
       replace: true,
     })
   },

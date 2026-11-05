@@ -17,6 +17,7 @@
 | 服务主体 `sub` | Harness | ✅ `harness-gateway` |
 | 网关地址 | New API | ✅ `https://testapi.soloai.chat` |
 | 资源池 id（`chat` / `video` / `audio` / `plan`）与池内模型 id | New API | ✅ A3 动态返回；`video` / `audio` 渠道未接入，`models` 暂为空属预期 |
+| 路由配置：资源池渠道顺序是唯一路由顺序；`global_channel_order` / 全渠道优先级全局池与 `token_group_access` / 令牌授权已移除；`pricing_group_order` 仅决定采购分组资格与倍率（当前 `["default"]`，倍率 1），不是渠道路由顺序 | New API | ✅ 代码已改（未构建，待复验） |
 
 ---
 
@@ -98,6 +99,9 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?limit=1" \
 
 **执行方**：Harness
 
+`X-Route-Group` 仅对通过 Harness JWT 校验的调用方生效；本节使用 Harness JWT
+发起请求即属于该情形。普通 `chat` / `video` / `audio` 调用不应携带该头。
+
 ```bash
 # 缺失 X-Harness-Run-Id
 curl -sS -X POST "http://<gateway>/v1/chat/completions" \
@@ -152,6 +156,9 @@ curl -sS -X POST "http://<gateway>/v1/chat/completions" \
 - [ ] 若该池渠道尚未接入，返回渠道/模型不可用类错误属预期；记录实际 `code` 与 `message`
 - [ ] 被拒绝时不产生费用，也不产生 B1/B3 事件
 
+> `X-Route-Group` 只对通过 Harness JWT 校验的调用方生效，且只有 `plan` 有业务
+> 含义；普通 chat/video/audio 调用不传该头，落默认 `chat` 池。
+>
 > `video` / `audio` 池当前没有可用渠道，不在本轮调用验收范围内。它们只需在 A3
 > 中以 `models: []` 出现，不要求可调用。
 
@@ -378,6 +385,7 @@ curl -sS "http://<gateway>/internal/v1/gateway/cost-records?limit=10" \
 - [ ] 金额为**字符串**（非数字）
 - [ ] `status` 为 `settled` 或 `pending`
 - [ ] `total_amount` 等于 `base_amount × group_ratio`（**无税额乘数**）
+- [ ] 当前只有 `default` 采购分组，`pricing_group_order` 为 `["default"]`，因此 `group_ratio` 为 `1`
 - [ ] `tax_rate_percent` 为 `0`（已废弃字段，仅保留兼容；不参与计算）
 
 ---
@@ -567,3 +575,4 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?from=2026-10-01T00:0
 | 2026-10-25 | V0.9 | 初版 |
 | 2026-10-29 | V0.9.1 | A3 增加池字段与真实模型 id；调用示例改用真实模型 id；新增 2.4 关联头与资源池校验 |
 | 2026-11-05 | V0.10 | 前置条件与 A3 样例改为 `chat`/`video`/`audio`/`plan` 四个池；新增 2.5 `plan` 池校验；B3 校验改为 `total_amount = base_amount × group_ratio`，取消税率检查；说明 `video`/`audio` 暂不可调用 |
+| 2026-11-06 | V0.10（修订） | 前置条件补充路由配置：资源池是唯一路由顺序，全局池与令牌授权已移除，`pricing_group_order` 仅决定采购资格与倍率；2.4 / 2.5 明确 `X-Route-Group` 仅经验证 Harness 调用方可用且仅 `plan` 有业务含义；5.2 补充当前 `group_ratio = 1` |

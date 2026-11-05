@@ -44,8 +44,7 @@ func TestValidateIntelligentRoutingChannelsUsesAnyEnabledAbilityGroup(t *testing
 	require.NoError(t, db.Create(&channel).Error)
 	require.NoError(t, db.Create(&model.Ability{Group: "unrelated", Model: "gpt-4o", ChannelId: channel.Id, Enabled: true}).Error)
 	err = validateIntelligentRoutingChannels(setting.IntelligentRoutingConfig{
-		GlobalChannelOrder: []int{channel.Id},
-		Groups:             []setting.IntelligentRoutingGroup{{ID: "pool", Name: "Pool", ChannelOrder: []int{channel.Id}}},
+		Groups: []setting.IntelligentRoutingGroup{{ID: "pool", Name: "Pool", ChannelOrder: []int{channel.Id}}},
 	})
 	require.NoError(t, err)
 }
@@ -85,7 +84,6 @@ func TestNormalizeIntelligentRoutingChannelOrdersKeepsDisabledChannels(t *testin
 	channels, err := model.GetAllChannelsWithoutKeys()
 	require.NoError(t, err)
 	normalized := normalizeIntelligentRoutingChannelOrders(setting.IntelligentRoutingConfig{
-		GlobalChannelOrder: []int{deletedChannelID, disabled.Id, enabled.Id},
 		Groups: []setting.IntelligentRoutingGroup{
 			{ID: "mixed", Name: "Mixed", ChannelOrder: []int{deletedChannelID, enabled.Id}},
 			{ID: "disabled-only", Name: "Disabled only", ChannelOrder: []int{disabled.Id}},
@@ -93,7 +91,6 @@ func TestNormalizeIntelligentRoutingChannelOrdersKeepsDisabledChannels(t *testin
 	}, newIntelligentRoutingChannelInventory(channels))
 
 	// The deleted channel is gone; the disabled one keeps its position.
-	assert.Equal(t, []int{disabled.Id, enabled.Id}, normalized.GlobalChannelOrder)
 	require.Len(t, normalized.Groups, 2)
 	assert.Equal(t, "mixed", normalized.Groups[0].ID)
 	assert.Equal(t, []int{enabled.Id}, normalized.Groups[0].ChannelOrder)
@@ -102,36 +99,17 @@ func TestNormalizeIntelligentRoutingChannelOrdersKeepsDisabledChannels(t *testin
 	assert.Equal(t, []int{disabled.Id}, normalized.Groups[1].ChannelOrder)
 }
 
-// TestCloneTokenGroupAccessIsolatesLiveConfig guards a save-time aliasing bug:
-// pruning a stale pool must not mutate the live config's map, which previously
-// left the in-memory state disagreeing with the stored option.
-func TestCloneTokenGroupAccessIsolatesLiveConfig(t *testing.T) {
-	live := map[int][]string{
-		7: {"pool-a", "pool-b"},
-		8: {"pool-a"},
-	}
-	cloned := cloneTokenGroupAccess(live)
-	require.Equal(t, live, cloned)
-
-	// Mutating the clone the way a save does must leave the live map intact.
-	delete(cloned, 8)
-	cloned[7] = cloned[7][:1]
-
-	assert.Len(t, live, 2, "deleting a token from the clone must not touch the live map")
-	assert.Equal(t, []string{"pool-a", "pool-b"}, live[7], "truncating the clone must not shrink the live slice")
-	require.Contains(t, live, 8)
-	assert.Nil(t, cloneTokenGroupAccess(nil), "a nil grant map must stay nil")
-}
-
 func TestIntelligentRoutingAPIContractContainsChannelsWithoutPricing(t *testing.T) {
 	response, err := common.Marshal(intelligentRoutingResponse{
-		GlobalChannelOrder: []int{1},
-		Groups:             []setting.IntelligentRoutingGroup{{ID: "pool", Name: "Pool", ChannelOrder: []int{1}}},
-		Channels:           []intelligentRoutingChannel{{ID: 1, EnabledGroups: []intelligentRoutingAbilityGroup{{ID: "group-a", Label: "Group A"}}}},
+		Groups:   []setting.IntelligentRoutingGroup{{ID: "pool", Name: "Pool", ChannelOrder: []int{1}}},
+		Channels: []intelligentRoutingChannel{{ID: 1, EnabledGroups: []intelligentRoutingAbilityGroup{{ID: "group-a", Label: "Group A"}}}},
 	})
 	require.NoError(t, err)
 	json := string(response)
 	require.Contains(t, json, `"enabled_groups"`)
+	require.Contains(t, json, `"pricing_group_order"`)
+	require.NotContains(t, json, "global_channel_order")
+	require.NotContains(t, json, "token_group_access")
 	require.NotContains(t, json, "global_cost_group")
 	require.NotContains(t, json, "cost_group")
 	require.NotContains(t, json, "discount_percent")
@@ -582,11 +560,8 @@ func TestSetIntelligentRoutingResponseHeadersUsesCheckedPricingGroup(t *testing.
 	})
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"group-a":0.8,"group-b":0.8,"group-c":0.7}`))
 	oldConfig := setting.GetIntelligentRoutingConfig()
-	if oldConfig.GlobalChannelOrder == nil {
-		oldConfig.GlobalChannelOrder = []int{}
-	}
 	t.Cleanup(func() { require.NoError(t, setting.UpdateIntelligentRoutingConfig(oldConfig)) })
-	require.NoError(t, setting.UpdateIntelligentRoutingConfig(setting.IntelligentRoutingConfig{GlobalChannelOrder: []int{}, PricingGroupOrder: []string{"group-c", "group-a"}}))
+	require.NoError(t, setting.UpdateIntelligentRoutingConfig(setting.IntelligentRoutingConfig{PricingGroupOrder: []string{"group-c", "group-a"}}))
 
 	for _, ability := range []model.Ability{
 		{Group: "group-a", Model: "model-x", ChannelId: 42, Enabled: true},
@@ -600,7 +575,7 @@ func TestSetIntelligentRoutingResponseHeadersUsesCheckedPricingGroup(t *testing.
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	common.SetContextKey(c, setting.IntelligentRoutingContextKey, setting.IntelligentRoutingGlobalGroupID)
+	common.SetContextKey(c, setting.IntelligentRoutingContextKey, "pool")
 
 	channel := &model.Channel{Id: 42}
 	require.NoError(t, db.Create(channel).Error)

@@ -212,8 +212,6 @@ func SetApiRouter(router *gin.Engine) {
 		intelligentRoutingRoute := apiRouter.Group("/intelligent-routing", middleware.AdminAuth())
 		handlePermissionRoute(intelligentRoutingRoute, http.MethodGet, "", authz.IntelligentRoutingRead, controller.GetIntelligentRouting)
 		handlePermissionRoute(intelligentRoutingRoute, http.MethodPut, "", authz.IntelligentRoutingWrite, controller.UpdateIntelligentRouting)
-		handlePermissionRoute(intelligentRoutingRoute, http.MethodGet, "/token-access", authz.IntelligentRoutingRead, controller.GetIntelligentRoutingTokenAccess)
-		handlePermissionRoute(intelligentRoutingRoute, http.MethodPut, "/token-access/:id", authz.IntelligentRoutingWrite, controller.UpdateIntelligentRoutingTokenAccess)
 		apiRouter.GET("/harness/catalog", middleware.DisableCache(), middleware.TokenAuth(), controller.GetHarnessCatalog)
 		apiRouter.GET("/harness/settlements/:request_id", middleware.DisableCache(), middleware.TokenAuth(), controller.GetHarnessSettlement)
 		// The operator console reads the gateway ledger through a browser session

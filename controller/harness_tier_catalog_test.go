@@ -96,11 +96,9 @@ func setupHarnessTierCatalogTestDB(t *testing.T, channelsForPool map[string][]st
 	}
 	if len(channelOrder) > 0 {
 		payload, marshalErr := common.Marshal(struct {
-			GlobalChannelOrder []int            `json:"global_channel_order"`
-			Groups             []map[string]any `json:"groups"`
+			Groups []map[string]any `json:"groups"`
 		}{
-			GlobalChannelOrder: []int{},
-			Groups:             poolGroupsFromOrder(channelOrder, poolIDs),
+			Groups: poolGroupsFromOrder(channelOrder, poolIDs),
 		})
 		require.NoError(t, marshalErr)
 		common.OptionMapRWMutex.Lock()

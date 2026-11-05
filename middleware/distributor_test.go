@@ -454,14 +454,28 @@ func TestApplyHarnessResourcePoolLeavesPlainClientsAlone(t *testing.T) {
 // The platform selects which pool serves a model by sending the routing header.
 // The model id itself is never rewritten: the pool only changes the candidate
 // channel order.
+//
+// Pool selection needs no token-level grant: a verified Harness principal resolves
+// the header straight to the configured pool order, which is what channel
+// selection then consumes.
 func TestApplyHarnessResourcePoolHonoursTheRoutingHeader(t *testing.T) {
 	publishHarnessPools(t)
+	previousRouting := setting.GetIntelligentRoutingConfig()
+	t.Cleanup(func() { require.NoError(t, setting.UpdateIntelligentRoutingConfig(previousRouting)) })
+	require.NoError(t, setting.UpdateIntelligentRoutingConfig(setting.IntelligentRoutingConfig{
+		Groups: []setting.IntelligentRoutingGroup{{ID: "plan", Name: "Plan", ChannelOrder: []int{11, 12}}},
+	}))
+
 	c := harnessPoolContext(t, "deepseek-v4.1-flash", true, "plan")
 	request := &ModelRequest{Model: "deepseek-v4.1-flash"}
 
 	require.NoError(t, applyHarnessResourcePool(c, request))
 
-	assert.Equal(t, "plan", common.GetContextKeyString(c, setting.IntelligentRoutingContextKey))
+	poolID := common.GetContextKeyString(c, setting.IntelligentRoutingContextKey)
+	assert.Equal(t, "plan", poolID)
+	order, ok := setting.GetIntelligentRoutingGroupChannelOrder(poolID)
+	require.True(t, ok, "the selected pool must resolve to configured channels")
+	assert.Equal(t, []int{11, 12}, order)
 	assert.Equal(t, "deepseek-v4.1-flash", request.Model,
 		"the model id is dispatched exactly as the platform sent it")
 }

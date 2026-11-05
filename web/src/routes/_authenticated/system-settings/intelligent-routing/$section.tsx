@@ -32,7 +32,7 @@ export const Route = createFileRoute(
     ) {
       throw redirect({
         to: '/system-settings/intelligent-routing/$section',
-        params: { section: 'global-priority' },
+        params: { section: 'resource-pools' },
         replace: true,
       })
     }

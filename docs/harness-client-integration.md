@@ -1,9 +1,16 @@
 # Harness 调用方联调指南
 
-> **2026-11-05（V0.10）起本文的计费口径已过时。** 供应商税率已取消，B3 金额为
-> `total_amount = base_amount × group_ratio`；`X-Route-Tax-Rate-Percent` 不再返回，
-> `tax_rate_percent` 恒为 `0`（废弃字段）。资源池改为 `chat`（默认）/`video`/`audio`/`plan`，
-> 经济/企业档已取消，路由完全由网关决定。
+> **2026-11-05 / 11-06（V0.10）起本文的路由与计费口径已过时。** 供应商税率已取消，
+> B3 金额为 `total_amount = base_amount × group_ratio`；`X-Route-Tax-Rate-Percent`
+> 不再返回，`tax_rate_percent` 恒为 `0`（废弃字段）。资源池改为 `chat`（默认）/
+> `video`/`audio`/`plan`，经济/企业档已取消，路由完全由网关决定。
+>
+> 路由也已简化：`global_channel_order` / 「全渠道优先级」全局池与
+> `token_group_access` / 「令牌授权」均已移除，资源池的渠道顺序是唯一路由顺序。
+> `X-Route-Group` 仅对通过 Harness JWT 校验的调用方生效，且只有 `plan` 有业务
+> 含义；普通 chat/video/audio 调用不传该头，落默认 `chat` 池。
+> `pricing_group_order` 保留，但它只决定采购分组资格与 `group_ratio`，不是渠道
+> 路由顺序；当前仅 `["default"]`，倍率为 `1`。
 >
 > 当前对外契约以 `docs/harness-delivery/` 交付包（V0.10）为准；本文其余内容仅作历史参考。
 
@@ -12,9 +19,10 @@
 ## 接入前向 New API 团队获取
 
 - New API 的 HTTPS Base URL
-- 已启用、未限制模型范围，并已获智能路由授权的服务令牌
-- 本令牌可用的路由组 ID（也可从目录接口返回的 `groups[].id` 获取）
+- 已启用、未限制模型范围的服务令牌（**无需**按资源池做「令牌授权」）
 - 实例的展示币种（也可从目录接口返回的 `groups[].models[].pricing.currency` 获取）
+- 仅在使用畅用计划时，向 New API 团队确认 `X-Route-Group: plan` 的调用场景；
+  普通 chat/video/audio 调用不需要路由组 ID
 
 请将服务令牌保存在 Harness 服务端的密钥配置中，不要写入代码、提交记录或普通日志。Harness 无需调用 `/api/intelligent-routing` 等管理端接口。
 
@@ -29,7 +37,8 @@ curl --fail-with-body --silent --show-error \
   "${NEW_API_BASE_URL}/api/harness/catalog"
 ```
 
-成功响应的核心结构如下（具体模型和数值由当前实例返回）：
+以下为 V0.9 旧构建的结构样例（`global` 池已随 V0.10 移除；当前目录结构见
+V0.10 交付包，模型和数值以实例返回为准）：
 
 ```json
 {
@@ -131,20 +140,20 @@ billing_mode, billing_expr, billing_usage_schema, billing_usage_examples
 
 ### 1.6 其他接入要点
 
-- `groups` 仅包含当前服务令牌可访问的路由组；运行时应使用返回的 `id`，不要假设一定存在 `global`。
+- `groups` 仅包含已配置的资源池（`chat`/`video`/`audio`/`plan`）；不再有 `global` 池。运行时应使用返回的 `id`，不要假设池一定存在或可调用。
 - 使用 `groups[].models[].name` 作为请求模型名；`upstream_models` 是网关侧的上游映射信息，不是 Harness 应优先请求的模型名。
 - 只向用户展示或调用 `models` 中的模型。`unpriced_models` 仅用于诊断；这些模型不在可计价目录中，Harness 不应展示或请求。显式价格 `0` 与未配置价格不同，仍可能是有效的免费模型。
 - 按 `capabilities` 选择兼容的请求协议，例如 `openai`、`anthropic` 或 `gemini`。
 - 若模型带 `billing_plugin_variants`，不要假定该模型只有一个价格：每个变体的 `pricing` 与模型级 `pricing` 同构，**直接按该变体的 `pricing` 计费**。`tiered_expr` 变体必须用变体自己的 `expression` / `usage_schema`，不能用模型级价格代替。
 
-## 2. 发起带路由的模型请求
+## 2. 发起模型请求（默认 `chat` 池）
 
-每次 Harness 发起模型/任务提交请求时，都要选择一个目录中可用的路由组，并发送 `X-Route-Group`。已获智能路由授权的令牌漏传此头会得到 HTTP 403，不会静默回退到普通路由。模型列表和只读任务结果查询不要求该头。
+普通 chat/video/audio 调用**不传** `X-Route-Group`，网关会自动使用默认 `chat`
+池。无需按资源池授权，也不会因为缺少该头返回 403。
 
 ```bash
 curl --include --fail-with-body \
   -H "Authorization: Bearer ${NEW_API_TOKEN}" \
-  -H "X-Route-Group: global" \
   -H "Content-Type: application/json" \
   --data '{
     "model": "<model-name-from-catalog>",
@@ -153,17 +162,25 @@ curl --include --fail-with-body \
   "${NEW_API_BASE_URL}/v1/chat/completions"
 ```
 
-将 `global` 替换为本次要使用的 `groups[].id`。其他兼容协议沿用其原有请求路径与请求体，只需附加相同的路由头。
+只有畅用计划需要显式选择 `plan` 池；该头仅对通过 Harness JWT 校验的调用方生效：
+
+```bash
+  -H "X-Route-Group: plan"
+```
+
+其他兼容协议沿用其原有请求路径与请求体，普通调用同样不附加路由头。`global`
+已不是有效取值。
 
 ### WebSocket 客户端
 
-原生 WebSocket 浏览器接口不能设置自定义 HTTP 请求头。需要从浏览器发起 WebSocket 时，可将路由组作为 `Sec-WebSocket-Protocol` 子协议传入：
+原生 WebSocket 浏览器接口不能设置自定义 HTTP 请求头。需要从浏览器选择 `plan`
+池时，可将池 id 作为 `Sec-WebSocket-Protocol` 子协议传入：
 
 ```text
-openai-insecure-route-group.<group-id>
+openai-insecure-route-group.plan
 ```
 
-例如 `openai-insecure-route-group.global`。已有的 WebSocket 协议项和认证方式仍需保留。由于浏览器子协议中可能携带令牌，不要将长期服务令牌暴露给不受信任的客户端；优先由 Harness 服务端代发请求。
+已有的 WebSocket 协议项和认证方式仍需保留。由于浏览器子协议中可能携带令牌，不要将长期服务令牌暴露给不受信任的客户端；优先由 Harness 服务端代发请求。
 
 ## 3. 根据响应头记录实际路由与价格
 
@@ -171,11 +188,11 @@ openai-insecure-route-group.<group-id>
 
 | 响应头 | Harness 用途 |
 | --- | --- |
-| `X-Route-Group` | 本次实际使用的路由组 |
+| `X-Route-Group` | 本次实际使用的资源池（普通调用为 `chat`） |
 | `X-Route-Channel-ID` | 实际命中的上游渠道标识，用于追踪与核对 |
-| `X-Route-Pricing-Group-ID` | 实际命中的 New API 计价分组 |
-| `X-Route-Group-Ratio` | 本次路由适用的倍率/折扣系数 |
-| `X-Route-Tax-Rate-Percent` | 实际渠道的供应商税率（百分数） |
+| `X-Route-Pricing-Group-ID` | 实际命中的 New API 采购计价分组 |
+| `X-Route-Group-Ratio` | 该采购计价分组的倍率（当前为 `1`） |
+| `X-Route-Tax-Rate-Percent` | **已废弃，恒为 `0`**；供应商税率已取消 |
 | `X-Oneapi-Request-Id` | 与 New API 团队排障时使用的请求 ID |
 
 **分工边界**：基础价格来自 catalog，`X-Route-Group-Ratio` 和 `X-Route-Tax-Rate-Percent` **只从本次请求的响应头读取**。catalog 不返回这两项，Harness 也不应从其他来源缓存或推断。
@@ -327,20 +344,20 @@ token 算例：`final_cost = 1.80 × 0.8 × 1.065 = 1.5336 USD`
 | HTTP 状态 | 常见原因 | Harness 处理 |
 | --- | --- | --- |
 | `401` | 服务令牌无效或未发送 | 检查 Base URL 与 `Authorization: Bearer ...`；不要记录令牌值 |
-| `403` | 令牌未获路由授权、使用了模型受限令牌、缺少 `X-Route-Group`，或组 ID 不在授权范围内 | 检查目录中的 `groups[].id` 和令牌授权；不要自动移除路由头重试 |
-| `503` | 所选组当前没有可用渠道，或没有满足价格配置的路由 | 返回可诊断错误并联系 New API 团队；不要静默切换到普通路由 |
+| `403` | 使用了模型受限令牌，或显式请求了未配置的资源池（普通调用不应携带 `X-Route-Group`） | 检查请求模型是否在目录内；普通调用移除路由头后重试。不再存在按令牌的资源池授权 |
+| `503` | 所选资源池当前没有可用渠道，或没有满足价格配置的路由 | 返回可诊断错误并联系 New API 团队；不要静默切换到其他池 |
 
 建议联调顺序：
 
-1. 用服务令牌请求 catalog，确认返回 `200` 且至少有一个可用路由组和模型。
+1. 用服务令牌请求 catalog，确认返回 `200` 且 `chat` 池至少有一个可用模型。
 2. 检查 `pricing.mode` 是否在 `token`/`fixed`/`tiered_expr` 之内，确认 `pricing.currency` 与 Harness 账本币种是否一致。
-3. 用 catalog 返回的模型名与组 ID 发起一次非流式调用。
+3. 用 catalog 返回的模型名发起一次非流式调用，普通调用不携带 `X-Route-Group`。
 4. 保存并核对 `X-Route-*` 响应头及 `X-Oneapi-Request-Id`。
 5. 按 3.2 / 3.3 / 3.4 的算例手工复核一次 `final_cost`。
 6. 挑一个缺少 `cache_read` 的模型，确认实现按"未配置"处理而不是按 0。
 7. 验证流式调用也使用最终响应头；随后再测试重试和计价模式。
 
-排障时向 New API 团队提供请求时间、路由组 ID、模型名、HTTP 状态和 `X-Oneapi-Request-Id`；不要发送令牌值。
+排障时向 New API 团队提供请求时间、资源池 id（如使用 `plan`）、模型名、HTTP 状态和 `X-Oneapi-Request-Id`；不要发送令牌值。
 
 ## 5. 待确认
 
@@ -441,8 +458,8 @@ curl --fail-with-body --silent --show-error \
 2. **异步任务全程用同一个 ID 查询。** 提交任务时拿到的 `X-Oneapi-Request-Id` 会一直有效，任务完成或退款后同一行状态会更新。**不需要再保存 `task_id`，也不需要轮询任务表。**
 3. **越权访问返回 404，不是 403。** 服务令牌只能查询自己产生的请求；查询别人的请求与查询不存在的 ID 返回完全相同的结果。
 4. **历史数据不回溯。** 结算表只记录上线之后的请求；上线前的调用查不到。
-5. **金额已包含采购折扣与税点。** `total_amount` 是最终采购成本，Harness **不要再乘 `X-Route-Group-Ratio` 或加税**，否则会重复计算。响应头那组值仅用于展示与核对。
-6. **`total_amount` 与内部扣额是两个概念。** New API 内部扣额按用户分组计费，`total_amount` 按供应商采购分组与税点计费，二者通常不相等，不要混用。
+5. **金额已包含采购分组倍率。** `total_amount` 是最终采购成本，Harness **不要再乘 `X-Route-Group-Ratio` 或加税**（税额已取消），否则会重复计算。响应头那组值仅用于展示与核对。
+6. **`total_amount` 与内部扣额是两个概念。** New API 内部扣额按用户分组计费，`total_amount` 按采购计价分组倍率计费（税额已取消），二者通常不相等，不要混用。
 7. **这是按 New API 已配置的采购规则算出的成本，不自动等于供应商最终账单。** 实际对账仍需与上游账单核对。
 
 ### 6.7 错误响应

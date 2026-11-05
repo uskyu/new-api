@@ -14,7 +14,6 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
-	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
@@ -644,70 +643,7 @@ func TokenAuth() func(c *gin.Context) {
 		if err != nil {
 			return
 		}
-		requestedGroup := strings.TrimSpace(c.GetHeader(setting.IntelligentRoutingGroupHeader))
-		if !enforceAuthorizedRoutingGroupHeader(c, token.Id, requestedGroup) {
-			return
-		}
-		if requestedGroup != "" {
-			if token.ModelLimitsEnabled {
-				abortWithOpenAiMessage(c, http.StatusForbidden, "request-level resource pool selection requires a full-model service token", types.ErrorCodeAccessDenied)
-				return
-			}
-			if !setting.TokenHasIntelligentRoutingAccess(token.Id) {
-				abortWithOpenAiMessage(c, http.StatusForbidden, "token is not configured for intelligent routing", types.ErrorCodeAccessDenied)
-				return
-			}
-			if err := applyIntelligentRoutingGroup(c, token, userCache.Group, requestedGroup); err != nil {
-				abortWithOpenAiMessage(c, http.StatusForbidden, err.Error(), types.ErrorCodeAccessDenied)
-				return
-			}
-		}
 		c.Next()
-	}
-}
-
-func enforceAuthorizedRoutingGroupHeader(c *gin.Context, tokenID int, requestedGroup string) bool {
-	if !requiresRoutingGroupHeader(c) || !setting.TokenHasIntelligentRoutingAccess(tokenID) || strings.TrimSpace(requestedGroup) != "" {
-		return true
-	}
-	abortWithOpenAiMessage(c, http.StatusForbidden,
-		"this token requires X-Route-Group for routed requests; choose an authorized resource pool",
-		types.ErrorCodeAccessDenied)
-	return false
-}
-
-func requiresRoutingGroupHeader(c *gin.Context) bool {
-	if c == nil || c.Request == nil || c.GetString(RouteTagKey) != "relay" {
-		return false
-	}
-	// A verified Harness caller must never be asked for a resource-pool header:
-	// the contract leaves grouping entirely to the gateway, which resolves the
-	// requested tier into a pool during dispatch. Keeping this exemption here (and
-	// only for Harness) preserves the rule for every ordinary API token.
-	if _, verified := GetHarnessPrincipal(c); verified {
-		return false
-	}
-	if value, exists := c.Get(pluginruntime.ContextKeyPinnedRoute); exists {
-		if pinned, ok := value.(pluginruntime.PinnedRoute); ok {
-			switch pinned.Route.Type {
-			case pluginruntime.RouteTypeQuery:
-				return false
-			case pluginruntime.RouteTypeSubmit, pluginruntime.RouteTypeDynamic:
-				return true
-			}
-		}
-	}
-	switch c.Request.Method {
-	case http.MethodGet:
-		return c.Request.URL.Path == "/v1/responses" || c.Request.URL.Path == "/v1/realtime"
-	case http.MethodPost:
-		path := c.Request.URL.Path
-		if path == "/v1/images/variations" || path == "/v1/files" || strings.HasPrefix(path, "/v1/fine-tunes") {
-			return false
-		}
-		return !strings.HasSuffix(path, "/mj/task/list-by-condition")
-	default:
-		return false
 	}
 }
 
@@ -756,17 +692,6 @@ func apiKeyFromWebSocketSubprotocol(protocols string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func applyIntelligentRoutingGroup(c *gin.Context, token *model.Token, _ string, requestedGroup string) error {
-	if _, exists := setting.GetIntelligentRoutingGroupChannelOrder(requestedGroup); !exists {
-		return errors.New("requested resource pool is not configured")
-	}
-	if !setting.TokenCanUseIntelligentRoutingGroup(token.Id, requestedGroup) {
-		return errors.New("token is not authorized for the requested resource pool")
-	}
-	common.SetContextKey(c, setting.IntelligentRoutingContextKey, requestedGroup)
-	return nil
 }
 
 func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) error {

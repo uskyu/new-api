@@ -56,7 +56,7 @@ func Distribute() func(c *gin.Context) {
 		// the routing header; the model id itself always comes from the platform
 		// and is never rewritten here.
 		if err := applyHarnessResourcePool(c, modelRequest); err != nil {
-			abortWithOpenAiMessage(c, http.StatusBadRequest, err.Error(), types.ErrorCodeInvalidRequest)
+			abortWithOpenAiMessage(c, http.StatusForbidden, err.Error(), types.ErrorCodeAccessDenied)
 			return
 		}
 		_, pinned, _ := constraints.ResolvedPin()
@@ -166,7 +166,7 @@ func applyHarnessResourcePool(c *gin.Context, modelRequest *ModelRequest) error 
 		return nil
 	}
 	if !setting.GetHarnessCatalogConfig().IsResourcePool(requested) {
-		return fmt.Errorf("requested resource pool %q is not available", requested)
+		return fmt.Errorf("requested resource pool %q is not configured", requested)
 	}
 	common.SetContextKey(c, setting.IntelligentRoutingContextKey, requested)
 	return nil

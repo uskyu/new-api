@@ -16,9 +16,6 @@ func TestHarnessPricingGroupOptInAndPriority(t *testing.T) {
 	oldDB := DB
 	oldCache := common.MemoryCacheEnabled
 	oldConfig := setting.GetIntelligentRoutingConfig()
-	if oldConfig.GlobalChannelOrder == nil {
-		oldConfig.GlobalChannelOrder = []int{}
-	}
 	oldRatios := ratio_setting.GroupRatio2JSONString()
 
 	channelSyncLock.RLock()
@@ -71,9 +68,9 @@ func TestHarnessPricingGroupOptInAndPriority(t *testing.T) {
 	InitChannelCache()
 
 	config := setting.IntelligentRoutingConfig{
-		GlobalChannelOrder: []int{channelA.Id, channelB.Id},
-		PricingGroupOrder:  []string{"c", "b"},
+		PricingGroupOrder: []string{"c", "b"},
 	}
+	channelOrder := []int{channelA.Id, channelB.Id}
 	require.NoError(t, setting.UpdateIntelligentRoutingConfig(config))
 	groups, err := GetEnabledAbilityGroupsForChannelModel(channelA.Id, "model-x")
 	require.NoError(t, err)
@@ -83,22 +80,22 @@ func TestHarnessPricingGroupOptInAndPriority(t *testing.T) {
 	require.True(t, eligible)
 	require.Equal(t, "b", group)
 
-	chosen, err := GetRandomSatisfiedChannelWithPricingGroups("global", "default", "model-x", 0, []dto.ChannelFilter{}, config.GlobalChannelOrder)
+	chosen, err := GetRandomSatisfiedChannelWithPricingGroups("global", "default", "model-x", 0, []dto.ChannelFilter{}, channelOrder)
 	require.NoError(t, err)
 	require.Equal(t, channelA.Id, chosen.Id)
 
 	config.PricingGroupOrder = []string{"c"}
 	require.NoError(t, setting.UpdateIntelligentRoutingConfig(config))
-	chosen, err = GetRandomSatisfiedChannelWithPricingGroups("global", "default", "model-x", 0, []dto.ChannelFilter{}, config.GlobalChannelOrder)
+	chosen, err = GetRandomSatisfiedChannelWithPricingGroups("global", "default", "model-x", 0, []dto.ChannelFilter{}, channelOrder)
 	require.NoError(t, err)
 	require.Equal(t, channelB.Id, chosen.Id)
-	chosen, err = GetRandomSatisfiedChannelWithPricingGroups("global", "default", "model-x", 1, []dto.ChannelFilter{}, config.GlobalChannelOrder)
+	chosen, err = GetRandomSatisfiedChannelWithPricingGroups("global", "default", "model-x", 1, []dto.ChannelFilter{}, channelOrder)
 	require.NoError(t, err)
 	require.Nil(t, chosen)
 
 	config.PricingGroupOrder = []string{}
 	require.NoError(t, setting.UpdateIntelligentRoutingConfig(config))
-	chosen, err = GetRandomSatisfiedChannelWithPricingGroups("global", "default", "model-x", 0, []dto.ChannelFilter{}, config.GlobalChannelOrder)
+	chosen, err = GetRandomSatisfiedChannelWithPricingGroups("global", "default", "model-x", 0, []dto.ChannelFilter{}, channelOrder)
 	require.NoError(t, err)
 	require.Nil(t, chosen)
 }

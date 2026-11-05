@@ -542,7 +542,7 @@ func TestApplyWebSocketSubprotocolAuthorizationSetsRoutingGroup(t *testing.T) {
 
 	assert.True(t, applyWebSocketSubprotocolAuthorization(header))
 	assert.Equal(t, "Bearer sk-test", header.Get("Authorization"))
-	assert.Equal(t, setting.IntelligentRoutingGlobalGroupID, header.Get(setting.IntelligentRoutingGroupHeader))
+	assert.Equal(t, "global", header.Get(setting.IntelligentRoutingGroupHeader))
 }
 
 func TestApplyWebSocketSubprotocolAuthorizationKeepsExplicitRoutingHeader(t *testing.T) {
@@ -552,24 +552,6 @@ func TestApplyWebSocketSubprotocolAuthorizationKeepsExplicitRoutingHeader(t *tes
 
 	assert.False(t, applyWebSocketSubprotocolAuthorization(header))
 	assert.Equal(t, "pool", header.Get(setting.IntelligentRoutingGroupHeader))
-}
-
-func TestAuthorizedRoutingWebSocketAcceptsGroupSubprotocol(t *testing.T) {
-	setupAuthorizedRoutingHeaderTest(t)
-	previousMode := gin.Mode()
-	gin.SetMode(gin.TestMode)
-	t.Cleanup(func() { gin.SetMode(previousMode) })
-
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/realtime", nil)
-	ctx.Request.Header.Set("Sec-WebSocket-Protocol", "realtime, openai-insecure-api-key.sk-test, openai-insecure-route-group.global")
-	ctx.Set(RouteTagKey, "relay")
-
-	assert.True(t, applyWebSocketSubprotocolAuthorization(ctx.Request.Header))
-	requestedGroup := ctx.Request.Header.Get(setting.IntelligentRoutingGroupHeader)
-	require.True(t, enforceAuthorizedRoutingGroupHeader(ctx, 77, requestedGroup))
-	require.NoError(t, applyIntelligentRoutingGroup(ctx, &model.Token{Id: 77}, "default", requestedGroup))
 }
 
 func TestRoutingGroupFromWebSocketSubprotocolRejectsAmbiguousValues(t *testing.T) {

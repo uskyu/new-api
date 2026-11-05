@@ -4,7 +4,6 @@ import (
 	"math"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -22,7 +21,6 @@ import (
 )
 
 type intelligentRoutingResponse struct {
-	GlobalChannelOrder  []int                             `json:"global_channel_order"`
 	PricingGroupOrder   []string                          `json:"pricing_group_order"`
 	PricingGroupOptions []pricingGroupOption              `json:"pricing_group_options"`
 	Groups              []setting.IntelligentRoutingGroup `json:"groups"`
@@ -58,7 +56,6 @@ func GetIntelligentRouting(c *gin.Context) {
 	routingConfig := setting.GetIntelligentRoutingConfig()
 	inventory := newIntelligentRoutingChannelInventory(channels)
 	response := intelligentRoutingResponse{
-		GlobalChannelOrder:  keepKnownRoutingChannelIDs(routingConfig.GlobalChannelOrder, inventory.known),
 		PricingGroupOrder:   routingConfig.PricingGroupOrder,
 		PricingGroupOptions: make([]pricingGroupOption, 0),
 		Groups:              keepKnownRoutingGroups(routingConfig.Groups, inventory.known),
@@ -150,19 +147,6 @@ func keepKnownRoutingChannelIDs(channelIDs []int, known map[int]struct{}) []int 
 	return kept
 }
 
-// cloneTokenGroupAccess deep-copies token routing grants so a save can prune
-// stale pools without mutating the live config the caller handed us.
-func cloneTokenGroupAccess(access map[int][]string) map[int][]string {
-	if access == nil {
-		return nil
-	}
-	cloned := make(map[int][]string, len(access))
-	for tokenID, groups := range access {
-		cloned[tokenID] = slices.Clone(groups)
-	}
-	return cloned
-}
-
 func keepKnownRoutingGroups(groups []setting.IntelligentRoutingGroup, known map[int]struct{}) []setting.IntelligentRoutingGroup {
 	kept := make([]setting.IntelligentRoutingGroup, 0, len(groups))
 	for _, group := range groups {
@@ -179,9 +163,6 @@ func keepKnownRoutingGroups(groups []setting.IntelligentRoutingGroup, known map[
 // was deleted; a pool submitted without any channel keeps its identity so
 // validation can report it.
 func normalizeIntelligentRoutingChannelOrders(config setting.IntelligentRoutingConfig, inventory intelligentRoutingChannelInventory) setting.IntelligentRoutingConfig {
-	if config.GlobalChannelOrder != nil {
-		config.GlobalChannelOrder = keepKnownRoutingChannelIDs(config.GlobalChannelOrder, inventory.known)
-	}
 	keptGroups := make([]setting.IntelligentRoutingGroup, 0, len(config.Groups))
 	for _, group := range config.Groups {
 		if len(group.ChannelOrder) > 0 {
@@ -197,9 +178,8 @@ func normalizeIntelligentRoutingChannelOrders(config setting.IntelligentRoutingC
 }
 
 type updateIntelligentRoutingRequest struct {
-	GlobalChannelOrder []int                             `json:"global_channel_order"`
-	PricingGroupOrder  *[]string                         `json:"pricing_group_order"`
-	Groups             []setting.IntelligentRoutingGroup `json:"groups"`
+	PricingGroupOrder *[]string                         `json:"pricing_group_order"`
+	Groups            []setting.IntelligentRoutingGroup `json:"groups"`
 }
 
 func UpdateIntelligentRouting(c *gin.Context) {
@@ -213,9 +193,8 @@ func UpdateIntelligentRouting(c *gin.Context) {
 		pricingOrder = *request.PricingGroupOrder
 	}
 	config := setting.IntelligentRoutingConfig{
-		GlobalChannelOrder: request.GlobalChannelOrder,
-		PricingGroupOrder:  pricingOrder,
-		Groups:             request.Groups,
+		PricingGroupOrder: pricingOrder,
+		Groups:            request.Groups,
 	}
 	if err := setting.ValidateIntelligentRoutingConfig(config); err != nil {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage(err.Error()))
@@ -227,10 +206,6 @@ func UpdateIntelligentRouting(c *gin.Context) {
 			return
 		}
 	}
-	if config.GlobalChannelOrder == nil {
-		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("global_channel_order must be provided"))
-		return
-	}
 	channels, err := model.GetAllChannelsWithoutKeys()
 	if err != nil {
 		common.ApiError(c, err)
@@ -241,25 +216,6 @@ func UpdateIntelligentRouting(c *gin.Context) {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage(err.Error()))
 		return
 	}
-	previousConfig := setting.GetIntelligentRoutingConfig()
-	// Clone before filtering: TokenGroupAccess is a map and its slices would
-	// otherwise alias the live config, so deleting a stale pool here would
-	// mutate the in-memory state while the stored option kept the old entries.
-	config.TokenGroupAccess = cloneTokenGroupAccess(previousConfig.TokenGroupAccess)
-	allowedGroups := setting.IntelligentRoutingGroups(config)
-	for tokenID, tokenGroups := range config.TokenGroupAccess {
-		filtered := make([]string, 0, len(tokenGroups))
-		for _, tokenGroup := range tokenGroups {
-			if _, exists := allowedGroups[tokenGroup]; exists {
-				filtered = append(filtered, tokenGroup)
-			}
-		}
-		if len(filtered) == 0 {
-			delete(config.TokenGroupAccess, tokenID)
-		} else {
-			config.TokenGroupAccess[tokenID] = filtered
-		}
-	}
 	routingJSON, err := setting.IntelligentRoutingConfig2JSONString(config)
 	if err != nil {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage(err.Error()))
@@ -269,7 +225,7 @@ func UpdateIntelligentRouting(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, gin.H{"global_channel_order": config.GlobalChannelOrder, "pricing_group_order": config.PricingGroupOrder, "groups": config.Groups})
+	common.ApiSuccess(c, gin.H{"pricing_group_order": config.PricingGroupOrder, "groups": config.Groups})
 }
 
 // validateIntelligentRoutingChannels rejects stored orders that reference a
@@ -279,6 +235,10 @@ func UpdateIntelligentRouting(c *gin.Context) {
 // filtered out later, at read time and at channel-selection time
 // (model.GetRandomSatisfiedChannelWithPricingGroups). Rejecting it here would
 // make every later save fail until the administrator removes the channel.
+//
+// An empty pool is valid: the catalog advertises video/audio/plan while their
+// channels are still being configured, and the platform must be able to see
+// that product line before it can route anything.
 func validateIntelligentRoutingChannels(config setting.IntelligentRoutingConfig) error {
 	channels, err := model.GetAllChannelsWithoutKeys()
 	if err != nil {
@@ -290,15 +250,7 @@ func validateIntelligentRoutingChannels(config setting.IntelligentRoutingConfig)
 			channelByID[channel.Id] = struct{}{}
 		}
 	}
-	for _, channelID := range config.GlobalChannelOrder {
-		if _, exists := channelByID[channelID]; !exists {
-			return common.NewMessage("Global order contains an unknown channel ID")
-		}
-	}
 	for _, group := range config.Groups {
-		if len(group.ChannelOrder) == 0 {
-			return common.NewMessage("Each resource pool must contain at least one channel")
-		}
 		for _, channelID := range group.ChannelOrder {
 			if _, exists := channelByID[channelID]; !exists {
 				return common.NewMessage("Resource pool contains an unknown channel ID")
@@ -306,90 +258,6 @@ func validateIntelligentRoutingChannels(config setting.IntelligentRoutingConfig)
 		}
 	}
 	return nil
-}
-
-type tokenRoutingAccessResponse struct {
-	TokenID   int      `json:"token_id"`
-	TokenName string   `json:"token_name"`
-	Groups    []string `json:"groups"`
-}
-
-type updateTokenRoutingAccessRequest struct {
-	Groups []string `json:"groups"`
-}
-
-func GetIntelligentRoutingTokenAccess(c *gin.Context) {
-	config := setting.GetIntelligentRoutingConfig()
-	tokenIDs := make([]int, 0, len(config.TokenGroupAccess))
-	for tokenID := range config.TokenGroupAccess {
-		tokenIDs = append(tokenIDs, tokenID)
-	}
-	slices.Sort(tokenIDs)
-	items := make([]tokenRoutingAccessResponse, 0, len(tokenIDs))
-	for _, tokenID := range tokenIDs {
-		token, err := model.GetTokenById(tokenID)
-		if err != nil {
-			continue
-		}
-		items = append(items, tokenRoutingAccessResponse{TokenID: tokenID, TokenName: token.Name, Groups: config.TokenGroupAccess[tokenID]})
-	}
-	common.ApiSuccess(c, gin.H{"items": items})
-}
-
-func UpdateIntelligentRoutingTokenAccess(c *gin.Context) {
-	tokenID, err := strconv.Atoi(c.Param("id"))
-	if err != nil || tokenID <= 0 {
-		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid token ID"))
-		return
-	}
-	token, err := model.GetTokenById(tokenID)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	var request updateTokenRoutingAccessRequest
-	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
-		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid parameters"))
-		return
-	}
-	config := setting.GetIntelligentRoutingConfig()
-	allowedGroups := setting.IntelligentRoutingGroups(config)
-	seen := make(map[string]struct{}, len(request.Groups))
-	for _, group := range request.Groups {
-		if _, allowed := allowedGroups[group]; !allowed {
-			common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Unknown resource pool: "+group))
-			return
-		}
-		if _, duplicate := seen[group]; duplicate {
-			common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Duplicate resource pool: "+group))
-			return
-		}
-		seen[group] = struct{}{}
-	}
-	access := config.TokenGroupAccess
-	if access == nil {
-		access = make(map[int][]string)
-	}
-	if len(request.Groups) == 0 {
-		delete(access, tokenID)
-	} else {
-		access[tokenID] = slices.Clone(request.Groups)
-	}
-	config.TokenGroupAccess = access
-	serialized, err := setting.IntelligentRoutingConfig2JSONString(config)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	if err := model.UpdateOption(setting.IntelligentRoutingOptionKey, serialized); err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	params := tokenAuditParams(c)
-	params["token_id"] = tokenID
-	params["groups"] = request.Groups
-	recordManageAudit(c, "intelligent-routing.token-access.update", params)
-	common.ApiSuccess(c, tokenRoutingAccessResponse{TokenID: tokenID, TokenName: token.Name, Groups: request.Groups})
 }
 
 // GetHarnessCatalog returns only the logical model and cost data needed by Harness.
@@ -582,19 +450,6 @@ func GetHarnessCatalog(c *gin.Context) {
 		return
 	}
 	routing := setting.GetIntelligentRoutingConfig()
-	authorizedGroups := routing.TokenGroupAccess[token.Id]
-	if len(authorizedGroups) == 0 {
-		common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage("Token has no authorized resource pools"))
-		return
-	}
-	authorizedSet := make(map[string]struct{}, len(authorizedGroups))
-	for _, groupID := range authorizedGroups {
-		authorizedSet[groupID] = struct{}{}
-	}
-	if len(authorizedSet) == 0 {
-		common.ApiErrorStatus(c, http.StatusForbidden, common.NewMessage("Token has no resource pools available"))
-		return
-	}
 	channels, err := model.GetAllChannelsWithoutKeys()
 	if err != nil {
 		common.ApiError(c, err)
@@ -684,38 +539,11 @@ func GetHarnessCatalog(c *gin.Context) {
 		}
 	}
 	for _, group := range routing.Groups {
-		if _, allowed := authorizedSet[group.ID]; !allowed {
-			continue
-		}
 		collectGroupModels(group.ID, group.ChannelOrder)
 	}
-	if routing.GlobalChannelOrder != nil {
-		if _, allowed := authorizedSet[setting.IntelligentRoutingGlobalGroupID]; allowed {
-			collectGroupModels(setting.IntelligentRoutingGlobalGroupID, routing.GlobalChannelOrder)
-		}
-	}
 
-	response := harnessCatalogResponse{Groups: make([]harnessCatalogGroup, 0, len(authorizedGroups))}
-	if routing.GlobalChannelOrder != nil {
-		if _, allowed := authorizedSet[setting.IntelligentRoutingGlobalGroupID]; allowed {
-			models, unpricedModels := buildHarnessCatalogModels(
-				groupModels[setting.IntelligentRoutingGlobalGroupID],
-				groupPricingByGroup[setting.IntelligentRoutingGlobalGroupID],
-				groupRoutePricingByGroup[setting.IntelligentRoutingGlobalGroupID],
-				pluginGeneration,
-			)
-			response.Groups = append(response.Groups, harnessCatalogGroup{
-				ID:             setting.IntelligentRoutingGlobalGroupID,
-				Name:           setting.IntelligentRoutingGlobalGroupName,
-				Models:         models,
-				UnpricedModels: unpricedModels,
-			})
-		}
-	}
+	response := harnessCatalogResponse{Groups: make([]harnessCatalogGroup, 0, len(routing.Groups))}
 	for _, group := range routing.Groups {
-		if _, allowed := authorizedSet[group.ID]; !allowed {
-			continue
-		}
 		models, unpricedModels := buildHarnessCatalogModels(
 			groupModels[group.ID],
 			groupPricingByGroup[group.ID],

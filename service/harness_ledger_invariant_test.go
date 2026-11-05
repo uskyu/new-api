@@ -41,13 +41,7 @@ func seedHarnessLedgerChannel(t *testing.T, modelName, group string, groupRatio 
 
 	originalRouting := setting.GetIntelligentRoutingConfig()
 	t.Cleanup(func() {
-		// The validator rejects a nil global channel order, and an unconfigured
-		// instance starts that way, so restore an empty non-nil list instead.
-		restored := originalRouting
-		if restored.GlobalChannelOrder == nil {
-			restored.GlobalChannelOrder = []int{}
-		}
-		require.NoError(t, setting.UpdateIntelligentRoutingConfig(restored))
+		require.NoError(t, setting.UpdateIntelligentRoutingConfig(originalRouting))
 	})
 
 	channel := &model.Channel{
@@ -69,10 +63,7 @@ func seedHarnessLedgerChannel(t *testing.T, modelName, group string, groupRatio 
 		model.DB.Exec("DELETE FROM abilities WHERE channel_id = ?", channel.Id)
 	})
 
-	// The routing config validator requires a non-nil global channel order, so the
-	// fixture registers its own channel there rather than leaving the list empty.
 	routing := originalRouting
-	routing.GlobalChannelOrder = []int{channel.Id}
 	routing.PricingGroupOrder = append(append([]string{}, originalRouting.PricingGroupOrder...), group)
 	require.NoError(t, setting.UpdateIntelligentRoutingConfig(routing))
 	return channel.Id

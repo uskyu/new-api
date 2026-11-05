@@ -149,14 +149,19 @@ B3 成本记录按第四轮冻结的字段表**不返回** `run_id`，但账本�
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `base_amount` | **string** | 采购基础金额（客户分组倍率影响之前） |
-| `group_ratio` | float | 采购分组倍率（由网关按实际服务的资源池决定，Harness 不参与选择） |
+| `group_ratio` | float | 采购计价分组倍率（来自 `pricing_group_order` 命中的分组，与资源池、渠道路由顺序无关；Harness 不参与选择） |
 | `tax_rate_percent` | float | **恒为 `0`，已废弃（legacy）**。供应商税率已取消，保留字段仅为兼容旧解析器，后续版本移除 |
 | `total_amount` | **string** | 最终采购成本 |
 
 **金额必须是字符串十进制**，不可当 float 解析——十进制精度会在转换中丢失。
 
-样例中 `group_ratio = 1`（无采购折扣），因此 `total_amount` 等于 `base_amount`；
-`tax_rate_percent` 恒为 `0`，是废弃字段。
+样例中 `group_ratio = 1`（当前只有 `default` 一个采购分组，无采购折扣），因此
+`total_amount` 等于 `base_amount`；`tax_rate_percent` 恒为 `0`，是废弃字段。
+
+**计价分组优先级不是渠道路由顺序。** `pricing_group_order` 决定哪些
+渠道+模型能力具备采购分组资格，并提供该能力的 `group_ratio`；它不决定请求落到
+哪个资源池，也不决定池内渠道的先后。资源池的渠道顺序才是唯一的路由顺序。当前
+配置为单分组 `["default"]`，倍率 `1`，因此正常情况下 `group_ratio` 恒为 `1`。
 
 ### 3.2 金额计算口径
 
@@ -296,3 +301,4 @@ Harness 更新自己的账本时应：
 | 2026-10-25 | V0.9 | 初版 |
 | 2026-10-29 | V0.9.1 | 明确 `run_id` 必填且 ≤64、缺失时调用被拒绝；说明 B3 不返回 `run_id` 但账本仍存储 |
 | 2026-11-05 | V0.10 | 金额口径改为 `total_amount = base_amount × group_ratio`，取消供应商税率；`tax_rate_percent` 恒 0 并标记废弃；事件类型判定去掉税率项；补充 `group_ratio` 由网关按资源池决定 |
+| 2026-11-06 | V0.10（修订） | 更正 `group_ratio` 来源：来自采购计价分组 `pricing_group_order`，不由资源池决定；明确计价分组优先级是采购资格/倍率分组，不是渠道路由顺序；当前单 `default` 分组、倍率 1 |

@@ -11,10 +11,8 @@ import (
 )
 
 const (
-	IntelligentRoutingOptionKey       = "IntelligentRouting"
-	IntelligentRoutingContextKey      = "intelligent_routing_group"
-	IntelligentRoutingGlobalGroupID   = "global"
-	IntelligentRoutingGlobalGroupName = "Global priority"
+	IntelligentRoutingOptionKey  = "IntelligentRouting"
+	IntelligentRoutingContextKey = "intelligent_routing_group"
 
 	IntelligentRoutingGroupHeader        = "X-Route-Group"
 	IntelligentRoutingChannelIDHeader    = "X-Route-Channel-ID"
@@ -29,19 +27,15 @@ type IntelligentRoutingGroup struct {
 }
 
 type IntelligentRoutingConfig struct {
-	GlobalChannelOrder []int                     `json:"global_channel_order"`
-	PricingGroupOrder  []string                  `json:"pricing_group_order"`
-	Groups             []IntelligentRoutingGroup `json:"groups"`
-	TokenGroupAccess   map[int][]string          `json:"token_group_access,omitempty"`
+	PricingGroupOrder []string                  `json:"pricing_group_order"`
+	Groups            []IntelligentRoutingGroup `json:"groups"`
 }
 
 var (
 	intelligentRoutingMu          sync.RWMutex
 	intelligentRoutingPricingRank = make(map[string]int)
 	intelligentRoutingConfig      = IntelligentRoutingConfig{
-		GlobalChannelOrder: nil,
-		Groups:             []IntelligentRoutingGroup{},
-		TokenGroupAccess:   make(map[int][]string),
+		Groups: []IntelligentRoutingGroup{},
 	}
 	intelligentRoutingGroupIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 )
@@ -61,49 +55,9 @@ func GetIntelligentRoutingPricingGroupRank(groupID string) (int, bool) {
 	return rank, ok
 }
 
-func TokenHasIntelligentRoutingAccess(tokenID int) bool {
-	intelligentRoutingMu.RLock()
-	defer intelligentRoutingMu.RUnlock()
-	return len(intelligentRoutingConfig.TokenGroupAccess[tokenID]) > 0
-}
-
-func TokenCanUseIntelligentRoutingGroup(tokenID int, groupID string) bool {
-	intelligentRoutingMu.RLock()
-	defer intelligentRoutingMu.RUnlock()
-	return tokenCanUseIntelligentRoutingGroup(intelligentRoutingConfig, tokenID, groupID)
-}
-
-func tokenCanUseIntelligentRoutingGroup(config IntelligentRoutingConfig, tokenID int, groupID string) bool {
-	return slices.Contains(config.TokenGroupAccess[tokenID], groupID) && intelligentRoutingGroupExists(config, groupID)
-}
-
-func TokenCanUseIntelligentRoutingGroupForConfig(config IntelligentRoutingConfig, tokenID int, groupID string) bool {
-	return tokenCanUseIntelligentRoutingGroup(config, tokenID, groupID)
-}
-
-func intelligentRoutingGroupExists(config IntelligentRoutingConfig, groupID string) bool {
-	if groupID == IntelligentRoutingGlobalGroupID {
-		return config.GlobalChannelOrder != nil
-	}
-	for _, group := range config.Groups {
-		if group.ID == groupID {
-			return true
-		}
-	}
-	return false
-}
-
 func GetIntelligentRoutingGroupChannelOrder(groupID string) ([]int, bool) {
 	intelligentRoutingMu.RLock()
 	defer intelligentRoutingMu.RUnlock()
-	if groupID == IntelligentRoutingGlobalGroupID {
-		if intelligentRoutingConfig.GlobalChannelOrder == nil {
-			return nil, false
-		}
-		order := make([]int, len(intelligentRoutingConfig.GlobalChannelOrder))
-		copy(order, intelligentRoutingConfig.GlobalChannelOrder)
-		return order, true
-	}
 	for _, group := range intelligentRoutingConfig.Groups {
 		if group.ID == groupID {
 			order := make([]int, len(group.ChannelOrder))
@@ -130,9 +84,6 @@ func ValidateIntelligentRoutingJSON(value string) error {
 	if err := common.UnmarshalJsonStr(value, &config); err != nil {
 		return err
 	}
-	if config.GlobalChannelOrder == nil {
-		return fmt.Errorf("global_channel_order must be provided")
-	}
 	return ValidateIntelligentRoutingConfig(config)
 }
 
@@ -145,17 +96,10 @@ func UpdateIntelligentRoutingConfigJSON(value string) error {
 }
 
 func UpdateIntelligentRoutingConfig(config IntelligentRoutingConfig) error {
-	if config.GlobalChannelOrder == nil {
-		return fmt.Errorf("global_channel_order must be provided")
-	}
 	if err := ValidateIntelligentRoutingConfig(config); err != nil {
 		return err
 	}
 	intelligentRoutingMu.Lock()
-	access := intelligentRoutingConfig.TokenGroupAccess
-	if config.TokenGroupAccess == nil {
-		config.TokenGroupAccess = access
-	}
 	intelligentRoutingConfig = cloneIntelligentRoutingConfig(config)
 	intelligentRoutingPricingRank = make(map[string]int, len(config.PricingGroupOrder))
 	for i, id := range config.PricingGroupOrder {
@@ -166,10 +110,7 @@ func UpdateIntelligentRoutingConfig(config IntelligentRoutingConfig) error {
 }
 
 func IntelligentRoutingGroups(config IntelligentRoutingConfig) map[string]string {
-	groups := make(map[string]string, len(config.Groups)+1)
-	if config.GlobalChannelOrder != nil {
-		groups[IntelligentRoutingGlobalGroupID] = IntelligentRoutingGlobalGroupName
-	}
+	groups := make(map[string]string, len(config.Groups))
 	for _, group := range config.Groups {
 		groups[group.ID] = group.Name
 	}
@@ -187,40 +128,9 @@ func ValidateIntelligentRoutingConfig(config IntelligentRoutingConfig) error {
 		}
 		seenPricing[id] = struct{}{}
 	}
-	if err := validateChannelOrder("global_channel_order", config.GlobalChannelOrder); err != nil {
-		return err
-	}
-	for tokenID, groups := range config.TokenGroupAccess {
-		if tokenID <= 0 {
-			return fmt.Errorf("token_group_access contains invalid token id %d", tokenID)
-		}
-		seen := make(map[string]struct{}, len(groups))
-		for _, groupID := range groups {
-			if _, exists := seen[groupID]; exists {
-				return fmt.Errorf("token_group_access contains duplicate group %s", groupID)
-			}
-			seen[groupID] = struct{}{}
-			if groupID == IntelligentRoutingGlobalGroupID {
-				if config.GlobalChannelOrder == nil {
-					return fmt.Errorf("token_group_access references an unavailable global group")
-				}
-				continue
-			}
-			found := false
-			for _, group := range config.Groups {
-				if group.ID == groupID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf("token_group_access references unknown group %s", groupID)
-			}
-		}
-	}
 	groupIDs := make(map[string]struct{}, len(config.Groups))
 	for i, group := range config.Groups {
-		if !intelligentRoutingGroupIDPattern.MatchString(group.ID) || group.ID == "auto" || group.ID == IntelligentRoutingGlobalGroupID {
+		if !intelligentRoutingGroupIDPattern.MatchString(group.ID) || group.ID == "auto" {
 			return fmt.Errorf("groups[%d].id must contain 1-64 letters, numbers, underscores, or hyphens and cannot be auto", i)
 		}
 		if strings.TrimSpace(group.Name) == "" || len(group.Name) > 128 {
@@ -239,13 +149,8 @@ func ValidateIntelligentRoutingConfig(config IntelligentRoutingConfig) error {
 
 func cloneIntelligentRoutingConfig(config IntelligentRoutingConfig) IntelligentRoutingConfig {
 	cloned := IntelligentRoutingConfig{
-		GlobalChannelOrder: slices.Clone(config.GlobalChannelOrder),
-		PricingGroupOrder:  slices.Clone(config.PricingGroupOrder),
-		Groups:             make([]IntelligentRoutingGroup, len(config.Groups)),
-		TokenGroupAccess:   make(map[int][]string, len(config.TokenGroupAccess)),
-	}
-	for tokenID, groups := range config.TokenGroupAccess {
-		cloned.TokenGroupAccess[tokenID] = slices.Clone(groups)
+		PricingGroupOrder: slices.Clone(config.PricingGroupOrder),
+		Groups:            make([]IntelligentRoutingGroup, len(config.Groups)),
 	}
 	for i, group := range config.Groups {
 		cloned.Groups[i] = group

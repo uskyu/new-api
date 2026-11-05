@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import { createSectionRegistry } from '../utils/section-registry'
 
 const ROUTING_SECTIONS = [
-  { id: 'global-priority', titleKey: '全渠道优先级设置', build: () => null },
   { id: 'resource-pools', titleKey: '资源池分组', build: () => null },
   {
     id: 'pricing-groups',
@@ -32,7 +31,7 @@ export type IntelligentRoutingSectionId =
   (typeof ROUTING_SECTIONS)[number]['id']
 const registry = createSectionRegistry<IntelligentRoutingSectionId, undefined>({
   sections: ROUTING_SECTIONS,
-  defaultSection: 'global-priority',
+  defaultSection: 'resource-pools',
   basePath: '/system-settings/intelligent-routing',
   urlStyle: 'path',
 })

@@ -206,7 +206,8 @@ total_amount = base_amount × group_ratio
 
 税率让同一次采购的金额依赖「实际服务的是哪个渠道」，而渠道选择由网关内部
 决定，Harness 无法预知也无法复核。取消后采购成本只由采购单价与采购分组倍率
-决定，两项都是网关可复现、可对账的量。
+决定，两项都是网关可复现、可对账的量。该倍率来自 `pricing_group_order` 命中的
+采购分组，**不是**资源池或渠道路由顺序；当前只有 `default` 分组，倍率为 `1`。
 
 ### 对 Harness 的要求
 
@@ -216,17 +217,20 @@ total_amount = base_amount × group_ratio
 
 ---
 
-## 本轮新增的硬性要求（网关已实施）
+## 本轮新增的硬性要求（V0.10 目标口径）
 
-以下不是待确认项，而是当前网关的确定行为，需在对接时遵守：
+以下不是待确认项，而是本轮约定的行为，需在对接时遵守。全局池与令牌授权的
+移除已体现在分支工作区代码中，但**未构建、未部署、未验证**：
 
 | 项 | 行为 |
 | --- | --- |
 | `X-Harness-Run-Id` | **必填**，≤64 字符。会写入每条 B1/B3 账本行，并在 B1 事件中返回 |
 | `X-Harness-Request-Id` | 必填，≤64 字符。账本主键，B1/B3 均按它查询 |
-| `X-Route-Group` | **可选**。仅 `plan`（畅用计划）有业务含义；普通 chat/video/audio 调用不传，落默认 `chat` 池；传未知池返回 403 |
+| `X-Route-Group` | **可选**，且仅对通过 Harness JWT 校验的调用方生效。仅 `plan`（畅用计划）有业务含义；普通 chat/video/audio 调用不传，落默认 `chat` 池；传未知池返回 403 |
 | `model` 字段 | 必须填 A3 `models[]` 中的真实模型 id，不是池 id。路由由网关决定，Harness 不选择档位 |
 | 资源池 | 四个产品线：`chat`（默认，text）/ `video`（video，无池级计费）/ `audio`（audio，占位）/ `plan`（video，`per_call`） |
+| 路由顺序 | 资源池的渠道顺序是唯一路由顺序。`global_channel_order` / 全渠道优先级全局池已移除，不存在 `global` 池；`token_group_access` / 令牌授权已移除，Harness 不需要按池授权 |
+| `pricing_group_order` | **不是路由顺序**。仅决定哪些渠道+模型能力具备采购分组资格，并给出 `group_ratio`；当前配置为单分组 `["default"]`，倍率 `1` |
 | `video` / `audio` 池 | 渠道尚未接入，`models: []` 属预期，**当前不可调用** |
 
 ---
@@ -287,3 +291,4 @@ total_amount = base_amount × group_ratio
 | 2026-10-25 | V0.9 | 初版 |
 | 2026-10-29 | V0.9.1 | 第 4 项定案为拒绝（400）；补充两个关联头必填且 ≤64、`X-Route-Group` 与真实模型 id 的硬性要求 |
 | 2026-11-05 | V0.10 | 第 5 项（供应商税率）定案为取消，无税额乘数；`tax_rate_percent` 恒 0 并废弃；硬性要求表改为四池产品线与 `X-Route-Group` 仅 `plan` 有业务含义；待确认项仍为 3 项 |
+| 2026-11-06 | V0.10（修订） | 硬性要求表补充：全局池与令牌授权已移除、资源池是唯一路由顺序；`X-Route-Group` 仅经验证 Harness 调用方可用；`pricing_group_order` 是采购资格与倍率来源，不是路由顺序；待确认项不变 |
