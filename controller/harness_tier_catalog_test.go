@@ -289,6 +289,7 @@ func TestGetHarnessTierCatalogAdvertisesEmptyVideoPools(t *testing.T) {
 	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
 		{ID: "chat", DisplayName: "通用对话", Kind: setting.HarnessCatalogKindText},
 		{ID: "video", DisplayName: "视频", Kind: setting.HarnessCatalogKindVideo},
+		{ID: "image", DisplayName: "图片生成", Kind: setting.HarnessCatalogKindImage},
 		{ID: "audio", DisplayName: "语音", Kind: setting.HarnessCatalogKindAudio},
 		{
 			ID:          "plan",
@@ -302,7 +303,7 @@ func TestGetHarnessTierCatalogAdvertisesEmptyVideoPools(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 
 	_, items := catalogItems(t, recorder)
-	require.Len(t, items, 4, "a pool with no channels is still advertised")
+	require.Len(t, items, 5, "a pool with no channels is still advertised")
 
 	byID := make(map[string]map[string]any, len(items))
 	for _, item := range items {
@@ -315,6 +316,11 @@ func TestGetHarnessTierCatalogAdvertisesEmptyVideoPools(t *testing.T) {
 	require.NotNil(t, video)
 	assert.Equal(t, "video", video["kind"])
 	assert.NotContains(t, video, "billing")
+
+	image := byID["image"]
+	require.NotNil(t, image)
+	assert.Equal(t, "image", image["kind"])
+	assert.NotContains(t, image, "billing")
 
 	// The reserved audio pool carries no billing label either.
 	audio := byID["audio"]

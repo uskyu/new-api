@@ -91,12 +91,13 @@ HTTP/1.1 400 Bad Request
 也不需要感知池的划分。
 
 **只有通过 Harness JWT 校验的调用方才能使用该头**；普通 API 令牌即使携带，也不
-参与资源池选择。资源池是产品线，不是价格档位。当前有四个池：
+参与资源池选择。资源池是产品线，不是价格档位。当前有五个池：
 
 | 池 id | 显示名 | `kind` | 说明 |
 | --- | --- | --- | --- |
 | `chat` | 通用对话 | `text` | **默认池**。不传 `X-Route-Group` 时的落点；A1/A2/A4/A9 的常规调用都走这里 |
 | `video` | 视频 | `video` | 视频任务池。池内混合按 token 与按秒计费的模型，因此**池级不标注 `billing`**；渠道尚未接入 |
+| `image` | 图片生成 | `image` | 图片生成预留池，池内混合按张、按 token 等模型，**池级不标注 `billing`**；渠道尚未接入，**本期不可调用** |
 | `audio` | 语音 | `audio` | 语音/TTS 预留池，当前仅占位；渠道尚未接入，**本期不可调用** |
 | `plan` | 畅用计划 | `video` | 专用于畅用计划；池级 `billing: per_call`（按次计费） |
 
@@ -104,7 +105,7 @@ HTTP/1.1 400 Bad Request
 | --- | --- |
 | 不传该头 | 使用默认池 `chat` |
 | 传 `plan` | 使用畅用计划池 —— 这是该头**唯一**有业务含义的用法 |
-| 传其他已配置池 id（`chat` / `video` / `audio`） | 普通调用应省略该头；显式传入只会把请求硬绑定到该池，不改变模型 id |
+| 传其他已配置池 id（`chat` / `video` / `image` / `audio`） | 普通调用应省略该头；显式传入只会把请求硬绑定到该池，不改变模型 id |
 | 传不存在的池 id | `403 access_denied`，消息 `requested resource pool is not configured` |
 
 不存在「全渠道优先级」全局池：`global_channel_order` 已移除，资源池的渠道顺序
@@ -160,6 +161,14 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
       "capabilities": []
     },
     {
+      "id": "image",
+      "object": "model",
+      "display_name": "图片生成",
+      "kind": "image",
+      "models": [],
+      "capabilities": []
+    },
+    {
       "id": "audio",
       "object": "model",
       "display_name": "语音",
@@ -186,10 +195,10 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
 
 | 字段 | 说明 |
 | --- | --- |
-| `data[].id` | **资源池 id**（`chat` / `video` / `audio` / `plan`）；其中仅 `plan` 有 `X-Route-Group` 业务含义，普通调用不需要该头 |
+| `data[].id` | **资源池 id**（`chat` / `video` / `image` / `audio` / `plan`）；其中仅 `plan` 有 `X-Route-Group` 业务含义，普通调用不需要该头 |
 | `data[].display_name` | 运营配置的显示名，仅用于界面展示 |
-| `data[].kind` | `text` / `video` / `audio` |
-| `data[].billing` | 仅 `plan` 池返回 `per_call`；`video` 池混合两种计费方式，不标注池级 `billing` |
+| `data[].kind` | `text` / `video` / `image` / `audio` |
+| `data[].billing` | 仅 `plan` 池返回 `per_call`；`video` / `image` 池混合多种计费方式，不标注池级 `billing` |
 | `data[].models` | 该池可路由的**真实模型 id**，直接用作请求的 `model` 字段；空数组表示该池尚无可调模型 |
 | `data[].capabilities` | 该池支持的能力枚举：`chat` / `stream` / `tools`，按池聚合，不区分单个模型 |
 | `catalog_version` | 单调递增的整数（字符串形式），不是时间戳 |

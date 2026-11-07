@@ -55,7 +55,7 @@
 | 项 | 状态 |
 | --- | --- |
 | 取消经济/企业档，路由完全归网关 | ✅ 分支已改 |
-| 资源池改为产品线 `chat` / `video` / `audio` / `plan` | ✅ 分支已改 |
+| 资源池改为产品线 `chat` / `video` / `image` / `audio` / `plan` | ✅ 分支已改 |
 | 取消 `global_channel_order` / 全渠道优先级全局池，资源池成为唯一路由顺序 | ✅ 代码已改（未构建） |
 | 取消 `token_group_access` / 令牌授权 | ✅ 代码已改（未构建） |
 | `X-Route-Group` 改为仅 `plan`（畅用计划）有业务含义，且仅经验证的 Harness 调用方可使用 | ✅ 代码已改（未构建） |

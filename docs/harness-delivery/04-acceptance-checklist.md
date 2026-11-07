@@ -16,7 +16,7 @@
 | `aud` 值 | 双方商定 | ✅ `new-api` |
 | 服务主体 `sub` | Harness | ✅ `harness-gateway` |
 | 网关地址 | New API | ✅ `https://testapi.soloai.chat` |
-| 资源池 id（`chat` / `video` / `audio` / `plan`）与池内模型 id | New API | ✅ A3 动态返回；`video` / `audio` 渠道未接入，`models` 暂为空属预期 |
+| 资源池 id（`chat` / `video` / `image` / `audio` / `plan`）与池内模型 id | New API | ✅ A3 动态返回；`video` / `image` / `audio` 渠道未接入，`models` 暂为空属预期 |
 | 路由配置：资源池渠道顺序是唯一路由顺序；`global_channel_order` / 全渠道优先级全局池与 `token_group_access` / 令牌授权已移除；`pricing_group_order` 仅决定采购分组资格与倍率（当前 `["default"]`，倍率 1），不是渠道路由顺序 | New API | ✅ 代码已改（未构建，待复验） |
 
 ---
@@ -223,10 +223,10 @@ curl -sS -D- "http://<gateway>/v1/models" \
 **通过标准**：
 - [ ] HTTP 200
 - [ ] `ETag` 响应头非空
-- [ ] `data[].id` 为**资源池 id**（`chat` / `video` / `audio` / `plan`）
+- [ ] `data[].id` 为**资源池 id**（`chat` / `video` / `image` / `audio` / `plan`）
 - [ ] `data[].models` 为**真实模型 id**（用作请求的 `model`）
-- [ ] `chat` 池含实际可调的模型 id；`video` / `audio` 允许 `models: []`
-- [ ] `plan` 池返回 `billing: per_call`；`video` 池不返回池级 `billing`
+- [ ] `chat` 池含实际可调的模型 id；`video` / `image` / `audio` 允许 `models: []`
+- [ ] `plan` 池返回 `billing: per_call`；`video` / `image` 池不返回池级 `billing`
 - [ ] 响应体 `etag` 与响应头一致
 - [ ] 不含渠道信息、采购价
 

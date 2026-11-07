@@ -15,6 +15,7 @@ func textPoolFixture() []HarnessCatalogTier {
 	return []HarnessCatalogTier{
 		{ID: "chat", DisplayName: "通用对话", Kind: HarnessCatalogKindText},
 		{ID: "video", DisplayName: "视频", Kind: HarnessCatalogKindVideo},
+		{ID: "image", DisplayName: "图片生成", Kind: HarnessCatalogKindImage},
 		{ID: "audio", DisplayName: "语音", Kind: HarnessCatalogKindAudio},
 		{ID: "plan", DisplayName: "畅用计划", Kind: HarnessCatalogKindVideo, Billing: HarnessCatalogBillingPerCall},
 	}
@@ -35,7 +36,9 @@ func TestNormalizeHarnessCatalogKind(t *testing.T) {
 		{name: "video uppercase", value: "ViDeO", wantKind: HarnessCatalogKindVideo, wantValid: true},
 		{name: "audio", value: "audio", wantKind: HarnessCatalogKindAudio, wantValid: true},
 		{name: "audio uppercase padded", value: "  AUDIO  ", wantKind: HarnessCatalogKindAudio, wantValid: true},
-		{name: "unknown label is rejected", value: "image", wantKind: "", wantValid: false},
+		{name: "image", value: "image", wantKind: HarnessCatalogKindImage, wantValid: true},
+		{name: "image uppercase padded", value: "  IMAGE  ", wantKind: HarnessCatalogKindImage, wantValid: true},
+		{name: "unknown label is rejected", value: "embedding", wantKind: "", wantValid: false},
 		{name: "whitespace only is text", value: "   ", wantKind: HarnessCatalogKindText, wantValid: true},
 	}
 
@@ -110,7 +113,7 @@ func TestNormalizeHarnessCatalogBilling(t *testing.T) {
 func TestHarnessCatalogConfigResourcePoolIDs(t *testing.T) {
 	config := HarnessCatalogConfig{Tiers: textPoolFixture()}
 
-	assert.Equal(t, []string{"chat", "video", "audio", "plan"},
+	assert.Equal(t, []string{"chat", "video", "image", "audio", "plan"},
 		config.ResourcePoolIDs(), "catalog order is preserved")
 
 	assert.True(t, config.IsResourcePool("chat"))
@@ -185,11 +188,12 @@ func TestSanitizeHarnessCatalogTiersDropsIncoherentLabels(t *testing.T) {
 		{ID: "chat", DisplayName: "通用对话", Kind: "text"},
 		{ID: "chat", DisplayName: "duplicate id", Kind: "text"},
 		{ID: "", DisplayName: "no id", Kind: "text"},
-		{ID: "image", DisplayName: "unknown kind", Kind: "image"},
+		{ID: "embedding", DisplayName: "unknown kind", Kind: "embedding"},
 		{ID: "text-with-billing", DisplayName: "text cannot bill per call", Kind: "text", Billing: "per_call"},
 		{ID: "audio-with-billing", DisplayName: "audio cannot bill per call", Kind: "audio", Billing: "per_call"},
 		{ID: "video-bad-billing", DisplayName: "unknown billing", Kind: "video", Billing: "per_token"},
 		{ID: "video", DisplayName: "视频", Kind: "video"},
+		{ID: "image", DisplayName: "图片生成", Kind: "IMAGE"},
 		{ID: "audio", DisplayName: "语音", Kind: "AUDIO"},
 		{ID: "plan", DisplayName: "畅用计划", Kind: "VIDEO", Billing: "PER_CALL"},
 		{ID: "unlabeled", DisplayName: "", Kind: ""},
@@ -199,7 +203,7 @@ func TestSanitizeHarnessCatalogTiersDropsIncoherentLabels(t *testing.T) {
 	for _, tier := range sanitized {
 		ids = append(ids, tier.ID)
 	}
-	assert.Equal(t, []string{"chat", "video", "audio", "plan", "unlabeled"}, ids)
+	assert.Equal(t, []string{"chat", "video", "image", "audio", "plan", "unlabeled"}, ids)
 
 	byID := make(map[string]HarnessCatalogTier, len(sanitized))
 	for _, tier := range sanitized {
@@ -210,6 +214,8 @@ func TestSanitizeHarnessCatalogTiersDropsIncoherentLabels(t *testing.T) {
 		"labels are canonicalised to lower case")
 	assert.Equal(t, HarnessCatalogKindVideo, byID["video"].Kind)
 	assert.Empty(t, byID["video"].Billing, "a video pool may leave billing unset")
+	assert.Equal(t, HarnessCatalogKindImage, byID["image"].Kind)
+	assert.Empty(t, byID["image"].Billing, "an image pool carries no billing label")
 	assert.Equal(t, HarnessCatalogKindAudio, byID["audio"].Kind)
 	assert.Empty(t, byID["audio"].Billing, "an audio pool carries no billing label")
 	assert.Equal(t, "unlabeled", byID["unlabeled"].DisplayName,
@@ -226,6 +232,7 @@ func TestDefaultHarnessCatalogTiersCoverTheOffering(t *testing.T) {
 	require.Equal(t, []HarnessCatalogTier{
 		{ID: "chat", DisplayName: "通用对话", Kind: HarnessCatalogKindText},
 		{ID: "video", DisplayName: "视频", Kind: HarnessCatalogKindVideo},
+		{ID: "image", DisplayName: "图片生成", Kind: HarnessCatalogKindImage},
 		{ID: "audio", DisplayName: "语音", Kind: HarnessCatalogKindAudio},
 		{ID: "plan", DisplayName: "畅用计划", Kind: HarnessCatalogKindVideo, Billing: HarnessCatalogBillingPerCall},
 	}, tiers)

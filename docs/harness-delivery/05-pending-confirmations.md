@@ -228,7 +228,7 @@ total_amount = base_amount × group_ratio
 | `X-Harness-Request-Id` | 必填，≤64 字符。账本主键，B1/B3 均按它查询 |
 | `X-Route-Group` | **可选**，且仅对通过 Harness JWT 校验的调用方生效。仅 `plan`（畅用计划）有业务含义；普通 chat/video/audio 调用不传，落默认 `chat` 池；传未知池返回 403 |
 | `model` 字段 | 必须填 A3 `models[]` 中的真实模型 id，不是池 id。路由由网关决定，Harness 不选择档位 |
-| 资源池 | 四个产品线：`chat`（默认，text）/ `video`（video，无池级计费）/ `audio`（audio，占位）/ `plan`（video，`per_call`） |
+| 资源池 | 五个产品线：`chat`（默认，text）/ `video`（video，无池级计费）/ `image`（image，占位，无池级计费）/ `audio`（audio，占位）/ `plan`（video，`per_call`） |
 | 路由顺序 | 资源池的渠道顺序是唯一路由顺序。`global_channel_order` / 全渠道优先级全局池已移除，不存在 `global` 池；`token_group_access` / 令牌授权已移除，Harness 不需要按池授权 |
 | `pricing_group_order` | **不是路由顺序**。仅决定哪些渠道+模型能力具备采购分组资格，并给出 `group_ratio`；当前配置为单分组 `["default"]`，倍率 `1` |
 | `video` / `audio` 池 | 渠道尚未接入，`models: []` 属预期，**当前不可调用** |
