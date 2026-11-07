@@ -11,7 +11,7 @@
 > - `X-Route-Tax-Rate-Percent` 不再随路由变化；B3 的 `tax_rate_percent` 恒为 `0`，
 >   属废弃（legacy）字段，仅为兼容保留，后续版本移除
 > - 资源池改为产品线 `chat`（默认，text）/ `video`（video，无池级计费）/
->   `audio`（audio，占位）/ `plan`（video，`per_call`，畅用计划）；经济/企业档
+>   `image`（image，占位，无渠道）/ `audio`（audio，占位）/ `plan`（video，`per_call`，畅用计划）；经济/企业档
 >   不存在，路由完全由网关决定
 > - **`global_channel_order` / 「全渠道优先级」全局池已移除**，不再有 `global`
 >   池；资源池的渠道顺序是唯一路由顺序

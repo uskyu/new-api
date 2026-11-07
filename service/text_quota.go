@@ -46,25 +46,25 @@ type textQuotaSummary struct {
 	CacheCreationTokens1h  int
 	CacheCreationTokens12h int
 	ImageTokens            int
-	AudioTokens             int
-	ModelName               string
-	TokenName               string
-	UseTimeSeconds          int64
-	CompletionRatio         float64
-	CacheRatio              float64
-	ImageRatio              float64
-	ModelRatio              float64
-	GroupRatio              float64
-	ModelPrice              float64
-	CacheCreationRatio      float64
-	CacheCreationRatio5m    float64
-	CacheCreationRatio1h    float64
-	CacheCreationRatio12h   float64
-	Quota                   int
+	AudioTokens            int
+	ModelName              string
+	TokenName              string
+	UseTimeSeconds         int64
+	CompletionRatio        float64
+	CacheRatio             float64
+	ImageRatio             float64
+	ModelRatio             float64
+	GroupRatio             float64
+	ModelPrice             float64
+	CacheCreationRatio     float64
+	CacheCreationRatio5m   float64
+	CacheCreationRatio1h   float64
+	CacheCreationRatio12h  float64
+	Quota                  int
 	// PreGroupQuota is the billable amount before the customer-side group ratio
 	// and before the tool-call surcharge. It feeds the procurement ledger; Quota
 	// (what the caller is charged) is derived from it plus the ratio and surcharge.
-	PreGroupQuota           decimal.Decimal
+	PreGroupQuota          decimal.Decimal
 	IsClaudeUsageSemantic  bool
 	UsageSemantic          string
 	AudioInputPrice        float64

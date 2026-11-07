@@ -1,7 +1,7 @@
 # Harness 网关接口接入指南
 
 **版本**：V0.10
-**对应网关版本**：`harness-api` 分支，本轮构建（待发布）；尚未部署、尚未验证
+**对应网关版本**：`harness-api-codex` RC48 候选分支；本地验证完成，尚未部署或真实联调
 **面向**：Harness 后端开发与联调
 
 本文档给出网关侧全部对外接口的调用方法。字段语义细节见
@@ -625,5 +625,6 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
 | 2026-10-25 | V0.9 | 初版 |
 | 2026-10-26 | V0.9 | 对应网关 `725ec9d6d`；样例与线上实测结果一致 |
 | 2026-10-29 | V0.9.1 | 对应网关 `fd00dae`。`model` 改为真实模型 id；A3 增加 `display_name`/`kind`/`billing`/`models`；`X-Harness-Run-Id` 改为必填且两个 ID 均 ≤64；缺失关联头改为 400；补充 `X-Route-Group` 与默认池规则 |
-| 2026-11-05 | V0.10 | 取消经济/企业档，路由完全归网关；资源池改为产品线 `chat`（默认）/`video`/`audio`/`plan`；`X-Route-Group` 改为仅 `plan` 有业务含义；A3 样例改为四个池；取消供应商税率，`total_amount = base_amount × group_ratio`，`tax_rate_percent` 恒 0 并标记废弃。对应本轮构建（待发布），尚未部署验证 |
+| 2026-11-05 | V0.10 | 取消经济/企业档，路由完全归网关；资源池改为产品线 `chat`（默认）/`video`/`image`/`audio`/`plan` 五个池；`X-Route-Group` 改为仅 `plan` 有业务含义；A3 样例改为五个池；取消供应商税率，`total_amount = base_amount × group_ratio`，`tax_rate_percent` 恒 0 并标记废弃。对应本轮构建（待发布），尚未部署验证 |
 | 2026-11-06 | V0.10（修订） | 路由简化：移除 `global_channel_order` / 全渠道优先级全局池与 `token_group_access` / 令牌授权，资源池成为唯一路由顺序；`X-Route-Group` 仅经验证的 Harness 调用方可使用；补充 `pricing_group_order` 是采购分组资格与倍率来源、不是渠道路由顺序。移除令牌未授权 403 行。代码已改，未构建、未部署、未验证 |
+| 2026-11-07 | RC48 候选 | 基于官方 `v1.0.0-rc.48` 对齐；保留五个 Harness 产品池与账本契约；补齐 task-plugin 协议路由的 Harness scope 检查。当前候选通过本地 Go、Web 与 SQLite/MySQL/PostgreSQL 检查；尚未部署或真实联调 |

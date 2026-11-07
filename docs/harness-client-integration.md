@@ -3,7 +3,8 @@
 > **2026-11-05 / 11-06（V0.10）起本文的路由与计费口径已过时。** 供应商税率已取消，
 > B3 金额为 `total_amount = base_amount × group_ratio`；`X-Route-Tax-Rate-Percent`
 > 不再返回，`tax_rate_percent` 恒为 `0`（废弃字段）。资源池改为 `chat`（默认）/
-> `video`/`audio`/`plan`，经济/企业档已取消，路由完全由网关决定。
+> `video`/`image`/`audio`/`plan`，经济/企业档已取消，路由完全由网关决定；`image`
+> 池目前是预留项，尚无可调用渠道。
 >
 > 路由也已简化：`global_channel_order` / 「全渠道优先级」全局池与
 > `token_group_access` / 「令牌授权」均已移除，资源池的渠道顺序是唯一路由顺序。

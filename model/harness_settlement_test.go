@@ -209,17 +209,20 @@ func TestHarnessSettlementRejectsRowsWithoutRequestId(t *testing.T) {
 }
 
 // TestKeepFirstNonEmptyRendersPerDialect pins the correlation-id guard used by the
-// settlement upsert. MySQL and PostgreSQL reference the proposed row differently,
-// and a wrong reference is not a subtle bug: MySQL answers "Unknown column" and
-// every settlement write fails.
+// settlement upsert. MySQL references the proposed row with VALUES(col), while
+// PostgreSQL needs the target row qualified to distinguish it from excluded.
 func TestKeepFirstNonEmptyRendersPerDialect(t *testing.T) {
 	assert.Equal(t,
 		"CASE WHEN excluded.harness_request_id <> '' THEN excluded.harness_request_id ELSE harness_request_id END",
-		keepFirstNonEmpty("harness_request_id", "excluded"),
-		"PostgreSQL and SQLite reference the proposed row as excluded")
+		keepFirstNonEmpty("harness_request_id", "excluded", "sqlite"),
+		"SQLite references the proposed row as excluded")
+	assert.Equal(t,
+		"CASE WHEN excluded.harness_request_id <> '' THEN excluded.harness_request_id ELSE harness_settlements.harness_request_id END",
+		keepFirstNonEmpty("harness_request_id", "excluded", "postgres"),
+		"PostgreSQL must qualify the target row")
 	assert.Equal(t,
 		"CASE WHEN VALUES(harness_run_id) <> '' THEN VALUES(harness_run_id) ELSE harness_run_id END",
-		keepFirstNonEmpty("harness_run_id", "VALUES"),
+		keepFirstNonEmpty("harness_run_id", "VALUES", "mysql"),
 		"MySQL references the proposed row through VALUES(col)")
 }
 

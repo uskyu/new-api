@@ -1,7 +1,7 @@
 # Harness 联调验收清单
 
 **版本**：V0.10
-**对应网关版本**：`harness-api` 分支，本轮构建（待发布）
+**对应网关版本**：`harness-api-codex` RC48 候选分支；本清单仍需部署后逐项验收
 
 本文档供双方逐项核验。每项包含：执行方、请求、预期响应、通过标准。
 
@@ -574,5 +574,5 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?from=2026-10-01T00:0
 | --- | --- | --- |
 | 2026-10-25 | V0.9 | 初版 |
 | 2026-10-29 | V0.9.1 | A3 增加池字段与真实模型 id；调用示例改用真实模型 id；新增 2.4 关联头与资源池校验 |
-| 2026-11-05 | V0.10 | 前置条件与 A3 样例改为 `chat`/`video`/`audio`/`plan` 四个池；新增 2.5 `plan` 池校验；B3 校验改为 `total_amount = base_amount × group_ratio`，取消税率检查；说明 `video`/`audio` 暂不可调用 |
+| 2026-11-05 | V0.10 | 前置条件与 A3 样例改为 `chat`/`video`/`image`/`audio`/`plan` 五个池；新增 2.5 `plan` 池校验；B3 校验改为 `total_amount = base_amount × group_ratio`，取消税率检查；说明 `video`/`image`/`audio` 暂不可调用 |
 | 2026-11-06 | V0.10（修订） | 前置条件补充路由配置：资源池是唯一路由顺序，全局池与令牌授权已移除，`pricing_group_order` 仅决定采购资格与倍率；2.4 / 2.5 明确 `X-Route-Group` 仅经验证 Harness 调用方可用且仅 `plan` 有业务含义；5.2 补充当前 `group_ratio = 1` |

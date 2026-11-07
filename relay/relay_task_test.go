@@ -873,6 +873,7 @@ func TestTaskProcurementBasisUnchangedWithoutAdjustment(t *testing.T) {
 	assert.Equal(t, 2.0, info.ProcurementBasis.CustomerGroupRatio,
 		"the customer ratio is recorded but never multiplies the base")
 }
+
 // A retry prices the plugin it lands on from scratch and holds that price
 // before the upstream sees the request. Plugin A fails upstream on the first
 // attempt; the retry runs on plugin B, pinned the way

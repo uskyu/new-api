@@ -157,9 +157,9 @@ func UpsertHarnessSettlementTx(tx *gorm.DB, row *HarnessSettlement) error {
 	}
 	updates = append(updates,
 		clause.Assignment{Column: clause.Column{Name: "harness_request_id"},
-			Value: gorm.Expr(keepFirstNonEmpty("harness_request_id", newRow))},
+			Value: gorm.Expr(keepFirstNonEmpty("harness_request_id", newRow, tx.Dialector.Name()))},
 		clause.Assignment{Column: clause.Column{Name: "harness_run_id"},
-			Value: gorm.Expr(keepFirstNonEmpty("harness_run_id", newRow))},
+			Value: gorm.Expr(keepFirstNonEmpty("harness_run_id", newRow, tx.Dialector.Name()))},
 	)
 	return tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "request_id"}},
@@ -170,12 +170,19 @@ func UpsertHarnessSettlementTx(tx *gorm.DB, row *HarnessSettlement) error {
 // keepFirstNonEmpty builds the dialect-appropriate expression that keeps an
 // existing non-empty correlation id. newRow names the dialect's reference to the
 // row proposed for insert: PostgreSQL spells it `excluded`, MySQL `VALUES`.
-func keepFirstNonEmpty(column, newRow string) string {
+func keepFirstNonEmpty(column, newRow, dialect string) string {
 	incoming := newRow + "." + column
 	if newRow == "VALUES" {
 		incoming = "VALUES(" + column + ")"
 	}
-	return "CASE WHEN " + incoming + " <> '' THEN " + incoming + " ELSE " + column + " END"
+	current := column
+	if dialect == "postgres" {
+		// PostgreSQL exposes both the target and the proposed row in the
+		// ON CONFLICT expression. Qualify the target column to avoid an
+		// ambiguous reference between those two rows.
+		current = HarnessSettlement{}.TableName() + "." + column
+	}
+	return "CASE WHEN " + incoming + " <> '' THEN " + incoming + " ELSE " + current + " END"
 }
 
 // GetHarnessSettlementForToken loads one settlement scoped to the owning token.

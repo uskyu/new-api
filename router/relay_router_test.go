@@ -14,9 +14,9 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/plugins"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -229,14 +229,13 @@ func TestRelayProtocolRoutesRequireAuthentication(t *testing.T) {
 	}
 }
 
-// TestRelayProtocolRoutesRequireChatScope pins that every model-call protocol a
-// verified Harness principal can reach also demands gateway.chat.
+// TestRelayProtocolRoutesRequireChatScope pins that every model-call and task
+// protocol a verified Harness principal can reach also demands gateway.chat.
 //
-// This exists because the four protocols are not registered in one place: A1 and A4
-// sit on the /v1 group, A9 on its own /v1beta group, and A2 is registered by the
-// task-plugin protocol router. A2 therefore does not inherit the /v1 scope check and
-// silently accepted any valid Harness credential, whatever its scopes. A route added
-// later in the same way would fail here instead.
+// These routes are registered across the /v1 group, the /v1beta group, and the
+// task-plugin protocol router. The latter does not inherit /v1's scope check, so
+// every operation there needs an explicit guard. A newly added route must fail
+// here rather than silently accepting a Harness credential without chat access.
 func TestRelayProtocolRoutesRequireChatScope(t *testing.T) {
 	setupRelayRouterTestDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Option{}))
@@ -282,6 +281,8 @@ func TestRelayProtocolRoutesRequireChatScope(t *testing.T) {
 		{"A2 OpenAI Responses", "/v1/responses", `{"model":"tier","input":"hi"}`},
 		{"A4 Anthropic Messages", "/v1/messages", `{"model":"tier","max_tokens":1,"messages":[]}`},
 		{"A9 Gemini native", "/v1beta/models/tier:generateContent", `{"contents":[]}`},
+		{"OpenAI Image generation", "/v1/images/generations", `{"model":"image-model","prompt":"test"}`},
+		{"OpenAI Video generation", "/v1/videos", `{"model":"video-model","prompt":"test"}`},
 	} {
 		t.Run(route.name+" refuses a credential without gateway.chat", func(t *testing.T) {
 			recorder := httptest.NewRecorder()
@@ -292,6 +293,28 @@ func TestRelayProtocolRoutesRequireChatScope(t *testing.T) {
 
 			assert.Equal(t, http.StatusForbidden, recorder.Code,
 				"a missing gateway.chat must be refused before channel selection, body=%s",
+				recorder.Body.String())
+		})
+	}
+
+	for _, route := range []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"OpenAI Responses retrieval", http.MethodGet, "/v1/responses/response-1"},
+		{"OpenAI Video retrieval", http.MethodGet, "/v1/videos/task-1"},
+		{"OpenAI Video content", http.MethodGet, "/v1/videos/task-1/content"},
+		{"OpenAI Video content HEAD", http.MethodHead, "/v1/videos/task-1/content"},
+	} {
+		t.Run(route.name+" refuses a credential without gateway.chat", func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(route.method, route.path, nil)
+			request.Header.Set("Authorization", "Bearer "+withoutChat)
+			engine.ServeHTTP(recorder, request)
+
+			assert.Equal(t, http.StatusForbidden, recorder.Code,
+				"a missing gateway.chat must be refused before task lookup, body=%s",
 				recorder.Body.String())
 		})
 	}

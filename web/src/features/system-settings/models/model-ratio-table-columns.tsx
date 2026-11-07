@@ -148,6 +148,14 @@ export function buildModelRatioColumns({
                   className='shrink-0'
                 />
               ) : null}
+              {showUnconfiguredTaskBadge ? (
+                <StatusBadge
+                  label={t('Task pricing not configured')}
+                  variant='warning'
+                  copyable={false}
+                  className='shrink-0'
+                />
+              ) : null}
             </div>
             {issueText ? (
               <span
