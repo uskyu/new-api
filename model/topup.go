@@ -219,6 +219,50 @@ func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, tota
 
 // GetAllTopUps 获取全平台的充值记录（管理员使用，不限制时间窗口）
 func GetAllTopUps(pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
+	return GetAllTopUpsFiltered(TopUpFilter{}, pageInfo)
+}
+
+// TopUpFilter 管理员充值订单查询条件，零值/空值表示对应条件不生效（条件之间为 AND）。
+type TopUpFilter struct {
+	UserId         int    `json:"user_id"`         // >0 生效
+	Status         string `json:"status"`          // pending/success/failed/expired
+	PaymentMethod  string `json:"payment_method"`  // 精确匹配
+	StartTimestamp int64  `json:"start_timestamp"` // 秒级时间戳，create_time >=
+	EndTimestamp   int64  `json:"end_timestamp"`   // 秒级时间戳，create_time <=
+	Keyword        string `json:"keyword"`         // trade_no 模糊匹配
+}
+
+// applyTopUpFilter 将过滤条件拼接到查询上。
+// 只使用 GORM 通用表达式，兼容 SQLite/MySQL/PostgreSQL。
+func applyTopUpFilter(tx *gorm.DB, filter TopUpFilter) (*gorm.DB, error) {
+	if filter.UserId > 0 {
+		tx = tx.Where("user_id = ?", filter.UserId)
+	}
+	if filter.Status != "" {
+		tx = tx.Where("status = ?", filter.Status)
+	}
+	if filter.PaymentMethod != "" {
+		tx = tx.Where("payment_method = ?", filter.PaymentMethod)
+	}
+	if filter.StartTimestamp > 0 {
+		tx = tx.Where("create_time >= ?", filter.StartTimestamp)
+	}
+	if filter.EndTimestamp > 0 {
+		tx = tx.Where("create_time <= ?", filter.EndTimestamp)
+	}
+	if filter.Keyword != "" {
+		pattern, err := sanitizeLikePattern(filter.Keyword)
+		if err != nil {
+			return nil, err
+		}
+		tx = tx.Where("trade_no LIKE ? ESCAPE '!'", pattern)
+	}
+	return tx, nil
+}
+
+// listAllTopUps 管理员查询充值记录实现。
+// countCap > 0 时对 COUNT 附加安全上限（关键词搜索路径），否则不限制（与原有管理员查询一致）。
+func listAllTopUps(filter TopUpFilter, pageInfo *common.PageInfo, countCap int) (topups []*TopUp, total int64, err error) {
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -229,13 +273,25 @@ func GetAllTopUps(pageInfo *common.PageInfo) (topups []*TopUp, total int64, err 
 		}
 	}()
 
-	if err = tx.Model(&TopUp{}).Count(&total).Error; err != nil {
+	query, err := applyTopUpFilter(tx.Model(&TopUp{}), filter)
+	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
-	if err = tx.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error; err != nil {
+	countQuery := query
+	if countCap > 0 {
+		countQuery = countQuery.Limit(countCap)
+	}
+	if err = countQuery.Count(&total).Error; err != nil {
 		tx.Rollback()
+		common.SysError("failed to count topups: " + err.Error())
+		return nil, 0, err
+	}
+
+	if err = query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error; err != nil {
+		tx.Rollback()
+		common.SysError("failed to query topups: " + err.Error())
 		return nil, 0, err
 	}
 
@@ -244,6 +300,18 @@ func GetAllTopUps(pageInfo *common.PageInfo) (topups []*TopUp, total int64, err 
 	}
 
 	return topups, total, nil
+}
+
+// GetAllTopUpsFiltered 管理员使用：按用户/状态/支付方式/时间/订单号查询全平台充值记录。
+// 未显式传入 start_timestamp/end_timestamp 时不附加任何时间窗口限制。
+func GetAllTopUpsFiltered(filter TopUpFilter, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
+	return listAllTopUps(filter, pageInfo, 0)
+}
+
+// SearchAllTopUpsFiltered 带过滤条件的全平台充值记录查询（关键词按 trade_no 模糊匹配），
+// COUNT 沿用关键词搜索路径的安全上限。
+func SearchAllTopUpsFiltered(filter TopUpFilter, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
+	return listAllTopUps(filter, pageInfo, searchTopUpCountHardLimit)
 }
 
 // searchTopUpCountHardLimit 搜索充值记录时 COUNT 的安全上限，
@@ -292,42 +360,7 @@ func SearchUserTopUps(userId int, keyword string, pageInfo *common.PageInfo) (to
 
 // SearchAllTopUps 按订单号搜索全平台充值记录（管理员使用，不限制时间窗口）
 func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
-	tx := DB.Begin()
-	if tx.Error != nil {
-		return nil, 0, tx.Error
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
-
-	query := tx.Model(&TopUp{})
-	if keyword != "" {
-		pattern, perr := sanitizeLikePattern(keyword)
-		if perr != nil {
-			tx.Rollback()
-			return nil, 0, perr
-		}
-		query = query.Where("trade_no LIKE ? ESCAPE '!'", pattern)
-	}
-
-	if err = query.Limit(searchTopUpCountHardLimit).Count(&total).Error; err != nil {
-		tx.Rollback()
-		common.SysError("failed to count search topups: " + err.Error())
-		return nil, 0, errors.New("搜索充值记录失败")
-	}
-
-	if err = query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error; err != nil {
-		tx.Rollback()
-		common.SysError("failed to search topups: " + err.Error())
-		return nil, 0, errors.New("搜索充值记录失败")
-	}
-
-	if err = tx.Commit().Error; err != nil {
-		return nil, 0, err
-	}
-	return topups, total, nil
+	return SearchAllTopUpsFiltered(TopUpFilter{Keyword: keyword}, pageInfo)
 }
 
 // ManualCompleteTopUp 管理员手动完成订单并给用户充值

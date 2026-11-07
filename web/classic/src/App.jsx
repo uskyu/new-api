@@ -35,6 +35,8 @@ import Channel from './pages/Channel';
 import Token from './pages/Token';
 import Redemption from './pages/Redemption';
 import TopUp from './pages/TopUp';
+import BlindBox from './pages/BlindBox';
+import BlindBoxAdmin from './pages/BlindBoxAdmin';
 import Log from './pages/Log';
 import Chat from './pages/Chat';
 import Chat2Link from './pages/Chat2Link';
@@ -196,6 +198,26 @@ function App() {
           element={
             <AdminRoute>
               <Redemption />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/blind-box'
+          element={
+            <PrivateRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <BlindBox />
+              </Suspense>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/blind-box-admin'
+          element={
+            <AdminRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <BlindBoxAdmin />
+              </Suspense>
             </AdminRoute>
           }
         />

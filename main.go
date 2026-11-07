@@ -122,6 +122,9 @@ func main() {
 	// Durable quick-refund batches resume automatically after process restarts.
 	service.StartRefundTask()
 
+	// Blind box pending order expiry task (every minute).
+	service.StartBlindBoxExpireTask()
+
 	// Wire task polling adaptor factory (breaks service -> relay import cycle)
 	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
 		a := relay.GetTaskAdaptor(platform)

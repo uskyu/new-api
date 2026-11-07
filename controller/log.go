@@ -22,7 +22,27 @@ func GetAllLogs(c *gin.Context) {
 	group := c.Query("group")
 	requestId := c.Query("request_id")
 	upstreamRequestId := c.Query("upstream_request_id")
-	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId, upstreamRequestId)
+	userId, userPresent, errMsg := parseNonNegativeQueryInt(c, "user_id")
+	if errMsg != "" {
+		common.ApiErrorMsg(c, errMsg)
+		return
+	}
+	filter := model.LogQueryFilter{
+		LogType:           logType,
+		StartTimestamp:    startTimestamp,
+		EndTimestamp:      endTimestamp,
+		ModelName:         modelName,
+		Username:          username,
+		TokenName:         tokenName,
+		Channel:           channel,
+		Group:             group,
+		RequestId:         requestId,
+		UpstreamRequestId: upstreamRequestId,
+	}
+	if userPresent {
+		filter.UserId = userId
+	}
+	logs, total, err := model.GetAllLogsFiltered(filter, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -104,7 +124,25 @@ func GetLogsStat(c *gin.Context) {
 	modelName := c.Query("model_name")
 	channel, _ := strconv.Atoi(c.Query("channel"))
 	group := c.Query("group")
-	stat, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
+	userId, userPresent, errMsg := parseNonNegativeQueryInt(c, "user_id")
+	if errMsg != "" {
+		common.ApiErrorMsg(c, errMsg)
+		return
+	}
+	filter := model.LogQueryFilter{
+		LogType:        logType,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		ModelName:      modelName,
+		Username:       username,
+		TokenName:      tokenName,
+		Channel:        channel,
+		Group:          group,
+	}
+	if userPresent {
+		filter.UserId = userId
+	}
+	stat, err := model.SumUsedQuotaFiltered(filter)
 	if err != nil {
 		common.ApiError(c, err)
 		return

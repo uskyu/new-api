@@ -149,6 +149,34 @@ func SetApiRouter(router *gin.Engine) {
 			}
 		}
 
+		// Blind box
+		blindBoxRoute := apiRouter.Group("/blind-box")
+		{
+			blindBoxUserRoute := blindBoxRoute.Group("/")
+			blindBoxUserRoute.Use(middleware.UserAuth())
+			{
+				blindBoxUserRoute.GET("/list", controller.GetBlindBoxList)
+				blindBoxUserRoute.POST("/purchase", middleware.CriticalRateLimit(), controller.PurchaseBlindBox)
+				blindBoxUserRoute.GET("/orders/self", controller.GetSelfBlindBoxOrders)
+			}
+
+			blindBoxAdminRoute := blindBoxRoute.Group("/admin")
+			blindBoxAdminRoute.Use(middleware.AdminAuth())
+			{
+				blindBoxAdminRoute.GET("/boxes", controller.AdminGetBlindBoxes)
+				blindBoxAdminRoute.POST("/box", controller.AdminCreateBlindBox)
+				blindBoxAdminRoute.PUT("/box/:id", controller.AdminUpdateBlindBox)
+				blindBoxAdminRoute.GET("/orders", controller.AdminGetBlindBoxOrders)
+				blindBoxAdminRoute.POST("/order/complete", controller.AdminCompleteBlindBoxOrder)
+				blindBoxAdminRoute.GET("/setting", controller.AdminGetBlindBoxSetting)
+				blindBoxAdminRoute.PUT("/setting", controller.AdminUpdateBlindBoxSetting)
+			}
+		}
+
+		// Blind box epay callback (anonymous)
+		apiRouter.POST("/blind-box/epay/notify", anonymousRequestBodyLimit, controller.BlindBoxEpayNotify)
+		apiRouter.GET("/blind-box/epay/notify", controller.BlindBoxEpayNotify)
+
 		// Subscription billing (plans, purchase, admin management)
 		subscriptionRoute := apiRouter.Group("/subscription")
 		subscriptionRoute.Use(middleware.UserAuth())

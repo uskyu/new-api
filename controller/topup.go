@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -481,20 +482,109 @@ func GetUserTopUps(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
+// parseNonNegativeQueryInt 解析可选的非负整数查询参数。
+// 参数缺失返回 (0, false, "")；非空但非法（非数字或负数）时返回可读错误信息，避免静默忽略导致误判。
+func parseNonNegativeQueryInt(c *gin.Context, key string) (int, bool, string) {
+	raw := strings.TrimSpace(c.Query(key))
+	if raw == "" {
+		return 0, false, ""
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return 0, false, "参数 " + key + " 必须是非负整数"
+	}
+	return value, true, ""
+}
+
+// parseNonNegativeQueryTimestamp 解析可选的秒级时间戳查询参数。
+func parseNonNegativeQueryTimestamp(c *gin.Context, key string) (int64, bool, string) {
+	raw := strings.TrimSpace(c.Query(key))
+	if raw == "" {
+		return 0, false, ""
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < 0 {
+		return 0, false, "参数 " + key + " 必须是非负整数（秒）"
+	}
+	return value, true, ""
+}
+
+// isValidTopUpStatus 校验充值订单状态枚举。
+func isValidTopUpStatus(status string) bool {
+	switch status {
+	case common.TopUpStatusPending, common.TopUpStatusSuccess, common.TopUpStatusFailed, common.TopUpStatusExpired:
+		return true
+	default:
+		return false
+	}
+}
+
+// parseAdminTopUpFilter 解析管理员充值记录查询参数。
+// 缺失/空参数保持零值（该条件不生效）；显式非法值返回明确错误。
+func parseAdminTopUpFilter(c *gin.Context) (model.TopUpFilter, string) {
+	filter := model.TopUpFilter{
+		PaymentMethod: strings.TrimSpace(c.Query("payment_method")),
+		Keyword:       strings.TrimSpace(c.Query("keyword")),
+	}
+
+	userId, userPresent, errMsg := parseNonNegativeQueryInt(c, "user_id")
+	if errMsg != "" {
+		return filter, errMsg
+	}
+	if userPresent {
+		filter.UserId = userId
+	}
+
+	status := strings.ToLower(strings.TrimSpace(c.Query("status")))
+	if status != "" {
+		if !isValidTopUpStatus(status) {
+			return filter, "无效的订单状态，仅支持 pending/success/failed/expired"
+		}
+		filter.Status = status
+	}
+
+	startTimestamp, startPresent, errMsg := parseNonNegativeQueryTimestamp(c, "start_timestamp")
+	if errMsg != "" {
+		return filter, errMsg
+	}
+	endTimestamp, endPresent, errMsg := parseNonNegativeQueryTimestamp(c, "end_timestamp")
+	if errMsg != "" {
+		return filter, errMsg
+	}
+	if startPresent {
+		filter.StartTimestamp = startTimestamp
+	}
+	if endPresent {
+		filter.EndTimestamp = endTimestamp
+	}
+	if startPresent && endPresent && startTimestamp > endTimestamp {
+		return filter, "开始时间不能晚于结束时间"
+	}
+
+	return filter, ""
+}
+
 // GetAllTopUps 管理员获取全平台充值记录
+// 可选参数：user_id、status、payment_method、start_timestamp、end_timestamp、keyword（trade_no 模糊）。
+// 分页与响应结构保持不变。
 func GetAllTopUps(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	keyword := c.Query("keyword")
+
+	filter, errMsg := parseAdminTopUpFilter(c)
+	if errMsg != "" {
+		common.ApiErrorMsg(c, errMsg)
+		return
+	}
 
 	var (
 		topups []*model.TopUp
 		total  int64
 		err    error
 	)
-	if keyword != "" {
-		topups, total, err = model.SearchAllTopUps(keyword, pageInfo)
+	if filter.Keyword != "" {
+		topups, total, err = model.SearchAllTopUpsFiltered(filter, pageInfo)
 	} else {
-		topups, total, err = model.GetAllTopUps(pageInfo)
+		topups, total, err = model.GetAllTopUpsFiltered(filter, pageInfo)
 	}
 	if err != nil {
 		common.ApiError(c, err)

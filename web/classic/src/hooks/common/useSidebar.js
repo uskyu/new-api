@@ -42,6 +42,7 @@ export const DEFAULT_ADMIN_CONFIG = {
   personal: {
     enabled: true,
     topup: true,
+    blind_box: true,
     personal: true,
     self_service: true,
   },
@@ -52,6 +53,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     deployment: true,
     redemption: true,
     user: true,
+    blind_box_admin: true,
     subscription: true,
     setting: true,
     self_service_admin: true,

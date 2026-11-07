@@ -32,6 +32,7 @@ import DeleteUserModal from './modals/DeleteUserModal';
 import ResetPasskeyModal from './modals/ResetPasskeyModal';
 import ResetTwoFAModal from './modals/ResetTwoFAModal';
 import UserSubscriptionsModal from './modals/UserSubscriptionsModal';
+import UserBillingModal from './modals/UserBillingModal';
 
 const UsersTable = (usersData) => {
   const {
@@ -64,6 +65,7 @@ const UsersTable = (usersData) => {
   const [showResetTwoFAModal, setShowResetTwoFAModal] = useState(false);
   const [showUserSubscriptionsModal, setShowUserSubscriptionsModal] =
     useState(false);
+  const [showUserBillingModal, setShowUserBillingModal] = useState(false);
 
   // Modal handlers
   const showPromoteUserModal = (user) => {
@@ -100,6 +102,11 @@ const UsersTable = (usersData) => {
   const showUserSubscriptionsUserModal = (user) => {
     setModalUser(user);
     setShowUserSubscriptionsModal(true);
+  };
+
+  const showUserBillingUserModal = (user) => {
+    setModalUser(user);
+    setShowUserBillingModal(true);
   };
 
   // Modal confirm handlers
@@ -141,6 +148,7 @@ const UsersTable = (usersData) => {
       showResetPasskeyModal: showResetPasskeyUserModal,
       showResetTwoFAModal: showResetTwoFAUserModal,
       showUserSubscriptionsModal: showUserSubscriptionsUserModal,
+      showUserBillingModal: showUserBillingUserModal,
     });
   }, [
     t,
@@ -153,6 +161,7 @@ const UsersTable = (usersData) => {
     showResetPasskeyUserModal,
     showResetTwoFAUserModal,
     showUserSubscriptionsUserModal,
+    showUserBillingUserModal,
   ]);
 
   // Handle compact mode by removing fixed positioning
@@ -256,6 +265,14 @@ const UsersTable = (usersData) => {
       <UserSubscriptionsModal
         visible={showUserSubscriptionsModal}
         onCancel={() => setShowUserSubscriptionsModal(false)}
+        user={modalUser}
+        t={t}
+        onSuccess={() => refresh?.()}
+      />
+
+      <UserBillingModal
+        visible={showUserBillingModal}
+        onCancel={() => setShowUserBillingModal(false)}
         user={modalUser}
         t={t}
         onSuccess={() => refresh?.()}

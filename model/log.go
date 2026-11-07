@@ -381,40 +381,75 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
+// LogQueryFilter 通用日志查询条件，零值/空值表示该条件不生效（条件之间为 AND）。
+type LogQueryFilter struct {
+	LogType           int    `json:"log_type"`
+	StartTimestamp    int64  `json:"start_timestamp"`
+	EndTimestamp      int64  `json:"end_timestamp"`
+	ModelName         string `json:"model_name"`
+	Username          string `json:"username"`
+	TokenName         string `json:"token_name"`
+	Channel           int    `json:"channel"`
+	Group             string `json:"group"`
+	RequestId         string `json:"request_id"`
+	UpstreamRequestId string `json:"upstream_request_id"`
+	UserId            int    `json:"user_id"` // >0 时按 logs.user_id 过滤
+}
+
+// GetAllLogs 管理员日志查询（保留原签名，行为不变）
 func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {
+	return GetAllLogsFiltered(LogQueryFilter{
+		LogType:           logType,
+		StartTimestamp:    startTimestamp,
+		EndTimestamp:      endTimestamp,
+		ModelName:         modelName,
+		Username:          username,
+		TokenName:         tokenName,
+		Channel:           channel,
+		Group:             group,
+		RequestId:         requestId,
+		UpstreamRequestId: upstreamRequestId,
+	}, startIdx, num)
+}
+
+// GetAllLogsFiltered 管理员日志查询，支持按 user_id 过滤，同时保留 username 过滤兼容逻辑。
+func GetAllLogsFiltered(filter LogQueryFilter, startIdx int, num int) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
-	if logType == LogTypeUnknown {
+	if filter.LogType == LogTypeUnknown {
 		tx = LOG_DB
 	} else {
-		tx = LOG_DB.Where("logs.type = ?", logType)
+		tx = LOG_DB.Where("logs.type = ?", filter.LogType)
 	}
 
-	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
+	if filter.UserId > 0 {
+		tx = tx.Where("logs.user_id = ?", filter.UserId)
+	}
+	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", filter.ModelName); err != nil {
 		return nil, 0, err
 	}
-	if tx, err = applyExplicitLogTextFilter(tx, "logs.username", username); err != nil {
+	if tx, err = applyExplicitLogTextFilter(tx, "logs.username", filter.Username); err != nil {
 		return nil, 0, err
 	}
-	if tokenName != "" {
-		tx = tx.Where("logs.token_name = ?", tokenName)
+	if filter.TokenName != "" {
+		tx = tx.Where("logs.token_name = ?", filter.TokenName)
 	}
-	if requestId != "" {
-		tx = tx.Where("logs.request_id = ?", requestId)
+	if filter.RequestId != "" {
+		tx = tx.Where("logs.request_id = ?", filter.RequestId)
 	}
-	if upstreamRequestId != "" {
-		tx = tx.Where("logs.upstream_request_id = ?", upstreamRequestId)
+	if filter.UpstreamRequestId != "" {
+		tx = tx.Where("logs.upstream_request_id = ?", filter.UpstreamRequestId)
 	}
-	if startTimestamp != 0 {
-		tx = tx.Where("logs.created_at >= ?", startTimestamp)
+	if filter.StartTimestamp != 0 {
+		tx = tx.Where("logs.created_at >= ?", filter.StartTimestamp)
 	}
-	if endTimestamp != 0 {
-		tx = tx.Where("logs.created_at <= ?", endTimestamp)
+	if filter.EndTimestamp != 0 {
+		tx = tx.Where("logs.created_at <= ?", filter.EndTimestamp)
 	}
-	if channel != 0 {
-		tx = tx.Where("logs.channel_id = ?", channel)
+	if filter.Channel != 0 {
+		tx = tx.Where("logs.channel_id = ?", filter.Channel)
 	}
-	if group != "" {
-		tx = tx.Where("logs."+logGroupCol+" = ?", group)
+	if filter.Group != "" {
+		tx = tx.Where("logs."+logGroupCol+" = ?", filter.Group)
 	}
 	err = tx.Model(&Log{}).Count(&total).Error
 	if err != nil {
@@ -520,41 +555,60 @@ type Stat struct {
 	Tpm   int `json:"tpm"`
 }
 
+// SumUsedQuota 统计日志额度（保留原签名，行为不变）
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
+	return SumUsedQuotaFiltered(LogQueryFilter{
+		LogType:        logType,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		ModelName:      modelName,
+		Username:       username,
+		TokenName:      tokenName,
+		Channel:        channel,
+		Group:          group,
+	})
+}
+
+// SumUsedQuotaFiltered 统计日志额度，支持按 user_id 过滤（与 username 过滤同时生效）。
+func SumUsedQuotaFiltered(filter LogQueryFilter) (stat Stat, err error) {
 	tx := LOG_DB.Table("logs").Select("sum(quota) quota")
 
 	// 为rpm和tpm创建单独的查询
 	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, sum(prompt_tokens) + sum(completion_tokens) tpm")
 
-	if tx, err = applyExplicitLogTextFilter(tx, "username", username); err != nil {
+	if filter.UserId > 0 {
+		tx = tx.Where("user_id = ?", filter.UserId)
+		rpmTpmQuery = rpmTpmQuery.Where("user_id = ?", filter.UserId)
+	}
+	if tx, err = applyExplicitLogTextFilter(tx, "username", filter.Username); err != nil {
 		return stat, err
 	}
-	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "username", username); err != nil {
+	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "username", filter.Username); err != nil {
 		return stat, err
 	}
-	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
-		rpmTpmQuery = rpmTpmQuery.Where("token_name = ?", tokenName)
+	if filter.TokenName != "" {
+		tx = tx.Where("token_name = ?", filter.TokenName)
+		rpmTpmQuery = rpmTpmQuery.Where("token_name = ?", filter.TokenName)
 	}
-	if startTimestamp != 0 {
-		tx = tx.Where("created_at >= ?", startTimestamp)
+	if filter.StartTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", filter.StartTimestamp)
 	}
-	if endTimestamp != 0 {
-		tx = tx.Where("created_at <= ?", endTimestamp)
+	if filter.EndTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", filter.EndTimestamp)
 	}
-	if tx, err = applyExplicitLogTextFilter(tx, "model_name", modelName); err != nil {
+	if tx, err = applyExplicitLogTextFilter(tx, "model_name", filter.ModelName); err != nil {
 		return stat, err
 	}
-	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "model_name", modelName); err != nil {
+	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "model_name", filter.ModelName); err != nil {
 		return stat, err
 	}
-	if channel != 0 {
-		tx = tx.Where("channel_id = ?", channel)
-		rpmTpmQuery = rpmTpmQuery.Where("channel_id = ?", channel)
+	if filter.Channel != 0 {
+		tx = tx.Where("channel_id = ?", filter.Channel)
+		rpmTpmQuery = rpmTpmQuery.Where("channel_id = ?", filter.Channel)
 	}
-	if group != "" {
-		tx = tx.Where(logGroupCol+" = ?", group)
-		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", group)
+	if filter.Group != "" {
+		tx = tx.Where(logGroupCol+" = ?", filter.Group)
+		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", filter.Group)
 	}
 
 	tx = tx.Where("type = ?", LogTypeConsume)

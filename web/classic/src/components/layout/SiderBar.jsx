@@ -53,6 +53,8 @@ const routerMap = {
   self_service_admin: '/console/self-service-admin',
   quick_refund: '/console/quick-refund',
   risk_control: '/console/risk-control',
+  blind_box: '/console/blind-box',
+  blind_box_admin: '/console/blind-box-admin',
 };
 
 const SiderBar = ({ onNavigate = () => {} }) => {
@@ -134,6 +136,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/topup',
       },
       {
+        text: t('盲盒'),
+        itemKey: 'blind_box',
+        to: '/blind-box',
+      },
+      {
         text: t('个人设置'),
         itemKey: 'personal',
         to: '/personal',
@@ -190,6 +197,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('用户管理'),
         itemKey: 'user',
         to: '/user',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('盲盒管理'),
+        itemKey: 'blind_box_admin',
+        to: '/blind-box-admin',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {
