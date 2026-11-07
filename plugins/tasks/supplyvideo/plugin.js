@@ -28,6 +28,188 @@ const ASPECT_RATIOS = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"];
 // The supplier manual gives explicit size aliases for 720p only. Other tiers
 // are selected by the model ID, so do not infer arbitrary pixel mappings.
 const SIZE_RESOLUTIONS = { "1280x720": "720p", "720x1280": "720p" };
+
+// TA's non-Seedance video group bills by actual output/input seconds. The
+// supplier returns these two usage facts for every model in this group.
+const SECOND_USAGE_SCHEMA = {
+  output_seconds: {
+    type: "number",
+    unit: "second",
+    description: { en: "Output video unit price", zh: "输出视频单价" },
+  },
+  input_seconds: {
+    type: "number",
+    unit: "second",
+    description: { en: "Input video unit price", zh: "输入视频单价" },
+  },
+};
+
+// Family-level request contract shared by the per-second models. Resolution is
+// locked by the model ID, exactly as for the token models above.
+const SECOND_FAMILIES = {
+  happyhorse: {
+    minSeconds: 3,
+    maxSeconds: 15,
+    autoSeconds: false,
+    aspects: ["16:9", "9:16", "1:1", "4:3", "3:4"],
+    defaultAspect: "16:9",
+    maxImages: 9,
+    maxVideos: 0,
+    maxAudios: 0,
+    imageRoles: ["first_frame", "reference_image"],
+    videoMode: "forbidden",
+    framePair: false,
+    framesExclusiveWithVideo: false,
+    audioRequiresMedia: false,
+    adaptiveWithFrames: false,
+    adaptiveWithoutMediaBlocked: false,
+  },
+  grok: {
+    minSeconds: 1,
+    maxSeconds: 15,
+    autoSeconds: false,
+    aspects: ["1:1", "16:9", "9:16", "3:2", "2:3"],
+    defaultAspect: "16:9",
+    maxImages: 7,
+    maxVideos: 0,
+    maxAudios: 0,
+    imageRoles: ["first_frame", "reference_image"],
+    videoMode: "forbidden",
+    framePair: false,
+    framesExclusiveWithVideo: false,
+    audioRequiresMedia: false,
+    adaptiveWithFrames: false,
+    adaptiveWithoutMediaBlocked: false,
+  },
+  wan: {
+    minSeconds: 2,
+    maxSeconds: 30,
+    autoSeconds: true,
+    aspects: ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4"],
+    defaultAspect: "16:9",
+    maxImages: 10,
+    maxVideos: 5,
+    maxAudios: 5,
+    imageRoles: ["first_frame", "last_frame", "reference_image"],
+    videoMode: "optional",
+    framePair: true,
+    framesExclusiveWithVideo: true,
+    audioRequiresMedia: true,
+    adaptiveWithFrames: false,
+    adaptiveWithoutMediaBlocked: false,
+  },
+  kling: {
+    minSeconds: 3,
+    maxSeconds: 30,
+    autoSeconds: false,
+    aspects: ["auto", "16:9", "9:16", "1:1", "21:9"],
+    defaultAspect: "auto",
+    maxImages: 10,
+    maxVideos: 5,
+    maxAudios: 0,
+    imageRoles: ["first_frame", "last_frame", "reference_image"],
+    videoMode: "by-model",
+    framePair: true,
+    framesExclusiveWithVideo: true,
+    audioRequiresMedia: false,
+    adaptiveWithFrames: false,
+    adaptiveWithoutMediaBlocked: false,
+  },
+  minimax: {
+    minSeconds: 5,
+    maxSeconds: 15,
+    autoSeconds: false,
+    aspects: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"],
+    defaultAspect: "16:9",
+    maxImages: 9,
+    maxVideos: 3,
+    maxAudios: 3,
+    maxTotalMaterials: 12,
+    imageRoles: ["first_frame", "last_frame", "reference_image"],
+    videoMode: "optional",
+    framePair: true,
+    framesExclusiveWithVideo: false,
+    audioRequiresMedia: true,
+    adaptiveWithFrames: true,
+    adaptiveWithoutMediaBlocked: true,
+  },
+};
+
+// Exact model ID -> [family, locked resolution]. Keep this list aligned with
+// the supplier's TA-其他视频模型分组 pricing records.
+const SECOND_MODELS = {
+  "happyhorse1.1-720p-second": ["happyhorse", "720p"],
+  "happyhorse1.1-1080p-second": ["happyhorse", "1080p"],
+  "happyhorse1.1-720p-edit-second": ["happyhorse", "720p"],
+  "grok-video1.5-480p-second": ["grok", "480p"],
+  "grok-video1.5-720p-second": ["grok", "720p"],
+  "wan3.0-video-480p": ["wan", "480p"],
+  "wan3.0-video-720p": ["wan", "720p"],
+  "wan3.0-video-1080p": ["wan", "1080p"],
+  "wan3.0-video-prime-480p": ["wan", "480p"],
+  "wan3.0-video-prime-720p": ["wan", "720p"],
+  "wan3.0-video-prime-1080p": ["wan", "1080p"],
+  "kling4-720p-second-no-video": ["kling", "720p"],
+  "kling4-720p-second-with-video": ["kling", "720p"],
+  "kling4-1080p-second-no-video": ["kling", "1080p"],
+  "kling4-1080p-second-with-video": ["kling", "1080p"],
+  "minimax-h3-max-480p-second": ["minimax", "480p"],
+  "minimax-h3-max-768p-second": ["minimax", "768p"],
+  "minimax-h3-max-1080p-second": ["minimax", "1080p"],
+};
+
+// PAI's Seedance group bills either per successful task or per billed second.
+// Its published duration ranges are used where confirmed; the seven records
+// the supplier marked "待确认" keep only a sanity bound and let the upstream
+// reject an out-of-contract duration.
+const PAI_MODELS = {
+  "seedance2-fast-720p-once-1": { kind: "call", minSeconds: 4, maxSeconds: 15 },
+  "seedance2-fast-720p-once-2": { kind: "call", minSeconds: 1, maxSeconds: 60, rangeUnconfirmed: true },
+  "seedance2-480p-once": { kind: "call", minSeconds: 4, maxSeconds: 15 },
+  "seedance2-1080p-once": { kind: "call", minSeconds: 4, maxSeconds: 15 },
+  "seedance2-720p-once-1": { kind: "call", minSeconds: 4, maxSeconds: 15 },
+  "seedance2-720p-once-2": { kind: "call", minSeconds: 1, maxSeconds: 60, rangeUnconfirmed: true },
+  "seedance2-720p-once-3": { kind: "call", minSeconds: 4, maxSeconds: 15 },
+  "seedance2.5-720p-once": { kind: "call", minSeconds: 5, maxSeconds: 30 },
+  "seedance2-mini-480p-second": { kind: "second", minSeconds: 4, maxSeconds: 15 },
+  "seedance2-mini-720p-second": { kind: "second", minSeconds: 4, maxSeconds: 15 },
+  "seedance2-fast-480p-second-1": { kind: "second", minSeconds: 4, maxSeconds: 15 },
+  "seedance2-fast-480p-second-2": { kind: "second", minSeconds: 1, maxSeconds: 60, rangeUnconfirmed: true },
+  "seedance2-fast-720p-second-1": { kind: "second", minSeconds: 4, maxSeconds: 15 },
+  "seedance2-fast-720p-second-2": { kind: "second", minSeconds: 1, maxSeconds: 60, rangeUnconfirmed: true },
+  "seedance2-480p-second-1": { kind: "second", minSeconds: 4, maxSeconds: 15 },
+  "seedance2-480p-second-2": { kind: "second", minSeconds: 1, maxSeconds: 60, rangeUnconfirmed: true },
+  "seedance2-720p-second-1": { kind: "second", minSeconds: 5, maxSeconds: 15 },
+  "seedance2-720p-second-2": { kind: "second", minSeconds: 1, maxSeconds: 60, rangeUnconfirmed: true },
+  "seedance2-1080p-second-1": { kind: "second", minSeconds: 4, maxSeconds: 15 },
+  "seedance2-1080p-second-2": { kind: "second", minSeconds: 1, maxSeconds: 60, rangeUnconfirmed: true },
+  "seedance2-4k-second": { kind: "second", minSeconds: 4, maxSeconds: 15 },
+  "seedance2.5-480p-second-1": { kind: "second", minSeconds: 4, maxSeconds: 30 },
+  "seedance2.5-480p-second-2": { kind: "second", minSeconds: 4, maxSeconds: 30 },
+  "seedance2.5-480p-second-3": { kind: "second", minSeconds: 4, maxSeconds: 30 },
+  "seedance2.5-480p-second-4": { kind: "second", minSeconds: 4, maxSeconds: 30 },
+  "seedance2.5-720p-second-1": { kind: "second", minSeconds: 4, maxSeconds: 30 },
+  "seedance2.5-720p-second-2": { kind: "second", minSeconds: 4, maxSeconds: 30 },
+  "seedance2.5-720p-second-3": { kind: "second", minSeconds: 4, maxSeconds: 30 },
+};
+
+const PAI_CALL_MODELS = Object.keys(PAI_MODELS).filter((model) => PAI_MODELS[model].kind === "call");
+const PAI_SECOND_MODELS = Object.keys(PAI_MODELS).filter((model) => PAI_MODELS[model].kind === "second");
+
+const REQUEST_FIELDS = [
+  "model",
+  "prompt",
+  "seconds",
+  "duration",
+  "aspect_ratio",
+  "resolution",
+  "size",
+  "video_operation",
+  "image_with_roles",
+  "video_with_roles",
+  "audio_with_roles",
+];
+const CONTENT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 const VIDEO_USAGE_SCHEMA = {
   tokens: {
     type: "number",
@@ -81,6 +263,30 @@ function usageProfiles() {
       });
     }
   }
+  profiles.push({
+    models: Object.keys(SECOND_MODELS),
+    schema: SECOND_USAGE_SCHEMA,
+    examples: [
+      {
+        label: "5s output · no input video",
+        facts: { output_seconds: 5, input_seconds: 0 },
+      },
+    ],
+  });
+  profiles.push({
+    models: PAI_CALL_MODELS,
+    schema: {},
+  });
+  profiles.push({
+    models: PAI_SECOND_MODELS,
+    schema: SECOND_USAGE_SCHEMA,
+    examples: [
+      {
+        label: "4s output · no input video",
+        facts: { output_seconds: 4, input_seconds: 0 },
+      },
+    ],
+  });
   return profiles;
 }
 
@@ -92,11 +298,12 @@ export const meta = {
     en: "Seedance video generation through a supplier gateway",
     zh: "通过供应商网关生成 Seedance 视频",
   },
-  version: "1.0.0",
+  version: "1.2.4",
   author: { name: "QuantumNous" },
-  models: Object.keys(MODEL_RESOLUTIONS),
+  models: Object.keys(MODEL_RESOLUTIONS).concat(Object.keys(SECOND_MODELS), PAI_CALL_MODELS, PAI_SECOND_MODELS),
   fetchMode: "per_task",
   upstreams: ["vendor", "new_api"],
+  allowedHosts: ["cdn.paisio.online", "files.toapis.xyz", "ark-acg-cn-beijing.tos-cn-beijing.volces.com"],
   usageSchema: VIDEO_USAGE_SCHEMA,
   usageExamples: videoUsageExamples("480p", "none"),
   usageProfiles: usageProfiles(),
@@ -107,10 +314,43 @@ function objectValue(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isKnownModel(model) {
+  return (
+    typeof model === "string" &&
+    (Object.prototype.hasOwnProperty.call(MODEL_RESOLUTIONS, model) ||
+      Object.prototype.hasOwnProperty.call(SECOND_MODELS, model) ||
+      Object.prototype.hasOwnProperty.call(PAI_MODELS, model))
+  );
+}
+
 function modelProfile(model) {
+  if (typeof model === "string" && Object.prototype.hasOwnProperty.call(PAI_MODELS, model)) {
+    const record = PAI_MODELS[model];
+    return {
+      billing: record.kind === "call" ? "pai_call" : "pai_second",
+      family: "pai",
+      minSeconds: record.minSeconds,
+      maxSeconds: record.maxSeconds,
+      rangeUnconfirmed: record.rangeUnconfirmed === true,
+    };
+  }
+  if (typeof model === "string" && Object.prototype.hasOwnProperty.call(SECOND_MODELS, model)) {
+    const entry = SECOND_MODELS[model];
+    const family = SECOND_FAMILIES[entry[0]];
+    const withVideo = model.endsWith("-with-video");
+    const videoMode = family.videoMode === "by-model" ? (withVideo ? "required" : "forbidden") : family.videoMode;
+    return Object.assign({}, family, {
+      billing: "second",
+      family: entry[0],
+      resolution: entry[1],
+      withVideo: withVideo,
+      videoMode: videoMode,
+    });
+  }
   if (typeof model !== "string" || !Object.prototype.hasOwnProperty.call(MODEL_RESOLUTIONS, model)) throw new Error("model is not supported by Supply Video");
   const seedance25 = model.startsWith("seedance2.5-");
   return {
+    billing: "token",
     resolution: MODEL_RESOLUTIONS[model],
     withVideo: model.endsWith("-with-video"),
     maxImages: seedance25 ? 30 : 9,
@@ -121,7 +361,7 @@ function modelProfile(model) {
 }
 
 function profileModelFor(declaredModel, upstreamModel) {
-  return typeof upstreamModel === "string" && Object.prototype.hasOwnProperty.call(MODEL_RESOLUTIONS, upstreamModel) ? upstreamModel : declaredModel;
+  return isKnownModel(upstreamModel) ? upstreamModel : declaredModel;
 }
 
 function unwrapData(body) {
@@ -152,30 +392,114 @@ function roleItems(value, field, allowedRoles, maxCount) {
     if (seen.has(url)) throw new Error(field + " contains a duplicate URL");
     seen.add(url);
     counts[item.role] = (counts[item.role] || 0) + 1;
-    if (["first_frame", "last_frame"].includes(item.role) && counts[item.role] > 1) throw new Error("image_with_roles may contain only one " + item.role);
+    if (["first_frame", "last_frame"].includes(item.role) && counts[item.role] > 1) throw new Error(field + " may contain only one " + item.role);
     items.push({ url: url, role: item.role });
   }
   if (counts.last_frame && !counts.first_frame) throw new Error("last_frame requires first_frame");
   return items;
 }
 
+function normalizeSecondRequest(request, declaredModel, profile) {
+  for (const key of Object.keys(request)) {
+    if (!REQUEST_FIELDS.includes(key)) throw new Error("field " + key + " is not supported");
+  }
+  if (request.model !== undefined && request.model !== declaredModel) throw new Error("model must match the selected model");
+  if (request.video_operation !== undefined && request.video_operation !== "generate") throw new Error("only video_operation generate is supported");
+  if (request.resolution !== undefined && request.resolution !== profile.resolution) throw new Error("resolution conflicts with the selected model");
+  if (request.size !== undefined) {
+    if (typeof request.size !== "string" || !Object.prototype.hasOwnProperty.call(SIZE_RESOLUTIONS, request.size))
+      throw new Error("size must be one of " + Object.keys(SIZE_RESOLUTIONS).join(", "));
+    if (SIZE_RESOLUTIONS[request.size] !== profile.resolution) throw new Error("size conflicts with the selected model");
+  }
+  if (typeof request.prompt !== "string" || !request.prompt.trim()) throw new Error("field prompt is required");
+
+  const seconds = request.seconds;
+  if (request.duration !== undefined) {
+    if (seconds === undefined || request.duration !== seconds) throw new Error("duration must match seconds");
+  }
+  const automaticSeconds = seconds === -1 && profile.autoSeconds;
+  if (!automaticSeconds && (!Number.isInteger(seconds) || seconds < profile.minSeconds || seconds > profile.maxSeconds))
+    throw new Error("seconds must be an integer between " + profile.minSeconds + " and " + profile.maxSeconds);
+
+  const aspectRatio = request.aspect_ratio === undefined ? profile.defaultAspect : request.aspect_ratio;
+  if (typeof aspectRatio !== "string" || !profile.aspects.includes(aspectRatio)) throw new Error("aspect_ratio must be one of " + profile.aspects.join(", "));
+
+  const images = roleItems(request.image_with_roles, "image_with_roles", profile.imageRoles, profile.maxImages);
+  const videos = roleItems(request.video_with_roles, "video_with_roles", ["reference_video"], profile.maxVideos);
+  const audios = roleItems(request.audio_with_roles, "audio_with_roles", ["reference_audio"], profile.maxAudios);
+  const firstFrames = images.filter((item) => item.role === "first_frame").length;
+  const lastFrames = images.filter((item) => item.role === "last_frame").length;
+  const referenceImages = images.filter((item) => item.role === "reference_image").length;
+  const frameMode = firstFrames > 0 || lastFrames > 0;
+  if (frameMode) {
+    if (firstFrames !== 1) throw new Error("image_with_roles must contain exactly one first_frame");
+    if (referenceImages > 0) throw new Error("frame pair cannot be combined with reference_image");
+    if (profile.framesExclusiveWithVideo && videos.length > 0) throw new Error("frame pair cannot be combined with reference_video");
+  }
+  if (profile.videoMode === "required" && videos.length === 0) throw new Error("with-video models require at least one reference_video");
+  if (profile.videoMode === "forbidden" && videos.length > 0) throw new Error("this model does not accept reference_video");
+  if (profile.audioRequiresMedia && audios.length > 0 && images.length === 0 && videos.length === 0)
+    throw new Error("audio_with_roles requires image or video material");
+  if (profile.adaptiveWithFrames && frameMode && aspectRatio !== "adaptive") throw new Error("frame inputs require aspect_ratio adaptive");
+  if (profile.adaptiveWithoutMediaBlocked && aspectRatio === "adaptive" && images.length === 0 && videos.length === 0 && audios.length === 0)
+    throw new Error("text-only generation does not support aspect_ratio adaptive");
+  if (profile.maxTotalMaterials && images.length + videos.length + audios.length > profile.maxTotalMaterials)
+    throw new Error("reference materials must not exceed " + profile.maxTotalMaterials + " items");
+
+  const body = {
+    model: declaredModel,
+    prompt: request.prompt,
+    seconds: seconds,
+    aspect_ratio: aspectRatio,
+  };
+  if (request.video_operation !== undefined) body.video_operation = "generate";
+  if (request.size !== undefined) body.size = request.size;
+  if (request.image_with_roles !== undefined) body.image_with_roles = images;
+  if (request.video_with_roles !== undefined) body.video_with_roles = videos;
+  if (request.audio_with_roles !== undefined) body.audio_with_roles = audios;
+  return { body: body, profile: profile, videoInput: videos.length > 0 ? "video" : "none" };
+}
+
+function integerValue(value) {
+  if (typeof value === "string" && value.trim()) value = Number(value);
+  return Number.isInteger(value) ? value : null;
+}
+
+function normalizePaiRequest(request, declaredModel, profile) {
+  for (const key of Object.keys(request)) {
+    if (!REQUEST_FIELDS.includes(key)) throw new Error("field " + key + " is not supported");
+  }
+  if (request.model !== undefined && request.model !== declaredModel) throw new Error("model must match the selected model");
+  if (request.video_operation !== undefined && request.video_operation !== "generate") throw new Error("only video_operation generate is supported");
+  if (request.resolution !== undefined) throw new Error("PAI model resolution is selected by the model ID; resolution must not be sent");
+  if (request.size !== undefined) throw new Error("PAI model resolution is selected by the model ID; size must not be sent");
+  if (request.image_with_roles !== undefined || request.video_with_roles !== undefined || request.audio_with_roles !== undefined)
+    throw new Error("PAI multimodal materials are not supported yet");
+  if (typeof request.prompt !== "string" || !request.prompt.trim()) throw new Error("field prompt is required");
+
+  const seconds = integerValue(request.seconds);
+  if (request.duration !== undefined) {
+    const duration = integerValue(request.duration);
+    if (seconds === null || duration !== seconds) throw new Error("duration must match seconds");
+  }
+  if (seconds === null || seconds < profile.minSeconds || seconds > profile.maxSeconds)
+    throw new Error("seconds must be an integer between " + profile.minSeconds + " and " + profile.maxSeconds);
+  if (request.aspect_ratio !== undefined && (typeof request.aspect_ratio !== "string" || !request.aspect_ratio.trim()))
+    throw new Error("aspect_ratio must be a non-empty string");
+
+  const body = { model: declaredModel, prompt: request.prompt, seconds: seconds };
+  if (request.aspect_ratio !== undefined) body.aspect_ratio = request.aspect_ratio;
+  if (request.video_operation !== undefined) body.video_operation = "generate";
+  return { body: body, profile: profile, videoInput: "none" };
+}
+
 function normalizeRequest(request, declaredModel, profileModel) {
   if (!objectValue(request)) throw new Error("request body must be an object");
   const profileName = profileModel || declaredModel;
   const profile = modelProfile(profileName);
-  const allowedKeys = new Set([
-    "model",
-    "prompt",
-    "seconds",
-    "duration",
-    "aspect_ratio",
-    "resolution",
-    "size",
-    "video_operation",
-    "image_with_roles",
-    "video_with_roles",
-    "audio_with_roles",
-  ]);
+  if (profile.billing === "pai_call" || profile.billing === "pai_second") return normalizePaiRequest(request, declaredModel, profile);
+  if (profile.billing === "second") return normalizeSecondRequest(request, declaredModel, profile);
+  const allowedKeys = new Set(REQUEST_FIELDS);
   for (const key of Object.keys(request)) {
     if (!allowedKeys.has(key)) throw new Error("field " + key + " is not supported");
   }
@@ -251,6 +575,10 @@ function validTotalTokens(body) {
   return typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0 ? tokens : null;
 }
 
+function validSeconds(value, allowZero) {
+  return typeof value === "number" && Number.isFinite(value) && (allowZero ? value >= 0 : value > 0) ? value : null;
+}
+
 function taskIdFrom(body) {
   const data = unwrapData(body);
   const taskId = data && (data.id !== undefined ? data.id : data.task_id);
@@ -266,11 +594,18 @@ function videoURL(ctx, taskId, suffix) {
 export function buildSubmitRequest(ctx) {
   const upstreamModel = ctx.upstreamModel || ctx.model;
   const normalized = normalizeRequest(ctx.requestBody, ctx.model, profileModelFor(ctx.model, upstreamModel));
+  const body = Object.assign({}, normalized.body, { model: upstreamModel });
+  // The supplier's New API path parses the OpenAI video request DTO, where
+  // seconds is a string; PAI records also use that wire shape.
+  if (normalized.profile.billing === "pai_call" || normalized.profile.billing === "pai_second") {
+    body.seconds = String(body.seconds);
+    body.duration = normalized.body.seconds;
+  }
   return {
     url: ctx.baseUrl + "/v1/videos",
     method: "POST",
     headers: { Authorization: "Bearer " + ctx.apiKey, "Content-Type": "application/json" },
-    body: Object.assign({}, normalized.body, { model: upstreamModel }),
+    body: body,
   };
 }
 
@@ -301,6 +636,18 @@ export function parseSubmitResponse(_ctx, response) {
 export function extractUsage(ctx) {
   const upstreamModel = ctx.upstreamModel || ctx.model;
   const normalized = normalizeRequest(ctx.requestBody, ctx.model, profileModelFor(ctx.model, upstreamModel));
+  if (normalized.profile.billing === "pai_call") {
+    return {};
+  }
+  if (normalized.profile.billing === "pai_second") {
+    if (ctx.usagePurpose === "billing_ratios") {
+      return { seconds: normalized.body.seconds };
+    }
+    return { output_seconds: normalized.body.seconds, input_seconds: 0 };
+  }
+  if (normalized.profile.billing === "second") {
+    return { output_seconds: 0, input_seconds: 0 };
+  }
   return {
     tokens: 0,
     resolution: normalized.profile.resolution,
@@ -338,9 +685,26 @@ export function parseTaskResult(_ctx, body) {
 
 export function extractUsageOnComplete(_ctx, taskResult, body) {
   if (!taskResult || taskResult.status !== "SUCCESS") return {};
+  const data = unwrapData(body);
+  const usage = data && data.usage;
+  if (!objectValue(usage)) {
+    console.log("warning: completed video response has no usable usage; actual billing facts were not reported");
+    return {};
+  }
+  const outputSeconds = validSeconds(usage.output_seconds, false);
+  if (outputSeconds !== null) {
+    const facts = { output_seconds: outputSeconds };
+    const inputSeconds = validSeconds(usage.input_seconds, true);
+    if (inputSeconds !== null) {
+      facts.input_seconds = inputSeconds;
+    } else {
+      console.log("warning: completed per-second video response has no valid usage.input_seconds; input video time was not reported");
+    }
+    return facts;
+  }
   const tokens = validTotalTokens(body);
   if (tokens === null) {
-    console.log("warning: completed video response has no valid usage.total_tokens; actual token usage was not reported");
+    console.log("warning: completed video response has no valid usage; actual billing facts were not reported");
     return {};
   }
   return { tokens: tokens, totalTokens: tokens };
@@ -354,6 +718,13 @@ export function buildContentRequest(ctx) {
   if (ctx.artifactKey !== "video") throw new Error("artifact_not_found");
   if (ctx.clientRequest.method !== "GET" && ctx.clientRequest.method !== "HEAD") throw new Error("video content supports GET and HEAD only");
   if (typeof ctx.upstreamTaskId !== "string" || !ctx.upstreamTaskId.trim()) throw new Error("upstream task id is required");
+  const data = unwrapData(ctx.data) || {};
+  const resultUrl = data.video_url || data.url || data.result_url;
+  if (typeof resultUrl === "string" && resultUrl.trim() === resultUrl && /^https?:\/\/[^\s/?#]+(?:[/?#][^\s]*)?$/i.test(resultUrl)) {
+    // PAI's CDN rejects non-browser clients, and the result URL is already
+    // public/signed. Do not send the supplier API key to a foreign origin.
+    return { url: resultUrl, method: ctx.clientRequest.method, headers: { "User-Agent": CONTENT_USER_AGENT } };
+  }
   return {
     url: videoURL(ctx, ctx.upstreamTaskId, "/content"),
     method: ctx.clientRequest.method,
@@ -367,7 +738,7 @@ export const protocols = {
       if (!ctx.body || ctx.body.kind !== "json") throw new Error("JSON body required");
       const declaredModel = ctx.model;
       const normalized = normalizeRequest(ctx.body.value, declaredModel, profileModelFor(declaredModel, ctx.upstreamModel || declaredModel));
-      const hasMedia = normalized.body.image_with_roles || normalized.body.video_with_roles;
+      const hasMedia = normalized.body.image_with_roles || normalized.body.video_with_roles || normalized.body.audio_with_roles;
       return {
         kind: "submit",
         model: declaredModel,
@@ -401,11 +772,17 @@ export const protocols = {
       }
       // The public representation must never expose the supplier's raw task
       // object: it can carry the private upstream task id and signed media URLs.
-      // Only the measured total token count is safe to publish.
+      // Only the measured billing facts are safe to publish.
       const usage = data.usage;
       if (objectValue(usage)) {
+        const publicUsage = {};
         const total = usage.total_tokens;
-        if (typeof total === "number" && Number.isFinite(total) && total >= 0) output.usage = { total_tokens: total };
+        const outputSeconds = usage.output_seconds;
+        const inputSeconds = usage.input_seconds;
+        if (typeof total === "number" && Number.isFinite(total) && total >= 0) publicUsage.total_tokens = total;
+        if (validSeconds(outputSeconds, true) !== null) publicUsage.output_seconds = outputSeconds;
+        if (validSeconds(inputSeconds, true) !== null) publicUsage.input_seconds = inputSeconds;
+        if (Object.keys(publicUsage).length > 0) output.usage = publicUsage;
       }
       return output;
     },

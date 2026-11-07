@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	builtinplugins "github.com/QuantumNous/new-api/plugins"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -38,6 +39,61 @@ const (
 	supplyVideo2_1080NoVideo    = "seedance2-1080p-token-no-video"
 	supplyVideo2_1080WithVideo  = "seedance2-1080p-token-with-video"
 )
+
+var supplyVideoSecondModels = []string{
+	"happyhorse1.1-720p-second",
+	"happyhorse1.1-1080p-second",
+	"happyhorse1.1-720p-edit-second",
+	"grok-video1.5-480p-second",
+	"grok-video1.5-720p-second",
+	"wan3.0-video-480p",
+	"wan3.0-video-720p",
+	"wan3.0-video-1080p",
+	"wan3.0-video-prime-480p",
+	"wan3.0-video-prime-720p",
+	"wan3.0-video-prime-1080p",
+	"kling4-720p-second-no-video",
+	"kling4-720p-second-with-video",
+	"kling4-1080p-second-no-video",
+	"kling4-1080p-second-with-video",
+	"minimax-h3-max-480p-second",
+	"minimax-h3-max-768p-second",
+	"minimax-h3-max-1080p-second",
+}
+
+var supplyVideoPaiCallModels = []string{
+	"seedance2-fast-720p-once-1",
+	"seedance2-fast-720p-once-2",
+	"seedance2-480p-once",
+	"seedance2-1080p-once",
+	"seedance2-720p-once-1",
+	"seedance2-720p-once-2",
+	"seedance2-720p-once-3",
+	"seedance2.5-720p-once",
+}
+
+var supplyVideoPaiSecondModels = []string{
+	"seedance2-mini-480p-second",
+	"seedance2-mini-720p-second",
+	"seedance2-fast-480p-second-1",
+	"seedance2-fast-480p-second-2",
+	"seedance2-fast-720p-second-1",
+	"seedance2-fast-720p-second-2",
+	"seedance2-480p-second-1",
+	"seedance2-480p-second-2",
+	"seedance2-720p-second-1",
+	"seedance2-720p-second-2",
+	"seedance2-1080p-second-1",
+	"seedance2-1080p-second-2",
+	"seedance2-4k-second",
+	"seedance2.5-480p-second-1",
+	"seedance2.5-480p-second-2",
+	"seedance2.5-480p-second-3",
+	"seedance2.5-480p-second-4",
+	"seedance2.5-720p-second-1",
+	"seedance2.5-720p-second-2",
+	"seedance2.5-720p-second-3",
+}
 
 func newSupplyVideoPlugin(t *testing.T) (*jsplugin.Registry, *jsplugin.LoadedPlugin) {
 	t.Helper()
@@ -90,7 +146,7 @@ func supplyVideoRoles(role string, count int) []any {
 
 func TestSupplyVideoManifestAndUsageProfiles(t *testing.T) {
 	registry, plugin := newSupplyVideoPlugin(t)
-	models := []string{
+	tokenModels := []string{
 		supplyVideo480NoVideo, supplyVideo480WithVideo,
 		supplyVideo720NoVideo, supplyVideo720WithVideo,
 		supplyVideo1080NoVideo, supplyVideo1080WithVideo,
@@ -103,9 +159,15 @@ func TestSupplyVideoManifestAndUsageProfiles(t *testing.T) {
 		supplyVideo2_720NoVideo, supplyVideo2_720WithVideo,
 		supplyVideo2_1080NoVideo, supplyVideo2_1080WithVideo,
 	}
+	var models []string
+	models = append(models, tokenModels...)
+	models = append(models, supplyVideoSecondModels...)
+	models = append(models, supplyVideoPaiCallModels...)
+	models = append(models, supplyVideoPaiSecondModels...)
 	assert.Equal(t, models, plugin.Meta.Models)
 	assert.True(t, plugin.Meta.SupportsUpstream(jsplugin.UpstreamKindNewAPI))
 	assert.Equal(t, []string{"vendor", "new_api"}, plugin.Meta.Upstreams)
+	assert.ElementsMatch(t, []string{"cdn.paisio.online", "files.toapis.xyz", "ark-acg-cn-beijing.tos-cn-beijing.volces.com"}, plugin.Meta.AllowedHosts)
 	assert.Equal(t, []jsplugin.ProtocolClaim{{Name: "openai_video"}}, plugin.Meta.Protocols)
 	assert.False(t, plugin.Meta.ProtocolSupports("openai_responses", "sync"))
 
@@ -159,8 +221,8 @@ func TestSupplyVideoManifestAndUsageProfiles(t *testing.T) {
 	assert.Equal(t, "No reference video", plugin.Meta.UsageSchema["video_input"].EnumLabels["none"]["en"])
 	assert.Equal(t, "With reference video", plugin.Meta.UsageSchema["video_input"].EnumLabels["video"]["en"])
 
-	assert.Len(t, plugin.Meta.UsageProfiles, 8)
-	for _, model := range models {
+	assert.Len(t, plugin.Meta.UsageProfiles, 11)
+	for _, model := range tokenModels {
 		resolution := wantResolution[model]
 		require.NotEmpty(t, resolution, model)
 		videoInput := "none"
@@ -173,7 +235,59 @@ func TestSupplyVideoManifestAndUsageProfiles(t *testing.T) {
 		require.Len(t, examples, 1, model)
 		assert.Equal(t, fmt.Sprintf("100k tokens · %s · %s", resolution, map[string]string{"none": "no reference video", "video": "reference video"}[videoInput]), examples[0].Label)
 		assert.Equal(t, map[string]any{"tokens": int64(100000), "resolution": resolution, "video_input": videoInput}, examples[0].Facts)
+	}
 
+	for _, model := range supplyVideoSecondModels {
+		schema, examples := plugin.Meta.UsageForModel(model)
+		require.Contains(t, schema, "input_seconds", model)
+		require.Contains(t, schema, "output_seconds", model)
+		assert.Equal(t, "second", schema["input_seconds"].Unit, model)
+		assert.Equal(t, "second", schema["output_seconds"].Unit, model)
+		assert.Equal(t, "Input video unit price", schema["input_seconds"].Description["en"], model)
+		assert.Equal(t, "Output video unit price", schema["output_seconds"].Description["en"], model)
+		require.Len(t, examples, 1, model)
+		assert.Equal(t, map[string]any{"output_seconds": int64(5), "input_seconds": int64(0)}, examples[0].Facts)
+	}
+
+	for _, model := range supplyVideoPaiCallModels {
+		schema, examples := plugin.Meta.UsageForModel(model)
+		assert.Empty(t, schema, model)
+		assert.Empty(t, examples, model)
+	}
+	for _, model := range supplyVideoPaiSecondModels {
+		schema, examples := plugin.Meta.UsageForModel(model)
+		require.Contains(t, schema, "input_seconds", model)
+		require.Contains(t, schema, "output_seconds", model)
+		assert.Equal(t, "second", schema["output_seconds"].Unit, model)
+		require.Len(t, examples, 1, model)
+		assert.Equal(t, map[string]any{"output_seconds": int64(4), "input_seconds": int64(0)}, examples[0].Facts)
+	}
+}
+
+func TestSupplyVideoSchemaAcceptsUpstreamTaskExpressions(t *testing.T) {
+	_, plugin := newSupplyVideoPlugin(t)
+
+	tokenSchema, _ := plugin.Meta.UsageForModel(supplyVideo480NoVideo)
+	require.NoError(t, billing_setting.SmokeTestTaskExpr(`tier("total_tokens", u("tokens") * 2.29 / 1000000)`, tokenSchema))
+
+	expressions := []string{
+		`tier("video_seconds", u("output_seconds") * 0.02)`,
+		`tier("video_edit_seconds", u("output_seconds") * 0.08)`,
+		`u("input_seconds") > u("output_seconds") ? tier("input_longer", u("output_seconds") * 0.12 + u("input_seconds") * 0.12) : tier("output_covers_input", u("output_seconds") * 0.23)`,
+		`tier("video_seconds", u("output_seconds") * 0.05 + u("input_seconds") * 0.06)`,
+	}
+	for _, model := range supplyVideoSecondModels {
+		schema, _ := plugin.Meta.UsageForModel(model)
+		for _, expression := range expressions {
+			require.NoError(t, billing_setting.SmokeTestTaskExpr(expression, schema), "%s: %s", model, expression)
+		}
+	}
+
+	paiCallSchema, _ := plugin.Meta.UsageForModel(supplyVideoPaiCallModels[0])
+	require.NoError(t, billing_setting.SmokeTestTaskExpr(`tier("per_video", 0.52)`, paiCallSchema))
+	for _, model := range supplyVideoPaiSecondModels {
+		schema, _ := plugin.Meta.UsageForModel(model)
+		require.NoError(t, billing_setting.SmokeTestTaskExpr(`tier("video_seconds", u("output_seconds") * 0.04)`, schema), model)
 	}
 }
 
@@ -330,6 +444,155 @@ func TestSupplyVideoDecodeRequest(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("per-second families normalize their own contracts", func(t *testing.T) {
+		t.Run("happyhorse reference image", func(t *testing.T) {
+			imageRoles := []any{map[string]any{"url": "https://cdn.example/reference.png", "role": "reference_image"}}
+			decoded, err := supplyVideoDecode(t, plugin, "happyhorse1.1-720p-second", map[string]any{
+				"prompt": "a horse", "seconds": 5, "aspect_ratio": "9:16", "image_with_roles": imageRoles,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, "image_to_video", decoded["action"])
+			assert.Equal(t, map[string]any{
+				"model": "happyhorse1.1-720p-second", "prompt": "a horse", "seconds": float64(5),
+				"aspect_ratio": "9:16", "image_with_roles": imageRoles,
+			}, decoded["requestBody"])
+			assert.Equal(t, map[string]any{"output_seconds": float64(0), "input_seconds": float64(0)}, supplyVideoCall(t, plugin, "extractUsage", map[string]any{
+				"model": "happyhorse1.1-720p-second", "requestBody": decoded["requestBody"],
+			}))
+		})
+
+		t.Run("grok first frame at the one-second lower bound", func(t *testing.T) {
+			imageRoles := []any{map[string]any{"url": "https://cdn.example/first.png", "role": "first_frame"}}
+			decoded, err := supplyVideoDecode(t, plugin, "grok-video1.5-480p-second", map[string]any{
+				"prompt": "a rocket", "seconds": 1, "image_with_roles": imageRoles,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, map[string]any{
+				"model": "grok-video1.5-480p-second", "prompt": "a rocket", "seconds": float64(1),
+				"aspect_ratio": "16:9", "image_with_roles": imageRoles,
+			}, decoded["requestBody"])
+		})
+
+		t.Run("wan automatic duration with mixed reference media", func(t *testing.T) {
+			imageRoles := []any{map[string]any{"url": "https://cdn.example/reference.png", "role": "reference_image"}}
+			videoRoles := []any{map[string]any{"url": "https://cdn.example/reference.mp4", "role": "reference_video"}}
+			audioRoles := []any{map[string]any{"url": "https://cdn.example/reference.mp3", "role": "reference_audio"}}
+			decoded, err := supplyVideoDecode(t, plugin, "wan3.0-video-720p", map[string]any{
+				"prompt": "a river", "seconds": -1, "aspect_ratio": "adaptive",
+				"image_with_roles": imageRoles, "video_with_roles": videoRoles, "audio_with_roles": audioRoles,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, "image_to_video", decoded["action"])
+			assert.Equal(t, map[string]any{
+				"model": "wan3.0-video-720p", "prompt": "a river", "seconds": float64(-1),
+				"aspect_ratio": "adaptive", "image_with_roles": imageRoles,
+				"video_with_roles": videoRoles, "audio_with_roles": audioRoles,
+			}, decoded["requestBody"])
+		})
+
+		t.Run("kling with-video defaults to auto and requires a video", func(t *testing.T) {
+			videoRoles := []any{map[string]any{"url": "https://cdn.example/source.mp4", "role": "reference_video"}}
+			decoded, err := supplyVideoDecode(t, plugin, "kling4-720p-second-with-video", map[string]any{
+				"prompt": "a dancer", "seconds": 10, "video_with_roles": videoRoles,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, map[string]any{
+				"model": "kling4-720p-second-with-video", "prompt": "a dancer", "seconds": float64(10),
+				"aspect_ratio": "auto", "video_with_roles": videoRoles,
+			}, decoded["requestBody"])
+		})
+
+		t.Run("minimax frame pair requires adaptive", func(t *testing.T) {
+			imageRoles := []any{
+				map[string]any{"url": "https://cdn.example/first.png", "role": "first_frame"},
+				map[string]any{"url": "https://cdn.example/last.png", "role": "last_frame"},
+			}
+			decoded, err := supplyVideoDecode(t, plugin, "minimax-h3-max-768p-second", map[string]any{
+				"prompt": "a lighthouse", "seconds": 5, "aspect_ratio": "adaptive", "image_with_roles": imageRoles,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, imageRoles, decoded["requestBody"].(map[string]any)["image_with_roles"])
+		})
+
+		t.Run("PAI per-second accepts string seconds and exposes billing ratios", func(t *testing.T) {
+			decoded, err := supplyVideoDecode(t, plugin, "seedance2-mini-480p-second", map[string]any{
+				"prompt": "a small boat", "seconds": "4",
+			})
+			require.NoError(t, err)
+			assert.Equal(t, "text_to_video", decoded["action"])
+			assert.Equal(t, map[string]any{
+				"model": "seedance2-mini-480p-second", "prompt": "a small boat", "seconds": float64(4),
+			}, decoded["requestBody"])
+			ctx := map[string]any{"model": "seedance2-mini-480p-second", "requestBody": decoded["requestBody"]}
+			assert.Equal(t, map[string]any{"output_seconds": float64(4), "input_seconds": float64(0)}, supplyVideoCall(t, plugin, "extractUsage", ctx))
+			ctx["usagePurpose"] = "billing_ratios"
+			assert.Equal(t, map[string]any{"seconds": float64(4)}, supplyVideoCall(t, plugin, "extractUsage", ctx))
+			submit := supplyVideoCall(t, plugin, "buildSubmitRequest", map[string]any{
+				"baseUrl": "https://supplier.example", "apiKey": "key",
+				"model": "seedance2-mini-480p-second", "requestBody": decoded["requestBody"],
+			})
+			assert.Equal(t, map[string]any{
+				"model": "seedance2-mini-480p-second", "prompt": "a small boat", "seconds": "4", "duration": float64(4),
+			}, submit["body"])
+		})
+
+		t.Run("PAI per-call returns no usage facts", func(t *testing.T) {
+			decoded, err := supplyVideoDecode(t, plugin, "seedance2-fast-720p-once-1", map[string]any{
+				"prompt": "a rocket", "seconds": 4, "aspect_ratio": "16:9",
+			})
+			require.NoError(t, err)
+			assert.Equal(t, map[string]any{
+				"model": "seedance2-fast-720p-once-1", "prompt": "a rocket", "seconds": float64(4), "aspect_ratio": "16:9",
+			}, decoded["requestBody"])
+			assert.Empty(t, supplyVideoCall(t, plugin, "extractUsage", map[string]any{
+				"model": "seedance2-fast-720p-once-1", "requestBody": decoded["requestBody"],
+			}))
+		})
+
+		t.Run("PAI unconfirmed duration range accepts an integer", func(t *testing.T) {
+			decoded, err := supplyVideoDecode(t, plugin, "seedance2-720p-once-2", map[string]any{
+				"prompt": "a rocket", "seconds": 4,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, float64(4), decoded["requestBody"].(map[string]any)["seconds"])
+		})
+	})
+
+	for _, tc := range []struct {
+		name    string
+		model   string
+		body    map[string]any
+		wantErr string
+	}{
+		{"happyhorse rejects reference video", "happyhorse1.1-1080p-second", map[string]any{"prompt": "a horse", "seconds": 5, "video_with_roles": supplyVideoRoles("reference_video", 1)}, "video_with_roles supports at most 0 items"},
+		{"happyhorse frame cannot mix reference images", "happyhorse1.1-720p-second", map[string]any{"prompt": "a horse", "seconds": 5, "image_with_roles": []any{
+			map[string]any{"url": "https://cdn.example/first.png", "role": "first_frame"},
+			map[string]any{"url": "https://cdn.example/reference.png", "role": "reference_image"},
+		}}, "frame pair cannot be combined with reference_image"},
+		{"grok seconds lower bound", "grok-video1.5-480p-second", map[string]any{"prompt": "a rocket", "seconds": 0}, "seconds must be an integer between 1 and 15"},
+		{"grok seconds upper bound", "grok-video1.5-720p-second", map[string]any{"prompt": "a rocket", "seconds": 16}, "seconds must be an integer between 1 and 15"},
+		{"wan frame cannot mix reference video", "wan3.0-video-480p", map[string]any{"prompt": "a river", "seconds": 8, "image_with_roles": supplyVideoRoles("first_frame", 1), "video_with_roles": supplyVideoRoles("reference_video", 1)}, "frame pair cannot be combined with reference_video"},
+		{"wan audio requires media", "wan3.0-video-1080p", map[string]any{"prompt": "a river", "seconds": 8, "audio_with_roles": supplyVideoRoles("reference_audio", 1)}, "audio_with_roles requires image or video material"},
+		{"kling with-video requires a video", "kling4-1080p-second-with-video", map[string]any{"prompt": "a dancer", "seconds": 10}, "with-video models require at least one reference_video"},
+		{"kling no-video rejects a video", "kling4-720p-second-no-video", map[string]any{"prompt": "a dancer", "seconds": 10, "video_with_roles": supplyVideoRoles("reference_video", 1)}, "this model does not accept reference_video"},
+		{"minimax text-only adaptive is rejected", "minimax-h3-max-480p-second", map[string]any{"prompt": "a lighthouse", "seconds": 5, "aspect_ratio": "adaptive"}, "text-only generation does not support aspect_ratio adaptive"},
+		{"minimax frames require adaptive", "minimax-h3-max-1080p-second", map[string]any{"prompt": "a lighthouse", "seconds": 5, "image_with_roles": []any{
+			map[string]any{"url": "https://cdn.example/first.png", "role": "first_frame"},
+			map[string]any{"url": "https://cdn.example/last.png", "role": "last_frame"},
+		}}, "frame inputs require aspect_ratio adaptive"},
+		{"minimax total material cap", "minimax-h3-max-480p-second", map[string]any{"prompt": "a lighthouse", "seconds": 5, "image_with_roles": supplyVideoRoles("reference_image", 9), "video_with_roles": supplyVideoRoles("reference_video", 3), "audio_with_roles": supplyVideoRoles("reference_audio", 3)}, "reference materials must not exceed 12 items"},
+		{"PAI rejects multimodal materials", "seedance2-mini-480p-second", map[string]any{"prompt": "a boat", "seconds": 4, "image_with_roles": supplyVideoRoles("reference_image", 1)}, "PAI multimodal materials are not supported yet"},
+		{"PAI rejects locked resolution", "seedance2-mini-480p-second", map[string]any{"prompt": "a boat", "seconds": 4, "resolution": "480p"}, "resolution must not be sent"},
+		{"PAI per-call range lower bound", "seedance2-fast-720p-once-1", map[string]any{"prompt": "a rocket", "seconds": 3}, "seconds must be an integer between 4 and 15"},
+		{"PAI per-second range upper bound", "seedance2-mini-480p-second", map[string]any{"prompt": "a boat", "seconds": 16}, "seconds must be an integer between 4 and 15"},
+		{"PAI unconfirmed range sanity bound", "seedance2-fast-480p-second-2", map[string]any{"prompt": "a boat", "seconds": 61}, "seconds must be an integer between 1 and 60"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := supplyVideoDecode(t, plugin, tc.model, tc.body)
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
 }
 
 func TestSupplyVideoDriverResponsesAndArtifacts(t *testing.T) {
@@ -421,10 +684,27 @@ func TestSupplyVideoDriverResponsesAndArtifacts(t *testing.T) {
 			{"status": "completed"},
 			{"status": "completed", "usage": map[string]any{}},
 			{"status": "completed", "usage": map[string]any{"total_tokens": 0}},
+			{"status": "completed", "usage": map[string]any{"output_seconds": 0, "input_seconds": 3}},
 		} {
 			facts := supplyVideoCall(t, plugin, "extractUsageOnComplete", nil, map[string]any{"status": "SUCCESS"}, body)
 			assert.Empty(t, facts)
 		}
+	})
+
+	t.Run("completed per-second response maps output and input seconds", func(t *testing.T) {
+		body := map[string]any{
+			"status": "completed",
+			"usage":  map[string]any{"charge_type": "per_second", "output_seconds": 5, "input_seconds": 10},
+		}
+		facts := supplyVideoCall(t, plugin, "extractUsageOnComplete", nil, map[string]any{"status": "SUCCESS"}, body)
+		assert.Equal(t, map[string]any{"output_seconds": float64(5), "input_seconds": float64(10)}, facts)
+
+		body = map[string]any{
+			"status": "completed",
+			"usage":  map[string]any{"charge_type": "per_second", "output_seconds": 8},
+		}
+		facts = supplyVideoCall(t, plugin, "extractUsageOnComplete", nil, map[string]any{"status": "SUCCESS"}, body)
+		assert.Equal(t, map[string]any{"output_seconds": float64(8)}, facts)
 	})
 
 	t.Run("openai_video renderer omits upstream identity and media URLs", func(t *testing.T) {
@@ -447,6 +727,23 @@ func TestSupplyVideoDriverResponsesAndArtifacts(t *testing.T) {
 		assert.Equal(t, "public-task-id", response["id"])
 	})
 
+	t.Run("openai_video renderer publishes measured seconds without upstream identity", func(t *testing.T) {
+		value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "render"}, map[string]any{}, map[string]any{
+			"task_id": "public-second-task", "status": "SUCCESS", "progress": "100%", "created_at": 11,
+			"data": map[string]any{
+				"id": "upstream-second-secret", "status": "completed",
+				"usage": map[string]any{"charge_type": "per_second", "output_seconds": 5, "input_seconds": 2},
+			},
+		})
+		require.NoError(t, err)
+		encoded, err := common.Marshal(value)
+		require.NoError(t, err)
+		assert.NotContains(t, string(encoded), "upstream-second-secret")
+		var response map[string]any
+		require.NoError(t, common.Unmarshal(encoded, &response))
+		assert.Equal(t, map[string]any{"output_seconds": float64(5), "input_seconds": float64(2)}, response["usage"])
+	})
+
 	t.Run("artifact list and content use upstream task identity and authentication", func(t *testing.T) {
 		artifactsValue, err := plugin.Engine.Call(t.Context(), "listArtifacts", map[string]any{"status": "SUCCESS"})
 		require.NoError(t, err)
@@ -462,5 +759,18 @@ func TestSupplyVideoDriverResponsesAndArtifacts(t *testing.T) {
 		})
 		assert.Equal(t, vendorBaseURL+"/v1/videos/actual-upstream-id/content", content["url"])
 		assert.Equal(t, map[string]any{"Authorization": "Bearer " + apiKey}, content["headers"])
+	})
+
+	t.Run("content prefers the stored result URL without leaking supplier credentials", func(t *testing.T) {
+		content := supplyVideoCall(t, plugin, "buildContentRequest", map[string]any{
+			"baseUrl": vendorBaseURL, "apiKey": apiKey, "artifactKey": "video", "upstreamTaskId": "actual-upstream-id",
+			"clientRequest": map[string]any{"method": http.MethodHead},
+			"data":          map[string]any{"status": "completed", "video_url": "https://cdn.example/result.mp4?sig=abc"},
+		})
+		assert.Equal(t, "https://cdn.example/result.mp4?sig=abc", content["url"])
+		assert.Equal(t, http.MethodHead, content["method"])
+		headers := content["headers"].(map[string]any)
+		assert.NotEmpty(t, headers["User-Agent"])
+		assert.NotContains(t, headers, "Authorization")
 	})
 }
