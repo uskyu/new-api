@@ -1,7 +1,7 @@
 # Harness 网关接口交付包
 
 **版本**：V0.10
-**对应网关版本**：`harness-api-codex` RC48 候选分支（从 `harness-api` 创建；尚未合并回上游分支、尚未部署）
+**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交；尚未部署）
 **交付日期**：2026-10-25（2026-10-29、2026-11-05、2026-11-06、2026-11-07 更新）
 
 ---
@@ -66,8 +66,8 @@
 | 下载包构建 | 使用 GitHub `Package harness-api` 工作流生成多平台产物 |
 | 部署与真实端到端复验 | ⏳ 待部署后执行；本地模拟测试不替代线上验收 |
 
-> 上述状态是 2026-11-06 时 `harness-api` 分支的记录。RC48 候选分支的本地验证结果
-> 见下节；它仍未部署，也未用真实 Harness JWT 或模型供应商验证。`07-acceptance-evidence.md`
+> 上述状态是 2026-11-06 时 `harness-api` 分支的记录。RC48 候选分支（已合入
+> `harness-api`）的本地验证结果见下节；它仍未部署，也未用真实 Harness JWT 或模型供应商验证。`07-acceptance-evidence.md`
 > 中的历史验收记录都属于 V0.9.1 构建（`fd00dae`），不能用来证明 V0.10 的线上行为。
 
 ### 已由 Harness 提供
@@ -104,12 +104,12 @@
 读回）。**该验证不覆盖 V0.10 的池分类与税额变更。**
 数据库部署目标为 MySQL，PostgreSQL 不在本期范围。
 
-### RC48 候选分支验证（2026-11-07）
+### RC48 候选合入前验证（2026-11-07）
 
 | 项 | 结果 |
 | --- | --- |
 | 官方基线 | `QuantumNous/new-api` `v1.0.0-rc.48`，commit `706144769e5bed5a47b78721e3bb11da3cf4c0b9`；对比 RC44 共 122 个上游提交 |
-| 工作分支 | `harness-api-codex`，从 `harness-api` 创建；保留 Harness 的 A3 目录分流、内部账本、智能路由池与 `supplyvideo` 插件 |
+| 工作分支 | `harness-api-codex`，从 `harness-api` 创建，已 fast-forward 合入 `harness-api`；保留 Harness 的 A3 目录分流、内部账本、智能路由池与 `supplyvideo` 插件 |
 | Go 检查 | 根模块、`relaykit`、`tokenkit` 的 `go vet` 与全量 `make test` 通过 |
 | Web 检查 | 类型检查通过；203 个测试文件中的 2,470 个测试通过 |
 | 数据库检查 | 审计排序索引新建与升级用例在 SQLite、MySQL 8.0.43、PostgreSQL 17.5 通过；Harness 账本/结算用例在三种方言通过 |
