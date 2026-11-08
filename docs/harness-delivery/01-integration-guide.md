@@ -1,7 +1,7 @@
 # Harness 网关接口接入指南
 
 **版本**：V0.10
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；本地验证完成，尚未部署或真实联调
+**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261108-bb26602`，真实联调待执行
 **面向**：Harness 后端开发与联调
 
 本文档给出网关侧全部对外接口的调用方法。字段语义细节见
@@ -504,7 +504,7 @@ Authorization: Bearer <JWT>
 | --- | --- |
 | `status` | `ok` 或 `degraded` |
 | `interface_version` | 固定 `v2` |
-| `upstream_baseline` | 网关基线提交；`45fbb149` 为 V0.9.1 构建值，本轮构建的基线待部署后确认 |
+| `upstream_baseline` | 网关基线提交；`45fbb149` 为 V0.9.1 构建值，本轮构建基于 RC48 合入后的 `bb266025`；B4 实际返回值待现场复核 |
 | `time` | 服务器时间，RFC3339 UTC 毫秒 |
 
 ---
@@ -628,3 +628,4 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
 | 2026-11-05 | V0.10 | 取消经济/企业档，路由完全归网关；资源池改为产品线 `chat`（默认）/`video`/`image`/`audio`/`plan` 五个池；`X-Route-Group` 改为仅 `plan` 有业务含义；A3 样例改为五个池；取消供应商税率，`total_amount = base_amount × group_ratio`，`tax_rate_percent` 恒 0 并标记废弃。对应本轮构建（待发布），尚未部署验证 |
 | 2026-11-06 | V0.10（修订） | 路由简化：移除 `global_channel_order` / 全渠道优先级全局池与 `token_group_access` / 令牌授权，资源池成为唯一路由顺序；`X-Route-Group` 仅经验证的 Harness 调用方可使用；补充 `pricing_group_order` 是采购分组资格与倍率来源、不是渠道路由顺序。移除令牌未授权 403 行。代码已改，未构建、未部署、未验证 |
 | 2026-11-07 | RC48 候选 | 基于官方 `v1.0.0-rc.48` 对齐；保留五个 Harness 产品池与账本契约；补齐 task-plugin 协议路由的 Harness scope 检查。当前候选通过本地 Go、Web 与 SQLite/MySQL/PostgreSQL 检查；尚未部署或真实联调 |
+| 2026-11-08 | RC48 部署 | `harness-api` 合入 RC48 后构建 `harness-api-20261108-bb26602`，已部署 82 实例并通过容器健康检查与 `/api/status` 探测；真实 Harness JWT / 供应商 E2E 待执行 |

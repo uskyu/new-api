@@ -1,7 +1,7 @@
 # Harness 联调验收清单
 
 **版本**：V0.10
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；本清单仍需部署后逐项验收
+**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261108-bb26602`，本清单仍需逐项验收
 
 本文档供双方逐项核验。每项包含：执行方、请求、预期响应、通过标准。
 
@@ -17,7 +17,7 @@
 | 服务主体 `sub` | Harness | ✅ `harness-gateway` |
 | 网关地址 | New API | ✅ `https://testapi.soloai.chat` |
 | 资源池 id（`chat` / `video` / `image` / `audio` / `plan`）与池内模型 id | New API | ✅ A3 动态返回；`video` / `image` / `audio` 渠道未接入，`models` 暂为空属预期 |
-| 路由配置：资源池渠道顺序是唯一路由顺序；`global_channel_order` / 全渠道优先级全局池与 `token_group_access` / 令牌授权已移除；`pricing_group_order` 仅决定采购分组资格与倍率（当前 `["default"]`，倍率 1），不是渠道路由顺序 | New API | ✅ 代码已改（未构建，待复验） |
+| 路由配置：资源池渠道顺序是唯一路由顺序；`global_channel_order` / 全渠道优先级全局池与 `token_group_access` / 令牌授权已移除；`pricing_group_order` 仅决定采购分组资格与倍率（当前 `["default"]`，倍率 1），不是渠道路由顺序 | New API | ✅ 已构建并部署，待逐项复验 |
 
 ---
 

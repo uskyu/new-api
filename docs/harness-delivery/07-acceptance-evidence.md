@@ -1,9 +1,9 @@
 # Harness 联调验收结果（真实 JWT）
 
-**交付包版本**：V0.10（下列证据对应 V0.9.1 构建；V0.10 变更见第十二节，未验证）
+**交付包版本**：V0.10（下列证据对应 V0.9.1 构建；V0.10 已构建并部署，见第十二、十四节）
 **日期**：2026-10-26（2026-10-29 复测）
 **网关版本**：复测记录为 `ec3cdc0`（版本头 `harness-api-20261029-ec3cdc0`）；
-V0.9.1 交付构建为 `fd00dae`（含 run id 校验补丁）；V0.10 为本轮构建（待发布）
+V0.9.1 交付构建为 `fd00dae`（含 run id 校验补丁）；V0.10 构建 `bb266025`，镜像 `harness-api-20261108-bb26602`，已部署 82 实例
 **JWT 来源**：Harness 正式签发（JWKS `https://alphapro-test.xyz/.well-known/jwks.json`）
 **Token 有效期**：至 2026-11-18
 
@@ -201,7 +201,7 @@ B1/B3 另含 `details.required_scope`。这是当前契约定义，不是缺陷�
 | 池分类 | 资源池改为产品线：`chat`（默认，text）、`video`（video，无池级计费）、`audio`（audio，占位）、`plan`（video，`per_call`，畅用计划） | 分支已改 |
 | 路由头 | `X-Route-Group` 改为可选，仅 `plan` 有业务含义；普通调用不传，落默认 `chat` 池 | 分支已改 |
 | 税额 | 取消供应商税率，`total_amount = base_amount × group_ratio`；`tax_rate_percent` 恒 0 并废弃，后续版本移除 | 分支已改 |
-| 构建与部署 | 本轮构建（待发布）；尚未部署 | ⏳ |
+| 构建与部署 | `harness-api-20261108-bb26602` 已部署 82 实例，容器 healthy，`/api/status` 成功 | ✅ |
 | 端到端复验 | 未执行：A3 五池返回、`plan` 池识别、B3 无税额金额核对均未实测 | ⏳ 待验证 |
 
 > 因此本文档**不能**用于声称 V0.10 已通过验收。旧记录中的 `economy` /
@@ -221,13 +221,14 @@ B1/B3 另含 `details.required_scope`。这是当前契约定义，不是缺陷�
 
 ---
 
-## 十四、RC48 候选代码验证（2026-11-07，不是线上验收）
+## 十四、RC48 合入与部署验证（2026-11-07 / 11-08，不是线上验收）
 
-代码候选位于 `harness-api-codex`，基于官方 `v1.0.0-rc.48`
+RC48 候选已 fast-forward 合入 `harness-api`（`bb266025`），基于官方 `v1.0.0-rc.48`
 （`706144769e5bed5a47b78721e3bb11da3cf4c0b9`）。本地 Go 全量测试、Web 类型检查、
-2,470 个 Web 测试，以及 SQLite/MySQL/PostgreSQL 审计索引迁移与 Harness 账本/结算
-测试通过。验证还补齐了 task-plugin 协议路由的 scope 检查。
+2,470 个 Web 测试，以及 SQLite/MySQL 8.0.43 审计索引迁移与 Harness 账本/结算
+测试通过；MySQL 8.0.43 的任务结算与完整启动/迁移也通过。验证还补齐了
+task-plugin 协议路由的 scope 检查。
 
-这些结果只证明候选代码通过自动检查。没有在部署实例上使用 Harness 正式 JWT，
-没有调用真实模型供应商，也没有验证 A3 目录、真实路由池或线上 B3 金额。因此本节
-不改变第一至十三节的历史性质，不能作为 V0.10 线上验收结论。
+代码已构建为 `harness-api-20261108-bb26602` 并部署到 82 实例，容器 healthy、
+`/api/status` 成功。但仍未在部署实例上使用 Harness 正式 JWT，没有调用真实模型供应商，
+也没有验证 A3 目录、真实路由池或线上 B3 金额。因此本节不能作为 V0.10 线上验收结论。
