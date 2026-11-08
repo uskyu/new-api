@@ -16,7 +16,7 @@
 | `aud` 值 | 双方商定 | ✅ `new-api` |
 | 服务主体 `sub` | Harness | ✅ `harness-gateway` |
 | 网关地址 | New API | ✅ `https://testapi.soloai.chat` |
-| 资源池 id（`chat` / `video` / `image` / `audio` / `plan`）与池内模型 id | New API | ✅ A3 动态返回；`video` / `image` / `audio` 渠道未接入，`models` 暂为空属预期 |
+| 资源池 id（`chat` / `video` / `image` / `audio` / `plan`）与池内模型 id | New API | ✅ A3 动态返回；`image` / `audio` 渠道未接入，`models` 为空属预期；`video` / `plan` 已配置模型 |
 | 路由配置：资源池渠道顺序是唯一路由顺序；`global_channel_order` / 全渠道优先级全局池与 `token_group_access` / 令牌授权已移除；`pricing_group_order` 仅决定采购分组资格与倍率（当前 `["default"]`，倍率 1），不是渠道路由顺序 | New API | ✅ 已构建并部署，待逐项复验 |
 
 ---
@@ -159,8 +159,8 @@ curl -sS -X POST "http://<gateway>/v1/chat/completions" \
 > `X-Route-Group` 只对通过 Harness JWT 校验的调用方生效，且只有 `plan` 有业务
 > 含义；普通 chat/video/audio 调用不传该头，落默认 `chat` 池。
 >
-> `video` / `audio` 池当前没有可用渠道，不在本轮调用验收范围内。它们只需在 A3
-> 中以 `models: []` 出现，不要求可调用。
+> `image` / `audio` 池当前没有可用渠道，不在本轮调用验收范围内。它们只需在 A3
+> 中以 `models: []` 出现，不要求可调用；`video` / `plan` 已有模型，按正常调用验收。
 
 ---
 
@@ -194,7 +194,7 @@ curl -sS -D- "http://<gateway>/v1/models" \
       "object": "model",
       "display_name": "视频",
       "kind": "video",
-      "models": [],
+      "models": ["seedance2-1080p-once", "seedance2-480p-once", "seedance2-720p-once-1", "seedance2-720p-once-2", "seedance2-720p-once-3", "seedance2-fast-720p-once-1", "seedance2-fast-720p-once-2", "seedance2.5-720p-once"],
       "capabilities": []
     },
     {
@@ -219,7 +219,7 @@ curl -sS -D- "http://<gateway>/v1/models" \
       "display_name": "畅用计划",
       "kind": "video",
       "billing": "per_call",
-      "models": [],
+      "models": ["seedance2-1080p-token-no-video", "seedance2-1080p-token-with-video", "seedance2-480p-token-no-video", "seedance2-480p-token-with-video", "seedance2-4k-token-no-video", "seedance2-4k-token-with-video", "seedance2-720p-token-no-video", "seedance2-720p-token-with-video", "seedance2-fast-480p-token-no-video", "seedance2-fast-480p-token-with-video", "seedance2-fast-720p-token-no-video", "seedance2-fast-720p-token-with-video", "seedance2-mini-480p-token-no-video", "seedance2-mini-480p-token-with-video", "seedance2-mini-720p-token-no-video", "seedance2-mini-720p-token-with-video", "seedance2.5-1080p-token-no-video", "seedance2.5-1080p-token-with-video", "seedance2.5-480p-token-no-video", "seedance2.5-480p-token-with-video", "seedance2.5-720p-token-no-video", "seedance2.5-720p-token-with-video"],
       "capabilities": []
     }
   ],
@@ -228,14 +228,14 @@ curl -sS -D- "http://<gateway>/v1/models" \
 }
 ```
 
-> 样例取自 2026-11-08 的 82 实例：`chat` 池有 15 个可路由且已定价模型；`video` / `image` / `audio` / `plan` 当前没有可用渠道，`models` 为空。实际验收以实例返回为准，模型集合会随渠道与价格变化。
+> 样例取自 2026-11-08 的 82 实例：`chat` 池 15 个模型，`video` 池 8 个 PAI 按次模型，`plan` 池 22 个 TA token 模型；`image` / `audio` 当前没有可用渠道，`models` 为空。`models` 按模型 id 字典序返回，实际验收以实例返回为准。
 
 **通过标准**：
 - [ ] HTTP 200
 - [ ] `ETag` 响应头非空
 - [ ] `data[].id` 为**资源池 id**（`chat` / `video` / `image` / `audio` / `plan`）
 - [ ] `data[].models` 为**真实模型 id**（用作请求的 `model`）
-- [ ] `chat` 池含实际可调的模型 id；`video` / `image` / `audio` 允许 `models: []`
+- [ ] `chat` / `video` / `plan` 池含实际可调的模型 id；`image` / `audio` 允许 `models: []`
 - [ ] `plan` 池返回 `billing: per_call`；`video` / `image` 池不返回池级 `billing`
 - [ ] 模型列表按四个对外分区展示：文字模型（`chat`）/ 图片生成模型（`image`）/ 视频模型（`video`）/ plan 计划（`plan`）；`audio` 为预留池，不进入这四个分区
 - [ ] 每个分区的 `models` 为扁平模型 id 数组，不再按供应商、计价分组、能力、渠道或模型子类二次分组

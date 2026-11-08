@@ -98,9 +98,9 @@
 | --- | --- |
 | 更正链（`usage_correction` / `cost_correction` / `refund`） | 需构造重复结算或退款场景 |
 | BatchGet 500 事件上限 | 数据量不足 |
-| `video` / `audio` 池渠道 | 渠道未接入，两个池当前合法地返回 `models: []`，**不可调用** |
+| `audio` 池渠道 | 渠道未接入，当前返回空模型列表，**不可调用** |
 | `image` 池渠道 | 渠道未接入，当前返回空模型列表，**不可调用** |
-| `plan` 池可用性 | 按次计费（`per_call`）已定义；是否已有可调模型以 A3 `models` 为准，本轮不作可调用承诺 |
+| `video` / `plan` 池 | 已配置渠道与模型：`video` 8 个 PAI 按次模型，`plan` 22 个 TA token 模型；可调用性以实际接口为准 |
 
 **Docker 镜像**：82 实例当前运行版本为
 `harness-api-20261108-bb26602`，并通过容器健康检查与
@@ -195,8 +195,10 @@ V0.10 在此之上调整了产品口径，已完成构建并部署到 82 实例�
 > 无池级计费）/ `audio`（audio，占位）/ `plan`（video，`per_call`，畅用计划）；
 > `X-Route-Group` 改为可选且仅 `plan` 有意义；取消供应商税率，
 > `total_amount = base_amount × group_ratio`，`tax_rate_percent` 保留为恒 0 的
-> 废弃字段，后续版本移除；`video` / `audio` 渠道未接入，其 `models` 为空属预期，
-> 不可调用。本轮构建已发布并部署（2026-11-08），真实 Harness 调用验收待执行。
+> 废弃字段，后续版本移除；2026-11-05 时 `video` / `audio` 渠道未接入，其
+> `models` 为空属预期，不可调用。本轮构建已发布并部署（2026-11-08），真实 Harness 调用验收待执行。
+> 2026-11-08 起 `video` 池配置 8 个 PAI 按次模型，`plan` 池配置 22 个 TA token 模型；
+> `image` / `audio` 仍为空。
 >
 > 2026-11-06 更新要点（仍为 V0.10）：路由进一步简化。取消
 > `global_channel_order` / 「全渠道优先级」全局池，资源池是唯一路由顺序；取消

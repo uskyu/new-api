@@ -231,7 +231,7 @@ total_amount = base_amount × group_ratio
 | 资源池 | 五个产品线：`chat`（默认，text）/ `video`（video，无池级计费）/ `image`（image，占位，无池级计费）/ `audio`（audio，占位）/ `plan`（video，`per_call`） |
 | 路由顺序 | 资源池的渠道顺序是唯一路由顺序。`global_channel_order` / 全渠道优先级全局池已移除，不存在 `global` 池；`token_group_access` / 令牌授权已移除，Harness 不需要按池授权 |
 | `pricing_group_order` | **不是路由顺序**。仅决定哪些渠道+模型能力具备采购分组资格，并给出 `group_ratio`；当前配置为单分组 `["default"]`，倍率 `1` |
-| `video` / `audio` 池 | 渠道尚未接入，`models: []` 属预期，**当前不可调用** |
+| `image` / `audio` 池 | 渠道尚未接入，`models: []` 属预期，**当前不可调用** |
 
 ---
 

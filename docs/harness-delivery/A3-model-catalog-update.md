@@ -27,7 +27,7 @@ Authorization: Bearer <HARNESS_JWT>
 
 ## 3. 返回样例
 
-以下为 **2026-11-08 的 82 实例真实样例**；模型 ID、版本及 ETag 以实际联调环境响应为准，模型集合会随渠道与价格变化。
+以下为 **2026-11-08 的 82 实例真实样例**：`chat` 15 个模型，`video` 8 个 PAI 按次模型，`plan` 22 个 TA token 模型；`image` / `audio` 为空。`models` 按模型 id 字典序返回；模型 ID、版本及 ETag 以实际联调环境响应为准，模型集合会随渠道与价格变化。
 
 ```json
 {
@@ -46,7 +46,7 @@ Authorization: Bearer <HARNESS_JWT>
       "object": "model",
       "display_name": "视频",
       "kind": "video",
-      "models": [],
+      "models": ["seedance2-1080p-once", "seedance2-480p-once", "seedance2-720p-once-1", "seedance2-720p-once-2", "seedance2-720p-once-3", "seedance2-fast-720p-once-1", "seedance2-fast-720p-once-2", "seedance2.5-720p-once"],
       "capabilities": []
     },
     {
@@ -71,7 +71,7 @@ Authorization: Bearer <HARNESS_JWT>
       "display_name": "畅用计划",
       "kind": "video",
       "billing": "per_call",
-      "models": [],
+      "models": ["seedance2-1080p-token-no-video", "seedance2-1080p-token-with-video", "seedance2-480p-token-no-video", "seedance2-480p-token-with-video", "seedance2-4k-token-no-video", "seedance2-4k-token-with-video", "seedance2-720p-token-no-video", "seedance2-720p-token-with-video", "seedance2-fast-480p-token-no-video", "seedance2-fast-480p-token-with-video", "seedance2-fast-720p-token-no-video", "seedance2-fast-720p-token-with-video", "seedance2-mini-480p-token-no-video", "seedance2-mini-480p-token-with-video", "seedance2-mini-720p-token-no-video", "seedance2-mini-720p-token-with-video", "seedance2.5-1080p-token-no-video", "seedance2.5-1080p-token-with-video", "seedance2.5-480p-token-no-video", "seedance2.5-480p-token-with-video", "seedance2.5-720p-token-no-video", "seedance2.5-720p-token-with-video"],
       "capabilities": []
     }
   ],

@@ -96,7 +96,7 @@ HTTP/1.1 400 Bad Request
 | 池 id | 显示名 | `kind` | 说明 |
 | --- | --- | --- | --- |
 | `chat` | 通用对话 | `text` | **默认池**。不传 `X-Route-Group` 时的落点；A1/A2/A4/A9 的常规调用都走这里 |
-| `video` | 视频 | `video` | 视频任务池。池内混合按 token 与按秒计费的模型，因此**池级不标注 `billing`**；渠道尚未接入 |
+| `video` | 视频 | `video` | 视频任务池。当前配置 8 个 PAI 按次模型；**池级不标注 `billing`** |
 | `image` | 图片生成 | `image` | 图片生成预留池，池内混合按张、按 token 等模型，**池级不标注 `billing`**；渠道尚未接入，**本期不可调用** |
 | `audio` | 语音 | `audio` | 语音/TTS 预留池，当前仅占位；渠道尚未接入，**本期不可调用** |
 | `plan` | 畅用计划 | `video` | 专用于畅用计划；池级 `billing: per_call`（按次计费） |
@@ -112,8 +112,9 @@ HTTP/1.1 400 Bad Request
 是唯一的路由顺序，也没有 `global` 池可供选择。池是硬绑定：选中的池里没有该模型
 的可用渠道时直接失败，不会改用另一个池。
 
-`video` 与 `audio` 的渠道尚未配置，这两个池的 `models` 可能合法地返回空数组，
-此时该池不可调用。池的存在只表示产品线已定义，不表示已经可以接单。
+`image` 与 `audio` 的渠道尚未配置，这两个池的 `models` 可能合法地返回空数组，
+此时该池不可调用。`video` 与 `plan` 已配置渠道与模型，以 A3 返回的 `models` 为准。
+池的存在只表示产品线已定义，不表示已经可以接单。
 
 供应商税率已取消，B3 金额不再含税额。`billing.group_ratio` 来自采购计价分组，
 不是资源池的倍率；`pricing_group_order` 只判断哪些渠道+模型能力具备采购分组
@@ -157,7 +158,7 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
       "object": "model",
       "display_name": "视频",
       "kind": "video",
-      "models": [],
+      "models": ["seedance2-1080p-once", "seedance2-480p-once", "seedance2-720p-once-1", "seedance2-720p-once-2", "seedance2-720p-once-3", "seedance2-fast-720p-once-1", "seedance2-fast-720p-once-2", "seedance2.5-720p-once"],
       "capabilities": []
     },
     {
@@ -182,7 +183,7 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
       "display_name": "畅用计划",
       "kind": "video",
       "billing": "per_call",
-      "models": [],
+      "models": ["seedance2-1080p-token-no-video", "seedance2-1080p-token-with-video", "seedance2-480p-token-no-video", "seedance2-480p-token-with-video", "seedance2-4k-token-no-video", "seedance2-4k-token-with-video", "seedance2-720p-token-no-video", "seedance2-720p-token-with-video", "seedance2-fast-480p-token-no-video", "seedance2-fast-480p-token-with-video", "seedance2-fast-720p-token-no-video", "seedance2-fast-720p-token-with-video", "seedance2-mini-480p-token-no-video", "seedance2-mini-480p-token-with-video", "seedance2-mini-720p-token-no-video", "seedance2-mini-720p-token-with-video", "seedance2.5-1080p-token-no-video", "seedance2.5-1080p-token-with-video", "seedance2.5-480p-token-no-video", "seedance2.5-480p-token-with-video", "seedance2.5-720p-token-no-video", "seedance2.5-720p-token-with-video"],
       "capabilities": []
     }
   ],
@@ -193,7 +194,7 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
 
 > `etag` 为示例值；`catalog_version` 取自 2026-11-08 的 82 实例，实际值以响应为准。
 >
-> 以上 `models` 取自 2026-11-08 的 82 实例：`chat` 池有 15 个可路由且已定价模型；`video` / `image` / `audio` / `plan` 当前没有可用渠道，`models` 为空。模型集合会随渠道与价格变化。
+> 以上 `models` 取自 2026-11-08 的 82 实例：`chat` 池 15 个模型，`video` 池 8 个 PAI 按次模型，`plan` 池 22 个 TA token 模型；`image` / `audio` 当前没有可用渠道，`models` 为空。`models` 按模型 id 字典序返回，模型集合会随渠道与价格变化。
 
 | 字段 | 说明 |
 | --- | --- |
@@ -214,8 +215,8 @@ A3 的 `data[]` 仍以资源池为单位返回，但平台侧模型列表现按�
 | --- | --- | --- | --- |
 | 文字模型 | `chat` | `kind: text` | 默认池；A1/A2/A4/A9 常规调用 |
 | 图片生成模型 | `image` | `kind: image` | 图片生成预留池；无渠道时 `models` 为空 |
-| 视频模型 | `video` | `kind: video` | 视频任务池，池内混合按 token / 按秒计费 |
-| plan 计划 | `plan` | `kind: video` + `billing: per_call` | 畅用计划；单独展示为 plan 分区，不并入视频分区 |
+| 视频模型 | `video` | `kind: video` | 视频任务池；当前 8 个 PAI 按次模型 |
+| plan 计划 | `plan` | `kind: video` + `billing: per_call` | 畅用计划；当前 22 个 TA token 模型；单独展示为 plan 分区，不并入视频分区 |
 
 `audio` 仍是预留资源池（`kind: audio`），本期不进入这四个对外分区；有音频渠道后再定义它的展示位置。
 
@@ -241,7 +242,7 @@ HTTP/1.1 304 Not Modified
   价格被移除后，该模型会从列表消失
 - 返回真实模型 id，但**不返回渠道、上游厂商和采购价**
 - 池即使暂时没有可调模型也会返回（`models: []`），便于对接方按最终结构开发。
-  `video` / `audio` 池当前就是这种情况：产品线已定义，渠道尚未配置
+  `image` / `audio` 池当前就是这种情况：产品线已定义，渠道尚未配置；`video` / `plan` 已有模型
 - 目录变更时 `etag` 与 `catalog_version` 同时变化
 - 目录是**调用能力**的快照，不保证当时有可用渠道；限流或额度耗尽仍可能返回 503
 
@@ -630,8 +631,8 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
 > `X-Route-Group` 只用于畅用计划：需要在该计划下调用时传
 > `-H "X-Route-Group: plan"`。该头仅对通过 Harness JWT 校验的调用方生效，
 > 不需要额外的令牌授权。普通 chat/video/audio 调用不要传该头——传了也不会
-> 改变模型 id，只会把请求硬绑定到该池。`video` / `audio` 池当前没有可用渠道，
-> 不要用它们发起调用。
+> 改变模型 id，只会把请求硬绑定到该池。`image` / `audio` 池当前没有可用渠道，
+> 不要用它们发起调用；`video` / `plan` 已有可用模型。
 
 ---
 
