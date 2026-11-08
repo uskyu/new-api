@@ -10,7 +10,7 @@
 
 - **模型列表接口**：`GET /v1/models`（Harness JWT，需 `gateway.catalog.read`）。
 - **前台四个展示分区**：文字模型、图片生成模型、视频模型、Plan 计划。
-- **API 当前仍返回五个资源池**：`chat`、`image`、`video`、`plan`、`audio`。其中 `audio` 为预留，不进入本期四个展示分区。
+- **API 当前仍返回五个资源池**：`chat`、`video`、`image`、`audio`、`plan`。其中 `audio` 为预留，不进入本期四个展示分区。
 - **实际调用**：使用对应 `models[]` 中的真实模型 ID 作为请求 `model`；普通文字调用不传 `X-Route-Group`，Plan 计划调用可传 `X-Route-Group: plan`。
 - **`capabilities`**：目前是**资源池级汇总**，不能代表池内每个模型均支持这些能力；本期列表展示可忽略，不作为逐模型能力判断依据。
 
@@ -27,7 +27,7 @@ Authorization: Bearer <HARNESS_JWT>
 
 ## 3. 返回样例
 
-以下为**结构示例**，模型 ID、版本及 ETag 均以实际联调环境响应为准。
+以下为 **2026-11-08 的 82 实例真实样例**；模型 ID、版本及 ETag 以实际联调环境响应为准，模型集合会随渠道与价格变化。
 
 ```json
 {
@@ -38,8 +38,16 @@ Authorization: Bearer <HARNESS_JWT>
       "object": "model",
       "display_name": "通用对话",
       "kind": "text",
-      "models": ["deepseek-v4.1-flash", "glm-5.3"],
+      "models": ["claude-fable-5", "claude-fable-5-1", "claude-haiku-5-5", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5", "deepseek-flash", "deepseek-v4-pro", "glm-5.3", "glm-5.3-flash", "kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"],
       "capabilities": ["chat", "stream", "tools"]
+    },
+    {
+      "id": "video",
+      "object": "model",
+      "display_name": "视频",
+      "kind": "video",
+      "models": [],
+      "capabilities": []
     },
     {
       "id": "image",
@@ -50,10 +58,10 @@ Authorization: Bearer <HARNESS_JWT>
       "capabilities": []
     },
     {
-      "id": "video",
+      "id": "audio",
       "object": "model",
-      "display_name": "视频",
-      "kind": "video",
+      "display_name": "语音",
+      "kind": "audio",
       "models": [],
       "capabilities": []
     },
@@ -65,17 +73,9 @@ Authorization: Bearer <HARNESS_JWT>
       "billing": "per_call",
       "models": [],
       "capabilities": []
-    },
-    {
-      "id": "audio",
-      "object": "model",
-      "display_name": "语音",
-      "kind": "audio",
-      "models": [],
-      "capabilities": []
     }
   ],
-  "catalog_version": "3",
+  "catalog_version": "4",
   "etag": "W/\"example-catalog-etag\""
 }
 ```

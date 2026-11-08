@@ -186,7 +186,7 @@ curl -sS -D- "http://<gateway>/v1/models" \
       "object": "model",
       "display_name": "通用对话",
       "kind": "text",
-      "models": ["claude-opus-5", "glm-5.3", "deepseek-v4-pro"],
+      "models": ["claude-fable-5", "claude-fable-5-1", "claude-haiku-5-5", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5", "deepseek-flash", "deepseek-v4-pro", "glm-5.3", "glm-5.3-flash", "kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"],
       "capabilities": ["chat", "stream", "tools"]
     },
     {
@@ -227,6 +227,8 @@ curl -sS -D- "http://<gateway>/v1/models" \
   "etag": "W/\"...\""
 }
 ```
+
+> 样例取自 2026-11-08 的 82 实例：`chat` 池有 15 个可路由且已定价模型；`video` / `image` / `audio` / `plan` 当前没有可用渠道，`models` 为空。实际验收以实例返回为准，模型集合会随渠道与价格变化。
 
 **通过标准**：
 - [ ] HTTP 200

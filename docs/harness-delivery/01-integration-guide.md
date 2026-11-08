@@ -149,7 +149,7 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
       "object": "model",
       "display_name": "通用对话",
       "kind": "text",
-      "models": ["claude-opus-5", "glm-5.3", "deepseek-v4-pro", "deepseek-v4.1-flash"],
+      "models": ["claude-fable-5", "claude-fable-5-1", "claude-haiku-5-5", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5", "deepseek-flash", "deepseek-v4-pro", "glm-5.3", "glm-5.3-flash", "kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"],
       "capabilities": ["chat", "stream", "tools"]
     },
     {
@@ -186,12 +186,14 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
       "capabilities": []
     }
   ],
-  "catalog_version": "3",
+  "catalog_version": "4",
   "etag": "W/\"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3\""
 }
 ```
 
-> `etag` 与 `catalog_version` 为示例值，实际值以响应为准。
+> `etag` 为示例值；`catalog_version` 取自 2026-11-08 的 82 实例，实际值以响应为准。
+>
+> 以上 `models` 取自 2026-11-08 的 82 实例：`chat` 池有 15 个可路由且已定价模型；`video` / `image` / `audio` / `plan` 当前没有可用渠道，`models` 为空。模型集合会随渠道与价格变化。
 
 | 字段 | 说明 |
 | --- | --- |
