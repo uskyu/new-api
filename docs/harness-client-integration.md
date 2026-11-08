@@ -14,6 +14,12 @@
 > 路由顺序；当前仅 `["default"]`，倍率为 `1`。
 >
 > 当前对外契约以 `docs/harness-delivery/` 交付包（V0.10）为准；本文其余内容仅作历史参考。
+>
+> **模型列表接口已更换。** 旧的 `/api/harness/catalog` `groups[]` 模型列表不再是当前对外接口；
+> 请使用 A3 `GET /v1/models`（Harness JWT，`gateway.catalog.read`）。新列表按四个对外分区展示：
+> 文字模型（`chat`）/ 图片生成模型（`image`）/ 视频模型（`video`）/ plan 计划（`plan`）。
+> 每个分区的 `models` 是扁平的真实模型 id 数组；不要再按供应商、计价分组、能力、渠道或
+> 模型子类二次分组。`audio` 为预留池，不进入这四个分区。
 
 本文仅说明 Harness 如何作为调用方接入 New API；不包含 New API 管理员的渠道、路由、价格或令牌配置步骤。管理端配置由 New API 团队负责。
 

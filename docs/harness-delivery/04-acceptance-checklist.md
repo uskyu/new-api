@@ -198,6 +198,14 @@ curl -sS -D- "http://<gateway>/v1/models" \
       "capabilities": []
     },
     {
+      "id": "image",
+      "object": "model",
+      "display_name": "图片生成",
+      "kind": "image",
+      "models": [],
+      "capabilities": []
+    },
+    {
       "id": "audio",
       "object": "model",
       "display_name": "语音",
@@ -227,6 +235,8 @@ curl -sS -D- "http://<gateway>/v1/models" \
 - [ ] `data[].models` 为**真实模型 id**（用作请求的 `model`）
 - [ ] `chat` 池含实际可调的模型 id；`video` / `image` / `audio` 允许 `models: []`
 - [ ] `plan` 池返回 `billing: per_call`；`video` / `image` 池不返回池级 `billing`
+- [ ] 模型列表按四个对外分区展示：文字模型（`chat`）/ 图片生成模型（`image`）/ 视频模型（`video`）/ plan 计划（`plan`）；`audio` 为预留池，不进入这四个分区
+- [ ] 每个分区的 `models` 为扁平模型 id 数组，不再按供应商、计价分组、能力、渠道或模型子类二次分组
 - [ ] 响应体 `etag` 与响应头一致
 - [ ] 不含渠道信息、采购价
 
