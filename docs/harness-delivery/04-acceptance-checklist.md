@@ -100,7 +100,7 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?limit=1" \
 **执行方**：Harness
 
 `X-Route-Group` 仅对通过 Harness JWT 校验的调用方生效；本节使用 Harness JWT
-发起请求即属于该情形。普通 `chat` / `video` / `audio` 调用不应携带该头。
+发起请求即属于该情形。`chat` 模型不应携带该头；`video` / `plan` 池模型需携带对应池 id。
 
 ```bash
 # 缺失 X-Harness-Run-Id
@@ -133,12 +133,12 @@ curl -sS -X POST "http://<gateway>/v1/chat/completions" \
 - [ ] 未知资源池 → 403
 - [ ] 以上拒绝均不产生费用，也不产生 B1/B3 事件
 
-### 2.5 `plan` 池被识别（P1）
+### 2.5 `video` / `plan` 池被识别（P1）
 
 **执行方**：双方
 
 ```bash
-# plan（畅用计划）是唯一需要 X-Route-Group 的业务场景
+# video / plan 池模型必须带对应 X-Route-Group；这里用 plan 验证池识别
 curl -sS -X POST "http://<gateway>/v1/chat/completions" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "X-Harness-Request-Id: hrq_test_plan" \
@@ -156,8 +156,8 @@ curl -sS -X POST "http://<gateway>/v1/chat/completions" \
 - [ ] 若该池渠道尚未接入，返回渠道/模型不可用类错误属预期；记录实际 `code` 与 `message`
 - [ ] 被拒绝时不产生费用，也不产生 B1/B3 事件
 
-> `X-Route-Group` 只对通过 Harness JWT 校验的调用方生效，且只有 `plan` 有业务
-> 含义；普通 chat/video/audio 调用不传该头，落默认 `chat` 池。
+> `X-Route-Group` 只对通过 Harness JWT 校验的调用方生效：`chat` 模型不传；
+> `video` 池模型传 `video`；`plan` 池模型传 `plan`。
 >
 > `image` / `audio` 池当前没有可用渠道，不在本轮调用验收范围内。它们只需在 A3
 > 中以 `models: []` 出现，不要求可调用；`video` / `plan` 已有模型，按正常调用验收。

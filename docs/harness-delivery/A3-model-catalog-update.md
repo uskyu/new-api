@@ -11,7 +11,7 @@
 - **模型列表接口**：`GET /v1/models`（Harness JWT，需 `gateway.catalog.read`）。
 - **前台四个展示分区**：文字模型、图片生成模型、视频模型、Plan 计划。
 - **API 当前仍返回五个资源池**：`chat`、`video`、`image`、`audio`、`plan`。其中 `audio` 为预留，不进入本期四个展示分区。
-- **实际调用**：使用对应 `models[]` 中的真实模型 ID 作为请求 `model`；普通文字调用不传 `X-Route-Group`，Plan 计划调用可传 `X-Route-Group: plan`。
+- **实际调用**：使用对应 `models[]` 中的真实模型 ID 作为请求 `model`；普通文字调用不传 `X-Route-Group`，`video` 池模型传 `X-Route-Group: video`，Plan 计划模型传 `X-Route-Group: plan`。
 - **`capabilities`**：目前是**资源池级汇总**，不能代表池内每个模型均支持这些能力；本期列表展示可忽略，不作为逐模型能力判断依据。
 
 > 这里取消的是旧档位和列表二级分组，并不是删除网关内部按产品线配置的资源池。视频、图片等资源池是否可调用，以对应 `models[]` 是否存在可用模型及实际接口为准。
@@ -82,12 +82,12 @@ Authorization: Bearer <HARNESS_JWT>
 
 ## 4. Harness 接入要点
 
-| 展示分区 | 使用的 `data[].id` | 识别规则 |
-| --- | --- | --- |
-| 文字模型 | `chat` | `kind=text` |
-| 图片生成模型 | `image` | `kind=image` |
-| 视频模型 | `video` | `kind=video`，无 `per_call` |
-| Plan 计划 | `plan` | `billing=per_call`，独立于视频列表 |
+| 展示分区 | 使用的 `data[].id` | 识别规则 | 调用头 |
+| --- | --- | --- | --- |
+| 文字模型 | `chat` | `kind=text` | 不传 `X-Route-Group` |
+| 图片生成模型 | `image` | `kind=image` | 当前无模型，不可调用 |
+| 视频模型 | `video` | `kind=video`，无 `per_call` | `X-Route-Group: video` |
+| Plan 计划 | `plan` | `billing=per_call`，独立于视频列表 | `X-Route-Group: plan` |
 
 - 每个分区直接展开 `models[]`，无需再建立第二层分组；`models: []` 表示暂无可用模型。
 - `audio` 目前仅保留接口结构，不进入展示。未来如果接入语音，优先根据实际业务引入 TTS；**本次不要求定义 TTS/ASR 二级分类，也不承诺语音接口可用**。

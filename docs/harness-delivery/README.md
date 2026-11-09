@@ -12,6 +12,7 @@
 | --- | --- | --- | --- |
 | 01 | [接入指南](./01-integration-guide.md) | 接口清单、路径、Scope、请求/响应样例、分页、错误码、调用示例 | 第 1 篇 |
 | A3 | [模型列表结构更新](./A3-model-catalog-update.md) | **最新模型列表**：取消经济/企业档、四个展示分区、JSON 示例与模型调用方式 | **模型列表对接优先看** |
+| 08 | [视频调用样例](./08-video-api-examples.md) | 视频池 / plan 池请求差异、真实跑通模型与轮询、内容下载示例 | **视频联调前读** |
 | 02 | [鉴权配置](./02-auth-setup.md) | JWKS/iss/aud/sub 配置、JWT 校验规则、需对方提供的信息 | 第 2 篇 |
 | 03 | [数据契约](./03-data-contract.md) | B1/B3 字段语义、事件类型、版本链、金额口径 | 第 3 篇 |
 | 04 | [联调验收清单](./04-acceptance-checklist.md) | 逐项测试用例、预期响应、通过标准 | 第 4 篇 |
@@ -60,7 +61,7 @@
 | 模型列表展示改为四个对外分区：文字模型（`chat`）/ 图片生成模型（`image`）/ 视频模型（`video`）/ plan 计划（`plan`）；分区内 `models` 平铺，不再二次分组；`audio` 为预留池，不进入这四个分区 | ✅ 已构建并部署 |
 | 取消 `global_channel_order` / 全渠道优先级全局池，资源池成为唯一路由顺序 | ✅ 已构建并部署 |
 | 取消 `token_group_access` / 令牌授权 | ✅ 已构建并部署 |
-| `X-Route-Group` 改为仅 `plan`（畅用计划）有业务含义，且仅经验证的 Harness 调用方可使用 | ✅ 已构建并部署 |
+| `X-Route-Group` 改为按池绑定：`chat` 不传，`video` 传 `video`，`plan` 传 `plan`；仅经验证的 Harness 调用方可使用 | ✅ 已构建并部署 |
 | `pricing_group_order` 保留为采购分组资格与倍率来源，不是渠道路由顺序 | ✅ 保留；当前仅 `["default"]`，倍率 1 |
 | 取消供应商税率，`total_amount = base_amount × group_ratio` | ✅ 分支已改 |
 | `tax_rate_percent` 保留为恒 0 的废弃字段 | ✅ 分支已改 |

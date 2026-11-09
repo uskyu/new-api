@@ -63,7 +63,7 @@ Messages / Gemini 原生）。网关侧仅在以下方面与官方协议不同�
 | `Authorization` | Harness → 网关 | ✓ | `Bearer <JWT>` |
 | `X-Harness-Request-Id` | Harness → 网关 | ✓ | 一次模型调用一个，建议 `hrq_<ULID>`，**≤ 64 字符** |
 | `X-Harness-Run-Id` | Harness → 网关 | ✓ | 一次任务执行一个，建议 `run_<ULID>`，**≤ 64 字符** |
-| `X-Route-Group` | Harness → 网关 | ✗ | 可选。仅通过 Harness JWT 校验的调用方可以使用，且只有 `plan`（畅用计划）需要；普通 chat/video/audio 调用不传，落默认 `chat` 池 |
+| `X-Route-Group` | Harness → 网关 | ✗ | 可选，仅经验证的 Harness 调用方可用。`chat` 模型不传（默认 `chat`）；`video` 池模型传 `video`；`plan` 池模型传 `plan` |
 | `X-NewAPI-Request-Id` | 网关 → Harness | 响应头 | 网关请求 ID，即账本中的 `gateway_request_id` |
 
 两个关联 ID 都只允许 `A-Z a-z 0-9 - _`，且都必须非空。缺失或格式不合法时，
@@ -87,8 +87,8 @@ HTTP/1.1 400 Bad Request
 ### 2.1 资源池（可选头 `X-Route-Group`）
 
 **路由归属网关。** 经济/企业档的划分已取消：Harness 只需调用 A3 返回的模型 id，
-由网关自行决定走哪个渠道、哪个上游。Harness **不需要**为普通调用选择资源池，
-也不需要感知池的划分。
+由网关自行决定走哪个渠道、哪个上游。调用 `chat` 模型不需要选择资源池；调用
+`video` / `plan` 池模型时必须传对应池 id，否则请求落到默认 `chat` 池并因模型不在该池而失败。
 
 **只有通过 Harness JWT 校验的调用方才能使用该头**；普通 API 令牌即使携带，也不
 参与资源池选择。资源池是产品线，不是价格档位。当前有五个池：
@@ -104,8 +104,10 @@ HTTP/1.1 400 Bad Request
 | 情况 | 行为 |
 | --- | --- |
 | 不传该头 | 使用默认池 `chat` |
-| 传 `plan` | 使用畅用计划池 —— 这是该头**唯一**有业务含义的用法 |
-| 传其他已配置池 id（`chat` / `video` / `image` / `audio`） | 普通调用应省略该头；显式传入只会把请求硬绑定到该池，不改变模型 id |
+| 传 `video` | 使用视频池；调用 `video` 池的 8 个 PAI 按次模型时必须传 |
+| 传 `plan` | 使用畅用计划池；调用 `plan` 池的 22 个 TA token 模型时必须传 |
+| 传 `chat` | 显式绑定 chat 池 |
+| 传 `image` / `audio` | 池已配置但当前无可用模型，调用会失败 |
 | 传不存在的池 id | `403 access_denied`，消息 `requested resource pool is not configured` |
 
 不存在「全渠道优先级」全局池：`global_channel_order` 已移除，资源池的渠道顺序
@@ -245,6 +247,9 @@ HTTP/1.1 304 Not Modified
   `image` / `audio` 池当前就是这种情况：产品线已定义，渠道尚未配置；`video` / `plan` 已有模型
 - 目录变更时 `etag` 与 `catalog_version` 同时变化
 - 目录是**调用能力**的快照，不保证当时有可用渠道；限流或额度耗尽仍可能返回 503
+
+> 视频任务（`video` / `plan` 池）的请求字段差异、轮询和内容下载样例，见
+> [08-video-api-examples.md](./08-video-api-examples.md)。
 
 ---
 
@@ -628,10 +633,10 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
   -d '{"model":"deepseek-v4.1-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
-> `X-Route-Group` 只用于畅用计划：需要在该计划下调用时传
-> `-H "X-Route-Group: plan"`。该头仅对通过 Harness JWT 校验的调用方生效，
-> 不需要额外的令牌授权。普通 chat/video/audio 调用不要传该头——传了也不会
-> 改变模型 id，只会把请求硬绑定到该池。`image` / `audio` 池当前没有可用渠道，
+> `X-Route-Group` 用于绑定非默认池：`video` 池模型传
+> `-H "X-Route-Group: video"`，`plan` 池模型传 `-H "X-Route-Group: plan"`；
+> `chat` 模型不要传。该头仅对通过 Harness JWT 校验的调用方生效，
+> 不需要额外的令牌授权。`image` / `audio` 池当前没有可用渠道，
 > 不要用它们发起调用；`video` / `plan` 已有可用模型。
 
 ---
