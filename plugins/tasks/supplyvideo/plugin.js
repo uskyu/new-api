@@ -196,9 +196,23 @@ const PAI_MODELS = {
 const PAI_CALL_MODELS = Object.keys(PAI_MODELS).filter((model) => PAI_MODELS[model].kind === "call");
 const PAI_SECOND_MODELS = Object.keys(PAI_MODELS).filter((model) => PAI_MODELS[model].kind === "second");
 
+// Nano Banana image models use the same asynchronous video endpoints as the
+// video models: POST /v1/videos creates the task and GET /v1/videos/{task_id}
+// reports it. The model ID fixes the output resolution.
+const BANANA_MODELS = {
+  "Nano Banana 2.1 1K": "1K",
+  "Nano Banana 2.1 2K": "2K",
+  "Nano Banana 2.1 4K": "4K",
+  "Nano Banana Pro 1K": "1K",
+  "Nano Banana Pro 2K": "2K",
+  "Nano Banana Pro 4K": "4K",
+};
+const BANANA_REQUEST_FIELDS = ["model", "prompt", "aspect_ratio", "n"];
+
 const REQUEST_FIELDS = [
   "model",
   "prompt",
+  "n",
   "seconds",
   "duration",
   "aspect_ratio",
@@ -227,6 +241,14 @@ const VIDEO_USAGE_SCHEMA = {
       video: { en: "With reference video", zh: "有参考视频" },
     },
     description: { en: "Reference video input", zh: "参考视频输入" },
+  },
+};
+// Nano Banana always produces the single image requested by n=1.
+const BANANA_USAGE_SCHEMA = {
+  image_count: {
+    type: "number",
+    unit: "count",
+    description: { en: "Image generation unit price", zh: "图片生成单价" },
   },
 };
 
@@ -287,6 +309,16 @@ function usageProfiles() {
       },
     ],
   });
+  profiles.push({
+    models: Object.keys(BANANA_MODELS),
+    schema: BANANA_USAGE_SCHEMA,
+    examples: [
+      {
+        label: "1 image",
+        facts: { image_count: 1 },
+      },
+    ],
+  });
   return profiles;
 }
 
@@ -295,15 +327,20 @@ export const meta = {
   key: "supplyvideo",
   name: "Supply Video",
   description: {
-    en: "Seedance video generation through a supplier gateway",
-    zh: "通过供应商网关生成 Seedance 视频",
+    en: "Seedance video and Nano Banana image generation through a supplier gateway",
+    zh: "通过供应商网关生成 Seedance 视频和 Nano Banana 图片",
   },
-  version: "1.2.4",
+  version: "1.3.0",
   author: { name: "QuantumNous" },
-  models: Object.keys(MODEL_RESOLUTIONS).concat(Object.keys(SECOND_MODELS), PAI_CALL_MODELS, PAI_SECOND_MODELS),
+  models: Object.keys(MODEL_RESOLUTIONS).concat(
+    Object.keys(SECOND_MODELS),
+    PAI_CALL_MODELS,
+    PAI_SECOND_MODELS,
+    Object.keys(BANANA_MODELS),
+  ),
   fetchMode: "per_task",
   upstreams: ["vendor", "new_api"],
-  allowedHosts: ["cdn.paisio.online", "files.toapis.xyz", "ark-acg-cn-beijing.tos-cn-beijing.volces.com"],
+  allowedHosts: ["cdn.paisio.online", "files.toapis.xyz", "ark-acg-cn-beijing.tos-cn-beijing.volces.com", "gateway.megarichglobal.com"],
   usageSchema: VIDEO_USAGE_SCHEMA,
   usageExamples: videoUsageExamples("480p", "none"),
   usageProfiles: usageProfiles(),
@@ -319,8 +356,13 @@ function isKnownModel(model) {
     typeof model === "string" &&
     (Object.prototype.hasOwnProperty.call(MODEL_RESOLUTIONS, model) ||
       Object.prototype.hasOwnProperty.call(SECOND_MODELS, model) ||
-      Object.prototype.hasOwnProperty.call(PAI_MODELS, model))
+      Object.prototype.hasOwnProperty.call(PAI_MODELS, model) ||
+      Object.prototype.hasOwnProperty.call(BANANA_MODELS, model))
   );
+}
+
+function isBananaModel(model) {
+  return typeof model === "string" && Object.prototype.hasOwnProperty.call(BANANA_MODELS, model);
 }
 
 function modelProfile(model) {
@@ -332,6 +374,13 @@ function modelProfile(model) {
       minSeconds: record.minSeconds,
       maxSeconds: record.maxSeconds,
       rangeUnconfirmed: record.rangeUnconfirmed === true,
+    };
+  }
+  if (isBananaModel(model)) {
+    return {
+      billing: "banana_image",
+      family: "banana",
+      resolution: BANANA_MODELS[model],
     };
   }
   if (typeof model === "string" && Object.prototype.hasOwnProperty.call(SECOND_MODELS, model)) {
@@ -404,6 +453,7 @@ function normalizeSecondRequest(request, declaredModel, profile) {
     if (!REQUEST_FIELDS.includes(key)) throw new Error("field " + key + " is not supported");
   }
   if (request.model !== undefined && request.model !== declaredModel) throw new Error("model must match the selected model");
+  if (request.n !== undefined) throw new Error("field n is not supported");
   if (request.video_operation !== undefined && request.video_operation !== "generate") throw new Error("only video_operation generate is supported");
   if (request.resolution !== undefined && request.resolution !== profile.resolution) throw new Error("resolution conflicts with the selected model");
   if (request.size !== undefined) {
@@ -470,6 +520,7 @@ function normalizePaiRequest(request, declaredModel, profile) {
     if (!REQUEST_FIELDS.includes(key)) throw new Error("field " + key + " is not supported");
   }
   if (request.model !== undefined && request.model !== declaredModel) throw new Error("model must match the selected model");
+  if (request.n !== undefined) throw new Error("field n is not supported");
   if (request.video_operation !== undefined && request.video_operation !== "generate") throw new Error("only video_operation generate is supported");
   if (request.resolution !== undefined) throw new Error("PAI model resolution is selected by the model ID; resolution must not be sent");
   if (request.size !== undefined) throw new Error("PAI model resolution is selected by the model ID; size must not be sent");
@@ -493,10 +544,26 @@ function normalizePaiRequest(request, declaredModel, profile) {
   return { body: body, profile: profile, videoInput: "none" };
 }
 
+function normalizeBananaRequest(request, declaredModel, profile) {
+  for (const key of Object.keys(request)) {
+    if (!BANANA_REQUEST_FIELDS.includes(key)) throw new Error("field " + key + " is not supported");
+  }
+  if (request.model !== undefined && request.model !== declaredModel) throw new Error("model must match the selected model");
+  if (typeof request.prompt !== "string" || !request.prompt.trim()) throw new Error("field prompt is required");
+  const aspectRatio = request.aspect_ratio === undefined ? "1:1" : request.aspect_ratio;
+  if (aspectRatio !== "1:1") throw new Error("aspect_ratio must be 1:1");
+  if (request.n !== undefined && request.n !== 1) throw new Error("n must be 1");
+  return {
+    body: { model: declaredModel, prompt: request.prompt, aspect_ratio: "1:1", n: 1 },
+    profile: profile,
+  };
+}
+
 function normalizeRequest(request, declaredModel, profileModel) {
   if (!objectValue(request)) throw new Error("request body must be an object");
   const profileName = profileModel || declaredModel;
   const profile = modelProfile(profileName);
+  if (profile.billing === "banana_image") return normalizeBananaRequest(request, declaredModel, profile);
   if (profile.billing === "pai_call" || profile.billing === "pai_second") return normalizePaiRequest(request, declaredModel, profile);
   if (profile.billing === "second") return normalizeSecondRequest(request, declaredModel, profile);
   const allowedKeys = new Set(REQUEST_FIELDS);
@@ -504,6 +571,7 @@ function normalizeRequest(request, declaredModel, profileModel) {
     if (!allowedKeys.has(key)) throw new Error("field " + key + " is not supported");
   }
   if (request.model !== undefined && request.model !== declaredModel) throw new Error("model must match the selected model");
+  if (request.n !== undefined) throw new Error("field n is not supported");
   if (request.video_operation !== undefined && request.video_operation !== "generate") throw new Error("only video_operation generate is supported");
   if (request.audio_with_roles !== undefined) throw new Error("audio_with_roles is not supported in phase 1");
   if (request.resolution !== undefined && request.resolution !== profile.resolution) throw new Error("resolution conflicts with the selected model");
@@ -636,6 +704,9 @@ export function parseSubmitResponse(_ctx, response) {
 export function extractUsage(ctx) {
   const upstreamModel = ctx.upstreamModel || ctx.model;
   const normalized = normalizeRequest(ctx.requestBody, ctx.model, profileModelFor(ctx.model, upstreamModel));
+  if (normalized.profile.billing === "banana_image") {
+    return { image_count: 1 };
+  }
   if (normalized.profile.billing === "pai_call") {
     return {};
   }
@@ -683,9 +754,18 @@ export function parseTaskResult(_ctx, body) {
   return result;
 }
 
-export function extractUsageOnComplete(_ctx, taskResult, body) {
+export function extractUsageOnComplete(ctx, taskResult, body) {
   if (!taskResult || taskResult.status !== "SUCCESS") return {};
   const data = unwrapData(body);
+  const context = ctx || {};
+  if (
+    isBananaModel(context.upstreamModel) ||
+    isBananaModel(context.model) ||
+    isBananaModel(body && body.model) ||
+    isBananaModel(data && data.model)
+  ) {
+    return { image_count: 1 };
+  }
   const usage = data && data.usage;
   if (!objectValue(usage)) {
     console.log("warning: completed video response has no usable usage; actual billing facts were not reported");
@@ -710,11 +790,62 @@ export function extractUsageOnComplete(_ctx, taskResult, body) {
   return { tokens: tokens, totalTokens: tokens };
 }
 
+function isImageData(data) {
+  if (!objectValue(data)) return false;
+  if (data.media_type === "image" || typeof data.image_url === "string") return true;
+  if (typeof data.url !== "string") return false;
+  return data.url.split(/[?#]/, 1)[0].endsWith("/artifacts/image/content");
+}
+
 export function listArtifacts(task) {
-  return task && task.status === "SUCCESS" ? [{ key: "video", type: "video" }] : [];
+  if (!task || task.status !== "SUCCESS") return [];
+  return isImageData(unwrapData(task.data)) ? [{ key: "image", type: "image" }] : [{ key: "video", type: "video" }];
+}
+
+// Compares the scheme, host, and non-default port of two absolute HTTP(S)
+// URLs so the supplier bearer is only sent back to the configured supplier
+// origin.
+function urlHostKey(value) {
+  const match = /^(https?):\/\/([^/?#]*)/i.exec(value);
+  if (!match) return null;
+  const scheme = match[1].toLowerCase();
+  let authority = match[2];
+  const at = authority.lastIndexOf("@");
+  if (at >= 0) authority = authority.slice(at + 1);
+  let hostname = authority;
+  let port = "";
+  if (authority.startsWith("[")) {
+    const end = authority.indexOf("]");
+    if (end < 0) return null;
+    hostname = authority.slice(0, end + 1);
+    if (end + 1 < authority.length) {
+      if (authority[end + 1] !== ":") return null;
+      port = authority.slice(end + 2);
+    }
+  } else {
+    const colon = authority.lastIndexOf(":");
+    if (colon >= 0) {
+      hostname = authority.slice(0, colon);
+      port = authority.slice(colon + 1);
+    }
+  }
+  if (!hostname) return null;
+  if (port === (scheme === "https" ? "443" : "80")) port = "";
+  return scheme + "://" + hostname.toLowerCase() + (port ? ":" + port : "");
 }
 
 export function buildContentRequest(ctx) {
+  if (ctx.artifactKey === "image") {
+    if (ctx.clientRequest.method !== "GET" && ctx.clientRequest.method !== "HEAD") throw new Error("image content supports GET and HEAD only");
+    const data = unwrapData(ctx.data) || {};
+    const imageUrl = data.image_url || data.url;
+    if (typeof imageUrl !== "string" || !/^https?:\/\/[^\s/?#]+(?:[/?#][^\s]*)?$/i.test(imageUrl))
+      throw new Error("image artifact URL is invalid");
+    const imageHost = urlHostKey(imageUrl);
+    if (!imageHost || imageHost !== urlHostKey(typeof ctx.baseUrl === "string" ? ctx.baseUrl : ""))
+      throw new Error("image artifact URL host does not match the supplier host");
+    return { url: imageUrl, method: ctx.clientRequest.method, headers: { Authorization: "Bearer " + ctx.apiKey } };
+  }
   if (ctx.artifactKey !== "video") throw new Error("artifact_not_found");
   if (ctx.clientRequest.method !== "GET" && ctx.clientRequest.method !== "HEAD") throw new Error("video content supports GET and HEAD only");
   if (typeof ctx.upstreamTaskId !== "string" || !ctx.upstreamTaskId.trim()) throw new Error("upstream task id is required");
@@ -739,10 +870,12 @@ export const protocols = {
       const declaredModel = ctx.model;
       const normalized = normalizeRequest(ctx.body.value, declaredModel, profileModelFor(declaredModel, ctx.upstreamModel || declaredModel));
       const hasMedia = normalized.body.image_with_roles || normalized.body.video_with_roles || normalized.body.audio_with_roles;
+      const action =
+        normalized.profile.billing === "banana_image" ? "text_to_image" : hasMedia ? "image_to_video" : "text_to_video";
       return {
         kind: "submit",
         model: declaredModel,
-        action: hasMedia ? "image_to_video" : "text_to_video",
+        action: action,
         requestBody: normalized.body,
       };
     },
@@ -764,6 +897,16 @@ export const protocols = {
         progress: Number(String(task.progress || "0").replace("%", "")),
         created_at: Number(task.created_at || 0),
       };
+      // Nano Banana tasks are reported through the same OpenAI video object,
+      // but the deliverable is one image. Publish only a gateway-relative
+      // artifact address; the upstream image URL and task id stay private.
+      const isImage = isImageData(data);
+      if (isImage) output.media_type = "image";
+      if (task.status === "SUCCESS" && isImage) {
+        const imagePath = "/v1/tasks/" + encodeURIComponent(task.task_id) + "/artifacts/image/content";
+        output.image_url = imagePath;
+        output.url = imagePath;
+      }
       if (task.status === "FAILURE") {
         output.error = {
           code: "video_generation_failed",

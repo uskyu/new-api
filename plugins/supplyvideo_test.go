@@ -95,6 +95,15 @@ var supplyVideoPaiSecondModels = []string{
 	"seedance2.5-720p-second-3",
 }
 
+var supplyVideoBananaModels = []string{
+	"Nano Banana 2.1 1K",
+	"Nano Banana 2.1 2K",
+	"Nano Banana 2.1 4K",
+	"Nano Banana Pro 1K",
+	"Nano Banana Pro 2K",
+	"Nano Banana Pro 4K",
+}
+
 func newSupplyVideoPlugin(t *testing.T) (*jsplugin.Registry, *jsplugin.LoadedPlugin) {
 	t.Helper()
 	source, err := builtinplugins.Source("supplyvideo")
@@ -164,10 +173,12 @@ func TestSupplyVideoManifestAndUsageProfiles(t *testing.T) {
 	models = append(models, supplyVideoSecondModels...)
 	models = append(models, supplyVideoPaiCallModels...)
 	models = append(models, supplyVideoPaiSecondModels...)
+	models = append(models, supplyVideoBananaModels...)
 	assert.Equal(t, models, plugin.Meta.Models)
+	assert.Equal(t, "1.3.0", plugin.Meta.Version)
 	assert.True(t, plugin.Meta.SupportsUpstream(jsplugin.UpstreamKindNewAPI))
 	assert.Equal(t, []string{"vendor", "new_api"}, plugin.Meta.Upstreams)
-	assert.ElementsMatch(t, []string{"cdn.paisio.online", "files.toapis.xyz", "ark-acg-cn-beijing.tos-cn-beijing.volces.com"}, plugin.Meta.AllowedHosts)
+	assert.ElementsMatch(t, []string{"cdn.paisio.online", "files.toapis.xyz", "ark-acg-cn-beijing.tos-cn-beijing.volces.com", "gateway.megarichglobal.com"}, plugin.Meta.AllowedHosts)
 	assert.Equal(t, []jsplugin.ProtocolClaim{{Name: "openai_video"}}, plugin.Meta.Protocols)
 	assert.False(t, plugin.Meta.ProtocolSupports("openai_responses", "sync"))
 
@@ -221,7 +232,7 @@ func TestSupplyVideoManifestAndUsageProfiles(t *testing.T) {
 	assert.Equal(t, "No reference video", plugin.Meta.UsageSchema["video_input"].EnumLabels["none"]["en"])
 	assert.Equal(t, "With reference video", plugin.Meta.UsageSchema["video_input"].EnumLabels["video"]["en"])
 
-	assert.Len(t, plugin.Meta.UsageProfiles, 11)
+	assert.Len(t, plugin.Meta.UsageProfiles, 12)
 	for _, model := range tokenModels {
 		resolution := wantResolution[model]
 		require.NotEmpty(t, resolution, model)
@@ -262,6 +273,20 @@ func TestSupplyVideoManifestAndUsageProfiles(t *testing.T) {
 		require.Len(t, examples, 1, model)
 		assert.Equal(t, map[string]any{"output_seconds": int64(4), "input_seconds": int64(0)}, examples[0].Facts)
 	}
+
+	for _, model := range supplyVideoBananaModels {
+		schema, examples := plugin.Meta.UsageForModel(model)
+		require.Len(t, schema, 1, model)
+		field, found := schema["image_count"]
+		require.True(t, found, model)
+		assert.Equal(t, "number", field.Type, model)
+		assert.Equal(t, "count", field.Unit, model)
+		assert.Equal(t, "Image generation unit price", field.Description["en"], model)
+		assert.Equal(t, "图片生成单价", field.Description["zh"], model)
+		require.Len(t, examples, 1, model)
+		assert.Equal(t, "1 image", examples[0].Label, model)
+		assert.Equal(t, map[string]any{"image_count": int64(1)}, examples[0].Facts, model)
+	}
 }
 
 func TestSupplyVideoSchemaAcceptsUpstreamTaskExpressions(t *testing.T) {
@@ -289,6 +314,211 @@ func TestSupplyVideoSchemaAcceptsUpstreamTaskExpressions(t *testing.T) {
 		schema, _ := plugin.Meta.UsageForModel(model)
 		require.NoError(t, billing_setting.SmokeTestTaskExpr(`tier("video_seconds", u("output_seconds") * 0.04)`, schema), model)
 	}
+
+	for _, model := range supplyVideoBananaModels {
+		schema, _ := plugin.Meta.UsageForModel(model)
+		require.NoError(t, billing_setting.SmokeTestTaskExpr(`tier("images", u("image_count") * 0.009)`, schema), model)
+	}
+}
+
+func TestSupplyVideoBananaImageModels(t *testing.T) {
+	_, plugin := newSupplyVideoPlugin(t)
+	const bananaModel = "Nano Banana Pro 2K"
+	const vendorBaseURL = "https://supplyvideo.example"
+	const apiKey = "supply-secret"
+	const supplierImageURL = vendorBaseURL + "/v1/tasks/upstream-banana/artifacts/image/content"
+
+	decoded, err := supplyVideoDecode(t, plugin, bananaModel, map[string]any{"prompt": "a banana"})
+	require.NoError(t, err)
+	wantBody := map[string]any{
+		"model": bananaModel, "prompt": "a banana", "aspect_ratio": "1:1", "n": float64(1),
+	}
+	assert.Equal(t, "submit", decoded["kind"])
+	assert.Equal(t, bananaModel, decoded["model"])
+	assert.Equal(t, "text_to_image", decoded["action"])
+	assert.Equal(t, wantBody, decoded["requestBody"])
+
+	explicit, err := supplyVideoDecode(t, plugin, bananaModel, map[string]any{
+		"model": bananaModel, "prompt": "a banana", "aspect_ratio": "1:1", "n": 1,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, wantBody, explicit["requestBody"])
+
+	submit := supplyVideoCall(t, plugin, "buildSubmitRequest", map[string]any{
+		"baseUrl": vendorBaseURL, "apiKey": apiKey, "model": bananaModel, "requestBody": decoded["requestBody"],
+	})
+	assert.Equal(t, vendorBaseURL+"/v1/videos", submit["url"])
+	assert.Equal(t, http.MethodPost, submit["method"])
+	assert.Equal(t, map[string]any{"Authorization": "Bearer " + apiKey, "Content-Type": "application/json"}, submit["headers"])
+	assert.Equal(t, wantBody, submit["body"])
+
+	for _, tc := range []struct {
+		name    string
+		body    map[string]any
+		wantErr string
+	}{
+		{"model mismatch", map[string]any{"model": "Nano Banana Pro 1K", "prompt": "a banana"}, "model must match the selected model"},
+		{"missing prompt", map[string]any{"n": 1}, "field prompt is required"},
+		{"n above one", map[string]any{"prompt": "a banana", "n": 2}, "n must be 1"},
+		{"n zero", map[string]any{"prompt": "a banana", "n": 0}, "n must be 1"},
+		{"n must be an integer", map[string]any{"prompt": "a banana", "n": "1"}, "n must be 1"},
+		{"unsupported aspect ratio", map[string]any{"prompt": "a banana", "aspect_ratio": "16:9"}, "aspect_ratio must be 1:1"},
+		{"seconds rejected", map[string]any{"prompt": "a banana", "seconds": 8}, "field seconds is not supported"},
+		{"duration rejected", map[string]any{"prompt": "a banana", "duration": 8}, "field duration is not supported"},
+		{"resolution rejected", map[string]any{"prompt": "a banana", "resolution": "2K"}, "field resolution is not supported"},
+		{"size rejected", map[string]any{"prompt": "a banana", "size": "1024x1024"}, "field size is not supported"},
+		{"video operation rejected", map[string]any{"prompt": "a banana", "video_operation": "generate"}, "field video_operation is not supported"},
+		{"image roles rejected", map[string]any{"prompt": "a banana", "image_with_roles": []any{map[string]any{"url": "https://cdn.example/a.png", "role": "reference_image"}}}, "field image_with_roles is not supported"},
+		{"video roles rejected", map[string]any{"prompt": "a banana", "video_with_roles": []any{map[string]any{"url": "https://cdn.example/a.mp4", "role": "reference_video"}}}, "field video_with_roles is not supported"},
+		{"audio roles rejected", map[string]any{"prompt": "a banana", "audio_with_roles": []any{map[string]any{"url": "https://cdn.example/a.mp3", "role": "reference_audio"}}}, "field audio_with_roles is not supported"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := supplyVideoDecode(t, plugin, bananaModel, tc.body)
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+
+	t.Run("usage facts bill one image", func(t *testing.T) {
+		assert.Equal(t, map[string]any{"image_count": float64(1)}, supplyVideoCall(t, plugin, "extractUsage", map[string]any{
+			"model": bananaModel, "requestBody": decoded["requestBody"],
+		}))
+		assert.Equal(t, map[string]any{"image_count": float64(1)}, supplyVideoCall(t, plugin, "extractUsage", map[string]any{
+			"model": bananaModel, "requestBody": decoded["requestBody"], "usagePurpose": "billing_ratios",
+		}))
+
+		imageBody := map[string]any{
+			"status": "completed", "model": bananaModel, "progress": 100, "media_type": "image",
+			"image_url": supplierImageURL, "url": supplierImageURL,
+		}
+		for _, ctx := range []map[string]any{
+			{"model": bananaModel},
+			{"model": "nano-banana-alias", "upstreamModel": bananaModel},
+			{},
+		} {
+			assert.Equal(t, map[string]any{"image_count": float64(1)}, supplyVideoCall(t, plugin, "extractUsageOnComplete", ctx, map[string]any{"status": "SUCCESS"}, imageBody))
+		}
+		assert.Empty(t, supplyVideoCall(t, plugin, "extractUsageOnComplete", map[string]any{"model": bananaModel}, map[string]any{"status": "FAILURE"}, imageBody))
+
+		videoBody := map[string]any{"status": "completed", "usage": map[string]any{"total_tokens": 12345}}
+		assert.Equal(t, map[string]any{"tokens": float64(12345), "totalTokens": float64(12345)}, supplyVideoCall(t, plugin, "extractUsageOnComplete", map[string]any{"model": supplyVideo480NoVideo}, map[string]any{"status": "SUCCESS"}, videoBody))
+	})
+
+	t.Run("artifact listing follows the result media type", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			task map[string]any
+			want []map[string]any
+		}{
+			{"media type", map[string]any{"status": "SUCCESS", "data": map[string]any{"media_type": "image"}}, []map[string]any{{"key": "image", "type": "image"}}},
+			{"image URL", map[string]any{"status": "SUCCESS", "data": map[string]any{"image_url": supplierImageURL}}, []map[string]any{{"key": "image", "type": "image"}}},
+			{"image content URL", map[string]any{"status": "SUCCESS", "data": map[string]any{"url": supplierImageURL + "?signature=abc"}}, []map[string]any{{"key": "image", "type": "image"}}},
+			{"video result", map[string]any{"status": "SUCCESS", "data": map[string]any{"video_url": "https://cdn.example/result.mp4"}}, []map[string]any{{"key": "video", "type": "video"}}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				value, err := plugin.Engine.Call(t.Context(), "listArtifacts", tc.task)
+				require.NoError(t, err)
+				encoded, err := common.Marshal(value)
+				require.NoError(t, err)
+				var artifacts []map[string]any
+				require.NoError(t, common.Unmarshal(encoded, &artifacts))
+				assert.Equal(t, tc.want, artifacts)
+			})
+		}
+
+		value, err := plugin.Engine.Call(t.Context(), "listArtifacts", map[string]any{
+			"status": "IN_PROGRESS", "data": map[string]any{"media_type": "image"},
+		})
+		require.NoError(t, err)
+		encoded, err := common.Marshal(value)
+		require.NoError(t, err)
+		var artifacts []map[string]any
+		require.NoError(t, common.Unmarshal(encoded, &artifacts))
+		assert.Empty(t, artifacts)
+	})
+
+	t.Run("image content request authenticates only to the supplier host", func(t *testing.T) {
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			content := supplyVideoCall(t, plugin, "buildContentRequest", map[string]any{
+				"baseUrl": vendorBaseURL, "apiKey": apiKey, "artifactKey": "image", "upstreamTaskId": "upstream-banana",
+				"clientRequest": map[string]any{"method": method},
+				"data":          map[string]any{"media_type": "image", "image_url": supplierImageURL, "url": supplierImageURL},
+			})
+			assert.Equal(t, supplierImageURL, content["url"])
+			assert.Equal(t, method, content["method"])
+			assert.Equal(t, map[string]any{"Authorization": "Bearer " + apiKey}, content["headers"])
+		}
+
+		fallback := supplyVideoCall(t, plugin, "buildContentRequest", map[string]any{
+			"baseUrl": vendorBaseURL, "apiKey": apiKey, "artifactKey": "image", "upstreamTaskId": "upstream-banana",
+			"clientRequest": map[string]any{"method": http.MethodGet},
+			"data":          map[string]any{"media_type": "image", "url": supplierImageURL},
+		})
+		assert.Equal(t, supplierImageURL, fallback["url"])
+
+		_, err := plugin.Engine.Call(t.Context(), "buildContentRequest", map[string]any{
+			"baseUrl": vendorBaseURL, "apiKey": apiKey, "artifactKey": "image", "upstreamTaskId": "upstream-banana",
+			"clientRequest": map[string]any{"method": http.MethodGet},
+			"data":          map[string]any{"media_type": "image", "image_url": "https://cdn.example/v1/tasks/upstream-banana/artifacts/image/content"},
+		})
+		require.ErrorContains(t, err, "host")
+		assert.NotContains(t, err.Error(), apiKey)
+
+		_, err = plugin.Engine.Call(t.Context(), "buildContentRequest", map[string]any{
+			"baseUrl": vendorBaseURL, "apiKey": apiKey, "artifactKey": "image", "upstreamTaskId": "upstream-banana",
+			"clientRequest": map[string]any{"method": http.MethodGet},
+			"data":          map[string]any{"media_type": "image", "image_url": "http://supplyvideo.example/v1/tasks/upstream-banana/artifacts/image/content"},
+		})
+		require.ErrorContains(t, err, "host")
+		assert.NotContains(t, err.Error(), apiKey)
+
+		_, err = plugin.Engine.Call(t.Context(), "buildContentRequest", map[string]any{
+			"baseUrl": vendorBaseURL, "apiKey": apiKey, "artifactKey": "image", "upstreamTaskId": "upstream-banana",
+			"clientRequest": map[string]any{"method": http.MethodPost},
+			"data":          map[string]any{"image_url": supplierImageURL},
+		})
+		require.ErrorContains(t, err, "GET and HEAD")
+	})
+
+	t.Run("render publishes a gateway-relative image artifact", func(t *testing.T) {
+		upstreamURL := vendorBaseURL + "/v1/tasks/upstream-banana-secret/artifacts/image/content"
+		value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "render"}, map[string]any{}, map[string]any{
+			"task_id": "public banana/task", "status": "SUCCESS", "progress": "100%", "created_at": 12,
+			"data": map[string]any{
+				"id": "upstream-banana-secret", "task_id": "upstream-banana-secret", "status": "completed",
+				"media_type": "image", "image_url": upstreamURL, "url": upstreamURL,
+			},
+		})
+		require.NoError(t, err)
+		encoded, err := common.Marshal(value)
+		require.NoError(t, err)
+		assert.NotContains(t, string(encoded), "upstream-banana-secret")
+		assert.NotContains(t, string(encoded), "supplyvideo.example")
+		assert.NotContains(t, string(encoded), "https://")
+		var response map[string]any
+		require.NoError(t, common.Unmarshal(encoded, &response))
+		assert.Equal(t, "video", response["object"])
+		assert.Equal(t, "image", response["media_type"])
+		assert.Equal(t, "public banana/task", response["id"])
+		wantPath := "/v1/tasks/public%20banana%2Ftask/artifacts/image/content"
+		assert.Equal(t, wantPath, response["image_url"])
+		assert.Equal(t, wantPath, response["url"])
+	})
+
+	t.Run("render keeps video results unchanged", func(t *testing.T) {
+		value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "render"}, map[string]any{}, map[string]any{
+			"task_id": "public-video", "status": "SUCCESS", "progress": "100%", "created_at": 13,
+			"data": map[string]any{"status": "completed", "video_url": "https://cdn.example/result.mp4"},
+		})
+		require.NoError(t, err)
+		encoded, err := common.Marshal(value)
+		require.NoError(t, err)
+		var response map[string]any
+		require.NoError(t, common.Unmarshal(encoded, &response))
+		assert.Equal(t, "video", response["object"])
+		assert.NotContains(t, response, "media_type")
+		assert.NotContains(t, response, "image_url")
+		assert.NotContains(t, response, "url")
+	})
 }
 
 func TestSupplyVideoDecodeRequest(t *testing.T) {
@@ -375,6 +605,7 @@ func TestSupplyVideoDecodeRequest(t *testing.T) {
 		{"request model must match selected alias", supplyVideo480NoVideo, map[string]any{"model": supplyVideo720NoVideo, "prompt": "a cat", "seconds": 8}, "model must match the selected model"},
 		{"prompt required", supplyVideo480NoVideo, map[string]any{"seconds": 8}, "field prompt is required"},
 		{"unknown request field", supplyVideo480NoVideo, map[string]any{"prompt": "a cat", "seconds": 8, "quality": "high"}, "field quality is not supported"},
+		{"video models reject n", supplyVideo480NoVideo, map[string]any{"prompt": "a cat", "seconds": 8, "n": 1}, "field n is not supported"},
 		{"unsupported operation", supplyVideo480NoVideo, map[string]any{"prompt": "a cat", "seconds": 8, "video_operation": "extend"}, "only video_operation generate is supported"},
 		{"audio material is unsupported", supplyVideo480NoVideo, map[string]any{"prompt": "a cat", "seconds": 8, "audio_with_roles": []any{}}, "audio_with_roles is not supported"},
 		{"duration must match seconds", supplyVideo480NoVideo, map[string]any{"prompt": "a cat", "seconds": 8, "duration": 9}, "duration must match seconds"},
@@ -566,6 +797,7 @@ func TestSupplyVideoDecodeRequest(t *testing.T) {
 		wantErr string
 	}{
 		{"happyhorse rejects reference video", "happyhorse1.1-1080p-second", map[string]any{"prompt": "a horse", "seconds": 5, "video_with_roles": supplyVideoRoles("reference_video", 1)}, "video_with_roles supports at most 0 items"},
+		{"happyhorse rejects n", "happyhorse1.1-720p-second", map[string]any{"prompt": "a horse", "seconds": 5, "n": 1}, "field n is not supported"},
 		{"happyhorse frame cannot mix reference images", "happyhorse1.1-720p-second", map[string]any{"prompt": "a horse", "seconds": 5, "image_with_roles": []any{
 			map[string]any{"url": "https://cdn.example/first.png", "role": "first_frame"},
 			map[string]any{"url": "https://cdn.example/reference.png", "role": "reference_image"},
@@ -583,6 +815,7 @@ func TestSupplyVideoDecodeRequest(t *testing.T) {
 		}}, "frame inputs require aspect_ratio adaptive"},
 		{"minimax total material cap", "minimax-h3-max-480p-second", map[string]any{"prompt": "a lighthouse", "seconds": 5, "image_with_roles": supplyVideoRoles("reference_image", 9), "video_with_roles": supplyVideoRoles("reference_video", 3), "audio_with_roles": supplyVideoRoles("reference_audio", 3)}, "reference materials must not exceed 12 items"},
 		{"PAI rejects multimodal materials", "seedance2-mini-480p-second", map[string]any{"prompt": "a boat", "seconds": 4, "image_with_roles": supplyVideoRoles("reference_image", 1)}, "PAI multimodal materials are not supported yet"},
+		{"PAI rejects n", "seedance2-mini-480p-second", map[string]any{"prompt": "a boat", "seconds": 4, "n": 1}, "field n is not supported"},
 		{"PAI rejects locked resolution", "seedance2-mini-480p-second", map[string]any{"prompt": "a boat", "seconds": 4, "resolution": "480p"}, "resolution must not be sent"},
 		{"PAI per-call range lower bound", "seedance2-fast-720p-once-1", map[string]any{"prompt": "a rocket", "seconds": 3}, "seconds must be an integer between 4 and 15"},
 		{"PAI per-second range upper bound", "seedance2-mini-480p-second", map[string]any{"prompt": "a boat", "seconds": 16}, "seconds must be an integer between 4 and 15"},
