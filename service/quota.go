@@ -1068,7 +1068,14 @@ func harnessUsageEventIfChanged(settlement *model.HarnessSettlement, money harne
 	version := 1
 	var supersedes *string
 	if previous != nil {
-		if !harnessUsageDiffers(previous, settlement, correlation) {
+		usageChanged := harnessUsageDiffers(previous, settlement, correlation)
+		// A per-image task reports no token usage, so its only usage fact never
+		// moves. Without a closing event the B1 record would stay pending forever
+		// even after the task settles. Append one final usage event with the same
+		// zero token values and the settled status; B1 has no status_change type,
+		// so the existing correction type carries the final state.
+		statusSettled := previous.Status != settlement.Status && settlement.Status == model.HarnessSettlementStatusSettled
+		if !usageChanged && !statusSettled {
 			return nil
 		}
 		version = previous.RecordVersion + 1

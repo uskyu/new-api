@@ -82,6 +82,67 @@ func TestRecordHarnessSettlementAppendsBothStreams(t *testing.T) {
 	assert.Equal(t, "token", costEvents[0].BillingBasis)
 }
 
+// TestRecordHarnessSettlementClosesZeroUsageTask covers a task whose billable
+// fact is not a token: it reports no token usage at all, so the usage stream
+// would otherwise stay pending after the task settles. The settle must append
+// one final usage event with the same zero counts and the settled status, and a
+// repeated settle must not append another.
+func TestRecordHarnessSettlementClosesZeroUsageTask(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	correlation := harnessSettlementCorrelation{
+		HarnessRequestId: "hrq_zero_usage_task",
+		HarnessRunId:     "run_zero_usage_task",
+		UsageUnit:        harnessUsageUnitToken,
+		UsageSource:      harnessUsageSourceUpstream,
+	}
+	money := harnessSettlementMoneyForQuota(nil, 4500, 0, "Nano Banana 2.1 1K")
+	pending := &model.HarnessSettlement{
+		RequestId: "gw-zero-usage-task",
+		Status:    model.HarnessSettlementStatusPending,
+		ModelName: "Nano Banana 2.1 1K",
+	}
+	recordHarnessSettlement(pending, money, correlation)
+
+	settled := &model.HarnessSettlement{
+		RequestId: "gw-zero-usage-task",
+		Status:    model.HarnessSettlementStatusSettled,
+		ModelName: "Nano Banana 2.1 1K",
+	}
+	recordHarnessSettlement(settled, money, correlation)
+
+	usages := harnessLedgerStreamCount(t, "gw-zero-usage-task", model.HarnessLedgerStreamUsage)
+	require.Len(t, usages, 2, "the settled zero-usage task must close its usage stream")
+	assert.Equal(t, model.HarnessSettlementStatusPending, usages[0].Status)
+	assert.Equal(t, model.HarnessLedgerEventTypeUsage, usages[0].EventType)
+	assert.Equal(t, model.HarnessSettlementStatusSettled, usages[1].Status)
+	assert.Equal(t, model.HarnessLedgerEventTypeUsageCorrection, usages[1].EventType)
+	assert.Equal(t, 2, usages[1].RecordVersion)
+	require.NotNil(t, usages[1].SupersedesEventId)
+	assert.Equal(t, usages[0].EventId, *usages[1].SupersedesEventId)
+	assert.Zero(t, usages[1].PromptTokens)
+	assert.Zero(t, usages[1].CompletionTokens)
+	assert.Zero(t, usages[1].TotalTokens)
+	assert.False(t, usages[1].TotalTokensKnown)
+
+	costs := harnessLedgerStreamCount(t, "gw-zero-usage-task", model.HarnessLedgerStreamCost)
+	require.Len(t, costs, 2)
+	assert.Equal(t, model.HarnessLedgerEventTypeCost, costs[0].EventType)
+	assert.Equal(t, model.HarnessLedgerEventTypeStatusChange, costs[1].EventType)
+	assert.Equal(t, model.HarnessSettlementStatusSettled, costs[1].Status)
+	assert.Equal(t, costs[0].BaseAmount, costs[1].BaseAmount)
+	assert.Equal(t, costs[0].TotalAmount, costs[1].TotalAmount)
+
+	// A repeated settle at the same status must not append another event.
+	recordHarnessSettlement(settled, money, correlation)
+	assert.Len(t, harnessLedgerStreamCount(t, "gw-zero-usage-task", model.HarnessLedgerStreamUsage), 2)
+	assert.Len(t, harnessLedgerStreamCount(t, "gw-zero-usage-task", model.HarnessLedgerStreamCost), 2)
+}
+
 // TestRecordHarnessSettlementRefundSupersedes covers the correction chain: a
 // refund must append a new cost event that points at the settled one and carries
 // the cumulative net amount of zero, never a delta.
