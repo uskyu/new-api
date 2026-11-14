@@ -1,8 +1,13 @@
 # Harness × New API｜A3 模型目录结构更新
 
-**日期**：2026-11-08  
-**适用对象**：Harness 后端与模型列表页面  
+**日期**：2026-11-14（2026-11-08 初版，2026-11-14 更新）
+**适用对象**：Harness 后端与模型列表页面
 **变更范围**：仅模型目录 A3 及模型选择方式；B1/B3 账本接口沿用现有对接规范。
+
+> 2026-11-14 更新：`image` 池已配置 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana），
+> 返回样例中的 `catalog_version` 为 `"7"`；`audio` 池仍为空。图片调用方式见
+> [09-image-api-examples.md](./09-image-api-examples.md)。2026-11-08 的目录结构与
+> 分区规则不变。
 
 ## 1. 本次调整
 
@@ -11,10 +16,10 @@
 - **模型列表接口**：`GET /v1/models`（Harness JWT，需 `gateway.catalog.read`）。
 - **前台四个展示分区**：文字模型、图片生成模型、视频模型、Plan 计划。
 - **API 当前仍返回五个资源池**：`chat`、`video`、`image`、`audio`、`plan`。其中 `audio` 为预留，不进入本期四个展示分区。
-- **实际调用**：使用对应 `models[]` 中的真实模型 ID 作为请求 `model`；普通文字调用不传 `X-Route-Group`，`video` 池模型传 `X-Route-Group: video`，Plan 计划模型传 `X-Route-Group: plan`。
+- **实际调用**：使用对应 `models[]` 中的真实模型 ID 作为请求 `model`；普通文字调用不传 `X-Route-Group`，`video` 池模型传 `X-Route-Group: video`，`image` 池模型传 `X-Route-Group: image`，Plan 计划模型传 `X-Route-Group: plan`。
 - **`capabilities`**：目前是**资源池级汇总**，不能代表池内每个模型均支持这些能力；本期列表展示可忽略，不作为逐模型能力判断依据。
 
-> 这里取消的是旧档位和列表二级分组，并不是删除网关内部按产品线配置的资源池。视频、图片等资源池是否可调用，以对应 `models[]` 是否存在可用模型及实际接口为准。
+> 这里取消的是旧档位和列表二级分组，并不是删除网关内部按产品线配置的资源池。各资源池是否可调用，以对应 `models[]` 是否存在可用模型及实际接口为准。
 
 ## 2. 请求示例
 
@@ -27,7 +32,7 @@ Authorization: Bearer <HARNESS_JWT>
 
 ## 3. 返回样例
 
-以下为 **2026-11-08 的 82 实例真实样例**：`chat` 15 个模型，`video` 8 个 PAI 按次模型，`plan` 22 个 TA token 模型；`image` / `audio` 为空。`models` 按模型 id 字典序返回；模型 ID、版本及 ETag 以实际联调环境响应为准，模型集合会随渠道与价格变化。
+以下为 **2026-11-14 的 82 实例真实样例**：`chat` 15 个模型，`video` 8 个 PAI 按次模型，`image` 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana），`plan` 22 个 TA token 模型；`audio` 为空。`models` 按模型 id 字典序返回；模型 ID、版本及 ETag 以实际联调环境响应为准，模型集合会随渠道与价格变化。
 
 ```json
 {
@@ -54,7 +59,7 @@ Authorization: Bearer <HARNESS_JWT>
       "object": "model",
       "display_name": "图片生成",
       "kind": "image",
-      "models": [],
+      "models": ["Nano Banana 2.1 1K", "Nano Banana 2.1 2K", "Nano Banana 2.1 4K", "Nano Banana Pro 1K", "Nano Banana Pro 2K", "Nano Banana Pro 4K", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"],
       "capabilities": []
     },
     {
@@ -75,7 +80,7 @@ Authorization: Bearer <HARNESS_JWT>
       "capabilities": []
     }
   ],
-  "catalog_version": "4",
+  "catalog_version": "7",
   "etag": "W/\"example-catalog-etag\""
 }
 ```
@@ -85,7 +90,7 @@ Authorization: Bearer <HARNESS_JWT>
 | 展示分区 | 使用的 `data[].id` | 识别规则 | 调用头 |
 | --- | --- | --- | --- |
 | 文字模型 | `chat` | `kind=text` | 不传 `X-Route-Group` |
-| 图片生成模型 | `image` | `kind=image` | 当前无模型，不可调用 |
+| 图片生成模型 | `image` | `kind=image` | 当前 10 个模型；传 `X-Route-Group: image`。GPT Image 4 个走同步 `POST /v1/images/generations`，Nano Banana 6 个走异步 `POST /v1/videos` |
 | 视频模型 | `video` | `kind=video`，无 `per_call` | `X-Route-Group: video` |
 | Plan 计划 | `plan` | `billing=per_call`，独立于视频列表 | `X-Route-Group: plan` |
 

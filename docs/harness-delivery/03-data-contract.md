@@ -1,7 +1,7 @@
 # Harness 账本数据契约说明
 
-**版本**：V0.10
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交；已部署 82 实例 `harness-api-20261108-bb26602`；数据契约未变）
+**版本**：V0.11（2026-11-14）
+**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交；已部署 82 实例 `harness-api-20261114-c29f1a6`）
 
 本文档说明 B1 用量事件与 B3 成本记录的字段语义、事件模型和金额口径。
 
@@ -184,6 +184,21 @@ total_amount = base_amount × group_ratio
 
 Harness 应将其视为「网关计价结果」，而非「供应商已确认的实付金额」。
 
+### 3.4 图片任务的 B1/B3 口径
+
+图片生成任务与文本任务共用 B1/B3，但完成判定不同：
+
+- **B1 只有用量，没有 `status` 字段。** 图片任务不按 Token 计费；Nano Banana
+  异步任务的 B1 `usage` 中 Token 为 0，可能先出现一条 `usage`（0 Token），结算后
+  再出现一条 `usage_correction`（0 Token）。GPT Image 同步请求可能携带上游返回的
+  Token 用量（实测 99 input / 7,028 output），但同样不能据此判断完成。
+  **不要用 B1 判断任务是否完成。**
+- **B3 才带 `status`。** 成功的图片任务最终会产生 `status_change`，`status` 为
+  `settled`，`billing.total_amount` 为按张价格（如 Nano Banana 2.1 1K 为
+  `0.009`，GPT Image 2.6 为 `0.018`）。
+- **完成与成本以 B3 为准。** `image_count` 为本次生成张数（当前只验证 `n=1`），
+  用于网关按张计费，不通过 B1 暴露。
+
 ---
 
 ## 四、事件类型规则
@@ -194,9 +209,11 @@ Harness 应将其视为「网关计价结果」，而非「供应商已确认的
 | --- | --- |
 | 首次用量记录 | `usage` |
 | 已有记录，用量被更正 | `usage_correction` |
+| 零 token 任务结算收尾（Nano Banana 等） | `usage_correction` |
 
-**判定逻辑**：有前序事件即为 `usage_correction`。因为只有用量**实际变化**时才会
-追加新事件，所以有前序的追加必然是更正。
+**判定逻辑**：有前序事件即为 `usage_correction`。通常只有用量实际变化时才追加；
+零 token 的异步任务在结算为 `settled` 时会追加一条同值的 `usage_correction` 作为
+B1 收尾。B1 没有 `status` 字段，完成与成本仍以 B3 为准。
 
 ### 4.2 B3 成本事件类型
 
@@ -274,17 +291,20 @@ Harness 更新自己的账本时应：
 
 | 项 | 本期实现 |
 | --- | --- |
-| `usage_unit` | **只产生 `token`** |
+| `usage_unit` | **只产生 `token`**；Nano Banana 异步图片任务 Token 为 0，GPT Image 同步可能带上游 Token |
 | `currency` | **固定 `USD`** |
-| 计费对象 | 仅模型 Token（`plan` 池的按次计费已定义，渠道尚未接入，本期不产生此类事件） |
+| 计费对象 | 文本按 Token；图片按张（`image_count`，当前只验证 `n=1`）；`plan` 池按次计费渠道尚未接入 |
 | 独立工具计费 | 不做 |
-| 图像/音频计费 | 不做 |
+| 图像计费 | **已接入**：B3 按张计价，`0.009` / `0.011` / `0.016` / `0.018` USD/张 |
+| 音频计费 | 不做 |
 | `status = failed` | 内部状态，**不会出现在 B3** |
 
 ### 6.1 关于 usage_unit
 
 第四轮文档列出 `token` / `image` / `audio_second` / `character` / `request` / `other`
-是为未来定义可选值。**本期实际只会产生 `token`**，其他值不会出现。
+是为未来定义可选值。**本期实际只会产生 `token`**，其他值不会出现。Nano Banana
+异步图片任务同样产生 `token` 单位的用量事件（Token 为 0）；GPT Image 同步请求
+可能带上游 Token。按张计费只体现在 B3 金额，不引入 `image` 单位。
 
 ### 6.2 关于 status = failed
 
@@ -302,3 +322,4 @@ Harness 更新自己的账本时应：
 | 2026-10-29 | V0.9.1 | 明确 `run_id` 必填且 ≤64、缺失时调用被拒绝；说明 B3 不返回 `run_id` 但账本仍存储 |
 | 2026-11-05 | V0.10 | 金额口径改为 `total_amount = base_amount × group_ratio`，取消供应商税率；`tax_rate_percent` 恒 0 并标记废弃；事件类型判定去掉税率项；补充 `group_ratio` 由网关按资源池决定 |
 | 2026-11-06 | V0.10（修订） | 更正 `group_ratio` 来源：来自采购计价分组 `pricing_group_order`，不由资源池决定；明确计价分组优先级是采购资格/倍率分组，不是渠道路由顺序；当前单 `default` 分组、倍率 1 |
+| 2026-11-14 | V0.11 | 新增「图片任务的 B1/B3 口径」：B1 无 `status`；Nano Banana 异步任务 Token 为 0，GPT Image 同步可携带 Token；完成与成本以 B3 `status_change`/`settled` 为准；`image_count` 按张计费且不在 B1 暴露；更新本期范围中的图像计费状态 |

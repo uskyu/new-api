@@ -1,7 +1,7 @@
 # Harness 联调验收清单
 
-**版本**：V0.10
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261108-bb26602`，本清单仍需逐项验收
+**版本**：V0.11
+**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261114-c29f1a6`，本清单仍需逐项验收
 
 本文档供双方逐项核验。每项包含：执行方、请求、预期响应、通过标准。
 
@@ -16,7 +16,7 @@
 | `aud` 值 | 双方商定 | ✅ `new-api` |
 | 服务主体 `sub` | Harness | ✅ `harness-gateway` |
 | 网关地址 | New API | ✅ `https://testapi.soloai.chat` |
-| 资源池 id（`chat` / `video` / `image` / `audio` / `plan`）与池内模型 id | New API | ✅ A3 动态返回；`image` / `audio` 渠道未接入，`models` 为空属预期；`video` / `plan` 已配置模型 |
+| 资源池 id（`chat` / `video` / `image` / `audio` / `plan`）与池内模型 id | New API | ✅ A3 动态返回；`image` 池 10 个图片模型、`video` 8 个、`plan` 22 个已配置；`audio` 渠道未接入，`models` 为空属预期 |
 | 路由配置：资源池渠道顺序是唯一路由顺序；`global_channel_order` / 全渠道优先级全局池与 `token_group_access` / 令牌授权已移除；`pricing_group_order` 仅决定采购分组资格与倍率（当前 `["default"]`，倍率 1），不是渠道路由顺序 | New API | ✅ 已构建并部署，待逐项复验 |
 
 ---
@@ -100,7 +100,7 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?limit=1" \
 **执行方**：Harness
 
 `X-Route-Group` 仅对通过 Harness JWT 校验的调用方生效；本节使用 Harness JWT
-发起请求即属于该情形。`chat` 模型不应携带该头；`video` / `plan` 池模型需携带对应池 id。
+发起请求即属于该情形。`chat` 模型不应携带该头；`video` / `image` / `plan` 池模型需携带对应池 id。
 
 ```bash
 # 缺失 X-Harness-Run-Id
@@ -157,10 +157,10 @@ curl -sS -X POST "http://<gateway>/v1/chat/completions" \
 - [ ] 被拒绝时不产生费用，也不产生 B1/B3 事件
 
 > `X-Route-Group` 只对通过 Harness JWT 校验的调用方生效：`chat` 模型不传；
-> `video` 池模型传 `video`；`plan` 池模型传 `plan`。
+> `video` 池模型传 `video`；`image` 池模型传 `image`；`plan` 池模型传 `plan`。
 >
-> `image` / `audio` 池当前没有可用渠道，不在本轮调用验收范围内。它们只需在 A3
-> 中以 `models: []` 出现，不要求可调用；`video` / `plan` 已有模型，按正常调用验收。
+> `audio` 池当前没有可用渠道，不在本轮调用验收范围内。它只需在 A3 中以
+> `models: []` 出现，不要求可调用；`video` / `image` / `plan` 已有模型，按正常调用验收。
 
 ---
 
@@ -202,7 +202,7 @@ curl -sS -D- "http://<gateway>/v1/models" \
       "object": "model",
       "display_name": "图片生成",
       "kind": "image",
-      "models": [],
+      "models": ["Nano Banana 2.1 1K", "Nano Banana 2.1 2K", "Nano Banana 2.1 4K", "Nano Banana Pro 1K", "Nano Banana Pro 2K", "Nano Banana Pro 4K", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"],
       "capabilities": []
     },
     {
@@ -223,21 +223,21 @@ curl -sS -D- "http://<gateway>/v1/models" \
       "capabilities": []
     }
   ],
-  "catalog_version": "<整数>",
+  "catalog_version": "7",
   "etag": "W/\"...\""
 }
 ```
 
-> 样例取自 2026-11-08 的 82 实例：`chat` 池 15 个模型，`video` 池 8 个 PAI 按次模型，`plan` 池 22 个 TA token 模型；`image` / `audio` 当前没有可用渠道，`models` 为空。`models` 按模型 id 字典序返回，实际验收以实例返回为准。
+> 样例取自 2026-11-14 的 82 实例：`chat` 池 15 个模型，`video` 池 8 个 PAI 按次模型，`image` 池 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana），`plan` 池 22 个 TA token 模型；`audio` 当前没有可用渠道，`models` 为空。`models` 按模型 id 字典序返回，实际验收以实例返回为准。
 
 **通过标准**：
 - [ ] HTTP 200
 - [ ] `ETag` 响应头非空
 - [ ] `data[].id` 为**资源池 id**（`chat` / `video` / `image` / `audio` / `plan`）
 - [ ] `data[].models` 为**真实模型 id**（用作请求的 `model`）
-- [ ] `chat` / `video` / `plan` 池含实际可调的模型 id；`image` / `audio` 允许 `models: []`
+- [ ] `chat` / `video` / `image` / `plan` 池含实际可调的模型 id；`audio` 允许 `models: []`
 - [ ] `plan` 池返回 `billing: per_call`；`video` / `image` 池不返回池级 `billing`
-- [ ] 模型列表按四个对外分区展示：文字模型（`chat`）/ 图片生成模型（`image`）/ 视频模型（`video`）/ plan 计划（`plan`）；`audio` 为预留池，不进入这四个分区
+- [ ] 模型列表按四个对外分区展示：文字模型（`chat`）/ 图片生成模型（`image`）/ 视频模型（`video`）/ plan 计划（`plan`）；图片生成分区须展示 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana），不得为空；`audio` 为预留池，不进入这四个分区
 - [ ] 每个分区的 `models` 为扁平模型 id 数组，不再按供应商、计价分组、能力、渠道或模型子类二次分组
 - [ ] 响应体 `etag` 与响应头一致
 - [ ] 不含渠道信息、采购价
@@ -358,6 +358,57 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
 - [ ] 收到 `data: ` 前缀的 SSE 事件流
 - [ ] 以 `data: [DONE]` 结束
 - [ ] 末尾事件含 `usage`
+
+---
+
+### 4.6 图片生成（P0）
+
+**执行方**：双方
+
+图片模型必须带 `X-Route-Group: image`，按两种协议分别验收。完整样例见
+[09-image-api-examples.md](./09-image-api-examples.md)。
+
+```bash
+# GPT Image：同步
+curl -sS -X POST "http://<gateway>/v1/images/generations" \
+  -H "Authorization: Bearer $HARNESS_JWT" \
+  -H "X-Harness-Request-Id: hrq_test_img26" \
+  -H "X-Harness-Run-Id: run_test_img26" \
+  -H "X-Route-Group: image" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-image-2.6-flare","prompt":"a red apple on a white table","n":1,"size":"1024x1024"}'
+```
+
+**通过标准（GPT Image）**：
+- [ ] HTTP 200
+- [ ] `data[0]` 含 `b64_json`（不要依赖 `response_format=url`）
+- [ ] B3 记录 `status` 为 `settled`，`billing.total_amount` 为 `0.018`
+
+```bash
+# Nano Banana：异步
+curl -sS -X POST "http://<gateway>/v1/videos" \
+  -H "Authorization: Bearer $HARNESS_JWT" \
+  -H "X-Harness-Request-Id: hrq_test_banana" \
+  -H "X-Harness-Run-Id: run_test_banana" \
+  -H "X-Route-Group: image" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"Nano Banana 2.1 1K","prompt":"a red apple on a white table","aspect_ratio":"1:1","n":1}'
+```
+
+轮询 `GET /v1/videos/{task_id}`；完成后 `media_type` 为 `image`，`image_url` / `url`
+为 `/v1/tasks/{task_id}/artifacts/image/content`，用 Harness JWT 下载。
+
+**通过标准（Nano Banana）**：
+- [ ] 创建返回任务 id
+- [ ] 轮询到 `completed`，`media_type` 为 `image`
+- [ ] 下载 `/v1/tasks/{task_id}/artifacts/image/content` 成功；上游 `Content-Type` 为 `application/octet-stream`，实际字节可能是 JPEG 或 PNG
+- [ ] B3 出现 `status_change` → `status` 为 `settled`，`billing.total_amount` 为 `0.009`
+
+**通用通过标准**：
+- [ ] A3 `image` 分区返回 10 个模型（4 个 GPT Image + 6 个 Nano Banana）
+- [ ] B1 中图片任务只有 usage、**没有 status 字段**；图片按张计费，B1 的 token 数不代表费用（Nano Banana 异步任务为 0 token，可能返回 0 token 的 `usage_correction`）；不得用 B1 判断完成，完成与成本以 B3 为准
+
+> Nano Banana 当前仅验证 `aspect_ratio: "1:1"`、`n=1`；其他比例、参考图、编辑与 GIF 未验证。下载请忽略 `Range`（上游返回 200 全量），不要使用 `/v1/videos/{task_id}/content`（上游返回 410）。
 
 ---
 
@@ -564,6 +615,7 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?from=2026-10-01T00:0
 | 4.3 | A4 模型调用 | 双方 | P0 | ⏳ |
 | 4.4 | A9 模型调用 | 双方 | P0 | ⏳ |
 | 4.5 | 流式调用 | 双方 | P0 | ⏳ |
+| 4.6 | 图片生成（GPT Image 同步 / Nano Banana 异步） | 双方 | P0 | ⏳ |
 | 5.1 | B1 增量拉取 | Harness | P0 | ⏳ |
 | 5.2 | B3 增量拉取 | Harness | P0 | ⏳ |
 | 5.3 | B1-batchGet 命中 | Harness | P0 | ⏳ |
@@ -588,3 +640,4 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?from=2026-10-01T00:0
 | 2026-10-29 | V0.9.1 | A3 增加池字段与真实模型 id；调用示例改用真实模型 id；新增 2.4 关联头与资源池校验 |
 | 2026-11-05 | V0.10 | 前置条件与 A3 样例改为 `chat`/`video`/`image`/`audio`/`plan` 五个池；新增 2.5 `plan` 池校验；B3 校验改为 `total_amount = base_amount × group_ratio`，取消税率检查；说明 `video`/`image`/`audio` 暂不可调用 |
 | 2026-11-06 | V0.10（修订） | 前置条件补充路由配置：资源池是唯一路由顺序，全局池与令牌授权已移除，`pricing_group_order` 仅决定采购资格与倍率；2.4 / 2.5 明确 `X-Route-Group` 仅经验证 Harness 调用方可用且仅 `plan` 有业务含义；5.2 补充当前 `group_ratio = 1` |
+| 2026-11-14 | V0.11 | A3 样例 `image` 池改为 10 个图片模型、`catalog_version` 为 `"7"`；前置条件与 2.5 说明 `image` 已配置、`audio` 仍为空；新增 4.6 图片生成验收（GPT Image 同步 0.018、Nano Banana 异步 0.009、B1 仅 usage / B3 `settled`）；部署 `harness-api-20261114-c29f1a6` |

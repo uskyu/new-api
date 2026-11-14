@@ -1,11 +1,12 @@
 # Harness 网关对外测试摘要
 
-**版本**：V0.10 历史过程记录；RC48 合入与部署验证见第十一节
-**对应网关版本**：早期记录对应 `harness-api` `725ec9d6d`；当前为 `harness-api` `bb266025`（官方 RC48 基线），已部署 `harness-api-20261108-bb26602`
-**测试时间**：2026-10-25 至 2026-10-26
+**版本**：V0.11 历史过程记录；RC48 合入与部署验证见第十一节；图片模型验证见第十二节
+**对应网关版本**：早期记录对应 `harness-api` `725ec9d6d`；当前为 `harness-api` `c29f1a6`，已部署 `harness-api-20261114-c29f1a6`
+**测试时间**：2026-10-25 至 2026-10-26；图片模型验证 2026-11-14
 
 > 本文记录该轮使用**网关自签 JWT** 的本地联调结果，保留作为过程记录。
-> 后续真实 JWT 验收与当前契约状态见 `07-acceptance-evidence.md`（`ec3cdc0`）。
+> 后续真实 JWT 验收与当前契约状态见 `07-acceptance-evidence.md`（`ec3cdc0`）；
+> 图片模型验证见第十二节（本地临时 JWT，非 Harness 正式 JWT）。
 
 本文档是对外测试摘要。内部完整验收报告（含详细命令、失败排查记录）保留在
 New API 内部，不随交付材料提供。
@@ -211,6 +212,7 @@ New API 内部，不随交付材料提供。
 
 1. 双方确认剩余三项契约（见 `05-pending-confirmations.md`）
 2. 按 `04-acceptance-checklist.md` 逐项执行验收
+3. 使用 Harness 正式 JWT 重跑图片 E2E（当前仅本地临时 JWT，见第十二节）
 
 真实 JWKS 联调已完成（2026-10-26、2026-10-29 两轮）；
 数据库部署目标为 MySQL，PostgreSQL 不在本期范围。
@@ -224,6 +226,7 @@ New API 内部，不随交付材料提供。
 | 2026-10-25 | V0.9 | 初版 |
 | 2026-10-26 | V0.9 | 补入部署实例端到端验证结果；记录 `pricing_version` 列宽缺陷及修复 |
 | 2026-11-05 | V0.10 | 版本对齐交付包；标注税率已取消（历史结果未重跑） |
+| 2026-11-14 | V0.11 | 补入图片模型验证：`supplyvideo` 1.3.0 单测、A3 图片池 10 模型、Nano Banana 2.1 1K 与 GPT Image 2.6-flare E2E；说明 B1 无 `status`、Nano Banana 0 Token、GPT Image 可带 Token，完成以 B3 `settled` 为准；本地临时 JWT，真实 Harness JWT 待验 |
 
 ---
 
@@ -247,6 +250,40 @@ New API 内部，不随交付材料提供。
 验证中发现并修复了 PostgreSQL 结算 upsert 对 Harness 关联 ID 的歧义引用，以及流式 keepalive 已发送后错误事件被提前丢弃的问题。测试使用本地模拟服务和隔离测试数据库；没有生产 JWT 或真实供应商请求，部署后也未执行线上 E2E。
 
 GitHub 的 `Package harness-api` 工作流生成本轮多平台下载包；`Publish harness image` 发布并部署了 `harness-api-20261108-bb26602`。
+
+---
+
+## 十二、图片模型（2026-11-14）
+
+本轮在 82 实例 `harness-api-20261114-c29f1a6` 上验证图片生成链路。镜像 digest
+`sha256:20104c9253c254fc90c5d36ac37f738a7f50596c8845615a8ce1dd37dbf4b7b0`，
+容器 healthy，`/api/status` 返回版本 `harness-api-20261114-c29f1a6`。
+
+| 检查 | 结果 |
+| --- | --- |
+| `supplyvideo` 1.3.0 单元测试 | ✅ 通过 |
+| A3 图片池 | ✅ `catalog_version="7"`，10 个模型 |
+| Nano Banana 2.1 1K E2E | ✅ 创建 200、轮询 completed、下载 468,870 bytes（实际 JPEG）；B3 `0.009` USD `settled` |
+| GPT Image 2.6-flare E2E | ✅ HTTP 200；B3 `0.018` USD `settled`；B1 99 input / 7,028 output tokens |
+| B1 语义 | ✅ 无 `status` 字段；Nano Banana 异步任务 Token 为 0，结算后可能追加 `usage_correction`；GPT Image 同步可带上游 Token（本例 99/7,028） |
+| B3 语义 | ✅ 成功图片任务最终为 `status_change`，`status=settled` |
+
+A3 图片池 10 个模型（按返回顺序）：`Nano Banana 2.1 1K`、`Nano Banana 2.1 2K`、
+`Nano Banana 2.1 4K`、`Nano Banana Pro 1K`、`Nano Banana Pro 2K`、
+`Nano Banana Pro 4K`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、
+`gpt-image-2.6-flare`、`gpt-image-2.6-sunburst`。协议与样例见
+[`09-image-api-examples.md`](./09-image-api-examples.md)。
+
+图片任务的 B1/B3 口径：B1 只有用量事件、没有 `status`。Nano Banana 异步任务 Token
+为 0，可能先 `usage` 后 `usage_correction`；GPT Image 同步可能带上游 Token
+（本例 99/7,028）。两者都不能用 B1 判断完成；B3 的 `status_change` /
+`status=settled` 才是完成信号，`billing.total_amount` 为按张价格（`0.009` /
+`0.011` / `0.016` / `0.018` USD）。`image_count` 为 `n=1` 并用于按张计费，
+不在 B1 暴露。
+
+**JWT 限制**：本轮使用本地临时铸造的测试 JWT 和临时 JWKS，**不是 Harness 正式
+签发的 JWT**。真实 Harness JWT 的图片 E2E 仍待执行，因此本节不构成正式 JWT
+验收结论。
 
 ---
 

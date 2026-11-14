@@ -1,7 +1,7 @@
 # Harness 网关接口接入指南
 
-**版本**：V0.10
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261108-bb26602`，真实联调待执行
+**版本**：V0.11
+**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261114-c29f1a6`，真实联调待执行
 **面向**：Harness 后端开发与联调
 
 本文档给出网关侧全部对外接口的调用方法。字段语义细节见
@@ -26,9 +26,9 @@ Messages / Gemini 原生）。网关侧仅在以下方面与官方协议不同�
 - `model` 字段填 **A3 目录 `models[]` 中的真实模型 id**（如 `deepseek-v4.1-flash`），
   不是池 id。**路由完全由网关负责**：Harness 只需要调一个模型 id，不需要区分
   经济/企业档，也不需要按档位选择渠道
-- 请求头 `X-Route-Group` 为**可选**，仅通过 Harness JWT 校验的调用方可以使用，
-  且只有 `plan`（畅用计划）有业务含义；普通 chat/video/audio 调用不传该头，使用
-  默认 `chat` 池，见第二节
+- 请求头 `X-Route-Group` 为**可选**，仅通过 Harness JWT 校验的调用方可以使用。
+  `chat` 模型不传（默认 `chat` 池）；`video` / `image` / `plan` 池模型必须传对应
+  池 id，见第二节
 - 鉴权用 Harness JWT（见鉴权指南）
 - 响应头返回 `X-NewAPI-Request-Id`
 
@@ -63,7 +63,7 @@ Messages / Gemini 原生）。网关侧仅在以下方面与官方协议不同�
 | `Authorization` | Harness → 网关 | ✓ | `Bearer <JWT>` |
 | `X-Harness-Request-Id` | Harness → 网关 | ✓ | 一次模型调用一个，建议 `hrq_<ULID>`，**≤ 64 字符** |
 | `X-Harness-Run-Id` | Harness → 网关 | ✓ | 一次任务执行一个，建议 `run_<ULID>`，**≤ 64 字符** |
-| `X-Route-Group` | Harness → 网关 | ✗ | 可选，仅经验证的 Harness 调用方可用。`chat` 模型不传（默认 `chat`）；`video` 池模型传 `video`；`plan` 池模型传 `plan` |
+| `X-Route-Group` | Harness → 网关 | ✗ | 可选，仅经验证的 Harness 调用方可用。`chat` 模型不传（默认 `chat`）；`video` 池模型传 `video`；`image` 池模型传 `image`；`plan` 池模型传 `plan` |
 | `X-NewAPI-Request-Id` | 网关 → Harness | 响应头 | 网关请求 ID，即账本中的 `gateway_request_id` |
 
 两个关联 ID 都只允许 `A-Z a-z 0-9 - _`，且都必须非空。缺失或格式不合法时，
@@ -88,7 +88,7 @@ HTTP/1.1 400 Bad Request
 
 **路由归属网关。** 经济/企业档的划分已取消：Harness 只需调用 A3 返回的模型 id，
 由网关自行决定走哪个渠道、哪个上游。调用 `chat` 模型不需要选择资源池；调用
-`video` / `plan` 池模型时必须传对应池 id，否则请求落到默认 `chat` 池并因模型不在该池而失败。
+`video` / `image` / `plan` 池模型时必须传对应池 id，否则请求落到默认 `chat` 池并因模型不在该池而失败。
 
 **只有通过 Harness JWT 校验的调用方才能使用该头**；普通 API 令牌即使携带，也不
 参与资源池选择。资源池是产品线，不是价格档位。当前有五个池：
@@ -97,7 +97,7 @@ HTTP/1.1 400 Bad Request
 | --- | --- | --- | --- |
 | `chat` | 通用对话 | `text` | **默认池**。不传 `X-Route-Group` 时的落点；A1/A2/A4/A9 的常规调用都走这里 |
 | `video` | 视频 | `video` | 视频任务池。当前配置 8 个 PAI 按次模型；**池级不标注 `billing`** |
-| `image` | 图片生成 | `image` | 图片生成预留池，池内混合按张、按 token 等模型，**池级不标注 `billing`**；渠道尚未接入，**本期不可调用** |
+| `image` | 图片生成 | `image` | 图片生成池。当前配置 10 个图片模型（4 个 GPT Image 同步 + 6 个 Nano Banana 异步），按张计价，**池级不标注 `billing`**；可调用 |
 | `audio` | 语音 | `audio` | 语音/TTS 预留池，当前仅占位；渠道尚未接入，**本期不可调用** |
 | `plan` | 畅用计划 | `video` | 专用于畅用计划；池级 `billing: per_call`（按次计费） |
 
@@ -107,15 +107,16 @@ HTTP/1.1 400 Bad Request
 | 传 `video` | 使用视频池；调用 `video` 池的 8 个 PAI 按次模型时必须传 |
 | 传 `plan` | 使用畅用计划池；调用 `plan` 池的 22 个 TA token 模型时必须传 |
 | 传 `chat` | 显式绑定 chat 池 |
-| 传 `image` / `audio` | 池已配置但当前无可用模型，调用会失败 |
+| 传 `image` | 使用图片生成池；调用 `image` 池的 10 个图片模型时必须传 |
+| 传 `audio` | 使用语音池；该池当前无可用模型，调用会失败 |
 | 传不存在的池 id | `403 access_denied`，消息 `requested resource pool is not configured` |
 
 不存在「全渠道优先级」全局池：`global_channel_order` 已移除，资源池的渠道顺序
 是唯一的路由顺序，也没有 `global` 池可供选择。池是硬绑定：选中的池里没有该模型
 的可用渠道时直接失败，不会改用另一个池。
 
-`image` 与 `audio` 的渠道尚未配置，这两个池的 `models` 可能合法地返回空数组，
-此时该池不可调用。`video` 与 `plan` 已配置渠道与模型，以 A3 返回的 `models` 为准。
+`audio` 的渠道尚未配置，该池的 `models` 可能合法地返回空数组，此时该池不可调用。
+`video`、`image` 与 `plan` 已配置渠道与模型，以 A3 返回的 `models` 为准。
 池的存在只表示产品线已定义，不表示已经可以接单。
 
 供应商税率已取消，B3 金额不再含税额。`billing.group_ratio` 来自采购计价分组，
@@ -168,7 +169,7 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
       "object": "model",
       "display_name": "图片生成",
       "kind": "image",
-      "models": [],
+      "models": ["Nano Banana 2.1 1K", "Nano Banana 2.1 2K", "Nano Banana 2.1 4K", "Nano Banana Pro 1K", "Nano Banana Pro 2K", "Nano Banana Pro 4K", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"],
       "capabilities": []
     },
     {
@@ -189,21 +190,21 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
       "capabilities": []
     }
   ],
-  "catalog_version": "4",
+  "catalog_version": "7",
   "etag": "W/\"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3\""
 }
 ```
 
-> `etag` 为示例值；`catalog_version` 取自 2026-11-08 的 82 实例，实际值以响应为准。
+> `etag` 为示例值；`catalog_version` 取自 2026-11-14 的 82 实例，实际值以响应为准。
 >
-> 以上 `models` 取自 2026-11-08 的 82 实例：`chat` 池 15 个模型，`video` 池 8 个 PAI 按次模型，`plan` 池 22 个 TA token 模型；`image` / `audio` 当前没有可用渠道，`models` 为空。`models` 按模型 id 字典序返回，模型集合会随渠道与价格变化。
+> 以上 `models` 取自 2026-11-14 的 82 实例：`chat` 池 15 个模型，`video` 池 8 个 PAI 按次模型，`image` 池 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana），`plan` 池 22 个 TA token 模型；`audio` 池当前没有可用渠道，`models` 为空。`models` 按模型 id 字典序返回，模型集合会随渠道与价格变化。
 
 | 字段 | 说明 |
 | --- | --- |
-| `data[].id` | **资源池 id**（`chat` / `video` / `image` / `audio` / `plan`）；其中仅 `plan` 有 `X-Route-Group` 业务含义，普通调用不需要该头 |
+| `data[].id` | **资源池 id**（`chat` / `video` / `image` / `audio` / `plan`）；`chat` 为默认池，调用 `video` / `image` / `plan` 模型时需传对应 `X-Route-Group` |
 | `data[].display_name` | 运营配置的显示名，仅用于界面展示 |
 | `data[].kind` | `text` / `video` / `image` / `audio` |
-| `data[].billing` | 仅 `plan` 池返回 `per_call`；`video` / `image` 池混合多种计费方式，不标注池级 `billing` |
+| `data[].billing` | 仅 `plan` 池返回 `per_call`；`video` 池混合多种计费方式、`image` 池按张计价，均不标注池级 `billing` |
 | `data[].models` | 该池可路由的**真实模型 id**，直接用作请求的 `model` 字段；空数组表示该池尚无可调模型 |
 | `data[].capabilities` | 该池支持的能力枚举：`chat` / `stream` / `tools`，按池聚合，不区分单个模型 |
 | `catalog_version` | 单调递增的整数（字符串形式），不是时间戳 |
@@ -216,7 +217,7 @@ A3 的 `data[]` 仍以资源池为单位返回，但平台侧模型列表现按�
 | 分区 | 对应池 | 判别字段 | 说明 |
 | --- | --- | --- | --- |
 | 文字模型 | `chat` | `kind: text` | 默认池；A1/A2/A4/A9 常规调用 |
-| 图片生成模型 | `image` | `kind: image` | 图片生成预留池；无渠道时 `models` 为空 |
+| 图片生成模型 | `image` | `kind: image` | 图片生成池；当前 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana） |
 | 视频模型 | `video` | `kind: video` | 视频任务池；当前 8 个 PAI 按次模型 |
 | plan 计划 | `plan` | `kind: video` + `billing: per_call` | 畅用计划；当前 22 个 TA token 模型；单独展示为 plan 分区，不并入视频分区 |
 
@@ -244,9 +245,24 @@ HTTP/1.1 304 Not Modified
   价格被移除后，该模型会从列表消失
 - 返回真实模型 id，但**不返回渠道、上游厂商和采购价**
 - 池即使暂时没有可调模型也会返回（`models: []`），便于对接方按最终结构开发。
-  `image` / `audio` 池当前就是这种情况：产品线已定义，渠道尚未配置；`video` / `plan` 已有模型
+  `audio` 池当前就是这种情况：产品线已定义，渠道尚未配置；`video` / `image` / `plan` 已有模型
 - 目录变更时 `etag` 与 `catalog_version` 同时变化
 - 目录是**调用能力**的快照，不保证当时有可用渠道；限流或额度耗尽仍可能返回 503
+
+### 3.6 图片生成（简要）
+
+图片模型统一传 `X-Route-Group: image`，有两种协议：
+
+| 模型 | 提交 | 完成方式 | 价格（每张，`n=1`） |
+| --- | --- | --- | --- |
+| GPT Image（`gpt-image-2.5-*` / `gpt-image-2.6-*`，4 个） | 同步 `POST /v1/images/generations` | 响应 `data[0]` 直接返回图片，可能是 `b64_json` | 0.018 USD |
+| Nano Banana（`Nano Banana 2.1 *` / `Nano Banana Pro *`，6 个） | 异步 `POST /v1/videos` | 轮询 `GET /v1/videos/{task_id}`，完成后下载 `/v1/tasks/{task_id}/artifacts/image/content` | 2.1 1K/2K 0.009、2.1 4K 0.011、Pro 0.016 USD |
+
+GPT Image 使用 `model` / `prompt` / `n: 1` / `size`（1K 为 `1024x1024`），不要依赖
+`response_format=url`；Nano Banana 当前只验证了 `aspect_ratio: "1:1"` 与 `n: 1`。
+图片按张计费，B1 中图片任务没有状态字段且 token 数不代表费用（Nano Banana 异步
+任务为 0 token），不能用于判断完成；完成与成本以 B3 `status_change` → `settled`
+为准。完整样例见 [09-image-api-examples.md](./09-image-api-examples.md)。
 
 > 视频任务（`video` / `plan` 池）的请求字段差异、轮询和内容下载样例，见
 > [08-video-api-examples.md](./08-video-api-examples.md)。
@@ -527,7 +543,7 @@ Authorization: Bearer <JWT>
 | --- | --- |
 | `status` | `ok` 或 `degraded` |
 | `interface_version` | 固定 `v2` |
-| `upstream_baseline` | 网关基线提交；`45fbb149` 为 V0.9.1 构建值，本轮构建基于 RC48 合入后的 `bb266025`；B4 实际返回值待现场复核 |
+| `upstream_baseline` | 网关基线提交；`45fbb149` 为 V0.9.1 构建值，`bb266025` 为 RC48 合入时的基线；当前构建的 B4 实际返回值待现场复核 |
 | `time` | 服务器时间，RFC3339 UTC 毫秒 |
 
 ---
@@ -634,10 +650,11 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
 ```
 
 > `X-Route-Group` 用于绑定非默认池：`video` 池模型传
-> `-H "X-Route-Group: video"`，`plan` 池模型传 `-H "X-Route-Group: plan"`；
-> `chat` 模型不要传。该头仅对通过 Harness JWT 校验的调用方生效，
-> 不需要额外的令牌授权。`image` / `audio` 池当前没有可用渠道，
-> 不要用它们发起调用；`video` / `plan` 已有可用模型。
+> `-H "X-Route-Group: video"`，`image` 池模型传 `-H "X-Route-Group: image"`，
+> `plan` 池模型传 `-H "X-Route-Group: plan"`；`chat` 模型不要传。该头仅对通过
+> Harness JWT 校验的调用方生效，不需要额外的令牌授权。`audio` 池当前没有可用渠道，
+> 不要用它发起调用；`video` / `image` / `plan` 已有可用模型，图片调用样例见
+> [09-image-api-examples.md](./09-image-api-examples.md)。
 
 ---
 
@@ -652,3 +669,4 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
 | 2026-11-06 | V0.10（修订） | 路由简化：移除 `global_channel_order` / 全渠道优先级全局池与 `token_group_access` / 令牌授权，资源池成为唯一路由顺序；`X-Route-Group` 仅经验证的 Harness 调用方可使用；补充 `pricing_group_order` 是采购分组资格与倍率来源、不是渠道路由顺序。移除令牌未授权 403 行。代码已改，未构建、未部署、未验证 |
 | 2026-11-07 | RC48 候选 | 基于官方 `v1.0.0-rc.48` 对齐；保留五个 Harness 产品池与账本契约；补齐 task-plugin 协议路由的 Harness scope 检查。当前候选通过本地 Go、Web 与 SQLite/MySQL/PostgreSQL 检查；尚未部署或真实联调 |
 | 2026-11-08 | RC48 部署 | `harness-api` 合入 RC48 后构建 `harness-api-20261108-bb26602`，已部署 82 实例并通过容器健康检查与 `/api/status` 探测；真实 Harness JWT / 供应商 E2E 待执行 |
+| 2026-11-14 | V0.11 | `image` 池配置 10 个图片模型（4 个 GPT Image 同步 + 6 个 Nano Banana 异步），新增 `X-Route-Group: image` 与按张计价；A3 样例 `catalog_version` 更新为 `"7"`；新增 3.6 图片生成小节与 `09-image-api-examples.md`；图片 B1 仅 usage、B3 `settled` 为准。部署 `harness-api-20261114-c29f1a6` |

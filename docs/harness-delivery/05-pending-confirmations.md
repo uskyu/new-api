@@ -1,7 +1,7 @@
 # 待确认事项
 
-**版本**：V0.10
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交；已部署 82 实例 `harness-api-20261108-bb26602`；契约待确认项不变）
+**版本**：V0.11
+**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交；已部署 82 实例 `harness-api-20261114-c29f1a6`；契约待确认项不变）
 
 ---
 
@@ -217,21 +217,30 @@ total_amount = base_amount × group_ratio
 
 ---
 
-## 本轮新增的硬性要求（V0.10 目标口径）
+## 本轮新增的硬性要求（V0.10 起，V0.11 补充图片池）
 
 以下不是待确认项，而是本轮约定的行为，需在对接时遵守。全局池与令牌授权的
-移除已构建并部署（2026-11-08），**线上契约验收仍未执行**：
+移除已构建并部署（2026-11-08），图片池已随 V0.11 部署（2026-11-14），
+**线上契约验收仍未执行**：
 
 | 项 | 行为 |
 | --- | --- |
 | `X-Harness-Run-Id` | **必填**，≤64 字符。会写入每条 B1/B3 账本行，并在 B1 事件中返回 |
 | `X-Harness-Request-Id` | 必填，≤64 字符。账本主键，B1/B3 均按它查询 |
-| `X-Route-Group` | **可选**，仅对通过 Harness JWT 校验的调用方生效。`chat` 模型不传；`video` 池模型传 `video`；`plan` 池模型传 `plan`；传未知池返回 403 |
+| `X-Route-Group` | **可选**，仅对通过 Harness JWT 校验的调用方生效。`chat` 模型不传；`video` 池模型传 `video`；`image` 池模型传 `image`；`plan` 池模型传 `plan`；传未知池返回 403 |
 | `model` 字段 | 必须填 A3 `models[]` 中的真实模型 id，不是池 id。路由由网关决定，Harness 不选择档位 |
-| 资源池 | 五个产品线：`chat`（默认，text）/ `video`（video，无池级计费）/ `image`（image，占位，无池级计费）/ `audio`（audio，占位）/ `plan`（video，`per_call`） |
+| 资源池 | 五个产品线：`chat`（默认，text）/ `video`（video，无池级计费）/ `image`（image，10 个图片模型，无池级计费）/ `audio`（audio，占位）/ `plan`（video，`per_call`） |
 | 路由顺序 | 资源池的渠道顺序是唯一路由顺序。`global_channel_order` / 全渠道优先级全局池已移除，不存在 `global` 池；`token_group_access` / 令牌授权已移除，Harness 不需要按池授权 |
 | `pricing_group_order` | **不是路由顺序**。仅决定哪些渠道+模型能力具备采购分组资格，并给出 `group_ratio`；当前配置为单分组 `["default"]`，倍率 `1` |
-| `image` / `audio` 池 | 渠道尚未接入，`models: []` 属预期，**当前不可调用** |
+| `image` 池 | 已配置 4 个 GPT Image（同步 `POST /v1/images/generations`，0.018 USD/张）与 6 个 Nano Banana（异步 `POST /v1/videos`，2.1 1K/2K 0.009、2.1 4K 0.011、Pro 0.016 USD/张）；调用传 `X-Route-Group: image` |
+| `audio` 池 | 渠道尚未接入，`models: []` 属预期，**当前不可调用** |
+
+> **图片任务账本语义**：B1 只有 usage、没有 `status` 字段；Nano Banana 异步任务为
+> 0 token，B1 可能返回 0 token 的 `usage_correction`。图片任务按张计费，B1 的
+> token 数不代表费用，不能用于判断完成；B3 带 `status`，成功图片任务以
+> `status_change` → `status: settled` 及 `billing.total_amount`（GPT Image 0.018、
+> Nano Banana 0.009 等）为准。样例见
+> [09-image-api-examples.md](./09-image-api-examples.md)。
 
 ---
 
@@ -253,7 +262,8 @@ total_amount = base_amount × group_ratio
 第四轮列出 `token` / `image` / `audio_second` / `character` / `request` / `other`
 是为未来定义可选值，不代表本期必须全部产生。
 
-本期只做模型 Token 计费，实际只会产生 `token`。
+本期 B1 的 `usage_unit` 仍只会产生 `token`；图片任务按张计费，B1 的 token 数
+不代表费用，完成与成本以 B3 为准。
 
 **无需确认**——符合本期业务边界。
 
@@ -292,3 +302,4 @@ total_amount = base_amount × group_ratio
 | 2026-10-29 | V0.9.1 | 第 4 项定案为拒绝（400）；补充两个关联头必填且 ≤64、`X-Route-Group` 与真实模型 id 的硬性要求 |
 | 2026-11-05 | V0.10 | 第 5 项（供应商税率）定案为取消，无税额乘数；`tax_rate_percent` 恒 0 并废弃；硬性要求表改为五池产品线与 `X-Route-Group` 仅 `plan` 有业务含义；待确认项仍为 3 项 |
 | 2026-11-06 | V0.10（修订） | 硬性要求表补充：全局池与令牌授权已移除、资源池是唯一路由顺序；`X-Route-Group` 仅经验证 Harness 调用方可用；`pricing_group_order` 是采购资格与倍率来源，不是路由顺序；待确认项不变 |
+| 2026-11-14 | V0.11 | 硬性要求表更新图片池：4 个 GPT Image（同步、0.018 USD/张）+ 6 个 Nano Banana（异步、0.009/0.011/0.016 USD/张），`X-Route-Group: image` 生效；`audio` 仍为空；补充 B1 仅 usage、B3 `settled` 为图片任务完成依据。部署 `harness-api-20261114-c29f1a6` |

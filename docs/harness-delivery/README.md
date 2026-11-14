@@ -1,8 +1,8 @@
 # Harness 网关接口交付包
 
-**版本**：V0.10
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261108-bb26602`
-**交付日期**：2026-10-25（2026-10-29、2026-11-05、2026-11-06、2026-11-07 更新）
+**版本**：V0.11
+**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261114-c29f1a6`
+**交付日期**：2026-10-25（2026-10-29、2026-11-05、2026-11-06、2026-11-07、2026-11-14 更新）
 
 ---
 
@@ -13,12 +13,13 @@
 | 01 | [接入指南](./01-integration-guide.md) | 接口清单、路径、Scope、请求/响应样例、分页、错误码、调用示例 | 第 1 篇 |
 | A3 | [模型列表结构更新](./A3-model-catalog-update.md) | **最新模型列表**：取消经济/企业档、四个展示分区、JSON 示例与模型调用方式 | **模型列表对接优先看** |
 | 08 | [视频调用样例](./08-video-api-examples.md) | 视频池 / plan 池请求差异、真实跑通模型与轮询、内容下载示例 | **视频联调前读** |
+| 09 | [图片调用样例](./09-image-api-examples.md) | 图片生成调用样例（GPT Image 同步 / Nano Banana 异步） | **图片联调前读** |
 | 02 | [鉴权配置](./02-auth-setup.md) | JWKS/iss/aud/sub 配置、JWT 校验规则、需对方提供的信息 | 第 2 篇 |
 | 03 | [数据契约](./03-data-contract.md) | B1/B3 字段语义、事件类型、版本链、金额口径 | 第 3 篇 |
 | 04 | [联调验收清单](./04-acceptance-checklist.md) | 逐项测试用例、预期响应、通过标准 | 第 4 篇 |
 | 05 | [待确认事项](./05-pending-confirmations.md) | 三项尚未冻结的契约差异（第 4、5 项已定案） | **必读** |
 | 06 | [对外测试摘要](./06-test-summary.md) | 各接口测试状态，区分真实/集成/协议/未完成 | 参考 |
-| 07 | [验收证据](./07-acceptance-evidence.md) | 真实 JWT 下的端到端验收记录、请求 ID 与金额核对 | 参考 |
+| 07 | [验收证据](./07-acceptance-evidence.md) | 真实 JWT 历史记录 + 2026-11-14 本地临时 JWT 图片验收、请求 ID 与金额核对 | 参考 |
 
 ---
 
@@ -51,6 +52,19 @@
 | 真实 JWT 端到端联调 | ✅ 2026-10-26、2026-10-29 两轮 |
 | A3 返回资源池 + 真实模型 id | ✅ 2026-10-29 |
 | A1/A2/A4/A9 文字模型调用（含流式） | ✅ 2026-10-29 |
+| 图片池 10 个模型与两种图片协议 | ✅ 2026-11-14 |
+
+### V0.11 变更（2026-11-14，已构建并部署）
+
+| 项 | 状态 |
+| --- | --- |
+| `image` 池配置 10 个图片模型：4 个 GPT Image（同步） + 6 个 Nano Banana（异步），可调用 | ✅ 已构建并部署 |
+| 图片按张计价：GPT Image 0.018 USD/张；Nano Banana 2.1 1K/2K 0.009、2.1 4K 0.011、Pro 0.016 USD/张 | ✅ 已部署 |
+| `X-Route-Group: image` 绑定图片池 | ✅ 已部署 |
+| 图片任务账本语义：B1 仅 usage、无状态；B3 `status_change` → `settled` 为完成与成本依据 | ✅ 已部署 |
+| 本地临时 JWT（临时 JWKS）图片 E2E：Banana 2.1 1K 0.009 USD、GPT Image 2.6-flare 0.018 USD，B3 `settled` | ✅ 2026-11-14 |
+| 部署 `harness-api-20261114-c29f1a6`（digest `sha256:20104c9253c254fc90c5d36ac37f738a7f50596c8845615a8ce1dd37dbf4b7b0`），容器 healthy，`/api/status` 一致 | ✅ 2026-11-14 |
+| 真实 Harness JWT 图片 E2E | ⏳ 待执行 |
 
 ### V0.10 变更（2026-11-05 / 11-06，已构建并部署）
 
@@ -61,7 +75,7 @@
 | 模型列表展示改为四个对外分区：文字模型（`chat`）/ 图片生成模型（`image`）/ 视频模型（`video`）/ plan 计划（`plan`）；分区内 `models` 平铺，不再二次分组；`audio` 为预留池，不进入这四个分区 | ✅ 已构建并部署 |
 | 取消 `global_channel_order` / 全渠道优先级全局池，资源池成为唯一路由顺序 | ✅ 已构建并部署 |
 | 取消 `token_group_access` / 令牌授权 | ✅ 已构建并部署 |
-| `X-Route-Group` 改为按池绑定：`chat` 不传，`video` 传 `video`，`plan` 传 `plan`；仅经验证的 Harness 调用方可使用 | ✅ 已构建并部署 |
+| `X-Route-Group` 改为按池绑定：`chat` 不传，`video` 传 `video`，`image` 传 `image`（V0.11 起），`plan` 传 `plan`；仅经验证的 Harness 调用方可使用 | ✅ 已构建并部署 |
 | `pricing_group_order` 保留为采购分组资格与倍率来源，不是渠道路由顺序 | ✅ 保留；当前仅 `["default"]`，倍率 1 |
 | 取消供应商税率，`total_amount = base_amount × group_ratio` | ✅ 分支已改 |
 | `tax_rate_percent` 保留为恒 0 的废弃字段 | ✅ 分支已改 |
@@ -100,14 +114,20 @@
 | 更正链（`usage_correction` / `cost_correction` / `refund`） | 需构造重复结算或退款场景 |
 | BatchGet 500 事件上限 | 数据量不足 |
 | `audio` 池渠道 | 渠道未接入，当前返回空模型列表，**不可调用** |
-| `image` 池渠道 | 渠道未接入，当前返回空模型列表，**不可调用** |
 | `video` / `plan` 池 | 已配置渠道与模型：`video` 8 个 PAI 按次模型，`plan` 22 个 TA token 模型；可调用性以实际接口为准 |
 
+图片池已配置并完成本地 JWT 端到端验证：Banana 2.1 1K（`hrq_banana_e2e_20261114_3`，
+0.009 USD，下载 468,870 字节 JPEG）与 GPT Image 2.6-flare（`hrq_img26_e2e_20261114_1`，
+0.018 USD）均在 B3 结算为 `settled`。该验证使用本地临时签发的测试 JWT 与临时 JWKS，
+**不是 Harness 正式签发的 JWT**；真实 Harness JWT 的图片端到端验收仍待执行。
+
 **Docker 镜像**：82 实例当前运行版本为
-`harness-api-20261108-bb26602`，并通过容器健康检查与
-`/api/status` 探测。该构建包含 V0.10 的池分类与税额变更，但真实 Harness JWT、
-供应商调用与 B1/B3 读回仍未在线上复验。数据库部署目标为 MySQL，
-PostgreSQL 不在生产范围。
+`harness-api-20261114-c29f1a6`（digest
+`sha256:20104c9253c254fc90c5d36ac37f738a7f50596c8845615a8ce1dd37dbf4b7b0`），
+并通过容器健康检查与 `/api/status` 探测（`/api/status` 返回
+`harness-api-20261114-c29f1a6`）。该构建包含 V0.10 的池分类与税额变更及 V0.11 的
+图片池；真实 Harness JWT、供应商调用与 B1/B3 读回尚未在线上复验。数据库部署目标为
+MySQL，PostgreSQL 不在生产范围。
 
 ### RC48 合入与部署（2026-11-07 / 11-08）
 
@@ -180,9 +200,11 @@ PostgreSQL 不在生产范围。
 
 ## 七、版本说明
 
-本文档为 **V0.10**（2026-11-05）。V0.9.1 的结论仍然成立：接口已可对接，真实 JWT
+本文档为 **V0.11**（2026-11-14）。V0.9.1 的结论仍然成立：接口已可对接，真实 JWT
 端到端联调通过，文字模型的 A1/A2/A4/A9 与流式调用已验证，A3 可直接驱动模型选择。
 V0.10 在此之上调整了产品口径，已完成构建并部署到 82 实例，但尚未完成真实 Harness 调用验收。
+V0.11 补齐图片池：`image` 池配置 10 个图片模型（4 个 GPT Image 同步 + 6 个 Nano Banana
+异步），按张计价，图片调用样例见 `09-image-api-examples.md`。
 
 **尚有三项契约待确认**（见 05），另有两类场景未覆盖（更正链、500 事件上限）。
 三项定稿后发布 V1.0 正式版。
@@ -199,13 +221,21 @@ V0.10 在此之上调整了产品口径，已完成构建并部署到 82 实例�
 > 废弃字段，后续版本移除；2026-11-05 时 `video` / `audio` 渠道未接入，其
 > `models` 为空属预期，不可调用。本轮构建已发布并部署（2026-11-08），真实 Harness 调用验收待执行。
 > 2026-11-08 起 `video` 池配置 8 个 PAI 按次模型，`plan` 池配置 22 个 TA token 模型；
-> `image` / `audio` 仍为空。
+> 当日 `image` / `audio` 仍为空（2026-11-14 起 `image` 池已配置 10 个图片模型）。
 >
 > 2026-11-06 更新要点（仍为 V0.10）：路由进一步简化。取消
 > `global_channel_order` / 「全渠道优先级」全局池，资源池是唯一路由顺序；取消
 > `token_group_access` / 「令牌授权」，Harness 不再需要按池授权；`X-Route-Group`
-> 仅对通过 Harness JWT 校验的调用方生效，且只有 `plan` 有业务含义，普通
-> `chat`/`video`/`audio` 调用不传该头，落默认 `chat` 池。`pricing_group_order`
+> 仅对通过 Harness JWT 校验的调用方生效，且当时只有 `plan` 有业务含义；V0.11 起
+> `image` 也使用该头。普通 `chat`/`video`/`audio` 调用不传该头，落默认 `chat` 池。`pricing_group_order`
 > 保留，但它属于采购分组资格与 `group_ratio` 来源，**不是**渠道路由顺序；当前仅
 > `default` 一个分组，配置为 `["default"]`，倍率为 1。上述两项移除已构建并部署
 > （2026-11-08），真实调用验收待执行。
+>
+> 2026-11-14 更新要点（V0.11）：`image` 池配置 10 个图片模型（4 个 GPT Image 同步
+> `POST /v1/images/generations`，0.018 USD/张；6 个 Nano Banana 异步
+> `POST /v1/videos`，2.1 1K/2K 0.009、2.1 4K 0.011、Pro 0.016 USD/张），统一传
+> `X-Route-Group: image`，样例见 `09-image-api-examples.md`。图片任务 B1 仅 usage、
+> 无状态字段，完成与成本以 B3 `status_change` → `settled` 为准。已部署
+> `harness-api-20261114-c29f1a6`，容器 healthy，`/api/status` 版本一致；图片 E2E
+> 使用本地临时 JWT，真实 Harness JWT 验收待执行。

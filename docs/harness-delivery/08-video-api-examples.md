@@ -1,8 +1,8 @@
 # 视频调用样例与模型差异
 
-**版本**：V0.10  
-**对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261108-bb26602`  
-**日期**：2026-11-09  
+**版本**：V0.11
+**对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261114-c29f1a6`
+**日期**：2026-11-14
 **适用对象**：Harness 后端与视频调用联调
 
 本文只说明视频生成调用。所有视频模型都使用同一个 OpenAI Video 入口，差异在
@@ -27,7 +27,7 @@
 
 - `video` 池：8 个 PAI 按次模型
 - `plan` 池：22 个 TA token 模型
-- `image` / `audio` 池当前为空
+- `image` 池已配置 10 个图片模型（见 [09-image-api-examples.md](./09-image-api-examples.md)）；`audio` 仍为空
 
 **池选择头**：
 
