@@ -292,8 +292,7 @@ Token（本例 99/7,028）。两者都不能用 B1 判断完成；B3 的 `status
 不在 B1 暴露。
 
 **JWT 限制**：本轮使用本地临时铸造的测试 JWT 和临时 JWKS，**不是 Harness 正式
-签发的 JWT**。真实 Harness JWT 的图片 E2E 仍待执行，因此本节不构成正式 JWT
-验收结论。
+签发的 JWT**。本节不构成正式 JWT 验收结论；真实 Harness JWT 四模型复测见第十三节。
 
 ---
 
@@ -311,7 +310,10 @@ Token（本例 99/7,028）。两者都不能用 B1 判断完成；B3 的 `status
 | Nano Banana 2.1 1K E2E | ✅ B1 1 条 `unavailable`/null；B3 `0.009` pending → settled |
 | GPT Image 2.6-flare E2E | ✅ B1 `upstream` 98/7,028；B3 `0.018` settled |
 | PAI 按次 E2E | ✅ B1 1 条 `unavailable`/null；B3 `0.52` pending → settled |
-| JWT 限制 | 本地临时 JWT/JWKS，**不是 Harness 正式签发**；真实 Harness JWT 复测待执行 |
+| PAI 按秒 E2E | ✅ B1 1 条 `unavailable`/null；B3 `0.16` pending → settled |
+| 真实 Harness JWT E2E | ✅ 四模型 B1/B3 4/4 命中；GPT Image PNG 1024×1024、Nano Banana JPEG 1024×1024 完整下载与 PIL 解码通过 |
+| JWKS 鉴权行为 | ✅ 正式 JWT 200；临时 JWT 401；chat-only 对 A3/B1/B3 分别 403，B1/B3 带 `required_scope` |
+| JWT 限制 | 2026-11-15 已用 Harness 正式签发 JWT 复测通过；本地临时 JWT 仅用于本地调试 |
 
 请求 ID 与完整金额核对见 `07-acceptance-evidence.md` 第十六节。
 

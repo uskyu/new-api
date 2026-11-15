@@ -190,5 +190,6 @@ curl -sS "http://<gateway>/v1/tasks/task_xxxxxxxx/artifacts/image/content" \
    查 B3 或按 task id 查任务状态，再决定是否重新提交。
 4. 网关不暴露供应商 URL 和密钥；下载只能使用网关路径，并携带 Harness JWT。
 5. Nano Banana 的 `Range` 不生效；下载总是返回完整响应体。
-6. 本节样例基于 2026-11-14 本地临时 JWT 联调，2026-11-15 修复复测同样使用本地临时
-   JWT，**不是 Harness 正式签发的 JWT**；真实 Harness JWT 的图片 E2E 仍待执行。
+6. 本节样例基于 2026-11-14 本地临时 JWT 联调；2026-11-15 已使用 Harness 正式签发
+   的 JWT 完成四模型复测（含 GPT Image PNG 与 Nano Banana JPEG 的完整下载和 PIL
+   解码），临时 JWKS 已恢复为正式地址。

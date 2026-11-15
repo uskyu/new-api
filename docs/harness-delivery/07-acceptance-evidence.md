@@ -4,7 +4,7 @@
 **日期**：2026-10-26（2026-10-29 复测；2026-11-14 图片模型验收见第十五节；2026-11-15 用量来源修复复测见第十六节）
 **网关版本**：复测记录为 `ec3cdc0`（版本头 `harness-api-20261029-ec3cdc0`）；
 V0.9.1 交付构建为 `fd00dae`（含 run id 校验补丁）；V0.10 构建 `bb266025`，镜像 `harness-api-20261108-bb26602`；V0.11 镜像 `harness-api-20261114-c29f1a6`；V0.11 修订镜像 `harness-api-20261115-de7fce8`，已部署 82 实例
-**JWT 来源**：Harness 正式签发（JWKS `https://alphapro-test.xyz/.well-known/jwks.json`）；第十五、十六节为本地临时 JWT
+**JWT 来源**：Harness 正式签发（JWKS `https://alphapro-test.xyz/.well-known/jwks.json`）；第十五节及第十六节 16.1–16.4 为本地临时 JWT，16.5 为 Harness 正式 JWT
 **Token 有效期**：至 2026-11-18
 
 > 第一至十一节是 V0.9.1 构建的历史实测记录。其中出现的 `economy` / `enterprise`
@@ -240,8 +240,8 @@ task-plugin 协议路由的 scope 检查。
 ## 十五、2026-11-14 图片模型端到端验收（本地临时 JWT，修复前记录）
 
 > **JWT 说明**：本节使用本地临时铸造的测试 JWT 和临时 JWKS，**不是 Harness 正式
-> 签发的 JWT**。真实 Harness JWT 的图片 E2E 仍待执行；本节只证明网关图片链路和
-> 账本口径，不作为正式 JWT 验收结论。
+> 签发的 JWT**。本节只证明网关图片链路和账本口径，不作为正式 JWT 验收结论；
+> 真实 Harness JWT 复测见 16.5。
 >
 > **修复前记录**：本节来自 `harness-api-20261114-c29f1a6`。当时 B1 将无 Token 用量
 > 的异步任务记为 `usage_source=upstream`、0 Token，并在结算时追加同值
@@ -304,9 +304,9 @@ B1 只有用量事件、没有 `status` 字段。Nano Banana 异步任务 Token 
 
 ## 十六、2026-11-15 异步任务用量来源修复复测（本地临时 JWT）
 
-> **JWT 说明**：本节同样使用本地临时铸造的测试 JWT 和临时 JWKS，**不是 Harness
-> 正式签发的 JWT**。复测完成后已恢复 82 的正式 JWKS；真实 Harness JWT 的复测仍
-> 待执行。
+> **JWT 说明**：16.1–16.4 使用本地临时铸造的测试 JWT 和临时 JWKS，**不是 Harness
+> 正式签发的 JWT**；16.5 使用 Harness 正式签发的测试 JWT 和正式 JWKS。临时 JWKS
+> 已在复测后恢复为正式地址。
 
 ### 16.1 部署
 
@@ -345,4 +345,34 @@ B1/B3 batchGet 均 `found=3/3`、`missing_request_ids=[]`、`truncated=false`。
 - 结算不再产生同值 B1 收尾事件；B1/B3 两条流保持独立。
 - B3 金额和按张计费未变：GPT Image 0.018、Nano Banana 0.009、PAI 按次 0.52 USD。
 
-**待办**：使用 Harness 正式签发 JWT 重跑上述三类任务，完成后补充正式验收记录。
+### 16.5 真实 Harness JWT 四模型复测（2026-11-15）
+
+> 本节使用 Harness 正式签发的测试 JWT（`exp` 2026-11-18），JWKS 为正式
+> `https://alphapro-test.xyz/.well-known/jwks.json`，不再是本地临时 JWT。
+
+| 模型 | Harness Request ID | 网关 Request ID | 结果 |
+| --- | --- | --- | --- |
+| GPT Image 2.6-flare | `hrq_e2e_realjwt_20261115_gpt_image_20261115T042257820_4dbfbb1f` | `202611150422588480605118268d9d6la0dolRN` | B1 `upstream` 98 / 7,028 / 7,126；B3 `0.018` settled；返回 PNG 1024×1024，2,393,885 字节，PIL 解码通过 |
+| Nano Banana 2.1 1K | `hrq_e2e_realjwt_20261115_nano_banana_20261115T042320580_9f704dba` | `202611150423215815683768268d9d6vFdFapgf` | B1 仅 1 条 `unavailable`/null；B3 `0.009` pending → settled；完整下载 717,274 字节 JPEG 1024×1024，PIL 解码通过 |
+| PAI 按次 `seedance2-fast-720p-once-1` | `hrq_e2e_realjwt_20261115_pai_video_20261115T042454731_f387f830` | `202611150424558134601278268d9d65BQt7dwF` | B1 仅 1 条 `unavailable`/null；B3 `0.52` pending → settled |
+| PAI 按秒 `seedance2-mini-480p-second` | `hrq_e2e_realjwt_20261115_pai_second_20261115T042712549_1eb2e805` | `202611150427136705113178268d9d6OZoAjoUD` | B1 仅 1 条 `unavailable`/null；B3 `0.16` pending → settled |
+
+四模型均 `completed`；B1/B3 batchGet 均 `found=4/4`、`missing_request_ids=[]`、
+`truncated=false`。GPT Image 同步返回 b64 PNG，Nano Banana 异步下载完整 JPEG，
+两者均通过 PIL `verify()`。
+
+**JWKS 鉴权行为复验**：
+
+| 场景 | 结果 |
+| --- | --- |
+| 正式 JWKS + 正式 JWT | ✅ B4/A3/B1/B3 均 200 |
+| 正式 JWKS + 本地临时 JWT | ✅ 401 `GATEWAY_UNAUTHORIZED` |
+| 临时 JWKS + chat-only JWT | ✅ B4 200；A3 403；B1 403（`required_scope=gateway.usage.read`）；B3 403（`required_scope=gateway.cost.read`） |
+| 恢复正式 JWKS 后 | ✅ 正式 JWT 200；临时 JWT 401 |
+
+**A3 目录观察**：`seedance2-mini-480p-second` 不在 A3 任何池的 `models` 中，但使用
+`X-Route-Group: video` 可以调用并正常结算。该差异不是本次账本修复引入的；Harness
+只能调用 A3 返回的模型 id，因此该模型当前不可被发现，接入前需要单独确认目录暴露。
+
+**待办**：确认 PAI 按秒模型是否应加入 A3 `video` 池的 `models`；其余正式 JWT
+复测已完成。
