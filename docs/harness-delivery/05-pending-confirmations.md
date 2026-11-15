@@ -1,7 +1,7 @@
 # 待确认事项
 
-**版本**：V0.11
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交；已部署 82 实例 `harness-api-20261114-c29f1a6`；契约待确认项不变）
+**版本**：V0.11（2026-11-15 修订）
+**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交；已部署 82 实例 `harness-api-20261115-de7fce8`；契约待确认项不变）
 
 ---
 
@@ -235,11 +235,16 @@ total_amount = base_amount × group_ratio
 | `image` 池 | 已配置 4 个 GPT Image（同步 `POST /v1/images/generations`，0.018 USD/张）与 6 个 Nano Banana（异步 `POST /v1/videos`，2.1 1K/2K 0.009、2.1 4K 0.011、Pro 0.016 USD/张）；调用传 `X-Route-Group: image` |
 | `audio` 池 | 渠道尚未接入，`models: []` 属预期，**当前不可调用** |
 
-> **图片任务账本语义**：B1 只有 usage、没有 `status` 字段；Nano Banana 异步任务为
-> 0 token，B1 可能返回 0 token 的 `usage_correction`。图片任务按张计费，B1 的
-> token 数不代表费用，不能用于判断完成；B3 带 `status`，成功图片任务以
-> `status_change` → `status: settled` 及 `billing.total_amount`（GPT Image 0.018、
-> Nano Banana 0.009 等）为准。样例见
+> **图片任务账本语义**：B1 只有 usage、没有 `status` 字段；Nano Banana 异步任务
+> 没有 Token 用量，B1 为 `usage_source=unavailable`，`input_tokens` /
+> `output_tokens` / `cache_read_tokens` / `cache_write_tokens` 均为 `null`，
+> `split_known=false`，`total_tokens` 省略；B1 只在用量或用量元数据变化时追加
+> 事件，结算不再追加同值 `usage_correction`；只有拿到 `total_tokens` 时才以
+> `usage_source=upstream` 输出总量（四个分项为 `null`、`split_known=false`）。
+> GPT Image 同步保持 `usage_source=upstream` 与上游实际 input/output Token。
+> 图片任务按张计费，B1 的 Token 数不代表费用，不能用于判断完成；B3 带
+> `status`，成功图片任务以 `status_change` → `status: settled` 及
+> `billing.total_amount`（GPT Image 0.018、Nano Banana 0.009 等）为准。样例见
 > [09-image-api-examples.md](./09-image-api-examples.md)。
 
 ---
@@ -303,3 +308,4 @@ total_amount = base_amount × group_ratio
 | 2026-11-05 | V0.10 | 第 5 项（供应商税率）定案为取消，无税额乘数；`tax_rate_percent` 恒 0 并废弃；硬性要求表改为五池产品线与 `X-Route-Group` 仅 `plan` 有业务含义；待确认项仍为 3 项 |
 | 2026-11-06 | V0.10（修订） | 硬性要求表补充：全局池与令牌授权已移除、资源池是唯一路由顺序；`X-Route-Group` 仅经验证 Harness 调用方可用；`pricing_group_order` 是采购资格与倍率来源，不是路由顺序；待确认项不变 |
 | 2026-11-14 | V0.11 | 硬性要求表更新图片池：4 个 GPT Image（同步、0.018 USD/张）+ 6 个 Nano Banana（异步、0.009/0.011/0.016 USD/张），`X-Route-Group: image` 生效；`audio` 仍为空；补充 B1 仅 usage、B3 `settled` 为图片任务完成依据。部署 `harness-api-20261114-c29f1a6` |
+| 2026-11-15 | V0.11（修订） | 图片任务账本语义更新：无 Token 用量时 B1 `usage_source=unavailable`、Token 字段 `null`、`split_known=false`；只有 `total_tokens` 时保持 `upstream`；结算不再追加同值 `usage_correction`。部署 `harness-api-20261115-de7fce8` |

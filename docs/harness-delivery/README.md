@@ -1,8 +1,8 @@
 # Harness 网关接口交付包
 
-**版本**：V0.11
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261114-c29f1a6`
-**交付日期**：2026-10-25（2026-10-29、2026-11-05、2026-11-06、2026-11-07、2026-11-14 更新）
+**版本**：V0.11（2026-11-15 修订）
+**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261115-de7fce8`
+**交付日期**：2026-10-25（2026-10-29、2026-11-05、2026-11-06、2026-11-07、2026-11-14、2026-11-15 更新）
 
 ---
 
@@ -19,7 +19,7 @@
 | 04 | [联调验收清单](./04-acceptance-checklist.md) | 逐项测试用例、预期响应、通过标准 | 第 4 篇 |
 | 05 | [待确认事项](./05-pending-confirmations.md) | 三项尚未冻结的契约差异（第 4、5 项已定案） | **必读** |
 | 06 | [对外测试摘要](./06-test-summary.md) | 各接口测试状态，区分真实/集成/协议/未完成 | 参考 |
-| 07 | [验收证据](./07-acceptance-evidence.md) | 真实 JWT 历史记录 + 2026-11-14 本地临时 JWT 图片验收、请求 ID 与金额核对 | 参考 |
+| 07 | [验收证据](./07-acceptance-evidence.md) | 真实 JWT 历史记录 + 2026-11-14 本地临时 JWT 图片验收 + 2026-11-15 用量来源修复复测、请求 ID 与金额核对 | 参考 |
 
 ---
 
@@ -53,6 +53,7 @@
 | A3 返回资源池 + 真实模型 id | ✅ 2026-10-29 |
 | A1/A2/A4/A9 文字模型调用（含流式） | ✅ 2026-10-29 |
 | 图片池 10 个模型与两种图片协议 | ✅ 2026-11-14 |
+| 异步任务用量来源修复（无 Token → `unavailable`，不再强制 B1 收尾） | ✅ 2026-11-15 |
 
 ### V0.11 变更（2026-11-14，已构建并部署）
 
@@ -65,6 +66,16 @@
 | 本地临时 JWT（临时 JWKS）图片 E2E：Banana 2.1 1K 0.009 USD、GPT Image 2.6-flare 0.018 USD，B3 `settled` | ✅ 2026-11-14 |
 | 部署 `harness-api-20261114-c29f1a6`（digest `sha256:20104c9253c254fc90c5d36ac37f738a7f50596c8845615a8ce1dd37dbf4b7b0`），容器 healthy，`/api/status` 一致 | ✅ 2026-11-14 |
 | 真实 Harness JWT 图片 E2E | ⏳ 待执行 |
+
+### V0.11 修订（2026-11-15，已构建并部署）
+
+| 项 | 状态 |
+| --- | --- |
+| 异步任务无 Token 用量时 B1 改为 `usage_source=unavailable`、Token 字段 `null`、`split_known=false`；已有 `total_tokens` 保持 `upstream` | ✅ 已构建并部署 |
+| 撤销 B1 结算强制收尾事件；B1 只在用量或用量元数据变化时追加，B3 `status_change` 为完成信号 | ✅ 已构建并部署 |
+| 任务路径回归测试：Nano Banana / PAI 无 Token、total-only、重复结算 | ✅ 通过 |
+| 部署 `harness-api-20261115-de7fce8`（digest `sha256:b1764aa141089f738919839e908e9289643a6d74ed9d2f32234644fce0fe0e5f`），容器 healthy，`/api/status` 一致 | ✅ 2026-11-15 |
+| 本地临时 JWT 复测：Banana/PAI B1 `unavailable`，GPT Image `upstream` 98/7,028；B3 0.009/0.018/0.52 `settled` | ✅ 2026-11-15 |
 
 ### V0.10 变更（2026-11-05 / 11-06，已构建并部署）
 
@@ -111,7 +122,7 @@
 
 | 项 | 影响 |
 | --- | --- |
-| 更正链（`usage_correction` / `cost_correction` / `refund`） | 需构造重复结算或退款场景 |
+| 更正链（`usage_correction` / `cost_correction` / `refund`） | 需构造用量变化、金额更正或退款场景 |
 | BatchGet 500 事件上限 | 数据量不足 |
 | `audio` 池渠道 | 渠道未接入，当前返回空模型列表，**不可调用** |
 | `video` / `plan` 池 | 已配置渠道与模型：`video` 8 个 PAI 按次模型，`plan` 22 个 TA token 模型；可调用性以实际接口为准 |
@@ -122,12 +133,12 @@
 **不是 Harness 正式签发的 JWT**；真实 Harness JWT 的图片端到端验收仍待执行。
 
 **Docker 镜像**：82 实例当前运行版本为
-`harness-api-20261114-c29f1a6`（digest
-`sha256:20104c9253c254fc90c5d36ac37f738a7f50596c8845615a8ce1dd37dbf4b7b0`），
+`harness-api-20261115-de7fce8`（digest
+`sha256:b1764aa141089f738919839e908e9289643a6d74ed9d2f32234644fce0fe0e5f`），
 并通过容器健康检查与 `/api/status` 探测（`/api/status` 返回
-`harness-api-20261114-c29f1a6`）。该构建包含 V0.10 的池分类与税额变更及 V0.11 的
-图片池；真实 Harness JWT、供应商调用与 B1/B3 读回尚未在线上复验。数据库部署目标为
-MySQL，PostgreSQL 不在生产范围。
+`harness-api-20261115-de7fce8`）。该构建包含 V0.10 的池分类与税额变更、V0.11 的
+图片池及 2026-11-15 的异步任务用量来源修复；图片/视频 B1/B3 已用本地临时 JWT 复测，
+真实 Harness JWT 尚未复验。数据库部署目标为 MySQL，PostgreSQL 不在生产范围。
 
 ### RC48 合入与部署（2026-11-07 / 11-08）
 
@@ -200,11 +211,13 @@ MySQL，PostgreSQL 不在生产范围。
 
 ## 七、版本说明
 
-本文档为 **V0.11**（2026-11-14）。V0.9.1 的结论仍然成立：接口已可对接，真实 JWT
+本文档为 **V0.11（2026-11-15 修订）**。V0.9.1 的结论仍然成立：接口已可对接，真实 JWT
 端到端联调通过，文字模型的 A1/A2/A4/A9 与流式调用已验证，A3 可直接驱动模型选择。
 V0.10 在此之上调整了产品口径，已完成构建并部署到 82 实例，但尚未完成真实 Harness 调用验收。
 V0.11 补齐图片池：`image` 池配置 10 个图片模型（4 个 GPT Image 同步 + 6 个 Nano Banana
-异步），按张计价，图片调用样例见 `09-image-api-examples.md`。
+异步），按张计价，图片调用样例见 `09-image-api-examples.md`。2026-11-15 修订修复了
+异步任务的 B1 用量来源：无 Token 用量时输出 `unavailable`/`null`，已有 `total_tokens`
+时保持 `upstream`，并撤销 B1 结算收尾事件；B3 金额与按张计费不变。
 
 **尚有三项契约待确认**（见 05），另有两类场景未覆盖（更正链、500 事件上限）。
 三项定稿后发布 V1.0 正式版。
@@ -239,3 +252,10 @@ V0.11 补齐图片池：`image` 池配置 10 个图片模型（4 个 GPT Image �
 > 无状态字段，完成与成本以 B3 `status_change` → `settled` 为准。已部署
 > `harness-api-20261114-c29f1a6`，容器 healthy，`/api/status` 版本一致；图片 E2E
 > 使用本地临时 JWT，真实 Harness JWT 验收待执行。
+>
+> 2026-11-15 更新要点（V0.11 修订）：异步任务没有 Token 用量时，B1 改为
+> `usage_source=unavailable`、四个 Token 字段 `null`、`split_known=false`，
+> `total_tokens` 省略；已有 `total_tokens` 的任务保持 `upstream` + total-only。
+> 撤销结算时强制追加同值 `usage_correction` 的逻辑，B1 只在用量或用量元数据变化时
+> 追加，B3 `status_change` 仍是完成信号。已部署 `harness-api-20261115-de7fce8`，
+> Nano Banana / PAI 按次 / GPT Image 三模型复测通过；B3 金额与按张计费不变。

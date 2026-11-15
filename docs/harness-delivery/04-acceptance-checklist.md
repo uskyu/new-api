@@ -1,7 +1,7 @@
 # Harness 联调验收清单
 
-**版本**：V0.11
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261114-c29f1a6`，本清单仍需逐项验收
+**版本**：V0.11（2026-11-15 修订）
+**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261115-de7fce8`，本清单仍需逐项验收
 
 本文档供双方逐项核验。每项包含：执行方、请求、预期响应、通过标准。
 
@@ -406,7 +406,7 @@ curl -sS -X POST "http://<gateway>/v1/videos" \
 
 **通用通过标准**：
 - [ ] A3 `image` 分区返回 10 个模型（4 个 GPT Image + 6 个 Nano Banana）
-- [ ] B1 中图片任务只有 usage、**没有 status 字段**；图片按张计费，B1 的 token 数不代表费用（Nano Banana 异步任务为 0 token，可能返回 0 token 的 `usage_correction`）；不得用 B1 判断完成，完成与成本以 B3 为准
+- [ ] B1 中图片任务只有 usage、**没有 status 字段**；图片按张计费，B1 的 Token 数不代表费用（Nano Banana 异步任务没有 Token 用量，B1 为 `usage_source=unavailable`，`input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_write_tokens` 均为 `null`，`split_known=false`，`total_tokens` 省略，且不再追加结算收尾 `usage_correction`）；不得用 B1 判断完成，完成与成本以 B3 为准
 
 > Nano Banana 当前仅验证 `aspect_ratio: "1:1"`、`n=1`；其他比例、参考图、编辑与 GIF 未验证。下载请忽略 `Range`（上游返回 200 全量），不要使用 `/v1/videos/{task_id}/content`（上游返回 410）。
 
@@ -641,3 +641,4 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?from=2026-10-01T00:0
 | 2026-11-05 | V0.10 | 前置条件与 A3 样例改为 `chat`/`video`/`image`/`audio`/`plan` 五个池；新增 2.5 `plan` 池校验；B3 校验改为 `total_amount = base_amount × group_ratio`，取消税率检查；说明 `video`/`image`/`audio` 暂不可调用 |
 | 2026-11-06 | V0.10（修订） | 前置条件补充路由配置：资源池是唯一路由顺序，全局池与令牌授权已移除，`pricing_group_order` 仅决定采购资格与倍率；2.4 / 2.5 明确 `X-Route-Group` 仅经验证 Harness 调用方可用且仅 `plan` 有业务含义；5.2 补充当前 `group_ratio = 1` |
 | 2026-11-14 | V0.11 | A3 样例 `image` 池改为 10 个图片模型、`catalog_version` 为 `"7"`；前置条件与 2.5 说明 `image` 已配置、`audio` 仍为空；新增 4.6 图片生成验收（GPT Image 同步 0.018、Nano Banana 异步 0.009、B1 仅 usage / B3 `settled`）；部署 `harness-api-20261114-c29f1a6` |
+| 2026-11-15 | V0.11（修订） | 图片验收改为：无 Token 用量时 B1 `usage_source=unavailable`、Token 字段 `null`、`split_known=false`，结算不再追加同值 `usage_correction`；GPT Image 保持 `upstream`。部署 `harness-api-20261115-de7fce8` |

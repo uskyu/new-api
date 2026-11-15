@@ -1,8 +1,8 @@
 # 视频调用样例与模型差异
 
-**版本**：V0.11
-**对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261114-c29f1a6`
-**日期**：2026-11-14
+**版本**：V0.11（2026-11-15 修订）
+**对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261115-de7fce8`
+**日期**：2026-11-14（2026-11-15 修订）
 **适用对象**：Harness 后端与视频调用联调
 
 本文只说明视频生成调用。所有视频模型都使用同一个 OpenAI Video 入口，差异在
@@ -43,8 +43,8 @@
 
 | 类型 | 代表模型 | 计费 | 客户端 `seconds` | 媒体输入 | `resolution` / `size` | 完成后的 usage |
 | --- | --- | --- | --- | --- | --- | --- |
-| PAI 按次 | `seedance2-fast-720p-once-1` | 按次 | 整数，按模型 4–15 或 1–60/5–30 | 不支持 | 不允许发送 | 通常无 `usage` |
-| PAI 按秒 | `seedance2-mini-480p-second` | 按秒 | 整数，按模型范围 | 不支持 | 不允许发送 | 可能无 `usage`；按请求秒数计费 |
+| PAI 按次 | `seedance2-fast-720p-once-1` | 按次 | 整数，按模型 4–15 或 1–60/5–30 | 不支持 | 不允许发送 | 通常无 `usage`；B1 为 `usage_source=unavailable`、Token 字段为 `null` |
+| PAI 按秒 | `seedance2-mini-480p-second` | 按秒 | 整数，按模型范围 | 不支持 | 不允许发送 | 可能无 `usage`；B1 为 `usage_source=unavailable`、Token 字段为 `null`；按请求秒数计费 |
 | TA token | `seedance2-mini-480p-token-no-video` | 按 token | 整数，4–15；2.5 系列 4–30 | 支持图片/参考视频 | 可选，但必须与模型 id 一致 | `total_tokens` |
 | TA 按秒 | `wan3.0-video-480p` | 按输出/输入秒 | 整数，按 family 范围；`wan` 支持 `-1` 自动 | 按 family 限制 | 由模型 id 锁定 | `output_seconds` / `input_seconds` |
 
@@ -113,7 +113,8 @@ curl -sS "http://<gateway>/v1/videos/task_xxxxxxxx" \
 ```
 
 PAI 按次模型通常没有 `usage`；计费在任务成功时按次价格结算，不由返回的秒数推算。
-下载：
+这类任务的 B1 为 `usage_source=unavailable`，Token 字段为 `null`，
+`split_known=false`，`total_tokens` 省略，不代表免费；费用以 B3 为准。下载：
 
 ```bash
 curl -sS "http://<gateway>/v1/videos/task_xxxxxxxx/content" \
@@ -294,7 +295,8 @@ PAI 按秒与 PAI 按次使用同一请求形状：只接受 `model` / `prompt` 
 - 提交、轮询、内容下载、B1/B3 结算均跑通
 - TA token 任务完成后返回 `usage.total_tokens`
 - TA 按秒任务完成后返回 `usage.output_seconds` / `input_seconds`
-- PAI 完成响应可能没有 `usage`；按次模型按次结算，按秒模型目前按请求秒数结算
+- PAI 完成响应可能没有 `usage`；B1 为 `usage_source=unavailable`、Token 字段为
+  `null`，不代表免费，费用以 B3 为准；按次模型按次结算，按秒模型目前按请求秒数结算
 - PAI 内容可直接从结果 URL 代理下载；TA token 内容通过网关 `/content` 读取
 
 ---
@@ -315,8 +317,9 @@ PAI 按秒与 PAI 按次使用同一请求形状：只接受 `model` / `prompt` 
    family 才支持音频。
 6. **TA token 的 `content` 建议用 GET。** 部分模型的 HEAD 会返回 502；GET/带
    `Range` 的 GET 正常（可返回 206）。PAI 的 HEAD 正常。
-7. **PAI 完成响应可能没有 `usage`。** 不要据此判断免费；按次/按秒的价格和结算
-   在网关账本里。PAI 按秒当前按请求秒数计费，后续如果上游返回实际秒数再切换。
+7. **PAI 完成响应可能没有 `usage`。** 此时 B1 为 `usage_source=unavailable`，
+   Token 字段为 `null`，不要据此判断免费；按次/按秒的价格和结算在网关 B3 账本里。
+   PAI 按秒当前按请求秒数计费，后续如果上游返回实际秒数再切换。
 8. **`capabilities` 是池级汇总。** 不能拿它判断池内每个模型都支持 `tools` 等能力；
    视频池当前 `capabilities` 为空。
 9. **`models` 是字典序数组。** A3 返回的模型顺序不等于后台渠道配置顺序；不要依赖

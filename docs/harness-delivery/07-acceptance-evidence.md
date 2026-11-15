@@ -1,10 +1,10 @@
 # Harness 联调验收结果（真实 JWT / 本地临时 JWT）
 
-**交付包版本**：V0.11（下列证据对应 V0.9.1 构建；V0.10 构建/部署见第十四节，V0.11 图片验收见第十五节）
-**日期**：2026-10-26（2026-10-29 复测；2026-11-14 图片模型验收见第十五节）
+**交付包版本**：V0.11（下列证据对应 V0.9.1 构建；V0.10 构建/部署见第十四节，V0.11 图片验收见第十五节，2026-11-15 修复复测见第十六节）
+**日期**：2026-10-26（2026-10-29 复测；2026-11-14 图片模型验收见第十五节；2026-11-15 用量来源修复复测见第十六节）
 **网关版本**：复测记录为 `ec3cdc0`（版本头 `harness-api-20261029-ec3cdc0`）；
-V0.9.1 交付构建为 `fd00dae`（含 run id 校验补丁）；V0.10 构建 `bb266025`，镜像 `harness-api-20261108-bb26602`；V0.11 镜像 `harness-api-20261114-c29f1a6`，已部署 82 实例
-**JWT 来源**：Harness 正式签发（JWKS `https://alphapro-test.xyz/.well-known/jwks.json`）；第十五节为本地临时 JWT
+V0.9.1 交付构建为 `fd00dae`（含 run id 校验补丁）；V0.10 构建 `bb266025`，镜像 `harness-api-20261108-bb26602`；V0.11 镜像 `harness-api-20261114-c29f1a6`；V0.11 修订镜像 `harness-api-20261115-de7fce8`，已部署 82 实例
+**JWT 来源**：Harness 正式签发（JWKS `https://alphapro-test.xyz/.well-known/jwks.json`）；第十五、十六节为本地临时 JWT
 **Token 有效期**：至 2026-11-18
 
 > 第一至十一节是 V0.9.1 构建的历史实测记录。其中出现的 `economy` / `enterprise`
@@ -219,6 +219,7 @@ B1/B3 另含 `details.required_scope`。这是当前契约定义，不是缺陷�
 | 2026-10-30 | 部署 `fd00dae` 并复验：真实 JWT、超长 run id 拒绝、正常调用与 B1/B3 入账 |
 | 2026-11-05 | 记录 V0.10 口径变更（五池产品线、`X-Route-Group` 仅 `plan`、取消税额）为分支已改、未部署未验证；旧证据保持原样 |
 | 2026-11-14 | 新增第十五节：图片模型 E2E（本地临时 JWT），A3 `image` 池 10 模型，Nano Banana 2.1 1K `0.009` USD、GPT Image 2.6-flare `0.018` USD；真实 Harness JWT 图片 E2E 待执行 |
+| 2026-11-15 | 修复异步任务用量来源：无 Token 用量时 B1 为 `usage_source=unavailable`、Token 字段为 `null`，仅有 `total_tokens` 时保持 `upstream`；撤销 B1 强制收尾事件。部署 `harness-api-20261115-de7fce8`，完成 Nano Banana / GPT Image / PAI 三模型复测（第十六节） |
 
 ---
 
@@ -236,11 +237,16 @@ task-plugin 协议路由的 scope 检查。
 
 ---
 
-## 十五、2026-11-14 图片模型端到端验收（本地临时 JWT）
+## 十五、2026-11-14 图片模型端到端验收（本地临时 JWT，修复前记录）
 
 > **JWT 说明**：本节使用本地临时铸造的测试 JWT 和临时 JWKS，**不是 Harness 正式
 > 签发的 JWT**。真实 Harness JWT 的图片 E2E 仍待执行；本节只证明网关图片链路和
 > 账本口径，不作为正式 JWT 验收结论。
+>
+> **修复前记录**：本节来自 `harness-api-20261114-c29f1a6`。当时 B1 将无 Token 用量
+> 的异步任务记为 `usage_source=upstream`、0 Token，并在结算时追加同值
+> `usage_correction`。这些是当时的真实行为，保留为历史事实，不回写；修复后复测
+> 见第十六节。
 
 ### 15.1 部署
 
@@ -293,3 +299,50 @@ B1 只有用量事件、没有 `status` 字段。Nano Banana 异步任务 Token 
 
 **待办**：使用 Harness 正式签发 JWT 重跑图片 E2E（创建、轮询、下载、B1/B3 对账），
 完成后在本节补充正式验收记录。
+
+---
+
+## 十六、2026-11-15 异步任务用量来源修复复测（本地临时 JWT）
+
+> **JWT 说明**：本节同样使用本地临时铸造的测试 JWT 和临时 JWKS，**不是 Harness
+> 正式签发的 JWT**。复测完成后已恢复 82 的正式 JWKS；真实 Harness JWT 的复测仍
+> 待执行。
+
+### 16.1 部署
+
+| 项 | 结果 |
+| --- | --- |
+| 镜像 | `ghcr.io/uskyu/new-api:harness-api-20261115-de7fce8` |
+| Digest | `sha256:b1764aa141089f738919839e908e9289643a6d74ed9d2f32234644fce0fe0e5f` |
+| Revision | `de7fce866866e215ccd666e4ca25d32e37ba4e45` |
+| 实例 | ✅ 82 healthy，`/api/status` 返回 `harness-api-20261115-de7fce8` |
+
+### 16.2 修复内容
+
+- `recordTaskHarnessSettlement` 在没有 Token 总量时置 `SplitUnknown=true`，使
+  `harnessUsageHasMeasurement` 判定为未测量，B1 输出 `usage_source=unavailable`。
+- 已有 `TotalTokensKnown=true` 的任务保持 `upstream` + `total_tokens`，后续无 usage
+  的结算不覆盖。
+- 撤销结算时强制追加同值 `usage_correction` 的逻辑；B1 只在用量或用量元数据变化时
+  追加事件，B3 `status_change` 仍是完成信号。
+
+### 16.3 三模型复测
+
+| 模型 | Harness Request ID | 网关 Request ID | 结果 |
+| --- | --- | --- | --- |
+| GPT Image 2.6-flare | `hrq_e2e_fix_20261115_gpt_image_20261115T040545461_7d74c118` | `202611150405464496462698268d9d6jmvOPmru` | HTTP 200；B1 `usage` v1 `upstream` 98 input / 7,028 output / 7,126 total，`split_known=true`；B3 `cost` v1 `settled` 0.018 USD |
+| Nano Banana 2.1 1K | `hrq_e2e_fix_20261115_nano_banana_20261115T040607639_9ec11d67` | `202611150406088133638338268d9d6ocNKKPe9` | 创建 200，79.2s `completed`；下载 16 字节，前缀 `ffd8ffe0`（JPEG）；B1 仅 1 条 `usage` v1 `unavailable`，四个 Token 字段 `null`，`split_known=false`；B3 `cost` v1 `pending` 0.009 → `status_change` v2 `settled` 0.009 USD |
+| PAI 按次 `seedance2-fast-720p-once-1` | `hrq_e2e_fix_20261115_pai_video_20261115T040732168_840398aa` | `202611150407331933169798268d9d6zgy0ptq3` | 创建 200，143.7s `completed`；B1 仅 1 条 `usage` v1 `unavailable`，四个 Token 字段 `null`，`split_known=false`；B3 `cost` v1 `pending` 0.52 → `status_change` v2 `settled` 0.52 USD |
+
+B1/B3 batchGet 均 `found=3/3`、`missing_request_ids=[]`、`truncated=false`。
+
+### 16.4 结论
+
+- 无 Token 的异步任务不再被发布成 `upstream` + 0 Token，而是 `unavailable` +
+  `null`；`null` 表示未测量，不是 0 Token。
+- 只有 `total_tokens` 的任务保持 `upstream` + total-only（单测覆盖，后续无 usage
+  的结算不覆盖已取得的总量）。
+- 结算不再产生同值 B1 收尾事件；B1/B3 两条流保持独立。
+- B3 金额和按张计费未变：GPT Image 0.018、Nano Banana 0.009、PAI 按次 0.52 USD。
+
+**待办**：使用 Harness 正式签发 JWT 重跑上述三类任务，完成后补充正式验收记录。

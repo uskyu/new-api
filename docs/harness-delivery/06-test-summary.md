@@ -1,8 +1,8 @@
 # Harness 网关对外测试摘要
 
-**版本**：V0.11 历史过程记录；RC48 合入与部署验证见第十一节；图片模型验证见第十二节
-**对应网关版本**：早期记录对应 `harness-api` `725ec9d6d`；当前为 `harness-api` `c29f1a6`，已部署 `harness-api-20261114-c29f1a6`
-**测试时间**：2026-10-25 至 2026-10-26；图片模型验证 2026-11-14
+**版本**：V0.11 历史过程记录；RC48 合入与部署验证见第十一节；图片模型验证见第十二节；用量来源修复见第十三节
+**对应网关版本**：早期记录对应 `harness-api` `725ec9d6d`；当前为 `harness-api` `de7fce8`，已部署 `harness-api-20261115-de7fce8`
+**测试时间**：2026-10-25 至 2026-10-26；图片模型验证 2026-11-14；用量来源修复复测 2026-11-15
 
 > 本文记录该轮使用**网关自签 JWT** 的本地联调结果，保留作为过程记录。
 > 后续真实 JWT 验收与当前契约状态见 `07-acceptance-evidence.md`（`ec3cdc0`）；
@@ -226,7 +226,8 @@ New API 内部，不随交付材料提供。
 | 2026-10-25 | V0.9 | 初版 |
 | 2026-10-26 | V0.9 | 补入部署实例端到端验证结果；记录 `pricing_version` 列宽缺陷及修复 |
 | 2026-11-05 | V0.10 | 版本对齐交付包；标注税率已取消（历史结果未重跑） |
-| 2026-11-14 | V0.11 | 补入图片模型验证：`supplyvideo` 1.3.0 单测、A3 图片池 10 模型、Nano Banana 2.1 1K 与 GPT Image 2.6-flare E2E；说明 B1 无 `status`、Nano Banana 0 Token、GPT Image 可带 Token，完成以 B3 `settled` 为准；本地临时 JWT，真实 Harness JWT 待验 |
+| 2026-11-14 | V0.11 | 补入图片模型验证：`supplyvideo` 1.3.0 单测、A3 图片池 10 模型、Nano Banana 2.1 1K 与 GPT Image 2.6-flare E2E；说明 B1 无 `status`、Nano Banana 0 Token（修复前口径）、GPT Image 可带 Token，完成以 B3 `settled` 为准；本地临时 JWT，真实 Harness JWT 待验 |
+| 2026-11-15 | V0.11（修订） | 修复异步任务用量来源：无 Token 用量时 B1 `unavailable`/`null`，仅有 `total_tokens` 时 `upstream`；撤销 B1 结算收尾事件。部署 `harness-api-20261115-de7fce8`，Nano Banana / GPT Image / PAI 三模型复测通过（第十三节） |
 
 ---
 
@@ -265,8 +266,17 @@ GitHub 的 `Package harness-api` 工作流生成本轮多平台下载包；`Publ
 | A3 图片池 | ✅ `catalog_version="7"`，10 个模型 |
 | Nano Banana 2.1 1K E2E | ✅ 创建 200、轮询 completed、下载 468,870 bytes（实际 JPEG）；B3 `0.009` USD `settled` |
 | GPT Image 2.6-flare E2E | ✅ HTTP 200；B3 `0.018` USD `settled`；B1 99 input / 7,028 output tokens |
-| B1 语义 | ✅ 无 `status` 字段；Nano Banana 异步任务 Token 为 0，结算后可能追加 `usage_correction`；GPT Image 同步可带上游 Token（本例 99/7,028） |
+| B1 语义（修复前记录） | ✅ 无 `status` 字段；Nano Banana 异步任务 Token 为 0，结算后可能追加 `usage_correction`；GPT Image 同步可带上游 Token（本例 99/7,028） |
 | B3 语义 | ✅ 成功图片任务最终为 `status_change`，`status=settled` |
+
+> **当前口径（2026-11-15 修复后）**：异步任务没有 Token 用量时，B1 为
+> `usage_source=unavailable`，`input_tokens` / `output_tokens` /
+> `cache_read_tokens` / `cache_write_tokens` 均为 `null`，`split_known=false`，
+> `total_tokens` 省略；只拿到 `total_tokens` 时为 `usage_source=upstream`、
+> `total_tokens=N`、四个分项为 `null`、`split_known=false`。B1 只在用量或用量
+> 元数据变化时追加事件，结算不再追加同值 `usage_correction`。GPT Image 同步保持
+> `usage_source=upstream` 与上游实际 input/output Token。本节 2026-11-14 的数字
+> 与结果是修复前事实，未改写。
 
 A3 图片池 10 个模型（按返回顺序）：`Nano Banana 2.1 1K`、`Nano Banana 2.1 2K`、
 `Nano Banana 2.1 4K`、`Nano Banana Pro 1K`、`Nano Banana Pro 2K`、
@@ -274,9 +284,9 @@ A3 图片池 10 个模型（按返回顺序）：`Nano Banana 2.1 1K`、`Nano Ba
 `gpt-image-2.6-flare`、`gpt-image-2.6-sunburst`。协议与样例见
 [`09-image-api-examples.md`](./09-image-api-examples.md)。
 
-图片任务的 B1/B3 口径：B1 只有用量事件、没有 `status`。Nano Banana 异步任务 Token
-为 0，可能先 `usage` 后 `usage_correction`；GPT Image 同步可能带上游 Token
-（本例 99/7,028）。两者都不能用 B1 判断完成；B3 的 `status_change` /
+2026-11-14 修复前的图片任务 B1/B3 口径：B1 只有用量事件、没有 `status`。Nano Banana
+异步任务 Token 为 0，可能先 `usage` 后 `usage_correction`；GPT Image 同步可能带上游
+Token（本例 99/7,028）。两者都不能用 B1 判断完成；B3 的 `status_change` /
 `status=settled` 才是完成信号，`billing.total_amount` 为按张价格（`0.009` /
 `0.011` / `0.016` / `0.018` USD）。`image_count` 为 `n=1` 并用于按张计费，
 不在 B1 暴露。
@@ -284,6 +294,26 @@ A3 图片池 10 个模型（按返回顺序）：`Nano Banana 2.1 1K`、`Nano Ba
 **JWT 限制**：本轮使用本地临时铸造的测试 JWT 和临时 JWKS，**不是 Harness 正式
 签发的 JWT**。真实 Harness JWT 的图片 E2E 仍待执行，因此本节不构成正式 JWT
 验收结论。
+
+---
+
+## 十三、异步任务用量来源修复（2026-11-15）
+
+本轮修复异步任务在无 Token 用量时被误标为 `usage_source=upstream`、0 Token 的问题，
+并撤销结算时的 B1 强制收尾事件。
+
+| 检查 | 结果 |
+| --- | --- |
+| 任务路径单测 | ✅ Nano Banana / PAI 无 Token：B1 1 条 `unavailable`，四个 Token 字段 `null`，`split_known=false`；B3 仍为 pending → settled |
+| total-only 单测 | ✅ settle 传 `5000`：B1 第 2 条 `usage_correction`，`upstream` + `total_tokens=5000` + 分项 `null`；重复无 usage settle 不覆盖总量 |
+| B1/B3 独立性 | ✅ 无用量变化的 settle 不再追加 B1；B3 `status_change` 仍为完成信号 |
+| 部署 | ✅ `harness-api-20261115-de7fce8`，digest `sha256:b1764aa141089f738919839e908e9289643a6d74ed9d2f32234644fce0fe0e5f`，82 healthy |
+| Nano Banana 2.1 1K E2E | ✅ B1 1 条 `unavailable`/null；B3 `0.009` pending → settled |
+| GPT Image 2.6-flare E2E | ✅ B1 `upstream` 98/7,028；B3 `0.018` settled |
+| PAI 按次 E2E | ✅ B1 1 条 `unavailable`/null；B3 `0.52` pending → settled |
+| JWT 限制 | 本地临时 JWT/JWKS，**不是 Harness 正式签发**；真实 Harness JWT 复测待执行 |
+
+请求 ID 与完整金额核对见 `07-acceptance-evidence.md` 第十六节。
 
 ---
 

@@ -1,8 +1,8 @@
 # 图片生成调用样例（GPT Image 同步 / Nano Banana 异步）
 
-**版本**：V0.11
-**日期**：2026-11-14
-**对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261114-c29f1a6`
+**版本**：V0.11（2026-11-15 修订）
+**日期**：2026-11-14（2026-11-15 修订）
+**对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261115-de7fce8`
 **适用对象**：Harness 后端与图片生成联调
 
 本文只说明图片生成调用。图片池 `image` 当前有 10 个模型，按协议分为两类：
@@ -160,16 +160,23 @@ curl -sS "http://<gateway>/v1/tasks/task_xxxxxxxx/artifacts/image/content" \
 
 | 流 | 图片任务行为 | 用途 |
 | --- | --- | --- |
-| B1 用量 | **没有 `status` 字段**；Nano Banana 异步任务 Token 为 0，可能先出现 `usage`（0 Token），结算后出现 `usage_correction`（0 Token）；GPT Image 同步可能带上游 Token（实测 99/7,028） | 不要用于判断完成 |
+| B1 用量 | **没有 `status` 字段**；Nano Banana 异步任务没有 Token 用量时 `usage_source=unavailable`，`input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_write_tokens` 均为 `null`，`split_known=false`，`total_tokens` 省略；只拿到总量时为 `usage_source=upstream`、`total_tokens=N`、分项为 `null`、`split_known=false`。GPT Image 同步保持 `usage_source=upstream` 与上游实际 input/output Token（修复前实测 99/7,028） | 不要用于判断完成 |
 | B3 成本 | 有 `status`；成功任务最终为 `status_change`，`status=settled`，`billing.total_amount` 为按张价格 | 完成与成本以 B3 为准 |
 
 - B1 的 Token 数不代表费用；图片任务按张计费，费用只体现在 B3。
-- Nano Banana 异步任务的 B1 为 0 Token；GPT Image 同步即使带上游 Token，
-  也不改变按张计费。
+- Nano Banana 异步任务没有 Token 用量时为 `unavailable` / `null`，**不是 0 Token**；
+  结算不再追加同值 `usage_correction`。GPT Image 同步即使带上游 Token，也不改变
+  按张计费。
+- B1 只在用量或用量元数据变化时追加事件，完成与成本仍以 B3 为准。
 - `image_count` 为本次生成张数，当前只验证 `n=1`；它用于网关按张计费，
   不在 B1 中暴露。
 - Harness 应以 B3 的最新 `record_version` 作为图片任务的完成和成本依据，不要用
   B1 推断任务状态。
+
+> 以上为 2026-11-15 修复后的账本口径；82 实例已部署
+> `harness-api-20261115-de7fce8`，Nano Banana / PAI / GPT Image 三模型复测通过。
+> GPT Image 的 99/7,028 是修复前实测值，仅用于说明上游 Token 行为；修复后复测为
+> 98/7,028。
 
 ---
 
@@ -183,5 +190,5 @@ curl -sS "http://<gateway>/v1/tasks/task_xxxxxxxx/artifacts/image/content" \
    查 B3 或按 task id 查任务状态，再决定是否重新提交。
 4. 网关不暴露供应商 URL 和密钥；下载只能使用网关路径，并携带 Harness JWT。
 5. Nano Banana 的 `Range` 不生效；下载总是返回完整响应体。
-6. 本节样例基于 2026-11-14 本地临时 JWT 联调，**不是 Harness 正式签发的 JWT**；
-   真实 Harness JWT 的图片 E2E 仍待执行。
+6. 本节样例基于 2026-11-14 本地临时 JWT 联调，2026-11-15 修复复测同样使用本地临时
+   JWT，**不是 Harness 正式签发的 JWT**；真实 Harness JWT 的图片 E2E 仍待执行。

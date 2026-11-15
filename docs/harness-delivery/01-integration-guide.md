@@ -1,7 +1,7 @@
 # Harness 网关接口接入指南
 
-**版本**：V0.11
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261114-c29f1a6`，真实联调待执行
+**版本**：V0.11（2026-11-15 修订）
+**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261115-de7fce8`，真实联调待执行
 **面向**：Harness 后端开发与联调
 
 本文档给出网关侧全部对外接口的调用方法。字段语义细节见
@@ -260,8 +260,10 @@ HTTP/1.1 304 Not Modified
 
 GPT Image 使用 `model` / `prompt` / `n: 1` / `size`（1K 为 `1024x1024`），不要依赖
 `response_format=url`；Nano Banana 当前只验证了 `aspect_ratio: "1:1"` 与 `n: 1`。
-图片按张计费，B1 中图片任务没有状态字段且 token 数不代表费用（Nano Banana 异步
-任务为 0 token），不能用于判断完成；完成与成本以 B3 `status_change` → `settled`
+图片按张计费，B1 中图片任务没有状态字段且 Token 数不代表费用（Nano Banana 异步
+任务没有 Token 用量，B1 为 `usage_source=unavailable`、Token 字段为 `null`、
+`total_tokens` 省略，结算不追加同值事件；GPT Image 同步为 `usage_source=upstream`，
+携带上游实际 Token），不能用于判断完成；完成与成本以 B3 `status_change` → `settled`
 为准。完整样例见 [09-image-api-examples.md](./09-image-api-examples.md)。
 
 > 视频任务（`video` / `plan` 池）的请求字段差异、轮询和内容下载样例，见
@@ -670,3 +672,4 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
 | 2026-11-07 | RC48 候选 | 基于官方 `v1.0.0-rc.48` 对齐；保留五个 Harness 产品池与账本契约；补齐 task-plugin 协议路由的 Harness scope 检查。当前候选通过本地 Go、Web 与 SQLite/MySQL/PostgreSQL 检查；尚未部署或真实联调 |
 | 2026-11-08 | RC48 部署 | `harness-api` 合入 RC48 后构建 `harness-api-20261108-bb26602`，已部署 82 实例并通过容器健康检查与 `/api/status` 探测；真实 Harness JWT / 供应商 E2E 待执行 |
 | 2026-11-14 | V0.11 | `image` 池配置 10 个图片模型（4 个 GPT Image 同步 + 6 个 Nano Banana 异步），新增 `X-Route-Group: image` 与按张计价；A3 样例 `catalog_version` 更新为 `"7"`；新增 3.6 图片生成小节与 `09-image-api-examples.md`；图片 B1 仅 usage、B3 `settled` 为准。部署 `harness-api-20261114-c29f1a6` |
+| 2026-11-15 | V0.11（修订） | 异步任务无 Token 用量时 B1 改为 `usage_source=unavailable`、Token 字段 `null`、`split_known=false`；已有 `total_tokens` 保持 `upstream`；撤销 B1 结算收尾事件。部署 `harness-api-20261115-de7fce8`，三模型 E2E 复测通过 |

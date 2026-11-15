@@ -1,7 +1,7 @@
 # Harness 账本数据契约说明
 
-**版本**：V0.11（2026-11-14）
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交；已部署 82 实例 `harness-api-20261114-c29f1a6`）
+**版本**：V0.11（2026-11-15 修订）
+**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交；已部署 82 实例 `harness-api-20261115-de7fce8`）
 
 本文档说明 B1 用量事件与 B3 成本记录的字段语义、事件模型和金额口径。
 
@@ -186,13 +186,21 @@ Harness 应将其视为「网关计价结果」，而非「供应商已确认的
 
 ### 3.4 图片任务的 B1/B3 口径
 
-图片生成任务与文本任务共用 B1/B3，但完成判定不同：
+图片生成任务与文本任务共用 B1/B3，但完成判定与用量来源不同：
 
-- **B1 只有用量，没有 `status` 字段。** 图片任务不按 Token 计费；Nano Banana
-  异步任务的 B1 `usage` 中 Token 为 0，可能先出现一条 `usage`（0 Token），结算后
-  再出现一条 `usage_correction`（0 Token）。GPT Image 同步请求可能携带上游返回的
-  Token 用量（实测 99 input / 7,028 output），但同样不能据此判断完成。
-  **不要用 B1 判断任务是否完成。**
+- **B1 只有用量，没有 `status` 字段。** 图片任务不按 Token 计费，B1 也不能用于
+  判断完成：
+  - **GPT Image 同步请求**：保持 `usage_source=upstream`，携带上游实际
+    `input_tokens` / `output_tokens`（修复前实测 99 / 7,028，修复后复测 98 / 7,028；
+    该行为不受本次修复影响）。
+  - **Nano Banana 异步任务**：上游不返回 Token 用量，B1 为
+    `usage_source=unavailable`，`input_tokens` / `output_tokens` /
+    `cache_read_tokens` / `cache_write_tokens` 均为 `null`，`split_known=false`，
+    `total_tokens` 省略（未测量）。`null` 表示未测量，**不是 0 Token**。
+  - **异步任务只拿到 `total_tokens`**：`usage_source=upstream`，`total_tokens=N`，
+    四个分项 Token 为 `null`，`split_known=false`。
+  - B1 只在用量或用量元数据（`usage_source`、`split_known`、`total_tokens`
+    是否已知等）变化时追加事件；结算不再追加同值 `usage_correction`。
 - **B3 才带 `status`。** 成功的图片任务最终会产生 `status_change`，`status` 为
   `settled`，`billing.total_amount` 为按张价格（如 Nano Banana 2.1 1K 为
   `0.009`，GPT Image 2.6 为 `0.018`）。
@@ -208,12 +216,12 @@ Harness 应将其视为「网关计价结果」，而非「供应商已确认的
 | 场景 | event_type |
 | --- | --- |
 | 首次用量记录 | `usage` |
-| 已有记录，用量被更正 | `usage_correction` |
-| 零 token 任务结算收尾（Nano Banana 等） | `usage_correction` |
+| 已有记录，用量或用量元数据被更正 | `usage_correction` |
 
-**判定逻辑**：有前序事件即为 `usage_correction`。通常只有用量实际变化时才追加；
-零 token 的异步任务在结算为 `settled` 时会追加一条同值的 `usage_correction` 作为
-B1 收尾。B1 没有 `status` 字段，完成与成本仍以 B3 为准。
+**判定逻辑**：有前序事件即为 `usage_correction`，且只在用量或用量元数据
+（`usage_source`、`split_known`、`total_tokens` 是否已知等）实际变化时追加。
+结算为 `settled` 时若用量及用量元数据均未变，不再追加同值 `usage_correction`。
+B1 没有 `status` 字段，完成与成本仍以 B3 为准。
 
 ### 4.2 B3 成本事件类型
 
@@ -291,7 +299,7 @@ Harness 更新自己的账本时应：
 
 | 项 | 本期实现 |
 | --- | --- |
-| `usage_unit` | **只产生 `token`**；Nano Banana 异步图片任务 Token 为 0，GPT Image 同步可能带上游 Token |
+| `usage_unit` | **只产生 `token`**；Nano Banana 异步图片任务无 Token 用量时为 `usage_source=unavailable`、Token 字段为 `null`；GPT Image 同步保持上游实际 Token |
 | `currency` | **固定 `USD`** |
 | 计费对象 | 文本按 Token；图片按张（`image_count`，当前只验证 `n=1`）；`plan` 池按次计费渠道尚未接入 |
 | 独立工具计费 | 不做 |
@@ -303,8 +311,11 @@ Harness 更新自己的账本时应：
 
 第四轮文档列出 `token` / `image` / `audio_second` / `character` / `request` / `other`
 是为未来定义可选值。**本期实际只会产生 `token`**，其他值不会出现。Nano Banana
-异步图片任务同样产生 `token` 单位的用量事件（Token 为 0）；GPT Image 同步请求
-可能带上游 Token。按张计费只体现在 B3 金额，不引入 `image` 单位。
+异步图片任务同样产生 `token` 单位的用量事件，但没有 Token 用量时
+`usage_source=unavailable`、四个基础 Token 字段为 `null`、`total_tokens` 省略；
+只拿到 `total_tokens` 时按上游总量输出（`usage_source=upstream`）。GPT Image
+同步请求保持 `usage_source=upstream` 与上游实际 input/output Token。按张计费只
+体现在 B3 金额，不引入 `image` 单位。
 
 ### 6.2 关于 status = failed
 
@@ -322,4 +333,5 @@ Harness 更新自己的账本时应：
 | 2026-10-29 | V0.9.1 | 明确 `run_id` 必填且 ≤64、缺失时调用被拒绝；说明 B3 不返回 `run_id` 但账本仍存储 |
 | 2026-11-05 | V0.10 | 金额口径改为 `total_amount = base_amount × group_ratio`，取消供应商税率；`tax_rate_percent` 恒 0 并标记废弃；事件类型判定去掉税率项；补充 `group_ratio` 由网关按资源池决定 |
 | 2026-11-06 | V0.10（修订） | 更正 `group_ratio` 来源：来自采购计价分组 `pricing_group_order`，不由资源池决定；明确计价分组优先级是采购资格/倍率分组，不是渠道路由顺序；当前单 `default` 分组、倍率 1 |
-| 2026-11-14 | V0.11 | 新增「图片任务的 B1/B3 口径」：B1 无 `status`；Nano Banana 异步任务 Token 为 0，GPT Image 同步可携带 Token；完成与成本以 B3 `status_change`/`settled` 为准；`image_count` 按张计费且不在 B1 暴露；更新本期范围中的图像计费状态 |
+| 2026-11-14 | V0.11 | 新增「图片任务的 B1/B3 口径」：B1 无 `status`；Nano Banana 异步任务 Token 为 0（修复前口径），GPT Image 同步可携带 Token；完成与成本以 B3 `status_change`/`settled` 为准；`image_count` 按张计费且不在 B1 暴露；更新本期范围中的图像计费状态 |
+| 2026-11-15 | V0.11（修订） | 异步任务用量来源修复：无 Token 用量时 B1 为 `usage_source=unavailable`，`input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_write_tokens` 均为 `null`，`split_known=false`，`total_tokens` 省略；仅有 `total_tokens` 时为 `usage_source=upstream`；B1 只在用量或用量元数据变化时追加事件，结算不再追加同值 `usage_correction`；B3 金额口径不变。已部署 `harness-api-20261115-de7fce8`，E2E 复测通过（Banana/PAI `unavailable`，GPT Image `upstream`，B3 金额不变） |
