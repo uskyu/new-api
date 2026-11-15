@@ -1068,14 +1068,7 @@ func harnessUsageEventIfChanged(settlement *model.HarnessSettlement, money harne
 	version := 1
 	var supersedes *string
 	if previous != nil {
-		usageChanged := harnessUsageDiffers(previous, settlement, correlation)
-		// A per-image task reports no token usage, so its only usage fact never
-		// moves. Without a closing event the B1 record would stay pending forever
-		// even after the task settles. Append one final usage event with the same
-		// zero token values and the settled status; B1 has no status_change type,
-		// so the existing correction type carries the final state.
-		statusSettled := previous.Status != settlement.Status && settlement.Status == model.HarnessSettlementStatusSettled
-		if !usageChanged && !statusSettled {
+		if !harnessUsageDiffers(previous, settlement, correlation) {
 			return nil
 		}
 		version = previous.RecordVersion + 1
@@ -1398,7 +1391,10 @@ func recordRelayHarnessSettlement(ctx *gin.Context, relayInfo *relaycommon.Relay
 // usage optionally carries the total the task actually consumed. A task's
 // completion reports at most a total, never a prompt/completion split, so the
 // caller passes what it has and the row records the split as unknown rather than
-// inventing two halves from one number.
+// inventing two halves from one number. A settle without usage marks the split
+// unknown as well: the gateway observed nothing at all, and leaving the zero
+// value would publish an unmeasured task as a measured zero. A total an earlier
+// settle already recorded is never overwritten by a usage-less settle.
 func recordTaskHarnessSettlement(task *model.Task, status string, quota int, usage ...int) {
 	if task == nil || task.TaskID == "" {
 		return
@@ -1434,6 +1430,10 @@ func recordTaskHarnessSettlement(task *model.Task, status string, quota int, usa
 	if len(usage) > 0 {
 		settlement.TotalTokens = usage[0]
 		settlement.TotalTokensKnown = true
+		settlement.SplitUnknown = true
+	} else if !settlement.TotalTokensKnown {
+		// 异步任务最多提供总量；没有总量时拆分同样未观测。保持零值会把
+		// "未测量"发布成"已测量零"。
 		settlement.SplitUnknown = true
 	}
 	// The correlation comes from two places, and only one of them survives a

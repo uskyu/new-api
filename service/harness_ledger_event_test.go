@@ -82,65 +82,179 @@ func TestRecordHarnessSettlementAppendsBothStreams(t *testing.T) {
 	assert.Equal(t, "token", costEvents[0].BillingBasis)
 }
 
-// TestRecordHarnessSettlementClosesZeroUsageTask covers a task whose billable
-// fact is not a token: it reports no token usage at all, so the usage stream
-// would otherwise stay pending after the task settles. The settle must append
-// one final usage event with the same zero counts and the settled status, and a
-// repeated settle must not append another.
-func TestRecordHarnessSettlementClosesZeroUsageTask(t *testing.T) {
+// ledgerUsageTestTask builds the task shape the polling settle path hands to
+// recordTaskHarnessSettlement: the submit path stored the platform correlation
+// and a frozen procurement context on private data, and the settlement row is
+// created from those fields on the first settle.
+func ledgerUsageTestTask(taskID, requestID, harnessRequestID, harnessRunID, modelName string, quota int) *model.Task {
+	return &model.Task{
+		TaskID:     taskID,
+		UserId:     9,
+		ChannelId:  0,
+		Quota:      quota,
+		SubmitTime: 1730000000,
+		Properties: model.Properties{OriginModelName: modelName},
+		PrivateData: model.TaskPrivateData{
+			TokenId: 7,
+			Execution: &model.TaskExecutionSnapshot{
+				RequestID:        requestID,
+				HarnessRequestID: harnessRequestID,
+				HarnessRunID:     harnessRunID,
+			},
+			BillingContext: &model.TaskBillingContext{
+				OriginModelName: modelName,
+				Procurement: &model.TaskProcurementContext{
+					Version:               1,
+					PricingGroup:          "default",
+					ProcurementGroupRatio: 1,
+					QuotaPerUnit:          500_000,
+					PriceVersion:          "test",
+				},
+			},
+		},
+	}
+}
+
+// assertUnavailableTaskUsage pins the "not measured" shape. Both the stored
+// event and the B1 wire projection must say unavailable with no token figures:
+// a task without tokens is never a measured zero and never has a known split.
+func assertUnavailableTaskUsage(t *testing.T, event model.HarnessLedgerEvent) {
+	t.Helper()
+	assert.Equal(t, harnessUsageSourceUnavailable, event.UsageSource)
+	assert.True(t, event.SplitUnknown)
+	assert.False(t, event.TotalTokensKnown)
+	wire := usageEventFromLedgerEvent(event)
+	assert.False(t, wire.Usage.SplitKnown)
+	assert.Nil(t, wire.Usage.TotalTokens)
+	assert.Nil(t, wire.Usage.InputTokens)
+	assert.Nil(t, wire.Usage.OutputTokens)
+	assert.Nil(t, wire.Usage.CacheReadTokens)
+	assert.Nil(t, wire.Usage.CacheWriteTokens)
+}
+
+// TestRecordTaskHarnessSettlementUsageSource covers the async task path, whose
+// only usage fact is the total the provider reported at completion, and often
+// not even that.
+//
+// A task with no token usage must be published as unavailable, not as a measured
+// zero: the usage stream keeps the pending event and the settle appends no
+// forced closing event, because a status transition that measured nothing new is
+// a cost-side fact. A task that later reports a total appends exactly one usage
+// correction, and a usage-less re-settle neither invents a new usage event nor
+// clears the total it already recorded.
+func TestRecordTaskHarnessSettlementUsageSource(t *testing.T) {
 	ledgerTestDB(t)
 
 	originalQuotaPerUnit := common.QuotaPerUnit
 	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
 	common.QuotaPerUnit = 500_000
 
-	correlation := harnessSettlementCorrelation{
-		HarnessRequestId: "hrq_zero_usage_task",
-		HarnessRunId:     "run_zero_usage_task",
-		UsageUnit:        harnessUsageUnitToken,
-		UsageSource:      harnessUsageSourceUpstream,
+	// assertZeroUsageTask runs the shared no-token flow: pending, settle,
+	// re-settle. Each call uses its own gateway request id, so the event counts
+	// asserted here are independent per scenario.
+	assertZeroUsageTask := func(t *testing.T, task *model.Task) {
+		t.Helper()
+		gatewayRequestID := task.PrivateData.Execution.RequestID
+
+		recordTaskHarnessSettlement(task, model.HarnessSettlementStatusPending, task.Quota)
+
+		usages := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamUsage)
+		require.Len(t, usages, 1, "the pending submit is the task's only usage fact")
+		assert.Equal(t, model.HarnessSettlementStatusPending, usages[0].Status)
+		assert.Equal(t, model.HarnessLedgerEventTypeUsage, usages[0].EventType)
+		assertUnavailableTaskUsage(t, usages[0])
+
+		costs := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+		require.Len(t, costs, 1)
+		assert.Equal(t, model.HarnessSettlementStatusPending, costs[0].Status)
+		assert.Equal(t, model.HarnessLedgerEventTypeCost, costs[0].EventType)
+
+		recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota)
+
+		usages = harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamUsage)
+		require.Len(t, usages, 1, "a settle without usage says nothing new about consumption")
+		assertUnavailableTaskUsage(t, usages[0])
+
+		costs = harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+		require.Len(t, costs, 2, "the status transition is a cost-side fact")
+		assert.Equal(t, model.HarnessLedgerEventTypeStatusChange, costs[1].EventType)
+		assert.Equal(t, model.HarnessSettlementStatusSettled, costs[1].Status)
+		assert.Equal(t, costs[0].BaseAmount, costs[1].BaseAmount, "settling does not reprice the task")
+		assert.Equal(t, costs[0].TotalAmount, costs[1].TotalAmount, "settling does not reprice the task")
+
+		recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota)
+		assert.Len(t, harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamUsage), 1,
+			"a repeated settle appends no usage event")
+		assert.Len(t, harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost), 2,
+			"a repeated settle appends no cost event")
 	}
-	money := harnessSettlementMoneyForQuota(nil, 4500, 0, "Nano Banana 2.1 1K")
-	pending := &model.HarnessSettlement{
-		RequestId: "gw-zero-usage-task",
-		Status:    model.HarnessSettlementStatusPending,
-		ModelName: "Nano Banana 2.1 1K",
-	}
-	recordHarnessSettlement(pending, money, correlation)
 
-	settled := &model.HarnessSettlement{
-		RequestId: "gw-zero-usage-task",
-		Status:    model.HarnessSettlementStatusSettled,
-		ModelName: "Nano Banana 2.1 1K",
-	}
-	recordHarnessSettlement(settled, money, correlation)
+	t.Run("per-image task without tokens", func(t *testing.T) {
+		task := ledgerUsageTestTask("task-banana-no-usage", "gw-banana-no-usage",
+			"hrq_banana_no_usage", "run_banana_no_usage", "Nano Banana 2.1 1K", 4500)
+		assertZeroUsageTask(t, task)
+	})
 
-	usages := harnessLedgerStreamCount(t, "gw-zero-usage-task", model.HarnessLedgerStreamUsage)
-	require.Len(t, usages, 2, "the settled zero-usage task must close its usage stream")
-	assert.Equal(t, model.HarnessSettlementStatusPending, usages[0].Status)
-	assert.Equal(t, model.HarnessLedgerEventTypeUsage, usages[0].EventType)
-	assert.Equal(t, model.HarnessSettlementStatusSettled, usages[1].Status)
-	assert.Equal(t, model.HarnessLedgerEventTypeUsageCorrection, usages[1].EventType)
-	assert.Equal(t, 2, usages[1].RecordVersion)
-	require.NotNil(t, usages[1].SupersedesEventId)
-	assert.Equal(t, usages[0].EventId, *usages[1].SupersedesEventId)
-	assert.Zero(t, usages[1].PromptTokens)
-	assert.Zero(t, usages[1].CompletionTokens)
-	assert.Zero(t, usages[1].TotalTokens)
-	assert.False(t, usages[1].TotalTokensKnown)
+	t.Run("PAI per-call task without tokens", func(t *testing.T) {
+		task := ledgerUsageTestTask("task-pai-no-usage", "gw-pai-no-usage",
+			"hrq_pai_no_usage", "run_pai_no_usage", "seedance2-fast-720p-once-1", 4500)
+		assertZeroUsageTask(t, task)
+	})
 
-	costs := harnessLedgerStreamCount(t, "gw-zero-usage-task", model.HarnessLedgerStreamCost)
-	require.Len(t, costs, 2)
-	assert.Equal(t, model.HarnessLedgerEventTypeCost, costs[0].EventType)
-	assert.Equal(t, model.HarnessLedgerEventTypeStatusChange, costs[1].EventType)
-	assert.Equal(t, model.HarnessSettlementStatusSettled, costs[1].Status)
-	assert.Equal(t, costs[0].BaseAmount, costs[1].BaseAmount)
-	assert.Equal(t, costs[0].TotalAmount, costs[1].TotalAmount)
+	t.Run("async task that later reports a total", func(t *testing.T) {
+		const gatewayRequestID = "gw-total-usage"
+		task := ledgerUsageTestTask("task-total-usage", gatewayRequestID,
+			"hrq_total_usage", "run_total_usage", "async-total-model", 5000)
 
-	// A repeated settle at the same status must not append another event.
-	recordHarnessSettlement(settled, money, correlation)
-	assert.Len(t, harnessLedgerStreamCount(t, "gw-zero-usage-task", model.HarnessLedgerStreamUsage), 2)
-	assert.Len(t, harnessLedgerStreamCount(t, "gw-zero-usage-task", model.HarnessLedgerStreamCost), 2)
+		recordTaskHarnessSettlement(task, model.HarnessSettlementStatusPending, task.Quota)
+		usages := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamUsage)
+		require.Len(t, usages, 1)
+		assertUnavailableTaskUsage(t, usages[0])
+		costs := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+		require.Len(t, costs, 1)
+
+		recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota, 5000)
+
+		usages = harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamUsage)
+		require.Len(t, usages, 2, "learning the total is exactly one usage correction")
+		correction := usages[1]
+		assert.Equal(t, model.HarnessLedgerEventTypeUsageCorrection, correction.EventType)
+		assert.Equal(t, 2, correction.RecordVersion)
+		require.NotNil(t, correction.SupersedesEventId)
+		assert.Equal(t, usages[0].EventId, *correction.SupersedesEventId)
+		assert.Equal(t, harnessUsageSourceUpstream, correction.UsageSource)
+		assert.True(t, correction.TotalTokensKnown)
+		assert.Equal(t, 5000, correction.TotalTokens)
+		assert.True(t, correction.SplitUnknown, "a total still says nothing about the input/output split")
+		wire := usageEventFromLedgerEvent(correction)
+		assert.False(t, wire.Usage.SplitKnown)
+		require.NotNil(t, wire.Usage.TotalTokens)
+		assert.Equal(t, 5000, *wire.Usage.TotalTokens)
+		assert.Nil(t, wire.Usage.InputTokens)
+		assert.Nil(t, wire.Usage.OutputTokens)
+		assert.Nil(t, wire.Usage.CacheReadTokens)
+		assert.Nil(t, wire.Usage.CacheWriteTokens)
+
+		costs = harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+		require.Len(t, costs, 2)
+		assert.Equal(t, model.HarnessLedgerEventTypeStatusChange, costs[1].EventType)
+		assert.Equal(t, model.HarnessSettlementStatusSettled, costs[1].Status)
+		assert.Equal(t, costs[0].BaseAmount, costs[1].BaseAmount, "settling does not reprice the task")
+		assert.Equal(t, costs[0].TotalAmount, costs[1].TotalAmount, "settling does not reprice the task")
+
+		// A usage-less re-settle must neither clear the learned total nor append
+		// another event on either stream.
+		recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota)
+
+		usages = harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamUsage)
+		require.Len(t, usages, 2, "a usage-less re-settle appends no usage event")
+		assert.True(t, usages[1].TotalTokensKnown)
+		assert.Equal(t, 5000, usages[1].TotalTokens, "the learned total survives a usage-less settle")
+
+		costs = harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+		require.Len(t, costs, 2, "a usage-less re-settle appends no cost event")
+		assert.Equal(t, costs[0].BaseAmount, costs[1].BaseAmount)
+	})
 }
 
 // TestRecordHarnessSettlementRefundSupersedes covers the correction chain: a
