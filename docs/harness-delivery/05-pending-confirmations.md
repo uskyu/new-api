@@ -231,21 +231,20 @@ total_amount = base_amount × group_ratio
 | `model` 字段 | 必须填 A3 `models[]` 中的真实模型 id，不是池 id。路由由网关决定，Harness 不选择档位 |
 | 资源池 | 五个产品线：`chat`（默认，text）/ `video`（video，无池级计费）/ `image`（image，10 个图片模型，无池级计费）/ `audio`（audio，占位）/ `plan`（video，`per_call`） |
 | 路由顺序 | 资源池的渠道顺序是唯一路由顺序。`global_channel_order` / 全渠道优先级全局池已移除，不存在 `global` 池；`token_group_access` / 令牌授权已移除，Harness 不需要按池授权 |
-| `pricing_group_order` | **不是路由顺序**。仅决定哪些渠道+模型能力具备采购分组资格，并给出 `group_ratio`；当前配置为单分组 `["default"]`，倍率 `1` |
-| `image` 池 | 已配置 4 个 GPT Image（同步 `POST /v1/images/generations`，0.018 USD/张）与 6 个 Nano Banana（异步 `POST /v1/videos`，2.1 1K/2K 0.009、2.1 4K 0.011、Pro 0.016 USD/张）；调用传 `X-Route-Group: image` |
+| `pricing_group_order` | **不是路由顺序**。仅决定哪些渠道+模型能力具备采购分组资格，并给出 `group_ratio`；当前按 20 个上游分组配置，具体分组和倍率由渠道+模型决定 |
+| `image` 池 | 已配置 4 个 GPT Image（同步 `POST /v1/images/generations`，0.018 USD/张）与 6 个 Nano Banana（Gemini 同步 `POST /v1beta/models/{URL编码模型}:generateContent`，2.1 1K/2K 0.009、2.1 4K 0.011、Pro 0.016 USD/张）；调用传 `X-Route-Group: image` |
 | `audio` 池 | 渠道尚未接入，`models: []` 属预期，**当前不可调用** |
 
-> **图片任务账本语义**：B1 只有 usage、没有 `status` 字段；Nano Banana 异步任务
-> 没有 Token 用量，B1 为 `usage_source=unavailable`，`input_tokens` /
-> `output_tokens` / `cache_read_tokens` / `cache_write_tokens` 均为 `null`，
-> `split_known=false`，`total_tokens` 省略；B1 只在用量或用量元数据变化时追加
-> 事件，结算不再追加同值 `usage_correction`；只有拿到 `total_tokens` 时才以
-> `usage_source=upstream` 输出总量（四个分项为 `null`、`split_known=false`）。
+> **图片任务账本语义**：B1 只有 usage、没有 `status` 字段；Nano Banana 同步请求
+> 走 Gemini 路径，B1 为 `usage_source=estimated`，按请求估算 prompt Token
+> （实测 `total_tokens=10`、`prompt_tokens=10`、`completion_tokens=0`），图片本身
+> 不是 Token 用量；无 Token 用量的异步视频任务仍为 `usage_source=unavailable`、
+> 四个基础 Token 字段为 `null`、`split_known=false`、`total_tokens` 省略。
 > GPT Image 同步保持 `usage_source=upstream` 与上游实际 input/output Token。
 > 图片任务按张计费，B1 的 Token 数不代表费用，不能用于判断完成；B3 带
 > `status`，成功图片任务以 `status_change` → `status: settled` 及
-> `billing.total_amount`（GPT Image 0.018、Nano Banana 0.009 等）为准。样例见
-> [09-image-api-examples.md](./09-image-api-examples.md)。
+> `billing.total_amount`（GPT Image 0.018、Nano Banana 0.009/0.011/0.016）为准。
+> 样例见 [09-image-api-examples.md](./09-image-api-examples.md)。
 
 ---
 

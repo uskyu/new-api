@@ -1,8 +1,8 @@
 # Harness 网关接口交付包
 
-**版本**：V0.11（2026-11-15 修订）
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261115-de7fce8`
-**交付日期**：2026-10-25（2026-10-29、2026-11-05、2026-11-06、2026-11-07、2026-11-14、2026-11-15 更新）
+**版本**：V0.12（2026-11-17 修订）
+**对应网关版本**：`harness-api` 分支；已部署 82 实例 `harness-api-20261116-df87870`
+**交付日期**：2026-10-25（2026-10-29、2026-11-05、2026-11-06、2026-11-07、2026-11-14、2026-11-15、2026-11-17 更新）
 
 ---
 
@@ -13,7 +13,8 @@
 | 01 | [接入指南](./01-integration-guide.md) | 接口清单、路径、Scope、请求/响应样例、分页、错误码、调用示例 | 第 1 篇 |
 | A3 | [模型列表结构更新](./A3-model-catalog-update.md) | **最新模型列表**：取消经济/企业档、四个展示分区、JSON 示例与模型调用方式 | **模型列表对接优先看** |
 | 08 | [视频调用样例](./08-video-api-examples.md) | 视频池 / plan 池请求差异、真实跑通模型与轮询、内容下载示例 | **视频联调前读** |
-| 09 | [图片调用样例](./09-image-api-examples.md) | 图片生成调用样例（GPT Image 同步 / Nano Banana 异步） | **图片联调前读** |
+| 09 | [图片调用样例](./09-image-api-examples.md) | 图片生成调用样例（GPT Image 同步 / Nano Banana Gemini 同步） | **图片联调前读** |
+| 10 | [全模型验收报告](./10-full-model-acceptance-20261117.md) | 全模型实测结果、接口样例、上游阻塞清单 | **全模型联调优先看** |
 | 02 | [鉴权配置](./02-auth-setup.md) | JWKS/iss/aud/sub 配置、JWT 校验规则、需对方提供的信息 | 第 2 篇 |
 | 03 | [数据契约](./03-data-contract.md) | B1/B3 字段语义、事件类型、版本链、金额口径 | 第 3 篇 |
 | 04 | [联调验收清单](./04-acceptance-checklist.md) | 逐项测试用例、预期响应、通过标准 | 第 4 篇 |
@@ -79,6 +80,17 @@
 | 本地临时 JWT 复测：Banana/PAI B1 `unavailable`，GPT Image `upstream` 98/7,028；B3 0.009/0.018/0.52 `settled` | ✅ 2026-11-15 |
 | 真实 Harness JWT 四模型复测：GPT Image / Nano Banana / PAI 按次 / PAI 按秒，B1/B3 4/4 命中；PNG/JPEG 完整下载与解码通过；正式 JWKS 下临时 JWT 401、chat-only 403 | ✅ 2026-11-15 |
 
+### V0.12 变更（2026-11-17，已构建并部署）
+
+| 项 | 状态 |
+| --- | --- |
+| Nano Banana 改为 Gemini 同步 `generateContent`；旧异步 `/v1/videos` 合同停用 | ✅ 已部署 |
+| Nano Banana 6 款改为固定 `ModelPrice`：2.1 1K/2K 0.009、2.1 4K 0.011、Pro 1K/2K/4K 0.016 USD/张 | ✅ 已部署 |
+| `supplyvideo` 插件 1.4.0：补 18 个视频模型 + 4 个 Seedance 变体；PAI 参考素材、HappyHorse `video-edit`、Kling 参考视频 | ✅ 已部署 |
+| 全模型验收：语言 35/38、图片 10/10、视频 55/61；6 个视频模型为上游阻塞（MiniMax 4、`wan3-1080p-once`、`seedance2-720p-second-1`） | ✅ 2026-11-17 |
+| 部署 `harness-api-20261116-df87870`（revision `df8787085`），容器 healthy | ✅ 2026-11-17 |
+| 全模型验收报告 [10-full-model-acceptance-20261117.md](./10-full-model-acceptance-20261117.md) | ✅ |
+
 ### V0.10 变更（2026-11-05 / 11-06，已构建并部署）
 
 | 项 | 状态 |
@@ -136,13 +148,11 @@
 复测，见 `07-acceptance-evidence.md` 第十六节。
 
 **Docker 镜像**：82 实例当前运行版本为
-`harness-api-20261115-de7fce8`（digest
-`sha256:b1764aa141089f738919839e908e9289643a6d74ed9d2f32234644fce0fe0e5f`），
-并通过容器健康检查与 `/api/status` 探测（`/api/status` 返回
-`harness-api-20261115-de7fce8`）。该构建包含 V0.10 的池分类与税额变更、V0.11 的
-图片池及 2026-11-15 的异步任务用量来源修复；图片/视频 B1/B3 已用本地临时 JWT 复测，
-真实 Harness JWT 已于 2026-11-15 复验（四模型）。数据库部署目标为 MySQL，
-PostgreSQL 不在生产范围。
+`harness-api-20261116-df87870`（revision `df8787085`），并通过容器健康检查与
+`/api/status` 探测。该构建包含 V0.12 的 Nano Banana Gemini 同步、`supplyvideo`
+1.4.0 全模型声明、PAI 参考素材、HappyHorse `video-edit` 与 Kling 参考视频修复；
+全模型验收见 [10-full-model-acceptance-20261117.md](./10-full-model-acceptance-20261117.md)。
+数据库部署目标为 MySQL，PostgreSQL 不在生产范围。
 
 ### RC48 合入与部署（2026-11-07 / 11-08）
 

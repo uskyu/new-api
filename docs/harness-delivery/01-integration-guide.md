@@ -1,7 +1,7 @@
 # Harness 网关接口接入指南
 
-**版本**：V0.11（2026-11-15 修订）
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261115-de7fce8`，真实联调待执行
+**版本**：V0.12（2026-11-17 修订）
+**对应网关版本**：`harness-api` 分支；已部署 82 实例 `harness-api-20261116-df87870`，全模型验收见 `10-full-model-acceptance-20261117.md`
 **面向**：Harness 后端开发与联调
 
 本文档给出网关侧全部对外接口的调用方法。字段语义细节见
@@ -96,8 +96,8 @@ HTTP/1.1 400 Bad Request
 | 池 id | 显示名 | `kind` | 说明 |
 | --- | --- | --- | --- |
 | `chat` | 通用对话 | `text` | **默认池**。不传 `X-Route-Group` 时的落点；A1/A2/A4/A9 的常规调用都走这里 |
-| `video` | 视频 | `video` | 视频任务池。当前配置 8 个 PAI 按次模型；**池级不标注 `billing`** |
-| `image` | 图片生成 | `image` | 图片生成池。当前配置 10 个图片模型（4 个 GPT Image 同步 + 6 个 Nano Banana 异步），按张计价，**池级不标注 `billing`**；可调用 |
+| `video` | 视频 | `video` | 视频任务池。当前配置按秒视频渠道（Seedance / Wan / TA-other / MiniMax / Muse）；**池级不标注 `billing`** |
+| `image` | 图片生成 | `image` | 图片生成池。当前配置 10 个图片模型（4 个 GPT Image 同步 + 6 个 Nano Banana Gemini 同步），按张计价，**池级不标注 `billing`**；可调用 |
 | `audio` | 语音 | `audio` | 语音/TTS 预留池，当前仅占位；渠道尚未接入，**本期不可调用** |
 | `plan` | 畅用计划 | `video` | 专用于畅用计划；池级 `billing: per_call`（按次计费） |
 
@@ -256,15 +256,16 @@ HTTP/1.1 304 Not Modified
 | 模型 | 提交 | 完成方式 | 价格（每张，`n=1`） |
 | --- | --- | --- | --- |
 | GPT Image（`gpt-image-2.5-*` / `gpt-image-2.6-*`，4 个） | 同步 `POST /v1/images/generations` | 响应 `data[0]` 直接返回图片，可能是 `b64_json` | 0.018 USD |
-| Nano Banana（`Nano Banana 2.1 *` / `Nano Banana Pro *`，6 个） | 异步 `POST /v1/videos` | 轮询 `GET /v1/videos/{task_id}`，完成后下载 `/v1/tasks/{task_id}/artifacts/image/content` | 2.1 1K/2K 0.009、2.1 4K 0.011、Pro 0.016 USD |
+| Nano Banana（`Nano Banana 2.1 *` / `Nano Banana Pro *`，6 个） | Gemini 同步 `POST /v1beta/models/{URL编码模型}:generateContent` | 响应 `candidates[].content.parts[].inlineData.data` 直接返回 Base64 图片；无轮询 | 2.1 1K/2K 0.009、2.1 4K 0.011、Pro 0.016 USD |
 
 GPT Image 使用 `model` / `prompt` / `n: 1` / `size`（1K 为 `1024x1024`），不要依赖
-`response_format=url`；Nano Banana 当前只验证了 `aspect_ratio: "1:1"` 与 `n: 1`。
-图片按张计费，B1 中图片任务没有状态字段且 Token 数不代表费用（Nano Banana 异步
-任务没有 Token 用量，B1 为 `usage_source=unavailable`、Token 字段为 `null`、
-`total_tokens` 省略，结算不追加同值事件；GPT Image 同步为 `usage_source=upstream`，
-携带上游实际 Token），不能用于判断完成；完成与成本以 B3 `status_change` → `settled`
-为准。完整样例见 [09-image-api-examples.md](./09-image-api-examples.md)。
+`response_format=url`；Nano Banana 使用 `contents` / `generationConfig.imageConfig.imageSize`
+（1K/2K/4K），当前只验证 `aspectRatio: "1:1"` 与 `candidateCount: 1`。
+图片按张计费，B1 中图片任务没有状态字段且 Token 数不代表费用（Nano Banana 同步
+请求为 `usage_source=estimated`，按请求估算 prompt Token；GPT Image 同步为
+`usage_source=upstream`，携带上游实际 Token），不能用于判断完成；完成与成本以
+B3 `status_change` → `settled` 为准。完整样例见
+[09-image-api-examples.md](./09-image-api-examples.md)。
 
 > 视频任务（`video` / `plan` 池）的请求字段差异、轮询和内容下载样例，见
 > [08-video-api-examples.md](./08-video-api-examples.md)。
@@ -673,3 +674,4 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
 | 2026-11-08 | RC48 部署 | `harness-api` 合入 RC48 后构建 `harness-api-20261108-bb26602`，已部署 82 实例并通过容器健康检查与 `/api/status` 探测；真实 Harness JWT / 供应商 E2E 待执行 |
 | 2026-11-14 | V0.11 | `image` 池配置 10 个图片模型（4 个 GPT Image 同步 + 6 个 Nano Banana 异步），新增 `X-Route-Group: image` 与按张计价；A3 样例 `catalog_version` 更新为 `"7"`；新增 3.6 图片生成小节与 `09-image-api-examples.md`；图片 B1 仅 usage、B3 `settled` 为准。部署 `harness-api-20261114-c29f1a6` |
 | 2026-11-15 | V0.11（修订） | 异步任务无 Token 用量时 B1 改为 `usage_source=unavailable`、Token 字段 `null`、`split_known=false`；已有 `total_tokens` 保持 `upstream`；撤销 B1 结算收尾事件。部署 `harness-api-20261115-de7fce8`，三模型 E2E 复测通过 |
+| 2026-11-17 | V0.12 | Nano Banana 改为 Gemini 同步 `generateContent`（无轮询）；B1 为 `estimated` prompt Token，B3 固定按张价；`supplyvideo` 1.4.0 补齐新视频模型；全模型验收 语言 35/38、图片 10/10、视频 55/61。部署 `harness-api-20261116-df87870` |

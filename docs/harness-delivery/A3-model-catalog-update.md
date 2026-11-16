@@ -90,7 +90,7 @@ Authorization: Bearer <HARNESS_JWT>
 | 展示分区 | 使用的 `data[].id` | 识别规则 | 调用头 |
 | --- | --- | --- | --- |
 | 文字模型 | `chat` | `kind=text` | 不传 `X-Route-Group` |
-| 图片生成模型 | `image` | `kind=image` | 当前 10 个模型；传 `X-Route-Group: image`。GPT Image 4 个走同步 `POST /v1/images/generations`，Nano Banana 6 个走异步 `POST /v1/videos` |
+| 图片生成模型 | `image` | `kind=image` | 当前 10 个模型；传 `X-Route-Group: image`。GPT Image 4 个走同步 `POST /v1/images/generations`，Nano Banana 6 个走 Gemini 同步 `POST /v1beta/models/{URL编码模型}:generateContent` |
 | 视频模型 | `video` | `kind=video`，无 `per_call` | `X-Route-Group: video` |
 | Plan 计划 | `plan` | `billing=per_call`，独立于视频列表 | `X-Route-Group: plan` |
 

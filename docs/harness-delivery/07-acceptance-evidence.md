@@ -1,9 +1,9 @@
 # Harness 联调验收结果（真实 JWT / 本地临时 JWT）
 
-**交付包版本**：V0.11（下列证据对应 V0.9.1 构建；V0.10 构建/部署见第十四节，V0.11 图片验收见第十五节，2026-11-15 修复复测见第十六节）
-**日期**：2026-10-26（2026-10-29 复测；2026-11-14 图片模型验收见第十五节；2026-11-15 用量来源修复复测见第十六节）
+**交付包版本**：V0.12（下列证据对应 V0.9.1 构建；V0.10 构建/部署见第十四节，V0.11 图片验收见第十五节，2026-11-15 修复复测见第十六节，2026-11-17 全模型验收见第十七节）
+**日期**：2026-10-26（2026-10-29 复测；2026-11-14 图片模型验收见第十五节；2026-11-15 用量来源修复复测见第十六节；2026-11-17 全模型验收见第十七节）
 **网关版本**：复测记录为 `ec3cdc0`（版本头 `harness-api-20261029-ec3cdc0`）；
-V0.9.1 交付构建为 `fd00dae`（含 run id 校验补丁）；V0.10 构建 `bb266025`，镜像 `harness-api-20261108-bb26602`；V0.11 镜像 `harness-api-20261114-c29f1a6`；V0.11 修订镜像 `harness-api-20261115-de7fce8`，已部署 82 实例
+V0.9.1 交付构建为 `fd00dae`（含 run id 校验补丁）；V0.10 构建 `bb266025`，镜像 `harness-api-20261108-bb26602`；V0.11 镜像 `harness-api-20261114-c29f1a6`；V0.11 修订镜像 `harness-api-20261115-de7fce8`；V0.12 镜像 `harness-api-20261116-df87870`（revision `df8787085`），已部署 82 实例
 **JWT 来源**：Harness 正式签发（JWKS `https://alphapro-test.xyz/.well-known/jwks.json`）；第十五节及第十六节 16.1–16.4 为本地临时 JWT，16.5 为 Harness 正式 JWT
 **Token 有效期**：至 2026-11-18
 
@@ -376,3 +376,33 @@ B1/B3 batchGet 均 `found=3/3`、`missing_request_ids=[]`、`truncated=false`。
 
 **待办**：确认 PAI 按秒模型是否应加入 A3 `video` 池的 `models`；其余正式 JWT
 复测已完成。
+
+---
+
+## 十七、全模型验收证据（2026-11-17）
+
+本轮在 `harness-api-20261116-df87870`（revision `df8787085`）上完成语言、图片、视频全模型实测，完整模型清单、接口样例和上游阻塞说明见 [10-full-model-acceptance-20261117.md](./10-full-model-acceptance-20261117.md)。
+
+| 项 | 结果 |
+| --- | --- |
+| 语言 | 35/38 条调用记录通过；3 条 `国模号池1` 上游 token 不服务的模型（预期 503） |
+| 图片 | 10/10；GPT Image 4、Nano Banana 6 |
+| 视频 | 55/61；6 个上游阻塞：MiniMax 4、`wan3-1080p-once`、`seedance2-720p-second-1` |
+| 参考素材 | Seedance 参考图/音频（480P）、Kling 参考视频（720P/1080P）、Omni 首尾帧（720P/1080P）、HappyHorse `video-edit` 均通过 |
+| `invalid api platform: 60` | ✅ 已修复；18 个新增视频模型已声明，提交不再报该错误 |
+
+**Nano Banana 同步 Harness JWT 实测**（`X-Route-Group: image`，模型 `Nano Banana Pro 1K`）：
+
+- Harness Request ID：`canary-banana-sync-20261117-2`
+- HTTP 200；`candidates[].content.parts[].inlineData` 为 Base64 图片；实际文件头为 PNG/JPEG 之一，`mimeType` 可能误标。
+- 结算行：`pricing_group=图片自营号池`、`group_ratio=1`、`base_amount=0.016`、`total_amount=0.016`、`status=settled`。
+- B1 `ue`：`usage_source=estimated`、`total_tokens=10`、`prompt_tokens=10`、`completion_tokens=0`、`split_unknown=0`。
+- B3 `ce`：`usage_source=estimated`、`total_tokens=10`、`base_amount=0.016`、`total_amount=0.016`、`group_ratio=1`、`status=settled`。
+
+**上游阻塞证据**：
+
+- MiniMax 4 个 `video-line-v1-second` 模型：经网关提交返回 401 `fail_to_fetch_task`，内层 `unauthorized`；直连供应网关 `POST /v1/videos` 复现。
+- `wan3-1080p-once`：任务停在 95% 超过 40 分钟；同组 `wan3-720p-once` 通过。
+- `seedance2-720p-second-1`：上游 `video_generation_failed`；同组其他 Seedance 模型通过，`seedance2-480p-second-1` 的参考图/音频通过。
+
+> 测试 token 按分组创建并在测试后删除；本文不包含任何 token 或上游密钥。

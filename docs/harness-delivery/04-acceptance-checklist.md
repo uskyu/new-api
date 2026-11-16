@@ -1,7 +1,7 @@
 # Harness 联调验收清单
 
-**版本**：V0.11（2026-11-15 修订）
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交）；已部署 82 实例 `harness-api-20261115-de7fce8`，本清单仍需逐项验收
+**版本**：V0.12（2026-11-17 修订）
+**对应网关版本**：`harness-api` 分支；已部署 82 实例 `harness-api-20261116-df87870`，本清单仍需逐项验收；全模型验收见 `10-full-model-acceptance-20261117.md`
 
 本文档供双方逐项核验。每项包含：执行方、请求、预期响应、通过标准。
 
@@ -385,30 +385,32 @@ curl -sS -X POST "http://<gateway>/v1/images/generations" \
 - [ ] B3 记录 `status` 为 `settled`，`billing.total_amount` 为 `0.018`
 
 ```bash
-# Nano Banana：异步
-curl -sS -X POST "http://<gateway>/v1/videos" \
+# Nano Banana：Gemini 同步
+curl -sS -X POST "http://<gateway>/v1beta/models/Nano%20Banana%202.1%201K:generateContent" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "X-Harness-Request-Id: hrq_test_banana" \
   -H "X-Harness-Run-Id: run_test_banana" \
   -H "X-Route-Group: image" \
   -H "Content-Type: application/json" \
-  -d '{"model":"Nano Banana 2.1 1K","prompt":"a red apple on a white table","aspect_ratio":"1:1","n":1}'
+  -d '{
+    "contents":[{"role":"user","parts":[{"text":"a red apple on a white table"}]}],
+    "generationConfig":{"candidateCount":1,"responseModalities":["IMAGE"],"imageConfig":{"aspectRatio":"1:1","imageSize":"1K"}}
+  }'
 ```
 
-轮询 `GET /v1/videos/{task_id}`；完成后 `media_type` 为 `image`，`image_url` / `url`
-为 `/v1/tasks/{task_id}/artifacts/image/content`，用 Harness JWT 下载。
+同步返回，不需要轮询；图片在 `candidates[].content.parts[].inlineData.data`。
 
 **通过标准（Nano Banana）**：
-- [ ] 创建返回任务 id
-- [ ] 轮询到 `completed`，`media_type` 为 `image`
-- [ ] 下载 `/v1/tasks/{task_id}/artifacts/image/content` 成功；上游 `Content-Type` 为 `application/octet-stream`，实际字节可能是 JPEG 或 PNG
+- [ ] HTTP 200
+- [ ] `inlineData.data` 非空 Base64
+- [ ] 解码后文件头为 PNG 或 JPEG（`mimeType` 可能误标 `image/png`）
 - [ ] B3 出现 `status_change` → `status` 为 `settled`，`billing.total_amount` 为 `0.009`
 
 **通用通过标准**：
 - [ ] A3 `image` 分区返回 10 个模型（4 个 GPT Image + 6 个 Nano Banana）
-- [ ] B1 中图片任务只有 usage、**没有 status 字段**；图片按张计费，B1 的 Token 数不代表费用（Nano Banana 异步任务没有 Token 用量，B1 为 `usage_source=unavailable`，`input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_write_tokens` 均为 `null`，`split_known=false`，`total_tokens` 省略，且不再追加结算收尾 `usage_correction`）；不得用 B1 判断完成，完成与成本以 B3 为准
+- [ ] B1 中图片任务只有 usage、**没有 status 字段**；图片按张计费，B1 的 Token 数不代表费用（Nano Banana 同步为 `usage_source=estimated`，按请求估算 prompt Token；GPT Image 同步为 `usage_source=upstream`，带上游实际 Token）；不得用 B1 判断完成，完成与成本以 B3 为准
 
-> Nano Banana 当前仅验证 `aspect_ratio: "1:1"`、`n=1`；其他比例、参考图、编辑与 GIF 未验证。下载请忽略 `Range`（上游返回 200 全量），不要使用 `/v1/videos/{task_id}/content`（上游返回 410）。
+> Nano Banana 当前仅验证 `aspectRatio: "1:1"`、`candidateCount: 1`；其他比例、参考图、编辑与 GIF 未验证。4K 响应体较大；上游偶发 524，重试前先确认是否已经生成。
 
 ---
 
@@ -615,7 +617,7 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?from=2026-10-01T00:0
 | 4.3 | A4 模型调用 | 双方 | P0 | ⏳ |
 | 4.4 | A9 模型调用 | 双方 | P0 | ⏳ |
 | 4.5 | 流式调用 | 双方 | P0 | ⏳ |
-| 4.6 | 图片生成（GPT Image 同步 / Nano Banana 异步） | 双方 | P0 | ⏳ |
+| 4.6 | 图片生成（GPT Image 同步 / Nano Banana Gemini 同步） | 双方 | P0 | ⏳ |
 | 5.1 | B1 增量拉取 | Harness | P0 | ⏳ |
 | 5.2 | B3 增量拉取 | Harness | P0 | ⏳ |
 | 5.3 | B1-batchGet 命中 | Harness | P0 | ⏳ |

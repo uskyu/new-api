@@ -1,8 +1,8 @@
 # 视频调用样例与模型差异
 
-**版本**：V0.11（2026-11-15 修订）
-**对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261115-de7fce8`
-**日期**：2026-11-14（2026-11-15 修订）
+**版本**：V0.12（2026-11-17 修订）
+**对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261116-df87870`
+**日期**：2026-11-14（2026-11-15、2026-11-17 修订）
 **适用对象**：Harness 后端与视频调用联调
 
 本文只说明视频生成调用。所有视频模型都使用同一个 OpenAI Video 入口，差异在
@@ -324,3 +324,97 @@ PAI 按秒与 PAI 按次使用同一请求形状：只接受 `model` / `prompt` 
    视频池当前 `capabilities` 为空。
 9. **`models` 是字典序数组。** A3 返回的模型顺序不等于后台渠道配置顺序；不要依赖
    渠道顺序，按模型 id 选择即可。
+
+---
+
+## 9. 2026-11-17 新视频规格与编辑合同
+
+本节补充 2026-11-17 全模型验收覆盖的新规格；完整结果和模型清单见
+[10-full-model-acceptance-20261117.md](./10-full-model-acceptance-20261117.md)。
+
+### 9.1 Wan 3.0 按秒 / 按次
+
+`pai-wan3.0-按秒` 5 个模型（`wan3-480p-second-1/2`、`wan3-720p-second-1/2`、
+`wan3-1080p-second`）：
+
+```json
+{"model":"wan3-480p-second-1","prompt":"...","seconds":5,"aspect_ratio":"16:9"}
+```
+
+`pai-wan3.0-按次` 2 个模型（`wan3-720p-once`、`wan3-1080p-once`）：
+
+```json
+{"model":"wan3-720p-once","prompt":"...","seconds":5}
+```
+
+### 9.2 MiniMax / Muse（video-line-v1-second）
+
+```json
+{"model":"MiniMax-H3-Max-480p","prompt":"...","seconds":"5","resolution":"480p","aspect_ratio":"16:9"}
+```
+
+首尾帧模型追加 `images`（两张不同 URL）：
+
+```json
+{"model":"MiniMax-H3-Max-480p-first-last-frame","prompt":"...","seconds":"5","resolution":"480p","aspect_ratio":"16:9","images":["https://.../first.png","https://.../last.png"]}
+```
+
+Muse：
+
+```json
+{"model":"muse-video-720p","prompt":"...","seconds":"10","aspect_ratio":"16:9"}
+```
+
+### 9.3 Omni（video-line-v1-once）
+
+720P：
+
+```json
+{"model":"gemini-omni-1.1-flash-720p-10s","prompt":"...","size":"1280x720"}
+```
+
+1080P：
+
+```json
+{"model":"gemini-omni-1.1-flash-1080p-10s","prompt":"..."}
+```
+
+首尾帧模型追加 `images`（两张不同 URL）。按次价格不乘秒数。
+
+### 9.4 Seedance 新增变体
+
+`seedance2-480p-second-3`、`seedance2.5-1080p-second-1` 按秒；
+`seedance2-fast-720p-once-3/4` 按次。请求体与同家族现有模型一致。
+
+### 9.5 HappyHorse 视频编辑
+
+`happyhorse1.1-720p-edit-second` 使用独立 `video-edit` 合同：
+
+```json
+{
+  "model": "happyhorse1.1-720p-edit-second",
+  "action": "video-edit",
+  "url": "https://.../source-720p.mp4",
+  "prompt": "将画面光线调整为暖色黄昏",
+  "resolution": "720P",
+  "audio_setting": "origin"
+}
+```
+
+不要传 `seconds`、`duration`、`size`、`ratio`、`aspect_ratio`、`image_with_roles`、
+`images` 或 `reference_images`；`url` 是参考视频。
+
+### 9.6 参考素材
+
+- Seedance 参考图/视频/音频：`image_with_roles` / `video_with_roles` /
+  `audio_with_roles`；PAI 按秒模型已支持这些字段。
+- Kling `with-video`：`video_with_roles` 的 `reference_video` 必须是可访问的
+  720P 级 MP4；低分辨率/不可达 URL 会被上游拒绝。
+- 首尾帧：`images` 必须两张不同 URL；同一 URL 会 400。
+
+### 9.7 已知上游阻塞
+
+- MiniMax 4 个 `video-line-v1-second` 模型：上游 401 `fail_to_fetch_task` /
+  `unauthorized`；网关已声明，直连上游复现。
+- `wan3-1080p-once`：上游任务停在 95%；`wan3-720p-once` 通过。
+- `seedance2-720p-second-1`：上游生成失败；同组其他 Seedance 模型通过。

@@ -193,7 +193,12 @@ Harness 应将其视为「网关计价结果」，而非「供应商已确认的
   - **GPT Image 同步请求**：保持 `usage_source=upstream`，携带上游实际
     `input_tokens` / `output_tokens`（修复前实测 99 / 7,028，修复后复测 98 / 7,028；
     该行为不受本次修复影响）。
-  - **Nano Banana 异步任务**：上游不返回 Token 用量，B1 为
+  - **Nano Banana 同步请求（Gemini `generateContent`）**：B1 为
+    `usage_source=estimated`，按请求估算 prompt Token（实测 `prompt_tokens=10`、
+    `completion_tokens=0`、`total_tokens=10`、`split_known=true`）。图片本身不是
+    Token 用量，B1 的 Token 数不代表图片费用；旧异步合同的 `unavailable`/`null`
+    口径不再适用于 Nano Banana。
+  - **无 Token 用量的异步视频任务（PAI/Seedance）**：B1 为
     `usage_source=unavailable`，`input_tokens` / `output_tokens` /
     `cache_read_tokens` / `cache_write_tokens` 均为 `null`，`split_known=false`，
     `total_tokens` 省略（未测量）。`null` 表示未测量，**不是 0 Token**。
@@ -202,8 +207,9 @@ Harness 应将其视为「网关计价结果」，而非「供应商已确认的
   - B1 只在用量或用量元数据（`usage_source`、`split_known`、`total_tokens`
     是否已知等）变化时追加事件；结算不再追加同值 `usage_correction`。
 - **B3 才带 `status`。** 成功的图片任务最终会产生 `status_change`，`status` 为
-  `settled`，`billing.total_amount` 为按张价格（如 Nano Banana 2.1 1K 为
-  `0.009`，GPT Image 2.6 为 `0.018`）。
+  `settled`，`pricing_group=图片自营号池`，`group_ratio=1`，
+  `billing.total_amount` 为按张价格（Nano Banana 2.1 1K 为 `0.009`，
+  Pro 1K 为 `0.016`，GPT Image 2.6 为 `0.018`）。
 - **完成与成本以 B3 为准。** `image_count` 为本次生成张数（当前只验证 `n=1`），
   用于网关按张计费，不通过 B1 暴露。
 
@@ -299,7 +305,7 @@ Harness 更新自己的账本时应：
 
 | 项 | 本期实现 |
 | --- | --- |
-| `usage_unit` | **只产生 `token`**；Nano Banana 异步图片任务无 Token 用量时为 `usage_source=unavailable`、Token 字段为 `null`；GPT Image 同步保持上游实际 Token |
+| `usage_unit` | **只产生 `token`**；Nano Banana 同步请求为 `usage_source=estimated`（prompt Token 估算，图片本身不是 Token 用量）；无 Token 用量的异步视频任务为 `usage_source=unavailable`、Token 字段为 `null`；GPT Image 同步保持上游实际 Token |
 | `currency` | **固定 `USD`** |
 | 计费对象 | 文本按 Token；图片按张（`image_count`，当前只验证 `n=1`）；`plan` 池按次计费渠道尚未接入 |
 | 独立工具计费 | 不做 |
@@ -311,9 +317,11 @@ Harness 更新自己的账本时应：
 
 第四轮文档列出 `token` / `image` / `audio_second` / `character` / `request` / `other`
 是为未来定义可选值。**本期实际只会产生 `token`**，其他值不会出现。Nano Banana
-异步图片任务同样产生 `token` 单位的用量事件，但没有 Token 用量时
-`usage_source=unavailable`、四个基础 Token 字段为 `null`、`total_tokens` 省略；
-只拿到 `total_tokens` 时按上游总量输出（`usage_source=upstream`）。GPT Image
+已改为 Gemini 同步请求，同样产生 `token` 单位的用量事件；B1 为
+`usage_source=estimated`，按请求估算 prompt Token（实测 `prompt_tokens=10`、
+`completion_tokens=0`），图片本身不是 Token 用量。无 Token 用量的异步视频任务
+仍为 `usage_source=unavailable`、四个基础 Token 字段为 `null`、`total_tokens`
+省略；只拿到 `total_tokens` 时按上游总量输出（`usage_source=upstream`）。GPT Image
 同步请求保持 `usage_source=upstream` 与上游实际 input/output Token。按张计费只
 体现在 B3 金额，不引入 `image` 单位。
 
@@ -335,3 +343,4 @@ Harness 更新自己的账本时应：
 | 2026-11-06 | V0.10（修订） | 更正 `group_ratio` 来源：来自采购计价分组 `pricing_group_order`，不由资源池决定；明确计价分组优先级是采购资格/倍率分组，不是渠道路由顺序；当前单 `default` 分组、倍率 1 |
 | 2026-11-14 | V0.11 | 新增「图片任务的 B1/B3 口径」：B1 无 `status`；Nano Banana 异步任务 Token 为 0（修复前口径），GPT Image 同步可携带 Token；完成与成本以 B3 `status_change`/`settled` 为准；`image_count` 按张计费且不在 B1 暴露；更新本期范围中的图像计费状态 |
 | 2026-11-15 | V0.11（修订） | 异步任务用量来源修复：无 Token 用量时 B1 为 `usage_source=unavailable`，`input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_write_tokens` 均为 `null`，`split_known=false`，`total_tokens` 省略；仅有 `total_tokens` 时为 `usage_source=upstream`；B1 只在用量或用量元数据变化时追加事件，结算不再追加同值 `usage_correction`；B3 金额口径不变。已部署 `harness-api-20261115-de7fce8`，真实 Harness JWT 四模型 E2E 通过（Banana/PAI `unavailable`，GPT Image `upstream`，B3 金额不变） |
+| 2026-11-17 | V0.12 | Nano Banana 改为 Gemini 同步 `generateContent`：B1 为 `usage_source=estimated`（prompt Token 估算，图片本身不是 Token 用量），B3 按张固定价；旧异步合同停用。全模型验收结果见 `10-full-model-acceptance-20261117.md`：语言 35/38、图片 10/10、视频 55/61，6 个视频模型为上游阻塞。已部署 `harness-api-20261116-df87870` |
