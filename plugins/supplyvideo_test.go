@@ -70,6 +70,8 @@ var supplyVideoPaiCallModels = []string{
 	"seedance2-720p-once-2",
 	"seedance2-720p-once-3",
 	"seedance2.5-720p-once",
+	"wan3-720p-once",
+	"wan3-1080p-once",
 }
 
 var supplyVideoPaiSecondModels = []string{
@@ -93,6 +95,11 @@ var supplyVideoPaiSecondModels = []string{
 	"seedance2.5-720p-second-1",
 	"seedance2.5-720p-second-2",
 	"seedance2.5-720p-second-3",
+	"wan3-480p-second-1",
+	"wan3-480p-second-2",
+	"wan3-720p-second-1",
+	"wan3-720p-second-2",
+	"wan3-1080p-second",
 }
 
 var supplyVideoBananaModels = []string{
@@ -102,6 +109,23 @@ var supplyVideoBananaModels = []string{
 	"Nano Banana Pro 1K",
 	"Nano Banana Pro 2K",
 	"Nano Banana Pro 4K",
+}
+
+var supplyVideoVideoLineSecondModels = []string{
+	"MiniMax-H3-Max-480p",
+	"MiniMax-H3-Max-480p-first-last-frame",
+	"MiniMax-H3-Max-768p",
+	"MiniMax-H3-Max-768p-first-last-frame",
+	"muse-video-720p",
+}
+
+var supplyVideoVideoLineCallModels = []string{
+	"gemini-omni-1.1-flash-720p-10s",
+	"gemini-omni-1.1-flash-720p-10s-first-last-frame",
+	"gemini-omni-1.1-flash-1080p-10s",
+	"gemini-omni-1.1-flash-1080p-10s-first-last-frame",
+	"gemini-omni-1.2-flash-720p-10s",
+	"gemini-omni-1.2-flash-720p-15s",
 }
 
 func newSupplyVideoPlugin(t *testing.T) (*jsplugin.Registry, *jsplugin.LoadedPlugin) {
@@ -174,8 +198,10 @@ func TestSupplyVideoManifestAndUsageProfiles(t *testing.T) {
 	models = append(models, supplyVideoPaiCallModels...)
 	models = append(models, supplyVideoPaiSecondModels...)
 	models = append(models, supplyVideoBananaModels...)
+	models = append(models, supplyVideoVideoLineSecondModels...)
+	models = append(models, supplyVideoVideoLineCallModels...)
 	assert.Equal(t, models, plugin.Meta.Models)
-	assert.Equal(t, "1.3.0", plugin.Meta.Version)
+	assert.Equal(t, "1.4.0", plugin.Meta.Version)
 	assert.True(t, plugin.Meta.SupportsUpstream(jsplugin.UpstreamKindNewAPI))
 	assert.Equal(t, []string{"vendor", "new_api"}, plugin.Meta.Upstreams)
 	assert.ElementsMatch(t, []string{"cdn.paisio.online", "files.toapis.xyz", "ark-acg-cn-beijing.tos-cn-beijing.volces.com", "gateway.megarichglobal.com"}, plugin.Meta.AllowedHosts)
@@ -232,7 +258,7 @@ func TestSupplyVideoManifestAndUsageProfiles(t *testing.T) {
 	assert.Equal(t, "No reference video", plugin.Meta.UsageSchema["video_input"].EnumLabels["none"]["en"])
 	assert.Equal(t, "With reference video", plugin.Meta.UsageSchema["video_input"].EnumLabels["video"]["en"])
 
-	assert.Len(t, plugin.Meta.UsageProfiles, 12)
+	assert.Len(t, plugin.Meta.UsageProfiles, 14)
 	for _, model := range tokenModels {
 		resolution := wantResolution[model]
 		require.NotEmpty(t, resolution, model)
@@ -287,6 +313,23 @@ func TestSupplyVideoManifestAndUsageProfiles(t *testing.T) {
 		assert.Equal(t, "1 image", examples[0].Label, model)
 		assert.Equal(t, map[string]any{"image_count": int64(1)}, examples[0].Facts, model)
 	}
+
+	for _, model := range supplyVideoVideoLineSecondModels {
+		schema, examples := plugin.Meta.UsageForModel(model)
+		require.Len(t, schema, 1, model)
+		field, found := schema["seconds"]
+		require.True(t, found, model)
+		assert.Equal(t, "number", field.Type, model)
+		assert.Equal(t, "second", field.Unit, model)
+		assert.Equal(t, "Video generation unit price", field.Description["en"], model)
+		require.Len(t, examples, 1, model)
+		assert.Equal(t, map[string]any{"seconds": int64(5)}, examples[0].Facts, model)
+	}
+	for _, model := range supplyVideoVideoLineCallModels {
+		schema, examples := plugin.Meta.UsageForModel(model)
+		assert.Empty(t, schema, model)
+		assert.Empty(t, examples, model)
+	}
 }
 
 func TestSupplyVideoSchemaAcceptsUpstreamTaskExpressions(t *testing.T) {
@@ -318,6 +361,15 @@ func TestSupplyVideoSchemaAcceptsUpstreamTaskExpressions(t *testing.T) {
 	for _, model := range supplyVideoBananaModels {
 		schema, _ := plugin.Meta.UsageForModel(model)
 		require.NoError(t, billing_setting.SmokeTestTaskExpr(`tier("images", u("image_count") * 0.009)`, schema), model)
+	}
+
+	for _, model := range supplyVideoVideoLineSecondModels {
+		schema, _ := plugin.Meta.UsageForModel(model)
+		require.NoError(t, billing_setting.SmokeTestTaskExpr(`tier("video_seconds", u("seconds") * 0.012)`, schema), model)
+	}
+	for _, model := range supplyVideoVideoLineCallModels {
+		schema, _ := plugin.Meta.UsageForModel(model)
+		require.NoError(t, billing_setting.SmokeTestTaskExpr(`tier("per_video", 0.102)`, schema), model)
 	}
 }
 
@@ -788,6 +840,16 @@ func TestSupplyVideoDecodeRequest(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, float64(4), decoded["requestBody"].(map[string]any)["seconds"])
 		})
+
+		t.Run("PAI accepts reference materials", func(t *testing.T) {
+			decoded, err := supplyVideoDecode(t, plugin, "seedance2-mini-480p-second", map[string]any{
+				"prompt": "a boat", "seconds": 4,
+				"image_with_roles": supplyVideoRoles("reference_image", 1),
+			})
+			require.NoError(t, err)
+			body := decoded["requestBody"].(map[string]any)
+			require.Len(t, body["image_with_roles"], 1)
+		})
 	})
 
 	for _, tc := range []struct {
@@ -814,7 +876,6 @@ func TestSupplyVideoDecodeRequest(t *testing.T) {
 			map[string]any{"url": "https://cdn.example/last.png", "role": "last_frame"},
 		}}, "frame inputs require aspect_ratio adaptive"},
 		{"minimax total material cap", "minimax-h3-max-480p-second", map[string]any{"prompt": "a lighthouse", "seconds": 5, "image_with_roles": supplyVideoRoles("reference_image", 9), "video_with_roles": supplyVideoRoles("reference_video", 3), "audio_with_roles": supplyVideoRoles("reference_audio", 3)}, "reference materials must not exceed 12 items"},
-		{"PAI rejects multimodal materials", "seedance2-mini-480p-second", map[string]any{"prompt": "a boat", "seconds": 4, "image_with_roles": supplyVideoRoles("reference_image", 1)}, "PAI multimodal materials are not supported yet"},
 		{"PAI rejects n", "seedance2-mini-480p-second", map[string]any{"prompt": "a boat", "seconds": 4, "n": 1}, "field n is not supported"},
 		{"PAI rejects locked resolution", "seedance2-mini-480p-second", map[string]any{"prompt": "a boat", "seconds": 4, "resolution": "480p"}, "resolution must not be sent"},
 		{"PAI per-call range lower bound", "seedance2-fast-720p-once-1", map[string]any{"prompt": "a rocket", "seconds": 3}, "seconds must be an integer between 4 and 15"},

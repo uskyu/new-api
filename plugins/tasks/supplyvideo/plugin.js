@@ -158,6 +158,60 @@ const SECOND_MODELS = {
   "minimax-h3-max-1080p-second": ["minimax", "1080p"],
 };
 
+// The supplier's new video-line specs. MiniMax and Muse bill per output
+// second and accept resolution/aspect_ratio; the first-last-frame MiniMax
+// models take two images in order. Omni bills per finished video and accepts
+// size (720p only) plus optional first/last images.
+const VIDEO_LINE_SECOND_MODELS = {
+  "MiniMax-H3-Max-480p": { family: "minimax", resolution: "480p", firstLast: false },
+  "MiniMax-H3-Max-480p-first-last-frame": { family: "minimax", resolution: "480p", firstLast: true },
+  "MiniMax-H3-Max-768p": { family: "minimax", resolution: "768p", firstLast: false },
+  "MiniMax-H3-Max-768p-first-last-frame": { family: "minimax", resolution: "768p", firstLast: true },
+  "muse-video-720p": { family: "muse", resolution: "720p", firstLast: false },
+};
+
+const VIDEO_LINE_SECOND_FAMILIES = {
+  minimax: {
+    minSeconds: 5,
+    maxSeconds: 15,
+    aspects: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
+    defaultAspect: "16:9",
+    maxImages: 2,
+  },
+  muse: {
+    minSeconds: 10,
+    maxSeconds: 30,
+    aspects: ["16:9", "9:16", "1:1", "4:3", "3:4"],
+    defaultAspect: "16:9",
+    maxImages: 0,
+  },
+};
+
+const VIDEO_LINE_CALL_MODELS = {
+  "gemini-omni-1.1-flash-720p-10s": { resolution: "720p", firstLast: false },
+  "gemini-omni-1.1-flash-720p-10s-first-last-frame": { resolution: "720p", firstLast: true },
+  "gemini-omni-1.1-flash-1080p-10s": { resolution: "1080p", firstLast: false },
+  "gemini-omni-1.1-flash-1080p-10s-first-last-frame": { resolution: "1080p", firstLast: true },
+  "gemini-omni-1.2-flash-720p-10s": { resolution: "720p", firstLast: false },
+  "gemini-omni-1.2-flash-720p-15s": { resolution: "720p", firstLast: false },
+};
+
+// MiniMax/Muse expressions read the requested seconds directly. Omni's
+// expressions are fixed per-video prices and need no usage facts.
+const VIDEO_LINE_SECOND_USAGE_SCHEMA = {
+  seconds: {
+    type: "number",
+    unit: "second",
+    description: { en: "Video generation unit price", zh: "视频生成单价" },
+  },
+};
+
+// The supplier's video-edit endpoint rejects aspect_ratio, so this model must
+// omit it instead of inheriting the family default.
+const SECOND_MODEL_OPTIONS = {
+  "happyhorse1.1-720p-edit-second": { omitAspectRatio: true },
+};
+
 // PAI's Seedance group bills either per successful task or per billed second.
 // Its published duration ranges are used where confirmed; the seven records
 // the supplier marked "待确认" keep only a sanity bound and let the upstream
@@ -191,6 +245,13 @@ const PAI_MODELS = {
   "seedance2.5-720p-second-1": { kind: "second", minSeconds: 4, maxSeconds: 30 },
   "seedance2.5-720p-second-2": { kind: "second", minSeconds: 4, maxSeconds: 30 },
   "seedance2.5-720p-second-3": { kind: "second", minSeconds: 4, maxSeconds: 30 },
+  "wan3-480p-second-1": { kind: "second", minSeconds: 2, maxSeconds: 30 },
+  "wan3-480p-second-2": { kind: "second", minSeconds: 2, maxSeconds: 30 },
+  "wan3-720p-second-1": { kind: "second", minSeconds: 2, maxSeconds: 30 },
+  "wan3-720p-second-2": { kind: "second", minSeconds: 2, maxSeconds: 30 },
+  "wan3-1080p-second": { kind: "second", minSeconds: 2, maxSeconds: 30 },
+  "wan3-720p-once": { kind: "call", minSeconds: 2, maxSeconds: 30 },
+  "wan3-1080p-once": { kind: "call", minSeconds: 2, maxSeconds: 30 },
 };
 
 const PAI_CALL_MODELS = Object.keys(PAI_MODELS).filter((model) => PAI_MODELS[model].kind === "call");
@@ -310,6 +371,20 @@ function usageProfiles() {
     ],
   });
   profiles.push({
+    models: Object.keys(VIDEO_LINE_SECOND_MODELS),
+    schema: VIDEO_LINE_SECOND_USAGE_SCHEMA,
+    examples: [
+      {
+        label: "5s output",
+        facts: { seconds: 5 },
+      },
+    ],
+  });
+  profiles.push({
+    models: Object.keys(VIDEO_LINE_CALL_MODELS),
+    schema: {},
+  });
+  profiles.push({
     models: Object.keys(BANANA_MODELS),
     schema: BANANA_USAGE_SCHEMA,
     examples: [
@@ -327,16 +402,18 @@ export const meta = {
   key: "supplyvideo",
   name: "Supply Video",
   description: {
-    en: "Seedance video and Nano Banana image generation through a supplier gateway",
-    zh: "通过供应商网关生成 Seedance 视频和 Nano Banana 图片",
+    en: "Seedance, video-line and Nano Banana generation through a supplier gateway",
+    zh: "通过供应商网关生成 Seedance、视频线路和 Nano Banana 内容",
   },
-  version: "1.3.0",
+  version: "1.4.0",
   author: { name: "QuantumNous" },
   models: Object.keys(MODEL_RESOLUTIONS).concat(
     Object.keys(SECOND_MODELS),
     PAI_CALL_MODELS,
     PAI_SECOND_MODELS,
     Object.keys(BANANA_MODELS),
+    Object.keys(VIDEO_LINE_SECOND_MODELS),
+    Object.keys(VIDEO_LINE_CALL_MODELS),
   ),
   fetchMode: "per_task",
   upstreams: ["vendor", "new_api"],
@@ -357,7 +434,9 @@ function isKnownModel(model) {
     (Object.prototype.hasOwnProperty.call(MODEL_RESOLUTIONS, model) ||
       Object.prototype.hasOwnProperty.call(SECOND_MODELS, model) ||
       Object.prototype.hasOwnProperty.call(PAI_MODELS, model) ||
-      Object.prototype.hasOwnProperty.call(BANANA_MODELS, model))
+      Object.prototype.hasOwnProperty.call(BANANA_MODELS, model) ||
+      Object.prototype.hasOwnProperty.call(VIDEO_LINE_SECOND_MODELS, model) ||
+      Object.prototype.hasOwnProperty.call(VIDEO_LINE_CALL_MODELS, model))
   );
 }
 
@@ -365,15 +444,51 @@ function isBananaModel(model) {
   return typeof model === "string" && Object.prototype.hasOwnProperty.call(BANANA_MODELS, model);
 }
 
+function isVideoLineSecondModel(model) {
+  return typeof model === "string" && Object.prototype.hasOwnProperty.call(VIDEO_LINE_SECOND_MODELS, model);
+}
+
+function isVideoLineCallModel(model) {
+  return typeof model === "string" && Object.prototype.hasOwnProperty.call(VIDEO_LINE_CALL_MODELS, model);
+}
+
 function modelProfile(model) {
   if (typeof model === "string" && Object.prototype.hasOwnProperty.call(PAI_MODELS, model)) {
     const record = PAI_MODELS[model];
+    const seedance25 = model.startsWith("seedance2.5-");
     return {
       billing: record.kind === "call" ? "pai_call" : "pai_second",
       family: "pai",
       minSeconds: record.minSeconds,
       maxSeconds: record.maxSeconds,
       rangeUnconfirmed: record.rangeUnconfirmed === true,
+      maxImages: seedance25 ? 30 : 9,
+      maxVideos: seedance25 ? 10 : 3,
+      maxAudios: seedance25 ? 10 : 3,
+      imageRoles: ["first_frame", "last_frame", "reference_image"],
+      videoMode: "optional",
+      framePair: true,
+      framesExclusiveWithVideo: false,
+      audioRequiresMedia: false,
+    };
+  }
+  if (typeof model === "string" && Object.prototype.hasOwnProperty.call(VIDEO_LINE_SECOND_MODELS, model)) {
+    const entry = VIDEO_LINE_SECOND_MODELS[model];
+    const family = VIDEO_LINE_SECOND_FAMILIES[entry.family];
+    return Object.assign({}, family, {
+      billing: "video_line_second",
+      family: entry.family,
+      resolution: entry.resolution,
+      firstLast: entry.firstLast === true,
+    });
+  }
+  if (typeof model === "string" && Object.prototype.hasOwnProperty.call(VIDEO_LINE_CALL_MODELS, model)) {
+    const entry = VIDEO_LINE_CALL_MODELS[model];
+    return {
+      billing: "video_line_call",
+      family: "omni",
+      resolution: entry.resolution,
+      firstLast: entry.firstLast === true,
     };
   }
   if (isBananaModel(model)) {
@@ -388,7 +503,7 @@ function modelProfile(model) {
     const family = SECOND_FAMILIES[entry[0]];
     const withVideo = model.endsWith("-with-video");
     const videoMode = family.videoMode === "by-model" ? (withVideo ? "required" : "forbidden") : family.videoMode;
-    return Object.assign({}, family, {
+    return Object.assign({}, family, SECOND_MODEL_OPTIONS[model] || {}, {
       billing: "second",
       family: entry[0],
       resolution: entry[1],
@@ -471,8 +586,13 @@ function normalizeSecondRequest(request, declaredModel, profile) {
   if (!automaticSeconds && (!Number.isInteger(seconds) || seconds < profile.minSeconds || seconds > profile.maxSeconds))
     throw new Error("seconds must be an integer between " + profile.minSeconds + " and " + profile.maxSeconds);
 
-  const aspectRatio = request.aspect_ratio === undefined ? profile.defaultAspect : request.aspect_ratio;
-  if (typeof aspectRatio !== "string" || !profile.aspects.includes(aspectRatio)) throw new Error("aspect_ratio must be one of " + profile.aspects.join(", "));
+  let aspectRatio = request.aspect_ratio === undefined ? profile.defaultAspect : request.aspect_ratio;
+  if (profile.omitAspectRatio) {
+    if (request.aspect_ratio !== undefined) throw new Error("aspect_ratio is not supported by this model");
+    aspectRatio = undefined;
+  } else if (typeof aspectRatio !== "string" || !profile.aspects.includes(aspectRatio)) {
+    throw new Error("aspect_ratio must be one of " + profile.aspects.join(", "));
+  }
 
   const images = roleItems(request.image_with_roles, "image_with_roles", profile.imageRoles, profile.maxImages);
   const videos = roleItems(request.video_with_roles, "video_with_roles", ["reference_video"], profile.maxVideos);
@@ -500,14 +620,93 @@ function normalizeSecondRequest(request, declaredModel, profile) {
     model: declaredModel,
     prompt: request.prompt,
     seconds: seconds,
-    aspect_ratio: aspectRatio,
   };
+  if (!profile.omitAspectRatio) body.aspect_ratio = aspectRatio;
   if (request.video_operation !== undefined) body.video_operation = "generate";
   if (request.size !== undefined) body.size = request.size;
   if (request.image_with_roles !== undefined) body.image_with_roles = images;
   if (request.video_with_roles !== undefined) body.video_with_roles = videos;
   if (request.audio_with_roles !== undefined) body.audio_with_roles = audios;
   return { body: body, profile: profile, videoInput: videos.length > 0 ? "video" : "none" };
+}
+
+function normalizeVideoLineSecondRequest(request, declaredModel, profile) {
+  const allowed = ["model", "prompt", "seconds", "duration", "resolution", "aspect_ratio", "images"];
+  for (const key of Object.keys(request)) {
+    if (!allowed.includes(key)) throw new Error("field " + key + " is not supported");
+  }
+  if (request.model !== undefined && request.model !== declaredModel) throw new Error("model must match the selected model");
+  if (typeof request.prompt !== "string" || !request.prompt.trim()) throw new Error("field prompt is required");
+
+  const seconds = integerValue(request.seconds);
+  if (request.duration !== undefined) {
+    const duration = integerValue(request.duration);
+    if (seconds === null || duration !== seconds) throw new Error("duration must match seconds");
+  }
+  if (seconds === null || seconds < profile.minSeconds || seconds > profile.maxSeconds)
+    throw new Error("seconds must be an integer between " + profile.minSeconds + " and " + profile.maxSeconds);
+
+  if (request.resolution !== undefined) {
+    if (profile.family !== "minimax") throw new Error("resolution is selected by the model ID");
+    if (request.resolution !== profile.resolution) throw new Error("resolution conflicts with the selected model");
+  }
+  const aspectRatio = request.aspect_ratio === undefined ? profile.defaultAspect : request.aspect_ratio;
+  if (typeof aspectRatio !== "string" || !profile.aspects.includes(aspectRatio))
+    throw new Error("aspect_ratio must be one of " + profile.aspects.join(", "));
+
+  let images;
+  if (request.images !== undefined) {
+    if (!profile.firstLast) throw new Error("images are supported only by first-last-frame models");
+    if (!Array.isArray(request.images) || request.images.length < 1 || request.images.length > 2)
+      throw new Error("images must contain 1 or 2 URLs");
+    images = request.images.map((url, index) => optionalURL(url, "images[" + index + "]"));
+    if (images.length === 2 && images[0] === images[1]) throw new Error("images must not repeat the same URL");
+  } else if (profile.firstLast) {
+    throw new Error("first-last-frame models require images");
+  }
+
+  const body = {
+    model: declaredModel,
+    prompt: request.prompt,
+    seconds: String(seconds),
+    aspect_ratio: aspectRatio,
+  };
+  if (profile.family === "minimax") body.resolution = profile.resolution;
+  if (images !== undefined) body.images = images;
+  return { body: body, profile: profile, videoInput: "none" };
+}
+
+function normalizeVideoLineCallRequest(request, declaredModel, profile) {
+  const allowed = ["model", "prompt", "size", "images"];
+  for (const key of Object.keys(request)) {
+    if (!allowed.includes(key)) throw new Error("field " + key + " is not supported");
+  }
+  if (request.model !== undefined && request.model !== declaredModel) throw new Error("model must match the selected model");
+  if (typeof request.prompt !== "string" || !request.prompt.trim()) throw new Error("field prompt is required");
+
+  let size;
+  if (request.size !== undefined) {
+    if (request.size !== "1280x720" && request.size !== "720x1280")
+      throw new Error("size must be 1280x720 or 720x1280");
+    if (profile.resolution !== "720p") throw new Error("size is supported only by 720p models");
+    size = request.size;
+  }
+
+  let images;
+  if (request.images !== undefined) {
+    if (!profile.firstLast) throw new Error("images are supported only by first-last-frame models");
+    if (!Array.isArray(request.images) || request.images.length !== 2)
+      throw new Error("images must contain exactly 2 URLs");
+    images = request.images.map((url, index) => optionalURL(url, "images[" + index + "]"));
+    if (images[0] === images[1]) throw new Error("images must not repeat the same URL");
+  } else if (profile.firstLast) {
+    throw new Error("first-last-frame models require images");
+  }
+
+  const body = { model: declaredModel, prompt: request.prompt };
+  if (size !== undefined) body.size = size;
+  if (images !== undefined) body.images = images;
+  return { body: body, profile: profile, videoInput: "none" };
 }
 
 function integerValue(value) {
@@ -524,8 +723,6 @@ function normalizePaiRequest(request, declaredModel, profile) {
   if (request.video_operation !== undefined && request.video_operation !== "generate") throw new Error("only video_operation generate is supported");
   if (request.resolution !== undefined) throw new Error("PAI model resolution is selected by the model ID; resolution must not be sent");
   if (request.size !== undefined) throw new Error("PAI model resolution is selected by the model ID; size must not be sent");
-  if (request.image_with_roles !== undefined || request.video_with_roles !== undefined || request.audio_with_roles !== undefined)
-    throw new Error("PAI multimodal materials are not supported yet");
   if (typeof request.prompt !== "string" || !request.prompt.trim()) throw new Error("field prompt is required");
 
   const seconds = integerValue(request.seconds);
@@ -538,10 +735,17 @@ function normalizePaiRequest(request, declaredModel, profile) {
   if (request.aspect_ratio !== undefined && (typeof request.aspect_ratio !== "string" || !request.aspect_ratio.trim()))
     throw new Error("aspect_ratio must be a non-empty string");
 
+  const images = roleItems(request.image_with_roles, "image_with_roles", profile.imageRoles || ["first_frame", "last_frame", "reference_image"], profile.maxImages || 0);
+  const videos = roleItems(request.video_with_roles, "video_with_roles", ["reference_video"], profile.maxVideos || 0);
+  const audios = roleItems(request.audio_with_roles, "audio_with_roles", ["reference_audio"], profile.maxAudios || 0);
+
   const body = { model: declaredModel, prompt: request.prompt, seconds: seconds };
   if (request.aspect_ratio !== undefined) body.aspect_ratio = request.aspect_ratio;
   if (request.video_operation !== undefined) body.video_operation = "generate";
-  return { body: body, profile: profile, videoInput: "none" };
+  if (request.image_with_roles !== undefined) body.image_with_roles = images;
+  if (request.video_with_roles !== undefined) body.video_with_roles = videos;
+  if (request.audio_with_roles !== undefined) body.audio_with_roles = audios;
+  return { body: body, profile: profile, videoInput: videos.length > 0 ? "video" : "none" };
 }
 
 function normalizeBananaRequest(request, declaredModel, profile) {
@@ -565,6 +769,8 @@ function normalizeRequest(request, declaredModel, profileModel) {
   const profile = modelProfile(profileName);
   if (profile.billing === "banana_image") return normalizeBananaRequest(request, declaredModel, profile);
   if (profile.billing === "pai_call" || profile.billing === "pai_second") return normalizePaiRequest(request, declaredModel, profile);
+  if (profile.billing === "video_line_second") return normalizeVideoLineSecondRequest(request, declaredModel, profile);
+  if (profile.billing === "video_line_call") return normalizeVideoLineCallRequest(request, declaredModel, profile);
   if (profile.billing === "second") return normalizeSecondRequest(request, declaredModel, profile);
   const allowedKeys = new Set(REQUEST_FIELDS);
   for (const key of Object.keys(request)) {
@@ -685,6 +891,11 @@ export function parseSubmitResponse(_ctx, response) {
   const parsedStatus = statusResult(body);
   if (parsedStatus.status === "UNKNOWN" && parsedStatus.rawStatus) throw new Error("unrecognized task status: " + parsedStatus.rawStatus);
   const result = { taskId: taskId, taskData: body };
+  const model = _ctx && (_ctx.upstreamModel || _ctx.model);
+  if (isVideoLineSecondModel(model) && _ctx && _ctx.requestBody && _ctx.requestBody.seconds !== undefined) {
+    const seconds = Number(_ctx.requestBody.seconds);
+    if (Number.isFinite(seconds) && seconds > 0) result.state = { seconds: seconds };
+  }
   if (parsedStatus.status === "SUCCESS") {
     const immediate = { status: "SUCCESS", progress: "100%" };
     const tokens = validTotalTokens(body);
@@ -715,6 +926,12 @@ export function extractUsage(ctx) {
       return { seconds: normalized.body.seconds };
     }
     return { output_seconds: normalized.body.seconds, input_seconds: 0 };
+  }
+  if (normalized.profile.billing === "video_line_second") {
+    return { seconds: Number(normalized.body.seconds) };
+  }
+  if (normalized.profile.billing === "video_line_call") {
+    return {};
   }
   if (normalized.profile.billing === "second") {
     return { output_seconds: 0, input_seconds: 0 };
@@ -765,6 +982,19 @@ export function extractUsageOnComplete(ctx, taskResult, body) {
     isBananaModel(data && data.model)
   ) {
     return { image_count: 1 };
+  }
+  const model = context.upstreamModel || context.model;
+  if (isVideoLineSecondModel(model)) {
+    const usage = data && data.usage;
+    const usageSeconds = usage && validSeconds(usage.seconds, false);
+    if (usageSeconds !== null) return { seconds: usageSeconds };
+    const stateSeconds = context.state && validSeconds(context.state.seconds, false);
+    if (stateSeconds !== null) return { seconds: stateSeconds };
+    console.log("warning: completed video-line response has no usable seconds; actual billing facts were not reported");
+    return {};
+  }
+  if (isVideoLineCallModel(model)) {
+    return {};
   }
   const usage = data && data.usage;
   if (!objectValue(usage)) {
