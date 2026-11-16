@@ -206,10 +206,10 @@ const VIDEO_LINE_SECOND_USAGE_SCHEMA = {
   },
 };
 
-// The supplier's video-edit endpoint rejects aspect_ratio, so this model must
-// omit it instead of inheriting the family default.
+// The supplier's video-edit endpoint has its own contract (action=video-edit,
+// url, prompt, resolution, audio_setting) and rejects the per-second fields.
 const SECOND_MODEL_OPTIONS = {
-  "happyhorse1.1-720p-edit-second": { omitAspectRatio: true, imageField: "images" },
+  "happyhorse1.1-720p-edit-second": { videoEdit: true },
 };
 
 // PAI's Seedance group bills either per successful task or per billed second.
@@ -508,8 +508,9 @@ function modelProfile(model) {
     const family = SECOND_FAMILIES[entry[0]];
     const withVideo = model.endsWith("-with-video");
     const videoMode = family.videoMode === "by-model" ? (withVideo ? "required" : "forbidden") : family.videoMode;
-    return Object.assign({}, family, SECOND_MODEL_OPTIONS[model] || {}, {
-      billing: "second",
+    const options = SECOND_MODEL_OPTIONS[model] || {};
+    return Object.assign({}, family, options, {
+      billing: options.videoEdit ? "video_edit" : "second",
       family: entry[0],
       resolution: entry[1],
       withVideo: withVideo,
@@ -651,6 +652,32 @@ function normalizeSecondRequest(request, declaredModel, profile) {
   if (request.video_with_roles !== undefined) body.video_with_roles = videos;
   if (request.audio_with_roles !== undefined) body.audio_with_roles = audios;
   return { body: body, profile: profile, videoInput: videos.length > 0 ? "video" : "none" };
+}
+
+function normalizeVideoEditRequest(request, declaredModel, profile) {
+  const allowed = ["model", "action", "url", "prompt", "resolution", "audio_setting"];
+  for (const key of Object.keys(request)) {
+    if (!allowed.includes(key)) throw new Error("field " + key + " is not supported");
+  }
+  if (request.model !== undefined && request.model !== declaredModel) throw new Error("model must match the selected model");
+  if (request.action !== undefined && request.action !== "video-edit") throw new Error("action must be video-edit");
+  if (typeof request.prompt !== "string" || !request.prompt.trim()) throw new Error("field prompt is required");
+  const url = optionalURL(request.url, "url");
+  if (request.resolution !== undefined && request.resolution !== "720P") throw new Error("resolution must be 720P");
+  if (request.audio_setting !== undefined && request.audio_setting !== "origin") throw new Error("audio_setting must be origin");
+
+  return {
+    body: {
+      model: declaredModel,
+      action: "video-edit",
+      url: url,
+      prompt: request.prompt,
+      resolution: "720P",
+      audio_setting: "origin",
+    },
+    profile: profile,
+    videoInput: "video",
+  };
 }
 
 function normalizeVideoLineSecondRequest(request, declaredModel, profile) {
@@ -795,6 +822,7 @@ function normalizeRequest(request, declaredModel, profileModel) {
   if (profile.billing === "pai_call" || profile.billing === "pai_second") return normalizePaiRequest(request, declaredModel, profile);
   if (profile.billing === "video_line_second") return normalizeVideoLineSecondRequest(request, declaredModel, profile);
   if (profile.billing === "video_line_call") return normalizeVideoLineCallRequest(request, declaredModel, profile);
+  if (profile.billing === "video_edit") return normalizeVideoEditRequest(request, declaredModel, profile);
   if (profile.billing === "second") return normalizeSecondRequest(request, declaredModel, profile);
   const allowedKeys = new Set(REQUEST_FIELDS);
   for (const key of Object.keys(request)) {
@@ -958,7 +986,7 @@ export function extractUsage(ctx) {
   if (normalized.profile.billing === "video_line_call") {
     return {};
   }
-  if (normalized.profile.billing === "second") {
+  if (normalized.profile.billing === "video_edit" || normalized.profile.billing === "second") {
     return { output_seconds: 0, input_seconds: 0 };
   }
   return {

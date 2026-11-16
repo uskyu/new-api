@@ -855,16 +855,19 @@ func TestSupplyVideoDecodeRequest(t *testing.T) {
 			require.Len(t, body["image_with_roles"], 1)
 		})
 
-		t.Run("happyhorse edit uses images and omits aspect_ratio", func(t *testing.T) {
+		t.Run("happyhorse edit uses the video-edit contract", func(t *testing.T) {
 			decoded, err := supplyVideoDecode(t, plugin, "happyhorse1.1-720p-edit-second", map[string]any{
-				"prompt": "a horse", "seconds": 5,
-				"image_with_roles": supplyVideoRoles("reference_image", 1),
+				"prompt": "a horse", "url": "https://cdn.example/source.mp4",
 			})
 			require.NoError(t, err)
 			body := decoded["requestBody"].(map[string]any)
-			require.NotContains(t, body, "image_with_roles")
-			require.NotContains(t, body, "aspect_ratio")
-			require.Len(t, body["images"], 1)
+			assert.Equal(t, "video-edit", body["action"])
+			assert.Equal(t, "https://cdn.example/source.mp4", body["url"])
+			assert.Equal(t, "720P", body["resolution"])
+			assert.Equal(t, "origin", body["audio_setting"])
+			assert.NotContains(t, body, "seconds")
+			assert.NotContains(t, body, "aspect_ratio")
+			assert.NotContains(t, body, "image_with_roles")
 		})
 	})
 
