@@ -209,7 +209,7 @@ const VIDEO_LINE_SECOND_USAGE_SCHEMA = {
 // The supplier's video-edit endpoint rejects aspect_ratio, so this model must
 // omit it instead of inheriting the family default.
 const SECOND_MODEL_OPTIONS = {
-  "happyhorse1.1-720p-edit-second": { omitAspectRatio: true },
+  "happyhorse1.1-720p-edit-second": { omitAspectRatio: true, imageField: "images" },
 };
 
 // PAI's Seedance group bills either per successful task or per billed second.
@@ -284,6 +284,7 @@ const REQUEST_FIELDS = [
   "resolution",
   "size",
   "video_operation",
+  "images",
   "image_with_roles",
   "video_with_roles",
   "audio_with_roles",
@@ -598,7 +599,21 @@ function normalizeSecondRequest(request, declaredModel, profile) {
     throw new Error("aspect_ratio must be one of " + profile.aspects.join(", "));
   }
 
-  const images = roleItems(request.image_with_roles, "image_with_roles", profile.imageRoles, profile.maxImages);
+  if (request.images !== undefined && profile.imageField !== "images")
+    throw new Error("images is not supported by this model");
+  let images;
+  if (profile.imageField === "images") {
+    if (request.images !== undefined) {
+      if (!Array.isArray(request.images) || request.images.length < 1 || request.images.length > profile.maxImages)
+        throw new Error("images must contain 1 to " + profile.maxImages + " URLs");
+      images = request.images.map((url, index) => ({ url: optionalURL(url, "images[" + index + "]"), role: "reference_image" }));
+      if (new Set(images.map((item) => item.url)).size !== images.length) throw new Error("images contains a duplicate URL");
+    } else {
+      images = roleItems(request.image_with_roles, "image_with_roles", profile.imageRoles, profile.maxImages);
+    }
+  } else {
+    images = roleItems(request.image_with_roles, "image_with_roles", profile.imageRoles, profile.maxImages);
+  }
   const videos = roleItems(request.video_with_roles, "video_with_roles", ["reference_video"], profile.maxVideos);
   const audios = roleItems(request.audio_with_roles, "audio_with_roles", ["reference_audio"], profile.maxAudios);
   const firstFrames = images.filter((item) => item.role === "first_frame").length;
@@ -628,7 +643,11 @@ function normalizeSecondRequest(request, declaredModel, profile) {
   if (!profile.omitAspectRatio) body.aspect_ratio = aspectRatio;
   if (request.video_operation !== undefined) body.video_operation = "generate";
   if (request.size !== undefined) body.size = request.size;
-  if (request.image_with_roles !== undefined) body.image_with_roles = images;
+  if (profile.imageField === "images") {
+    if (images.length > 0) body.images = images.map((item) => item.url);
+  } else if (request.image_with_roles !== undefined) {
+    body.image_with_roles = images;
+  }
   if (request.video_with_roles !== undefined) body.video_with_roles = videos;
   if (request.audio_with_roles !== undefined) body.audio_with_roles = audios;
   return { body: body, profile: profile, videoInput: videos.length > 0 ? "video" : "none" };
@@ -724,6 +743,7 @@ function normalizePaiRequest(request, declaredModel, profile) {
   }
   if (request.model !== undefined && request.model !== declaredModel) throw new Error("model must match the selected model");
   if (request.n !== undefined) throw new Error("field n is not supported");
+  if (request.images !== undefined) throw new Error("field images is not supported");
   if (request.video_operation !== undefined && request.video_operation !== "generate") throw new Error("only video_operation generate is supported");
   if (request.resolution !== undefined) throw new Error("PAI model resolution is selected by the model ID; resolution must not be sent");
   if (request.size !== undefined) throw new Error("PAI model resolution is selected by the model ID; size must not be sent");
@@ -782,6 +802,7 @@ function normalizeRequest(request, declaredModel, profileModel) {
   }
   if (request.model !== undefined && request.model !== declaredModel) throw new Error("model must match the selected model");
   if (request.n !== undefined) throw new Error("field n is not supported");
+  if (request.images !== undefined) throw new Error("field images is not supported");
   if (request.video_operation !== undefined && request.video_operation !== "generate") throw new Error("only video_operation generate is supported");
   if (request.audio_with_roles !== undefined) throw new Error("audio_with_roles is not supported in phase 1");
   if (request.resolution !== undefined && request.resolution !== profile.resolution) throw new Error("resolution conflicts with the selected model");
