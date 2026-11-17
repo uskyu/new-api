@@ -72,6 +72,8 @@ var supplyVideoPaiCallModels = []string{
 	"seedance2-720p-once-2",
 	"seedance2-720p-once-3",
 	"seedance2.5-720p-once",
+	"seedance2.5-flash-480p-once-1",
+	"seedance2.5-flash-720p-once-1",
 	"wan3-720p-once",
 	"wan3-1080p-once",
 }
@@ -99,6 +101,9 @@ var supplyVideoPaiSecondModels = []string{
 	"seedance2.5-720p-second-2",
 	"seedance2.5-720p-second-3",
 	"seedance2.5-1080p-second-1",
+	"seedance2.5-flash-480p-second-1",
+	"seedance2.5-flash-720p-second-1",
+	"seedance2.5-flash-720p-second-2",
 	"wan3-480p-second-1",
 	"wan3-480p-second-2",
 	"wan3-720p-second-1",
@@ -205,7 +210,7 @@ func TestSupplyVideoManifestAndUsageProfiles(t *testing.T) {
 	models = append(models, supplyVideoVideoLineSecondModels...)
 	models = append(models, supplyVideoVideoLineCallModels...)
 	assert.Equal(t, models, plugin.Meta.Models)
-	assert.Equal(t, "1.4.0", plugin.Meta.Version)
+	assert.Equal(t, "1.5.0", plugin.Meta.Version)
 	assert.True(t, plugin.Meta.SupportsUpstream(jsplugin.UpstreamKindNewAPI))
 	assert.Equal(t, []string{"vendor", "new_api"}, plugin.Meta.Upstreams)
 	assert.ElementsMatch(t, []string{"cdn.paisio.online", "files.toapis.xyz", "ark-acg-cn-beijing.tos-cn-beijing.volces.com", "gateway.megarichglobal.com"}, plugin.Meta.AllowedHosts)
@@ -299,9 +304,16 @@ func TestSupplyVideoManifestAndUsageProfiles(t *testing.T) {
 		schema, examples := plugin.Meta.UsageForModel(model)
 		require.Contains(t, schema, "input_seconds", model)
 		require.Contains(t, schema, "output_seconds", model)
+		require.Contains(t, schema, "seconds", model)
+		require.Contains(t, schema, "reference_seconds", model)
 		assert.Equal(t, "second", schema["output_seconds"].Unit, model)
+		assert.Equal(t, "second", schema["seconds"].Unit, model)
+		assert.Equal(t, "second", schema["reference_seconds"].Unit, model)
 		require.Len(t, examples, 1, model)
-		assert.Equal(t, map[string]any{"output_seconds": int64(4), "input_seconds": int64(0)}, examples[0].Facts)
+		assert.Equal(t, map[string]any{
+			"seconds": int64(4), "reference_seconds": int64(0),
+			"output_seconds": int64(4), "input_seconds": int64(0),
+		}, examples[0].Facts)
 	}
 
 	for _, model := range supplyVideoBananaModels {
@@ -715,6 +727,8 @@ func TestSupplyVideoDecodeRequest(t *testing.T) {
 			maxVideos int
 		}{
 			{"Seedance 2.5", supplyVideo480WithVideo, 30, 10},
+			{"Seedance 2.5 Flash", "seedance2.5-flash-720p-second-1", 10, 5},
+			{"Seedance 2.5 Flash no-video", "seedance2.5-flash-720p-second-2", 10, 0},
 			{"Seedance 2.0", supplyVideo2WithVideo, 9, 3},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -812,7 +826,10 @@ func TestSupplyVideoDecodeRequest(t *testing.T) {
 				"model": "seedance2-mini-480p-second", "prompt": "a small boat", "seconds": float64(4),
 			}, decoded["requestBody"])
 			ctx := map[string]any{"model": "seedance2-mini-480p-second", "requestBody": decoded["requestBody"]}
-			assert.Equal(t, map[string]any{"output_seconds": float64(4), "input_seconds": float64(0)}, supplyVideoCall(t, plugin, "extractUsage", ctx))
+			assert.Equal(t, map[string]any{
+				"seconds": float64(4), "reference_seconds": float64(0),
+				"output_seconds": float64(4), "input_seconds": float64(0),
+			}, supplyVideoCall(t, plugin, "extractUsage", ctx))
 			ctx["usagePurpose"] = "billing_ratios"
 			assert.Equal(t, map[string]any{"seconds": float64(4)}, supplyVideoCall(t, plugin, "extractUsage", ctx))
 			submit := supplyVideoCall(t, plugin, "buildSubmitRequest", map[string]any{
@@ -1018,6 +1035,29 @@ func TestSupplyVideoDriverResponsesAndArtifacts(t *testing.T) {
 		}
 		facts = supplyVideoCall(t, plugin, "extractUsageOnComplete", nil, map[string]any{"status": "SUCCESS"}, body)
 		assert.Equal(t, map[string]any{"output_seconds": float64(8)}, facts)
+	})
+
+	t.Run("completed PAI per-second response exposes supplier fact names", func(t *testing.T) {
+		ctx := map[string]any{"model": "seedance2.5-flash-480p-second-1"}
+		body := map[string]any{
+			"status": "completed",
+			"usage":  map[string]any{"charge_type": "per_second", "output_seconds": 5, "input_seconds": 5.055},
+		}
+		facts := supplyVideoCall(t, plugin, "extractUsageOnComplete", ctx, map[string]any{"status": "SUCCESS"}, body)
+		assert.Equal(t, map[string]any{
+			"seconds": float64(5), "reference_seconds": 5.055,
+			"output_seconds": float64(5), "input_seconds": 5.055,
+		}, facts)
+
+		body = map[string]any{
+			"status": "completed",
+			"usage":  map[string]any{"seconds": 5, "reference_seconds": 6},
+		}
+		facts = supplyVideoCall(t, plugin, "extractUsageOnComplete", ctx, map[string]any{"status": "SUCCESS"}, body)
+		assert.Equal(t, map[string]any{
+			"seconds": float64(5), "output_seconds": float64(5),
+			"reference_seconds": float64(6), "input_seconds": float64(6),
+		}, facts)
 	})
 
 	t.Run("openai_video renderer omits upstream identity and media URLs", func(t *testing.T) {

@@ -44,6 +44,22 @@ const SECOND_USAGE_SCHEMA = {
   },
 };
 
+// PAI's per-second expressions use the supplier's own fact names. Keep the
+// output/input aliases above for existing models and add the supplier names so
+// its published expressions can be imported verbatim.
+const PAI_SECOND_USAGE_SCHEMA = Object.assign({}, SECOND_USAGE_SCHEMA, {
+  seconds: {
+    type: "number",
+    unit: "second",
+    description: { en: "Video generation unit price", zh: "视频生成单价" },
+  },
+  reference_seconds: {
+    type: "number",
+    unit: "second",
+    description: { en: "Reference video unit price", zh: "参考视频单价" },
+  },
+});
+
 // Family-level request contract shared by the per-second models. Resolution is
 // locked by the model ID, exactly as for the token models above.
 const SECOND_FAMILIES = {
@@ -249,6 +265,11 @@ const PAI_MODELS = {
   "seedance2.5-720p-second-2": { kind: "second", minSeconds: 4, maxSeconds: 30 },
   "seedance2.5-720p-second-3": { kind: "second", minSeconds: 4, maxSeconds: 30 },
   "seedance2.5-1080p-second-1": { kind: "second", minSeconds: 5, maxSeconds: 30 },
+  "seedance2.5-flash-480p-second-1": { kind: "second", minSeconds: 5, maxSeconds: 30, flash: true },
+  "seedance2.5-flash-720p-second-1": { kind: "second", minSeconds: 5, maxSeconds: 30, flash: true },
+  "seedance2.5-flash-720p-second-2": { kind: "second", minSeconds: 5, maxSeconds: 30, flash: true, maxVideos: 0 },
+  "seedance2.5-flash-480p-once-1": { kind: "call", minSeconds: 5, maxSeconds: 30, flash: true },
+  "seedance2.5-flash-720p-once-1": { kind: "call", minSeconds: 5, maxSeconds: 30, flash: true },
   "wan3-480p-second-1": { kind: "second", minSeconds: 2, maxSeconds: 30 },
   "wan3-480p-second-2": { kind: "second", minSeconds: 2, maxSeconds: 30 },
   "wan3-720p-second-1": { kind: "second", minSeconds: 2, maxSeconds: 30 },
@@ -367,11 +388,11 @@ function usageProfiles() {
   });
   profiles.push({
     models: PAI_SECOND_MODELS,
-    schema: SECOND_USAGE_SCHEMA,
+    schema: PAI_SECOND_USAGE_SCHEMA,
     examples: [
       {
         label: "4s output · no input video",
-        facts: { output_seconds: 4, input_seconds: 0 },
+        facts: { seconds: 4, reference_seconds: 0, output_seconds: 4, input_seconds: 0 },
       },
     ],
   });
@@ -410,7 +431,7 @@ export const meta = {
     en: "Seedance, video-line and Nano Banana generation through a supplier gateway",
     zh: "通过供应商网关生成 Seedance、视频线路和 Nano Banana 内容",
   },
-  version: "1.4.0",
+  version: "1.5.0",
   author: { name: "QuantumNous" },
   models: Object.keys(MODEL_RESOLUTIONS).concat(
     Object.keys(SECOND_MODELS),
@@ -457,19 +478,28 @@ function isVideoLineCallModel(model) {
   return typeof model === "string" && Object.prototype.hasOwnProperty.call(VIDEO_LINE_CALL_MODELS, model);
 }
 
+function isPaiSecondModel(model) {
+  return (
+    typeof model === "string" &&
+    Object.prototype.hasOwnProperty.call(PAI_MODELS, model) &&
+    PAI_MODELS[model].kind === "second"
+  );
+}
+
 function modelProfile(model) {
   if (typeof model === "string" && Object.prototype.hasOwnProperty.call(PAI_MODELS, model)) {
     const record = PAI_MODELS[model];
     const seedance25 = model.startsWith("seedance2.5-");
+    const flash = record.flash === true;
     return {
       billing: record.kind === "call" ? "pai_call" : "pai_second",
       family: "pai",
       minSeconds: record.minSeconds,
       maxSeconds: record.maxSeconds,
       rangeUnconfirmed: record.rangeUnconfirmed === true,
-      maxImages: seedance25 ? 30 : 9,
-      maxVideos: seedance25 ? 10 : 3,
-      maxAudios: seedance25 ? 10 : 3,
+      maxImages: flash ? 10 : seedance25 ? 30 : 9,
+      maxVideos: record.maxVideos !== undefined ? record.maxVideos : flash ? 5 : seedance25 ? 10 : 3,
+      maxAudios: flash ? 5 : seedance25 ? 10 : 3,
       imageRoles: ["first_frame", "last_frame", "reference_image"],
       videoMode: "optional",
       framePair: true,
@@ -978,7 +1008,12 @@ export function extractUsage(ctx) {
     if (ctx.usagePurpose === "billing_ratios") {
       return { seconds: normalized.body.seconds };
     }
-    return { output_seconds: normalized.body.seconds, input_seconds: 0 };
+    return {
+      seconds: normalized.body.seconds,
+      reference_seconds: 0,
+      output_seconds: normalized.body.seconds,
+      input_seconds: 0,
+    };
   }
   if (normalized.profile.billing === "video_line_second") {
     return { seconds: Number(normalized.body.seconds) };
@@ -1054,6 +1089,7 @@ export function extractUsageOnComplete(ctx, taskResult, body) {
     console.log("warning: completed video response has no usable usage; actual billing facts were not reported");
     return {};
   }
+  const paiSecond = isPaiSecondModel(model);
   const outputSeconds = validSeconds(usage.output_seconds, false);
   if (outputSeconds !== null) {
     const facts = { output_seconds: outputSeconds };
@@ -1063,7 +1099,25 @@ export function extractUsageOnComplete(ctx, taskResult, body) {
     } else {
       console.log("warning: completed per-second video response has no valid usage.input_seconds; input video time was not reported");
     }
+    if (paiSecond) {
+      facts.seconds = outputSeconds;
+      if (inputSeconds !== null) facts.reference_seconds = inputSeconds;
+    }
     return facts;
+  }
+  if (paiSecond) {
+    const usageSeconds = validSeconds(usage.seconds, false);
+    if (usageSeconds !== null) {
+      const facts = { seconds: usageSeconds, output_seconds: usageSeconds };
+      const referenceSeconds = validSeconds(usage.reference_seconds, true);
+      if (referenceSeconds !== null) {
+        facts.reference_seconds = referenceSeconds;
+        facts.input_seconds = referenceSeconds;
+      } else {
+        console.log("warning: completed per-second video response has no valid usage.reference_seconds; reference video time was not reported");
+      }
+      return facts;
+    }
   }
   const tokens = validTotalTokens(body);
   if (tokens === null) {
