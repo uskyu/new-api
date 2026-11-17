@@ -431,7 +431,7 @@ export const meta = {
     en: "Seedance, video-line and Nano Banana generation through a supplier gateway",
     zh: "通过供应商网关生成 Seedance、视频线路和 Nano Banana 内容",
   },
-  version: "1.5.0",
+  version: "1.5.1",
   author: { name: "QuantumNous" },
   models: Object.keys(MODEL_RESOLUTIONS).concat(
     Object.keys(SECOND_MODELS),
@@ -1008,11 +1008,16 @@ export function extractUsage(ctx) {
     if (ctx.usagePurpose === "billing_ratios") {
       return { seconds: normalized.body.seconds };
     }
+    // The supplier does not report output/input seconds for the Flash
+    // per-second models, so a reference request cannot settle on measured
+    // reference time. Reserve the requested generation seconds as the
+    // reference estimate; completion usage, when present, replaces it.
+    const referenceSeconds = normalized.videoInput === "video" ? normalized.body.seconds : 0;
     return {
       seconds: normalized.body.seconds,
-      reference_seconds: 0,
+      reference_seconds: referenceSeconds,
       output_seconds: normalized.body.seconds,
-      input_seconds: 0,
+      input_seconds: referenceSeconds,
     };
   }
   if (normalized.profile.billing === "video_line_second") {

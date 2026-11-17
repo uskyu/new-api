@@ -210,7 +210,7 @@ func TestSupplyVideoManifestAndUsageProfiles(t *testing.T) {
 	models = append(models, supplyVideoVideoLineSecondModels...)
 	models = append(models, supplyVideoVideoLineCallModels...)
 	assert.Equal(t, models, plugin.Meta.Models)
-	assert.Equal(t, "1.5.0", plugin.Meta.Version)
+	assert.Equal(t, "1.5.1", plugin.Meta.Version)
 	assert.True(t, plugin.Meta.SupportsUpstream(jsplugin.UpstreamKindNewAPI))
 	assert.Equal(t, []string{"vendor", "new_api"}, plugin.Meta.Upstreams)
 	assert.ElementsMatch(t, []string{"cdn.paisio.online", "files.toapis.xyz", "ark-acg-cn-beijing.tos-cn-beijing.volces.com", "gateway.megarichglobal.com"}, plugin.Meta.AllowedHosts)
@@ -870,6 +870,21 @@ func TestSupplyVideoDecodeRequest(t *testing.T) {
 			require.NoError(t, err)
 			body := decoded["requestBody"].(map[string]any)
 			require.Len(t, body["image_with_roles"], 1)
+		})
+
+		t.Run("PAI reference seconds reserve the requested duration", func(t *testing.T) {
+			decoded, err := supplyVideoDecode(t, plugin, "seedance2.5-flash-480p-second-1", map[string]any{
+				"prompt": "a boat", "seconds": 5,
+				"video_with_roles": supplyVideoRoles("reference_video", 1),
+			})
+			require.NoError(t, err)
+			facts := supplyVideoCall(t, plugin, "extractUsage", map[string]any{
+				"model": "seedance2.5-flash-480p-second-1", "requestBody": decoded["requestBody"],
+			})
+			assert.Equal(t, map[string]any{
+				"seconds": float64(5), "reference_seconds": float64(5),
+				"output_seconds": float64(5), "input_seconds": float64(5),
+			}, facts)
 		})
 
 		t.Run("happyhorse edit uses the video-edit contract", func(t *testing.T) {
