@@ -1,8 +1,14 @@
 # Harness × New API｜A3 模型目录结构更新
 
-**日期**：2026-11-14（2026-11-08 初版，2026-11-14 更新）
+**日期**：2026-11-14（2026-11-08 初版，2026-11-14 更新，2026-11-17 增量补充）
 **适用对象**：Harness 后端与模型列表页面
 **变更范围**：仅模型目录 A3 及模型选择方式；B1/B3 账本接口沿用现有对接规范。
+
+> 2026-11-17 增量（部署 revision `b04024190` 后实测 `GET /v1/models`）：`catalog_version` 由 `"7"` 变为 `"10"`。
+> 当前各资源池数量为：`chat` 26 个、`video` 83 个、`plan` 80 个、`image` 10 个、`audio` 0 个。
+> `video` 池新增 3 个 Seedance 2.5 Flash 按秒规格，`plan` 池新增 2 个 Seedance 2.5 Flash 按次规格；
+> 新增模型均已配置价格表达式，A3 只返回可路由且可计费的模型。完整模型 ID 与最终集合以实际响应为准，
+> 价格见下文“2026-11-17 增量”表。
 
 > 2026-11-14 更新：`image` 池已配置 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana），
 > 返回样例中的 `catalog_version` 为 `"7"`；`audio` 池仍为空。图片调用方式见
@@ -21,6 +27,22 @@
 
 > 这里取消的是旧档位和列表二级分组，并不是删除网关内部按产品线配置的资源池。各资源池是否可调用，以对应 `models[]` 是否存在可用模型及实际接口为准。
 
+### 2026-11-17 增量
+
+2026-11-17 部署 revision `b04024190` 后实测 `GET /v1/models`，`catalog_version = "10"`，新增以下 5 个 Seedance 2.5 Flash 规格：
+
+| 模型 ID | 资源池 | 计费方式 | 价格摘要 |
+| --- | --- | --- | --- |
+| `seedance2.5-flash-480p-second-1` | `video` | 按秒 | 0.05 / 生成秒；带参考两段式 0.09 + 0.05 |
+| `seedance2.5-flash-720p-second-1` | `video` | 按秒 | 0.06 / 生成秒；带参考 0.13 + 0.065 |
+| `seedance2.5-flash-720p-second-2` | `video` | 按秒 | 0.06 / 生成秒 |
+| `seedance2.5-flash-480p-once-1` | `plan` | 按次 | 0.78 / 条 |
+| `seedance2.5-flash-720p-once-1` | `plan` | 按次 | 0.95 / 条 |
+
+- 3 个 `second` 规格进入 `video` 池（按秒计费），2 个 `once` 规格进入 `plan` 池（按次计费）；调用头分别沿用 `X-Route-Group: video` 与 `X-Route-Group: plan`。
+- 这 5 个模型均已配置价格表达式；A3 只返回**可路由且可计费**的模型，未配置价格或暂无可用渠道的模型不会出现在 `models[]` 中。
+- 本次实测各池数量：`chat` 26、`video` 83、`plan` 80、`image` 10、`audio` 0。模型 ID 拼写与完整集合以实际响应为准。
+
 ## 2. 请求示例
 
 ```http
@@ -32,7 +54,9 @@ Authorization: Bearer <HARNESS_JWT>
 
 ## 3. 返回样例
 
-以下为 **2026-11-14 的 82 实例真实样例**：`chat` 15 个模型，`video` 8 个 PAI 按次模型，`image` 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana），`plan` 22 个 TA token 模型；`audio` 为空。`models` 按模型 id 字典序返回；模型 ID、版本及 ETag 以实际联调环境响应为准，模型集合会随渠道与价格变化。
+以下为 **2026-11-14 的 82 实例真实样例（历史样例，已过时）**：`chat` 15 个模型，`video` 8 个 PAI 按次模型，`image` 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana），`plan` 22 个 TA token 模型；`audio` 为空。`models` 按模型 id 字典序返回；模型 ID、版本及 ETag 以实际联调环境响应为准，模型集合会随渠道与价格变化。
+
+> 历史样例提示：该 JSON 仅用于说明响应**结构**，其中 `catalog_version` 为 `"7"`、各池模型数量均为 2026-11-14 的旧值。当前应以实际 `GET /v1/models` 响应为准（2026-11-17 实测 `catalog_version = "10"`，各池数量见上文“2026-11-17 增量”），新增模型见上文增量表，本节 JSON 不再逐一重写。
 
 ```json
 {

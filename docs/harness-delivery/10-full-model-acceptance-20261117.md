@@ -1,7 +1,7 @@
 # 全模型验收报告与接入样例（2026-11-17）
 
-**版本**：V0.12（2026-11-17）
-**对应网关版本**：`harness-api-20261116-df87870`（revision `df8787085`）
+**版本**：V0.13（2026-11-17）
+**对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261117-b040241`（revision `b04024190`）
 **适用对象**：Harness 后端联调、供应商问题跟踪
 **测试范围**：语言、图片、视频全部当前模型；视频参考图、参考视频、参考音频、首尾帧和视频编辑
 
@@ -15,8 +15,8 @@
 | --- | --- | --- | --- |
 | 语言 | 35/38 条调用记录 | 3 | 3 条是 `国模号池1` 上游 token 不服务的模型（预期 503），不是网关问题 |
 | 图片 | 10/10 | 0 | GPT Image 4/4、Nano Banana 6/6 |
-| 视频 | 55/61 个模型 | 6 | 全部为上游阻塞：MiniMax 4、Wan 1080P 按次 1、Seedance 720P 按秒 1 |
-| 参考素材 | 通过 | 部分模型上游失败 | Seedance 参考图/音频、Kling 参考视频、Omni/MiniMax 首尾帧、HappyHorse 编辑均已按对应合同提交；失败集中在 MiniMax 上游和 `seedance2-720p-second-1` 上游生成 |
+| 视频 | 57/66 个模型 | 6 阻塞 + 3 未测 | 6 个上游阻塞：MiniMax 4、Wan 1080P 按次 1、Seedance 720P 按秒 1；新增 Flash 5 个中已测 2 个，另 3 个未测（见 4.5） |
+| 参考素材 | 通过 | 部分模型上游失败 | Seedance 参考图/音频、Kling 参考视频、Omni/MiniMax 首尾帧、HappyHorse 编辑均已按对应合同提交；Flash 参考视频生成通过，但上游不返回参考秒（见 4.5）；失败集中在 MiniMax 上游和 `seedance2-720p-second-1` 上游生成 |
 
 **网关侧结论**：`invalid api platform: 60` 已修复；所有当前模型已声明到 `supplyvideo` 插件并可通过对应渠道提交。剩余失败均为上游供应网关/供应商问题，不是网关未声明或未路由。
 
@@ -233,14 +233,14 @@ Muse：
 
 | 分组 | 模型数 | 通过 | 未通过 | 说明 |
 | --- | --- | --- | --- | --- |
-| `pai-seedance-按秒` | 22 | 21 | 1 | `seedance2-720p-second-1` 上游生成失败；其余通过，含新增 `seedance2-480p-second-3`、`seedance2.5-1080p-second-1` |
-| `pai-seedance-按次` | 7 | 7 | 0 | 含新增 `seedance2-fast-720p-once-3/4` |
+| `pai-seedance-按秒` | 25 | 22 | 1 | `seedance2-720p-second-1` 上游生成失败；其余通过，含新增 `seedance2-480p-second-3`、`seedance2.5-1080p-second-1`；Flash `720p-second-1/2` 未测 |
+| `pai-seedance-按次` | 9 | 8 | 0 | 含新增 `seedance2-fast-720p-once-3/4`、Flash `720p-once-1`；Flash `480p-once-1` 未测 |
 | `pai-wan3.0-按秒` | 5 | 5 | 0 | `wan3-480p/720p/1080p-second` 全部通过 |
 | `pai-wan3.0-按次` | 2 | 1 | 1 | `wan3-720p-once` 通过；`wan3-1080p-once` 上游任务停在 95% |
 | `video-line-v1-second` | 5 | 1 | 4 | `muse-video-720p` 通过；MiniMax 4 个上游 401 |
 | `video-line-v1-once` | 6 | 6 | 0 | Omni 6 个全部通过，含首尾帧 |
 | `TA-其他视频模型分组` | 14 | 14 | 0 | Wan3.0-video 6、Kling 4、HappyHorse 3、Grok 1 全部通过 |
-| **合计** | **61** | **55** | **6** | 6 个均为上游阻塞 |
+| **合计** | **66** | **57** | **6** | 6 个上游阻塞；另 3 个 Flash 规格未测 |
 
 ### 4.4 参考素材结果
 
@@ -255,6 +255,22 @@ Muse：
 | 首尾帧 | `gemini-omni-1.1-flash-1080p-10s-first-last-frame` | 通过（6.47 MB MP4） |
 | 首尾帧 | `MiniMax-H3-Max-480p-first-last-frame` | 上游 401，未通过 |
 | 视频编辑 | `happyhorse1.1-720p-edit-second` | 通过（7.51 MB MP4） |
+| 参考视频 | `seedance2.5-flash-480p-second-1` | 生成通过（4.04 MB MP4）；上游完成响应不返回 `usage`，B3 按请求秒数估算参考秒，结算 0.70 USD（见 4.5） |
+
+### 4.5 Seedance 2.5 Flash 实测（2026-11-17 新增）
+
+2026-11-17 部署 `harness-api-20261117-b040241`（revision `b04024190`）后实测 3 笔：
+
+| 用例 | 模型 | 结果 | 下载 | B3 |
+| --- | --- | --- | --- | --- |
+| 按次 720P | `seedance2.5-flash-720p-once-1` | completed | 6,139,463 bytes MP4 | 0.95 USD |
+| 按秒 480P 无参考 | `seedance2.5-flash-480p-second-1` | completed | 4,529,223 bytes MP4 | 0.25 USD（5×0.05） |
+| 按秒 480P 带参考 | `seedance2.5-flash-480p-second-1` | completed | 4,037,357 bytes MP4 | 0.70 USD（5×0.09 + 5×0.05） |
+
+- 3 笔 B1 均为 `usage_source=unavailable`、Token 字段 `null`、`split_known=false`；费用以 B3 为准。
+- **上游用量缺口**：Flash 按秒任务完成后，供应网关的 `/v1/videos/{id}` 和 `/v1/tasks/{id}` 都不返回 `usage`；直连上游用 `extra_videos` 提交同样不返回。因此参考秒无法按上游实测值结算。
+- 网关当前在带参考请求中按请求 `seconds` 估算参考秒并预扣/结算；上游后续返回 `input_seconds` 时以实际值为准。上例供应商公式按 5.055 秒参考、`ceil(5.055)=6` 计算应为 0.75 USD，当前 0.70 USD 少 0.05 USD。
+- `seedance2.5-flash-480p-once-1`、`seedance2.5-flash-720p-second-1`、`seedance2.5-flash-720p-second-2` 本轮未测；不要写成已验收。
 
 ---
 
@@ -265,6 +281,7 @@ Muse：
 | `MiniMax-H3-Max-480p` / `-first-last-frame` / `-768p` / `-768p-first-last-frame` | 提交返回 401 `fail_to_fetch_task`，内层 `unauthorized` | 直连供应网关 `POST /v1/videos` 同样复现；同一 `video-line-v1-second` 的 Muse 通过 | 供应网关修复 MiniMax 线路后再测 |
 | `wan3-1080p-once` | 上游任务停在 95%，超过 40 分钟 | `wan3-720p-once` 同一渠道通过；重试仍停在 95% | 供应网关检查该规格 |
 | `seedance2-720p-second-1` | 上游 `video_generation_failed`（“视频生成失败，请稍后重试”） | 同组其他 Seedance 模型通过；`seedance2-480p-second-1` 的参考图/音频通过 | 供应网关检查该规格；联调可先用 480P/其他 720P 规格 |
+| `seedance2.5-flash-*-second-*` | 完成响应不返回 `usage`，参考秒无法按实际值结算 | `/v1/videos/{id}` 与 `/v1/tasks/{id}` 均无 usage；直连上游改用 `extra_videos` 同样无 | 供应网关补 `usage.input_seconds` / `reference_seconds`；当前网关按请求 `seconds` 估算参考秒并结算 |
 | `国模号池1` 的 `deepseek-flash` / `deepseek-v4-pro` / `kimi-k3.1-pro-highspeed` | 503 `model_not_found` | 上游 token 的 `/v1/models` 不含这三个模型 | 使用 `国模官方直连`，或后续配置日期别名映射 |
 
 ---
@@ -273,7 +290,7 @@ Muse：
 
 - 每个模型至少一次真实提交；视频任务轮询到终态后下载完整内容，并检查 MP4 `ftyp`；图片解码后检查 PNG/JPEG 文件头。
 - 测试 token 按分组创建，测试结束后删除；本文不包含任何 token 或上游密钥。
-- 测试覆盖的网关版本：`harness-api-20261116-df87870`（revision `df8787085`）。
+- 测试覆盖的网关版本：`harness-api-20261116-df87870`（revision `df8787085`，主体验收）与 `harness-api-20261117-b040241`（revision `b04024190`，Flash 复测）。
 - 语言/图片/视频的通过数以实际 HTTP 200 + 有效内容为准；上游任务失败、上游超时和上游 401 单独列为“上游阻塞”，不混入网关通过数。
 - 参考图/音频/视频使用公开可访问的 HTTPS 素材；Kling 参考视频必须使用 720P 级 MP4。
 
@@ -285,4 +302,5 @@ Muse：
 2. 图片按 B3 `settled` 作为完成和成本依据；B1 只作用量参考。
 3. 视频提交后保存 `task_id`，轮询到 `completed` 再下载；失败任务先查上游原因，不要盲目重提。
 4. MiniMax、`wan3-1080p-once`、`seedance2-720p-second-1` 作为已知上游阻塞，联调时先跳过或替换为同组可用模型。
-5. 需要新增模型或调整价格时，以 A3 返回的模型 id 和实际 B3 金额为准。
+5. Seedance 2.5 Flash 带参考任务当前上游不返回参考秒，网关按请求 `seconds` 估算并结算；联调对账时不要把 B3 金额与上游实际参考秒公式逐分对齐，待上游补 `usage` 后再校准。
+6. 需要新增模型或调整价格时，以 A3 返回的模型 id 和实际 B3 金额为准。

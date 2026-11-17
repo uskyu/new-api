@@ -1,7 +1,7 @@
 # 视频调用样例与模型差异
 
-**版本**：V0.12（2026-11-17 修订）
-**对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261116-df87870`
+**版本**：V0.13（2026-11-17 修订）
+**对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261117-b040241`
 **日期**：2026-11-14（2026-11-15、2026-11-17 修订）
 **适用对象**：Harness 后端与视频调用联调
 
@@ -25,8 +25,8 @@
 
 当前模型池与模型 id 以 [A3 模型目录更新](./A3-model-catalog-update.md) 为准：
 
-- `video` 池：8 个 PAI 按次模型
-- `plan` 池：22 个 TA token 模型
+- `video` 池：按秒视频模型（PAI 按秒、TA 按秒、video-line 按秒线路）
+- `plan` 池：按次视频模型（TA token、PAI 按次、Wan 按次、video-line 按次）
 - `image` 池已配置 10 个图片模型（见 [09-image-api-examples.md](./09-image-api-examples.md)）；`audio` 仍为空
 
 **池选择头**：
@@ -43,8 +43,8 @@
 
 | 类型 | 代表模型 | 计费 | 客户端 `seconds` | 媒体输入 | `resolution` / `size` | 完成后的 usage |
 | --- | --- | --- | --- | --- | --- | --- |
-| PAI 按次 | `seedance2-fast-720p-once-1` | 按次 | 整数，按模型 4–15 或 1–60/5–30 | 不支持 | 不允许发送 | 通常无 `usage`；B1 为 `usage_source=unavailable`、Token 字段为 `null` |
-| PAI 按秒 | `seedance2-mini-480p-second` | 按秒 | 整数，按模型范围 | 不支持 | 不允许发送 | 可能无 `usage`；B1 为 `usage_source=unavailable`、Token 字段为 `null`；按请求秒数计费 |
+| PAI 按次 | `seedance2-fast-720p-once-1` | 按次 | 整数，按模型 4–15 或 1–60/5–30 | 按模型声明；Seedance 2.5 Flash 按次支持参考素材（≤10 图/5 视频/5 音频） | 不允许发送 | 通常无 `usage`；B1 为 `usage_source=unavailable`、Token 字段为 `null` |
+| PAI 按秒 | `seedance2-mini-480p-second` | 按秒 | 整数，按模型范围 | 已支持参考图/视频/音频（按模型声明） | 不允许发送 | 可能无 `usage`；B1 为 `usage_source=unavailable`、Token 字段为 `null`；有 `usage` 时按 `output_seconds` / `input_seconds` 结算，无 `usage` 时按请求生成秒数估算参考秒 |
 | TA token | `seedance2-mini-480p-token-no-video` | 按 token | 整数，4–15；2.5 系列 4–30 | 支持图片/参考视频 | 可选，但必须与模型 id 一致 | `total_tokens` |
 | TA 按秒 | `wan3.0-video-480p` | 按输出/输入秒 | 整数，按 family 范围；`wan` 支持 `-1` 自动 | 按 family 限制 | 由模型 id 锁定 | `output_seconds` / `input_seconds` |
 
@@ -52,16 +52,21 @@
 
 - `duration` 是可选字段；如果发送，必须与 `seconds` 相等。PAI 上游需要
   `seconds` 字符串 + `duration` 数字，由网关自动转换，客户端无需关心。
-- PAI 模型不接受 `resolution`、`size`、`image_with_roles`、`video_with_roles`、
-  `audio_with_roles`；分辨率由模型 id 决定。
+- PAI 模型仍不接受 `resolution`、`size`，分辨率由模型 id 锁定；PAI 按秒已支持
+  `image_with_roles` / `video_with_roles` / `audio_with_roles`，PAI 按次以模型声明
+  为准（Seedance 2.5 Flash 按次声明支持参考素材，最多 10 图 / 5 视频 / 5 音频）。
 - TA token 模型的分辨率也由模型 id 决定；发送冲突的 `resolution` / `size` 会被
   拒绝。`size` 只接受 `1280x720` / `720x1280`，且只对 720p 模型有效。
 - `with-video` 模型必须提供至少一个 `reference_video`；`no-video` 模型拒绝参考视频。
 - TA token 当前不支持 `audio_with_roles`；TA 按秒模型按 family 支持部分音频输入。
+- PAI 按秒有 `usage` 时按 `output_seconds` / `input_seconds` 结算；Seedance 2.5
+  Flash `second-1` 带参考时，上游当前完成响应不返回 `usage`，网关按请求
+  `seconds` 估算参考秒并按两段式价格结算；上游后续返回实际 `input_seconds`
+  时以实际值为准。
 
 ---
 
-## 3. 样例 A：PAI 按次模型（video 池）
+## 3. 样例 A：PAI 按次模型（plan 池）
 
 以 `seedance2-fast-720p-once-1` 为例。该模型最少 4 秒、最多 15 秒；本例用 5 秒。
 
@@ -70,7 +75,7 @@ curl -sS -X POST "http://<gateway>/v1/videos" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "X-Harness-Request-Id: hrq_video_pai_001" \
   -H "X-Harness-Run-Id: run_video_pai_001" \
-  -H "X-Route-Group: video" \
+  -H "X-Route-Group: plan" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "seedance2-fast-720p-once-1",
@@ -270,8 +275,10 @@ TA 按秒模型的 `seconds` 范围、aspect 和素材限制按 family 不同：
 }
 ```
 
-PAI 按秒与 PAI 按次使用同一请求形状：只接受 `model` / `prompt` / `seconds` /
-可选 `aspect_ratio`；不接受媒体、分辨率或尺寸。
+PAI 按秒与 PAI 按次使用同一基础请求形状：`model` / `prompt` / `seconds` /
+可选 `aspect_ratio`；按秒模型还接受 `image_with_roles` / `video_with_roles` /
+`audio_with_roles`，按次模型以模型声明为准。两者都不接受 `resolution` / `size`，
+分辨率由模型 id 锁定。
 
 ---
 
@@ -306,8 +313,8 @@ PAI 按秒与 PAI 按次使用同一请求形状：只接受 `model` / `prompt` 
 1. **PAI 的 `seconds` 在客户端仍是整数。** 网关会在提交时转成上游需要
    `seconds` 字符串 + `duration` 数字；不要自己传字符串 `seconds` 或额外构造
    `duration`（传了也必须与 `seconds` 相等）。
-2. **PAI 不接受媒体和分辨率。** `resolution` / `size` / `image_with_roles` /
-   `video_with_roles` / `audio_with_roles` 会直接 400；分辨率由模型 id 决定。
+2. **PAI 不接受 `resolution` / `size`。** 分辨率由模型 id 决定；PAI 按秒已支持
+   `image_with_roles` / `video_with_roles` / `audio_with_roles`，按次以模型声明为准。
 3. **TA token 的 `resolution` / `size` 必须和模型 id 一致。** 例如
    `seedance2-mini-480p-token-no-video` 只能 480p；传 `720p` 会 400。最稳妥的做法
    是直接省略这两个字段。
@@ -319,7 +326,9 @@ PAI 按秒与 PAI 按次使用同一请求形状：只接受 `model` / `prompt` 
    `Range` 的 GET 正常（可返回 206）。PAI 的 HEAD 正常。
 7. **PAI 完成响应可能没有 `usage`。** 此时 B1 为 `usage_source=unavailable`，
    Token 字段为 `null`，不要据此判断免费；按次/按秒的价格和结算在网关 B3 账本里。
-   PAI 按秒当前按请求秒数计费，后续如果上游返回实际秒数再切换。
+   PAI 按秒有 `usage` 时按 `output_seconds` / `input_seconds` 结算；Flash `second-1`
+   带参考时上游当前不返回 `usage`，网关按请求 `seconds` 估算参考秒并按两段式价格
+   结算；上游后续返回实际 `input_seconds` 时以实际值为准。
 8. **`capabilities` 是池级汇总。** 不能拿它判断池内每个模型都支持 `tools` 等能力；
    视频池当前 `capabilities` 为空。
 9. **`models` 是字典序数组。** A3 返回的模型顺序不等于后台渠道配置顺序；不要依赖
@@ -418,3 +427,95 @@ Muse：
   `unauthorized`；网关已声明，直连上游复现。
 - `wan3-1080p-once`：上游任务停在 95%；`wan3-720p-once` 通过。
 - `seedance2-720p-second-1`：上游生成失败；同组其他 Seedance 模型通过。
+
+---
+
+## 10. Seedance 2.5 Flash（2026-11-17 新增）
+
+2026-11-16 供应侧新增 5 个已启用的 Seedance 2.5 Flash 规格，2026-11-17 同步到本文。
+清晰度由模型 id 锁定，客户端不要再传 `resolution` / `size`。配置启用不等于生成、
+健康或计费已全量验收；下面的价格与边界以当前生效配置为准。
+
+### 10.1 模型与价格
+
+| 模型 | 池 | 价格（USD，分组倍率 1 已含） | 参考视频 |
+| --- | --- | --- | --- |
+| `seedance2.5-flash-480p-second-1` | `video` | 无参考 0.05/生成秒；带参考 0.09×生成秒 + ceil(实际参考总秒)×0.05 | 最多 5 段（能力声明） |
+| `seedance2.5-flash-720p-second-1` | `video` | 无参考 0.06/生成秒；带参考 0.13×生成秒 + ceil(实际参考总秒)×0.065 | 最多 5 段（能力声明） |
+| `seedance2.5-flash-720p-second-2` | `video` | 0.06/生成秒 | 不支持 |
+| `seedance2.5-flash-480p-once-1` | `plan` | 0.78/条 | 最多 5 段（能力声明） |
+| `seedance2.5-flash-720p-once-1` | `plan` | 0.95/条 | 最多 5 段（能力声明） |
+
+按秒模型的参考秒由服务端计量，不能用“总时长 × 单一单价”估算；按次模型每次生成
+计 1 条，价格不乘秒数。上游当前对 Flash 按秒任务的完成响应不返回 `usage`，网关在
+带参考请求中按请求 `seconds` 估算参考秒，先按两段式价格预扣/结算；上游后续返回
+实际 `input_seconds` 时以实际值为准。按次模型的参考素材不额外收费为能力声明，未做
+本模型账单实测。
+
+### 10.2 请求规则
+
+- 仍使用统一入口 `POST /v1/videos`；按秒模型带 `X-Route-Group: video`，按次模型
+  带 `X-Route-Group: plan`。
+- `seconds` 为整数，5–30。
+- 图片最多 10 张（`image_with_roles`）、音频最多 5 段（`audio_with_roles`）；
+  参考视频除 `720p-second-2` 外最多 5 段（`video_with_roles`）。以上均为能力声明，
+  未做全组合实测。
+- `seedance2.5-flash-720p-second-2` 不支持参考视频，传 `video_with_roles` 会被拒绝。
+- 不接受 `resolution` / `size`；清晰度由模型 id 锁定。
+- 按次价格不乘秒数；不要给按次模型套用按秒计费表达式。
+
+### 10.3 示例
+
+按次 720p（`plan` 池，0.95 USD/条，不乘秒）：
+
+```json
+{
+  "model": "seedance2.5-flash-720p-once-1",
+  "prompt": "A hummingbird hovering beside a red flower, macro shot",
+  "seconds": 5
+}
+```
+
+按秒 480p，无参考（`video` 池，0.05×5 = 0.25 USD）：
+
+```json
+{
+  "model": "seedance2.5-flash-480p-second-1",
+  "prompt": "A paper lantern drifting over a night river, cinematic",
+  "seconds": 5
+}
+```
+
+按秒 480p，带参考视频（`video` 池）：
+
+```json
+{
+  "model": "seedance2.5-flash-480p-second-1",
+  "prompt": "Keep the subject and camera motion, replace the scene with a neon city at night",
+  "seconds": 5,
+  "video_with_roles": [
+    {
+      "url": "https://cdn.example.com/reference.mp4",
+      "role": "reference_video"
+    }
+  ]
+}
+```
+
+供应网关的参考视频历史样例使用 `extra_videos`（1 段视频 URL，prompt 中用
+`@Video1` 指代）；下游合同统一走 `video_with_roles` + `role=reference_video`，
+不要传 `extra_videos`。
+
+计费示例：生成 5 秒 + 单段 5.055 秒参考，`ceil(5.055)=6`；480P 为
+5×0.09 + 6×0.05 = 0.75 USD，720P 为 5×0.13 + 6×0.065 = 1.04 USD。上游当前不返回
+Flash 的参考秒，网关按请求 `seconds` 估算：5 秒生成 + 5 秒参考估算，480P 为
+5×0.09 + 5×0.05 = 0.70 USD；上游补 `input_seconds` 后按实际值校准。该示例是公式
+计算，不是新增付费扣账实测；实际金额以 B3 为准。
+
+---
+
+## 变更记录
+
+| 版本 | 日期 | 变更 |
+| --- | --- | --- |
+| V0.13 | 2026-11-17 | 新增第 10 节 Seedance 2.5 Flash（3 个按秒 / 2 个按次）的池、价格、请求规则与 3 个 JSON 样例；修正第 2 节 PAI 参考素材输入与按秒结算描述。 |

@@ -1,7 +1,8 @@
 # Harness 网关接口接入指南
 
-**版本**：V0.12（2026-11-17 修订）
-**对应网关版本**：`harness-api` 分支；已部署 82 实例 `harness-api-20261116-df87870`，全模型验收见 `10-full-model-acceptance-20261117.md`
+**版本**：V0.13（2026-11-17 修订）
+**对应网关版本**：`harness-api` 分支；已部署 82 实例 `harness-api-20261117-b040241`（revision `b04024190`），全模型验收见 `10-full-model-acceptance-20261117.md`
+**2026-11-17 变更**：`video` / `plan` 池语义更新为按秒 / 按次视频模型；新增 5 个 Seedance 2.5 Flash 规格（3 个按秒进 `video`、2 个按次进 `plan`），A3 实测 `catalog_version` `"10"`
 **面向**：Harness 后端开发与联调
 
 本文档给出网关侧全部对外接口的调用方法。字段语义细节见
@@ -96,20 +97,22 @@ HTTP/1.1 400 Bad Request
 | 池 id | 显示名 | `kind` | 说明 |
 | --- | --- | --- | --- |
 | `chat` | 通用对话 | `text` | **默认池**。不传 `X-Route-Group` 时的落点；A1/A2/A4/A9 的常规调用都走这里 |
-| `video` | 视频 | `video` | 视频任务池。当前配置按秒视频渠道（Seedance / Wan / TA-other / MiniMax / Muse）；**池级不标注 `billing`** |
+| `video` | 视频 | `video` | 视频任务池，按秒视频模型（PAI 按秒、TA 按秒、video-line 按秒）；**池级不标注 `billing`** |
 | `image` | 图片生成 | `image` | 图片生成池。当前配置 10 个图片模型（4 个 GPT Image 同步 + 6 个 Nano Banana Gemini 同步），按张计价，**池级不标注 `billing`**；可调用 |
 | `audio` | 语音 | `audio` | 语音/TTS 预留池，当前仅占位；渠道尚未接入，**本期不可调用** |
-| `plan` | 畅用计划 | `video` | 专用于畅用计划；池级 `billing: per_call`（按次计费） |
+| `plan` | 畅用计划 | `video` | 按次视频模型（TA token、PAI 按次、Wan 按次、video-line 按次）；池级 `billing: per_call`（按次计费） |
 
 | 情况 | 行为 |
 | --- | --- |
 | 不传该头 | 使用默认池 `chat` |
-| 传 `video` | 使用视频池；调用 `video` 池的 8 个 PAI 按次模型时必须传 |
-| 传 `plan` | 使用畅用计划池；调用 `plan` 池的 22 个 TA token 模型时必须传 |
+| 传 `video` | 使用视频池；调用 `video` 池的按秒视频模型时必须传 |
+| 传 `plan` | 使用畅用计划池；调用 `plan` 池的按次视频模型时必须传 |
 | 传 `chat` | 显式绑定 chat 池 |
 | 传 `image` | 使用图片生成池；调用 `image` 池的 10 个图片模型时必须传 |
 | 传 `audio` | 使用语音池；该池当前无可用模型，调用会失败 |
 | 传不存在的池 id | `403 access_denied`，消息 `requested resource pool is not configured` |
+
+截至 2026-11-17 实测（revision `b04024190`，`catalog_version` `"10"`）：`chat` 26 个、`video` 83 个、`plan` 80 个、`image` 10 个、`audio` 0 个；各池模型集合与数量以 A3 实际响应为准。
 
 不存在「全渠道优先级」全局池：`global_channel_order` 已移除，资源池的渠道顺序
 是唯一的路由顺序，也没有 `global` 池可供选择。池是硬绑定：选中的池里没有该模型
@@ -195,16 +198,16 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
 }
 ```
 
-> `etag` 为示例值；`catalog_version` 取自 2026-11-14 的 82 实例，实际值以响应为准。
+> `etag` 为示例值；以下 JSON 为**历史样例**（2026-11-14 的 82 实例，仅用于说明响应结构），数量与模型集合以实际响应为准，不要按样例数量做校验。
 >
-> 以上 `models` 取自 2026-11-14 的 82 实例：`chat` 池 15 个模型，`video` 池 8 个 PAI 按次模型，`image` 池 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana），`plan` 池 22 个 TA token 模型；`audio` 池当前没有可用渠道，`models` 为空。`models` 按模型 id 字典序返回，模型集合会随渠道与价格变化。
+> 历史样例中：`chat` 池 15 个模型，`video` 池 8 个模型（旧语义：PAI 按次），`image` 池 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana），`plan` 池 22 个 TA token 模型；`audio` 池当前没有可用渠道，`models` 为空。2026-11-17 实测（revision `b04024190`）`catalog_version` 为 `"10"`，各池数量为 `chat` 26 / `video` 83 / `plan` 80 / `image` 10 / `audio` 0，新增模型见 3.7。`models` 按模型 id 字典序返回，模型集合会随渠道与价格变化。
 
 | 字段 | 说明 |
 | --- | --- |
 | `data[].id` | **资源池 id**（`chat` / `video` / `image` / `audio` / `plan`）；`chat` 为默认池，调用 `video` / `image` / `plan` 模型时需传对应 `X-Route-Group` |
 | `data[].display_name` | 运营配置的显示名，仅用于界面展示 |
 | `data[].kind` | `text` / `video` / `image` / `audio` |
-| `data[].billing` | 仅 `plan` 池返回 `per_call`；`video` 池混合多种计费方式、`image` 池按张计价，均不标注池级 `billing` |
+| `data[].billing` | 仅 `plan` 池返回 `per_call`；`video` 池为按秒视频模型、`image` 池按张计价，均不标注池级 `billing` |
 | `data[].models` | 该池可路由的**真实模型 id**，直接用作请求的 `model` 字段；空数组表示该池尚无可调模型 |
 | `data[].capabilities` | 该池支持的能力枚举：`chat` / `stream` / `tools`，按池聚合，不区分单个模型 |
 | `catalog_version` | 单调递增的整数（字符串形式），不是时间戳 |
@@ -218,8 +221,10 @@ A3 的 `data[]` 仍以资源池为单位返回，但平台侧模型列表现按�
 | --- | --- | --- | --- |
 | 文字模型 | `chat` | `kind: text` | 默认池；A1/A2/A4/A9 常规调用 |
 | 图片生成模型 | `image` | `kind: image` | 图片生成池；当前 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana） |
-| 视频模型 | `video` | `kind: video` | 视频任务池；当前 8 个 PAI 按次模型 |
-| plan 计划 | `plan` | `kind: video` + `billing: per_call` | 畅用计划；当前 22 个 TA token 模型；单独展示为 plan 分区，不并入视频分区 |
+| 视频模型 | `video` | `kind: video` | 视频任务池；按秒视频模型（PAI 按秒、TA 按秒、video-line 按秒） |
+| plan 计划 | `plan` | `kind: video` + `billing: per_call` | 畅用计划；按次视频模型（TA token、PAI 按次、Wan 按次、video-line 按次）；单独展示为 plan 分区，不并入视频分区 |
+
+> 2026-11-17 实测（`catalog_version` `"10"`）：`chat` 26 / `video` 83 / `plan` 80 / `image` 10 / `audio` 0；数量与集合以 A3 实际响应为准。
 
 `audio` 仍是预留资源池（`kind: audio`），本期不进入这四个对外分区；有音频渠道后再定义它的展示位置。
 
@@ -269,6 +274,33 @@ B3 `status_change` → `settled` 为准。完整样例见
 
 > 视频任务（`video` / `plan` 池）的请求字段差异、轮询和内容下载样例，见
 > [08-video-api-examples.md](./08-video-api-examples.md)。
+
+### 3.7 2026-11-17 目录增量：Seedance 2.5 Flash
+
+2026-11-17 部署 `harness-api-20261117-b040241`（revision `b04024190`）后实测
+`GET /v1/models`：`catalog_version` 为 `"10"`，各池数量为 `chat` 26、`video` 83、
+`plan` 80、`image` 10、`audio` 0。数量与模型集合以 A3 实际响应为准。
+
+本次新增 5 个 Seedance 2.5 Flash 规格，3 个按秒进 `video` 池，2 个按次进 `plan` 池：
+
+| 模型 | 池 | 调用头 | 价格（USD，分组倍率 1 已含） |
+| --- | --- | --- | --- |
+| `seedance2.5-flash-480p-second-1` | `video` | `X-Route-Group: video` | 无参考 0.05/生成秒；带参考 0.09×生成秒 + ceil(实际参考总秒)×0.05 |
+| `seedance2.5-flash-720p-second-1` | `video` | `X-Route-Group: video` | 无参考 0.06/生成秒；带参考 0.13×生成秒 + ceil(实际参考总秒)×0.065 |
+| `seedance2.5-flash-720p-second-2` | `video` | `X-Route-Group: video` | 0.06/生成秒 |
+| `seedance2.5-flash-480p-once-1` | `plan` | `X-Route-Group: plan` | 0.78/条 |
+| `seedance2.5-flash-720p-once-1` | `plan` | `X-Route-Group: plan` | 0.95/条 |
+
+- 3 个按秒模型进入 `video` 池，2 个按次模型进入 `plan` 池；`video` 池仍不标注池级
+  `billing`，`plan` 池为 `billing: per_call`。
+- 按秒价格按生成秒计费，带参考时参考秒另计；按次价格每条固定，不乘秒数。所有
+  Flash 视频调用仍走统一入口 `POST /v1/videos`，请求字段与样例见
+  [08-video-api-examples.md](./08-video-api-examples.md) 第 10 节。
+- 上游对 Flash 按秒任务的完成响应当前不返回 `usage`；带参考时网关按请求 `seconds`
+  估算参考秒并按两段式价格预扣/结算，上游补 `input_seconds` 后按实际值校准。B1 为
+  `usage_source=unavailable`、Token 字段 `null`，费用以 B3 `settled` 为准。详见
+  [10-full-model-acceptance-20261117.md](./10-full-model-acceptance-20261117.md) 第 4.5 节。
+- 模型已启用并配置价格不等于已完成全量验收；未测规格不要写成已验收（见 10 文档 4.5）。
 
 ---
 
@@ -675,3 +707,4 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
 | 2026-11-14 | V0.11 | `image` 池配置 10 个图片模型（4 个 GPT Image 同步 + 6 个 Nano Banana 异步），新增 `X-Route-Group: image` 与按张计价；A3 样例 `catalog_version` 更新为 `"7"`；新增 3.6 图片生成小节与 `09-image-api-examples.md`；图片 B1 仅 usage、B3 `settled` 为准。部署 `harness-api-20261114-c29f1a6` |
 | 2026-11-15 | V0.11（修订） | 异步任务无 Token 用量时 B1 改为 `usage_source=unavailable`、Token 字段 `null`、`split_known=false`；已有 `total_tokens` 保持 `upstream`；撤销 B1 结算收尾事件。部署 `harness-api-20261115-de7fce8`，三模型 E2E 复测通过 |
 | 2026-11-17 | V0.12 | Nano Banana 改为 Gemini 同步 `generateContent`（无轮询）；B1 为 `estimated` prompt Token，B3 固定按张价；`supplyvideo` 1.4.0 补齐新视频模型；全模型验收 语言 35/38、图片 10/10、视频 55/61。部署 `harness-api-20261116-df87870` |
+| 2026-11-17 | V0.13 | 资源池语义更新：`video` 为按秒视频模型（PAI 按秒、TA 按秒、video-line 按秒），`plan` 为按次视频模型（TA token、PAI 按次、Wan 按次、video-line 按次）；新增 Seedance 2.5 Flash 5 个规格（3 个按秒进 `video`、2 个按次进 `plan`）及价格摘要；补充 Flash 按秒上游不返回 `usage` 时网关按请求 `seconds` 估算参考秒的结算口径。对应网关 `harness-api-20261117-b040241`（revision `b04024190`），A3 实测 `catalog_version` `"10"`：chat 26 / video 83 / plan 80 / image 10 / audio 0 |
