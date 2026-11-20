@@ -450,6 +450,10 @@ func ProcessTools(tools []any) ([]*Tool, []*ClaudeWebSearchTool) {
 type Thinking struct {
 	Type         string `json:"type,omitempty"`
 	BudgetTokens *int   `json:"budget_tokens,omitempty"`
+	// BlockBinding carries the client's preserved-thinking controls, such as
+	// {"prefix_mismatch_behavior":"drop_block"}. It is forwarded verbatim and
+	// never added by the gateway.
+	BlockBinding json.RawMessage `json:"block_binding,omitempty"`
 }
 
 func (c *Thinking) GetBudgetTokens() int {

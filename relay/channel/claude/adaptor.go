@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
@@ -25,6 +26,14 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) (any, error) {
+	// A model reasoning suffix replaces the client's thinking config, but
+	// block_binding is a conversation control, not a reasoning setting. Keep
+	// the client's value when the rendered mode is still adaptive; never add
+	// one the client did not send.
+	if original, ok := info.Request.(*dto.ClaudeRequest); ok && original.Thinking != nil &&
+		request.Thinking != nil && request.Thinking.Type == "adaptive" && len(request.Thinking.BlockBinding) == 0 {
+		request.Thinking.BlockBinding = original.Thinking.BlockBinding
+	}
 	return request, nil
 }
 
@@ -72,7 +81,9 @@ func shouldAppendClaudeBetaQuery(info *relaycommon.RelayInfo) bool {
 
 func CommonClaudeHeadersOperation(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) {
 	// common headers operation
-	anthropicBeta := c.Request.Header.Get("anthropic-beta")
+	// A client may send several anthropic-beta lines; the API reads one
+	// comma-separated list, so forward all of them in their original order.
+	anthropicBeta := strings.Join(c.Request.Header.Values("anthropic-beta"), ",")
 	if anthropicBeta != "" {
 		req.Set("anthropic-beta", anthropicBeta)
 	}

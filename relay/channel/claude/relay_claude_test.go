@@ -2,11 +2,16 @@ package claude
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -414,4 +419,46 @@ func TestRequestOpenAI2ClaudeMessage_ConvertsTextFileContentToText(t *testing.T)
 	require.Equal(t, "text", content[0].Type)
 	require.NotNil(t, content[0].Text)
 	require.Equal(t, "alpha\nbeta", *content[0].Text)
+}
+
+func TestThinkingBlockBindingRoundTripsFromJSON(t *testing.T) {
+	var request dto.ClaudeRequest
+	require.NoError(t, common.Unmarshal([]byte(`{"model":"claude-opus-4-6","thinking":{"type":"enabled","block_binding":{"prefix_mismatch_behavior":"drop_block"}}}`), &request))
+	require.NotNil(t, request.Thinking)
+	require.JSONEq(t, `{"prefix_mismatch_behavior":"drop_block"}`, string(request.Thinking.BlockBinding))
+}
+
+func TestConvertClaudeRequestRestoresBlockBindingAfterAdaptiveRewrite(t *testing.T) {
+	original := &dto.ClaudeRequest{Thinking: &dto.Thinking{
+		Type:         "enabled",
+		BlockBinding: json.RawMessage(`{"prefix_mismatch_behavior":"drop_block"}`),
+	}}
+	info := &relaycommon.RelayInfo{Request: original}
+	rewritten := &dto.ClaudeRequest{Thinking: &dto.Thinking{Type: "adaptive"}}
+
+	_, err := (&Adaptor{}).ConvertClaudeRequest(nil, info, rewritten)
+	require.NoError(t, err)
+	require.JSONEq(t, string(original.Thinking.BlockBinding), string(rewritten.Thinking.BlockBinding))
+}
+
+func TestConvertClaudeRequestDoesNotAddBlockBinding(t *testing.T) {
+	info := &relaycommon.RelayInfo{Request: &dto.ClaudeRequest{Thinking: &dto.Thinking{Type: "enabled"}}}
+	rewritten := &dto.ClaudeRequest{Thinking: &dto.Thinking{Type: "adaptive"}}
+
+	_, err := (&Adaptor{}).ConvertClaudeRequest(nil, info, rewritten)
+	require.NoError(t, err)
+	require.Empty(t, rewritten.Thinking.BlockBinding)
+}
+
+func TestCommonClaudeHeadersOperationForwardsEveryBetaValue(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	context.Request.Header.Add("anthropic-beta", "beta-a")
+	context.Request.Header.Add("anthropic-beta", "beta-b")
+
+	target := http.Header{}
+	CommonClaudeHeadersOperation(context, &target, &relaycommon.RelayInfo{OriginModelName: "claude-3-5-sonnet"})
+	require.Equal(t, "beta-a,beta-b", target.Get("anthropic-beta"))
 }

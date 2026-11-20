@@ -58,6 +58,150 @@ func buildSSEBody(n int) string {
 	return b.String()
 }
 
+type headerCommitWriter struct {
+	*httptest.ResponseRecorder
+	headerStarted chan struct{}
+	once          sync.Once
+}
+
+func (w *headerCommitWriter) WriteHeader(code int) {
+	// Let the scanner start while the first keepalive snapshots the headers.
+	w.once.Do(func() { close(w.headerStarted) })
+	w.ResponseRecorder.WriteHeader(code)
+}
+
+func TestStreamScannerHandler_RequestKeepAliveHandoff(t *testing.T) {
+	settings := operation_setting.GetGeneralSetting()
+	previousEnabled, previousInterval := settings.PingIntervalEnabled, settings.PingIntervalSeconds
+	settings.PingIntervalEnabled, settings.PingIntervalSeconds = true, 60
+	t.Cleanup(func() {
+		settings.PingIntervalEnabled, settings.PingIntervalSeconds = previousEnabled, previousInterval
+	})
+
+	for _, test := range []struct {
+		name        string
+		interval    time.Duration
+		waitForPing bool
+	}{
+		{name: "immediate stream before first keepalive", interval: time.Hour},
+		{name: "first keepalive commits headers", interval: 20 * time.Millisecond, waitForPing: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			writer := &headerCommitWriter{
+				ResponseRecorder: httptest.NewRecorder(),
+				headerStarted:    make(chan struct{}),
+			}
+			c, _ := gin.CreateTestContext(writer)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			stop := StartStreamKeepAlive(c, test.interval)
+			defer stop()
+			if test.waitForPing {
+				select {
+				case <-writer.headerStarted:
+				case <-time.After(time.Second):
+					t.Fatal("keepalive did not commit response headers")
+				}
+			}
+
+			resp := &http.Response{
+				Header: http.Header{
+					"X-Reasoning-Included": {"true"},
+					"X-Codex-Turn-State":   {"turn-state"},
+				},
+				Body: io.NopCloser(strings.NewReader("data: chunk\n\ndata: [DONE]\n\n")),
+			}
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+			var received []string
+			StreamScannerHandler(c, resp, info, func(data string, _ *StreamResult) {
+				received = append(received, data)
+				assert.NoError(t, StringData(c, data))
+			})
+
+			// The scanner must have joined the request keepalive before taking
+			// over, so no second heartbeat goroutine stays behind.
+			wrapper, ok := c.Writer.(*streamKeepAliveWriter)
+			require.True(t, ok)
+			select {
+			case <-wrapper.done:
+			default:
+				t.Fatal("request keepalive is still running after scanner handoff")
+			}
+
+			require.NotNil(t, info.StreamStatus)
+			assert.True(t, info.StreamStatus.IsNormalEnd())
+			assert.Equal(t, []string{"chunk"}, received)
+			assert.True(t, strings.HasSuffix(writer.Body.String(), "data: chunk\n\n"))
+			if test.waitForPing {
+				body := writer.Body.String()
+				assert.Equal(t, "text/event-stream", writer.Result().Header.Get("Content-Type"))
+				assert.True(t, strings.HasPrefix(body, ": PING\n\n"))
+				assert.GreaterOrEqual(t, strings.Count(body, ": PING\n\n"), 1)
+				// Handoff must precede the first business write.
+				chunkPos := strings.Index(body, "data: chunk\n\n")
+				require.GreaterOrEqual(t, chunkPos, 0)
+				assert.Less(t, strings.LastIndex(body, ": PING\n\n"), chunkPos)
+			} else {
+				assert.Equal(t, "data: chunk\n\n", writer.Body.String())
+				assert.Equal(t, "true", writer.Result().Header.Get("X-Reasoning-Included"))
+				assert.Equal(t, "turn-state", writer.Result().Header.Get("X-Codex-Turn-State"))
+			}
+		})
+	}
+}
+
+func TestStartStreamKeepAliveReusesOuter(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	stopOuter := StartStreamKeepAlive(c, time.Hour)
+	outer, ok := c.Writer.(*streamKeepAliveWriter)
+	require.True(t, ok)
+
+	stopInner := StartStreamKeepAlive(c, time.Millisecond)
+	assert.Same(t, outer, c.Writer, "nested keepalive must reuse the outer writer")
+	stopInner()
+	select {
+	case <-outer.done:
+		t.Fatal("stopping the inner keepalive stopped the outer one")
+	default:
+	}
+
+	stopOuter()
+	select {
+	case <-outer.done:
+	case <-time.After(time.Second):
+		t.Fatal("outer keepalive did not stop")
+	}
+}
+
+func TestStartStreamKeepAliveStopsOnRequestCancellation(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	defer cancelRequest()
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(requestContext)
+
+	stop := StartStreamKeepAlive(c, time.Hour)
+	cancelRequest()
+
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		stop() // repeated stops must be safe
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("keepalive did not stop after request cancellation")
+	}
+
+	_, err := c.Writer.WriteString("data: done\n\n")
+	require.NoError(t, err)
+	require.True(t, strings.HasSuffix(recorder.Body.String(), "data: done\n\n"))
+}
+
 type slowReader struct {
 	r     io.Reader
 	delay time.Duration
@@ -174,15 +318,36 @@ func TestStreamScannerHandler_OrderPreserved(t *testing.T) {
 func TestStreamScannerHandler_DoneStopsScanner(t *testing.T) {
 	t.Parallel()
 
-	body := buildSSEBody(50) + "data: should_not_appear\n"
-	c, resp, info := setupStreamTest(t, strings.NewReader(body))
+	for _, test := range []struct {
+		name string
+		line string
+		want []string
+	}{
+		{name: "bare", line: "[DONE]", want: []string{"before"}},
+		{name: "bare with whitespace", line: " \t[DONE] \t\r", want: []string{"before"}},
+		{name: "data prefixed", line: "data: [DONE]", want: []string{"before"}},
+		{name: "data without space", line: "data:[DONE]", want: []string{"before"}},
+		{name: "data with whitespace", line: "data: \t[DONE] \t\r", want: []string{"before"}},
+		{name: "bare prefix is not done", line: "[DONE]extra", want: []string{"before", "after"}},
+		{name: "data prefix is not done", line: "data: [DONE]extra", want: []string{"before", "[DONE]extra", "after"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := "data: before\n" + test.line + "\ndata: after\ndata: [DONE]\n"
+			c, resp, info := setupStreamTest(t, strings.NewReader(body))
+			info.DisablePing = true
 
-	var count atomic.Int64
-	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
-		count.Add(1)
-	})
+			var received []string
+			StreamScannerHandler(c, resp, info, func(data string, _ *StreamResult) {
+				received = append(received, data)
+			})
 
-	assert.Equal(t, int64(50), count.Load(), "data after [DONE] must not be processed")
+			assert.Equal(t, test.want, received)
+			require.NotNil(t, info.StreamStatus)
+			assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+			assert.NoError(t, info.StreamStatus.EndError)
+			assert.Equal(t, len(test.want), info.ReceivedResponseCount)
+		})
+	}
 }
 
 func TestStreamScannerHandler_StopStopsStream(t *testing.T) {

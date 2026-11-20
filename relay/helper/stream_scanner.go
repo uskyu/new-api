@@ -153,6 +153,11 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 	defer cleanup()
 
 	scanner.Split(bufio.ScanLines)
+	// Finish the request keepalive before touching response headers. The
+	// scanner owns subsequent ping and data writes through its shared mutex.
+	if writer, ok := c.Writer.(*streamKeepAliveWriter); ok {
+		writer.stop()
+	}
 	copyCodexSSEHeaders(c, resp)
 	SetEventStreamHeaders(c)
 	if options.FlushHeaders {
@@ -300,18 +305,15 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 				println(data)
 			}
 
-			if len(data) < 6 {
-				continue
-			}
-			if data[:5] != "data:" && data[:6] != "[DONE]" {
-				continue
-			}
-			data = data[5:]
+			data, hasDataPrefix := strings.CutPrefix(data, "data:")
 			data = strings.TrimSpace(data)
+			if !hasDataPrefix && data != "[DONE]" {
+				continue
+			}
 			if data == "" {
 				continue
 			}
-			if !strings.HasPrefix(data, "[DONE]") {
+			if data != "[DONE]" {
 				info.SetFirstResponseTime()
 				info.ReceivedResponseCount++
 

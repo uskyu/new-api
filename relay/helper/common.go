@@ -1,9 +1,12 @@
 package helper
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -13,6 +16,130 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+// streamKeepAliveWriter keeps the stream alive until the first business write,
+// then waits for the heartbeat to exit before writing.
+type streamKeepAliveWriter struct {
+	gin.ResponseWriter
+	mutex       sync.Mutex
+	cancel      context.CancelFunc
+	done        chan struct{}
+	pingContext *gin.Context
+}
+
+func (writer *streamKeepAliveWriter) stop() {
+	writer.cancel()
+	<-writer.done
+}
+
+func (writer *streamKeepAliveWriter) Unwrap() http.ResponseWriter {
+	return writer.ResponseWriter
+}
+
+func (writer *streamKeepAliveWriter) Write(data []byte) (int, error) {
+	writer.stop()
+	return writer.ResponseWriter.Write(data)
+}
+
+func (writer *streamKeepAliveWriter) WriteString(data string) (int, error) {
+	writer.stop()
+	return writer.ResponseWriter.WriteString(data)
+}
+
+func (writer *streamKeepAliveWriter) WriteHeader(status int) {
+	writer.stop()
+	writer.ResponseWriter.WriteHeader(status)
+}
+
+func (writer *streamKeepAliveWriter) WriteHeaderNow() {
+	writer.stop()
+	writer.ResponseWriter.WriteHeaderNow()
+}
+
+func (writer *streamKeepAliveWriter) Flush() {
+	writer.stop()
+	writer.ResponseWriter.Flush()
+}
+
+func (writer *streamKeepAliveWriter) Status() int {
+	writer.mutex.Lock()
+	defer writer.mutex.Unlock()
+	return writer.ResponseWriter.Status()
+}
+
+func (writer *streamKeepAliveWriter) Size() int {
+	writer.mutex.Lock()
+	defer writer.mutex.Unlock()
+	return writer.ResponseWriter.Size()
+}
+
+func (writer *streamKeepAliveWriter) Written() bool {
+	writer.mutex.Lock()
+	defer writer.mutex.Unlock()
+	return writer.ResponseWriter.Written()
+}
+
+func (writer *streamKeepAliveWriter) ping() error {
+	writer.mutex.Lock()
+	defer writer.mutex.Unlock()
+	ExtendWriteDeadline(writer.pingContext)
+	return PingData(writer.pingContext)
+}
+
+// StartStreamKeepAlive sends heartbeats every interval, covering request
+// preparation and retries. Once business writes begin the stream handler takes
+// over. Nested calls reuse the outer keepalive so a request never runs two
+// heartbeat goroutines.
+func StartStreamKeepAlive(c *gin.Context, interval time.Duration) func() {
+	if c == nil || c.Writer == nil {
+		return func() {}
+	}
+	if previous, ok := c.Writer.(*streamKeepAliveWriter); ok {
+		select {
+		case <-previous.done:
+			c.Writer = previous.ResponseWriter
+		default:
+			return func() {}
+		}
+	}
+	if requestContextDone(c) {
+		return func() {}
+	}
+	if interval <= 0 {
+		interval = DefaultPingInterval
+	}
+	SetEventStreamHeaders(c)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Minute)
+	pingContext := c.Copy()
+	// Heartbeats use the original writer; only business writes trigger the handoff.
+	pingContext.Writer = c.Writer
+	writer := &streamKeepAliveWriter{ResponseWriter: c.Writer, cancel: cancel, done: make(chan struct{}), pingContext: pingContext}
+	c.Writer = writer
+	go writer.keepAlive(ctx, interval)
+	return writer.stop
+}
+
+func (writer *streamKeepAliveWriter) keepAlive(ctx context.Context, interval time.Duration) {
+	defer close(writer.done)
+	defer writer.cancel()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logger.LogDebug(writer.pingContext, "SSE ping goroutine panic recovered: %v", recovered)
+		}
+	}()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if ctx.Err() != nil || writer.ping() != nil {
+				return
+			}
+		}
+	}
+}
 
 func FlushWriter(c *gin.Context) (err error) {
 	defer func() {

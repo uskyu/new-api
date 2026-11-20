@@ -73,6 +73,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	var (
 		newAPIError *types.NewAPIError
 		ws          *websocket.Conn
+		relayInfo   *relaycommon.RelayInfo
 	)
 
 	if relayFormat == types.RelayFormatOpenAIRealtime {
@@ -89,6 +90,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			if relayFormat != types.RelayFormatOpenAIRealtime {
+				// The keepalive may already have committed SSE headers; keep the
+				// final error on the same stream instead of appending JSON.
+				if c.Writer.Written() && strings.HasPrefix(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
+					writeRelayStreamError(c, relayFormat, newAPIError, relayInfo)
+					return
+				}
+				c.Header("Content-Type", "application/json; charset=utf-8")
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
@@ -116,10 +126,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, request, ws)
+	relayInfo, err = relaycommon.GenRelayInfo(c, relayFormat, request, ws)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
+	}
+
+	generalSettings := operation_setting.GetGeneralSetting()
+	if relayFormat == types.RelayFormatClaude && relayInfo.IsStream && generalSettings.PingIntervalEnabled {
+		stopKeepAlive := helper.StartStreamKeepAlive(c, time.Duration(generalSettings.PingIntervalSeconds)*time.Second)
+		defer stopKeepAlive()
 	}
 
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
@@ -243,6 +259,27 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
 	}
+}
+
+// writeRelayStreamError reports a final error on an already-committed SSE
+// response, so clients still receive a structured error frame.
+func writeRelayStreamError(c *gin.Context, format types.RelayFormat, apiError *types.NewAPIError, info *relaycommon.RelayInfo) {
+	if info != nil {
+		// The scanner may never run when the request fails after keepalive
+		// committed SSE headers; retain the failed outcome for the request log.
+		if info.StreamStatus == nil {
+			info.StreamStatus = relaycommon.NewStreamStatus()
+		}
+		info.StreamStatus.RecordError(apiError.Error())
+		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonHandlerStop, apiError)
+	}
+	helper.ExtendWriteDeadline(c)
+	if format == types.RelayFormatClaude {
+		_ = helper.ClaudeData(c, dto.ClaudeResponse{Type: "error", Error: apiError.ToClaudeError()})
+		return
+	}
+	_ = helper.ObjectData(c, gin.H{"error": apiError.ToOpenAIError()})
+	helper.Done(c)
 }
 
 var upgrader = websocket.Upgrader{
