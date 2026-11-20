@@ -3105,6 +3105,14 @@
     "暂无代理排名数据": "暫無代理排名資料",
     "上移": "上移",
     "下移": "下移",
-    "账户类型": "帳戶類型"
+    "账户类型": "帳戶類型",
+    "在线客服": "線上客服",
+    "在线客服设置": "線上客服設定",
+    "启用在线客服": "啟用線上客服",
+    "LiveHelperChat 地址": "LiveHelperChat 位址",
+    "填写 LiveHelperChat 站点根地址，例如 https://chat.example.com；生产环境必须使用 HTTPS。": "填寫 LiveHelperChat 站點根位址，例如 https://chat.example.com；生產環境必須使用 HTTPS。",
+    "请先填写 LiveHelperChat 地址": "請先填寫 LiveHelperChat 位址",
+    "在线客服配置已保存，刷新页面后生效": "線上客服設定已儲存，重新整理頁面後生效",
+    "加载在线客服设置失败": "載入線上客服設定失敗"
   }
 }

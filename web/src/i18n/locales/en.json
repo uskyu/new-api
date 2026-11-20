@@ -3484,6 +3484,14 @@
     "暂无代理排名数据": "No agent leaderboard data",
     "上移": "Move up",
     "下移": "Move down",
-    "账户类型": "Account type"
+    "账户类型": "Account type",
+    "在线客服": "Online support",
+    "在线客服设置": "Online support settings",
+    "启用在线客服": "Enable online support",
+    "LiveHelperChat 地址": "LiveHelperChat URL",
+    "填写 LiveHelperChat 站点根地址，例如 https://chat.example.com；生产环境必须使用 HTTPS。": "Enter the LiveHelperChat site root URL, for example https://chat.example.com. HTTPS is required in production.",
+    "请先填写 LiveHelperChat 地址": "Please enter the LiveHelperChat URL first",
+    "在线客服配置已保存，刷新页面后生效": "Online support settings saved. Refresh the page to apply.",
+    "加载在线客服设置失败": "Failed to load online support settings"
   }
 }

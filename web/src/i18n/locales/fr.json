@@ -3440,6 +3440,14 @@
     "暂无代理排名数据": "Aucune donnée de classement",
     "上移": "Monter",
     "下移": "Descendre",
-    "账户类型": "Type de compte"
+    "账户类型": "Type de compte",
+    "在线客服": "Support en ligne",
+    "在线客服设置": "Paramètres du support en ligne",
+    "启用在线客服": "Activer le support en ligne",
+    "LiveHelperChat 地址": "URL LiveHelperChat",
+    "填写 LiveHelperChat 站点根地址，例如 https://chat.example.com；生产环境必须使用 HTTPS。": "Saisissez l'URL racine du site LiveHelperChat, par exemple https://chat.example.com. HTTPS est requis en production.",
+    "请先填写 LiveHelperChat 地址": "Veuillez d'abord saisir l'URL LiveHelperChat",
+    "在线客服配置已保存，刷新页面后生效": "Paramètres du support en ligne enregistrés. Actualisez la page pour les appliquer.",
+    "加载在线客服设置失败": "Échec du chargement des paramètres du support en ligne"
   }
 }

@@ -3989,6 +3989,14 @@
     "暂无代理排名数据": "Chưa có dữ liệu xếp hạng",
     "上移": "Di chuyển lên",
     "下移": "Di chuyển xuống",
-    "账户类型": "Loại tài khoản"
+    "账户类型": "Loại tài khoản",
+    "在线客服": "Hỗ trợ trực tuyến",
+    "在线客服设置": "Cài đặt hỗ trợ trực tuyến",
+    "启用在线客服": "Bật hỗ trợ trực tuyến",
+    "LiveHelperChat 地址": "URL LiveHelperChat",
+    "填写 LiveHelperChat 站点根地址，例如 https://chat.example.com；生产环境必须使用 HTTPS。": "Nhập URL gốc của trang LiveHelperChat, ví dụ https://chat.example.com. HTTPS là bắt buộc trong môi trường sản xuất.",
+    "请先填写 LiveHelperChat 地址": "Vui lòng nhập URL LiveHelperChat trước",
+    "在线客服配置已保存，刷新页面后生效": "Đã lưu cài đặt hỗ trợ trực tuyến. Làm mới trang để áp dụng.",
+    "加载在线客服设置失败": "Không thể tải cài đặt hỗ trợ trực tuyến"
   }
 }

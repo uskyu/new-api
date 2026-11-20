@@ -132,6 +132,72 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case system_setting.LiveHelperChatEnabledOption:
+		value, _ := option.Value.(string)
+		if value != "true" && value != "false" {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无效的在线客服启用状态",
+			})
+			return
+		}
+		if value == "true" {
+			settings := system_setting.GetLiveHelperChatSettings()
+			if strings.TrimSpace(settings.BaseURL) == "" {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "无法启用在线客服，请先填写 LiveHelperChat 地址！",
+				})
+				return
+			}
+			if _, err = system_setting.ValidateLiveHelperChatBaseURL(settings.BaseURL, common.DebugEnabled); err != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "无法启用在线客服：" + err.Error(),
+				})
+				return
+			}
+		}
+	case system_setting.LiveHelperChatBaseURLOption:
+		value, _ := option.Value.(string)
+		normalized, validateErr := system_setting.ValidateLiveHelperChatBaseURL(value, common.DebugEnabled)
+		if validateErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": validateErr.Error(),
+			})
+			return
+		}
+		if normalized == "" && system_setting.GetLiveHelperChatSettings().Enabled {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "请先关闭在线客服，再清空 LiveHelperChat 地址！",
+			})
+			return
+		}
+		option.Value = normalized
+	case system_setting.LiveHelperChatWidgetIDOption:
+		value, _ := option.Value.(string)
+		normalized, validateErr := system_setting.ValidateLiveHelperChatWidgetID(value)
+		if validateErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": validateErr.Error(),
+			})
+			return
+		}
+		option.Value = normalized
+	case system_setting.LiveHelperChatLocaleOption:
+		value, _ := option.Value.(string)
+		normalized, validateErr := system_setting.ValidateLiveHelperChatLocale(value)
+		if validateErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": validateErr.Error(),
+			})
+			return
+		}
+		option.Value = normalized
 	case "discord.enabled":
 		if option.Value == "true" && system_setting.GetDiscordSettings().ClientId == "" {
 			c.JSON(http.StatusOK, gin.H{
