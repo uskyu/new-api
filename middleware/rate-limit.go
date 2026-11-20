@@ -4,10 +4,19 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	// supportPollingRateLimitNum 在线客服轮询请求单独计数，避免 2-3 秒一次的
+	// 消息/会话/未读轮询把全局 API 限额耗尽后连带影响 /api/status 等基础接口。
+	// 600 次 / 180 秒足以覆盖多个客服工作台与用户浮窗同时在线。
+	supportPollingRateLimitNum      = 600
+	supportPollingRateLimitDuration = 180
 )
 
 var timeFormat = "2006-01-02T15:04:05.000Z"
@@ -95,10 +104,21 @@ func GlobalWebRateLimit() func(c *gin.Context) {
 }
 
 func GlobalAPIRateLimit() func(c *gin.Context) {
-	if common.GlobalApiRateLimitEnable {
-		return rateLimitFactory(common.GlobalApiRateLimitNum, common.GlobalApiRateLimitDuration, "GA")
+	if !common.GlobalApiRateLimitEnable {
+		return defNext
 	}
-	return defNext
+
+	generalLimiter := rateLimitFactory(common.GlobalApiRateLimitNum, common.GlobalApiRateLimitDuration, "GA")
+	supportLimiter := rateLimitFactory(supportPollingRateLimitNum, supportPollingRateLimitDuration, "SP")
+	return func(c *gin.Context) {
+		// 客服轮询频率远高于普通页面操作，使用独立限额，避免把同 IP 的
+		// 全局 API 额度消耗殆尽，导致状态、登录等基础请求一起 429。
+		if strings.HasPrefix(c.Request.URL.Path, "/api/support/") {
+			supportLimiter(c)
+			return
+		}
+		generalLimiter(c)
+	}
 }
 
 func CriticalRateLimit() func(c *gin.Context) {
