@@ -77,6 +77,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       subscription: true,
       marketplace_permission: true,
       setting: true,
+      support: true,
     },
   });
 
@@ -148,6 +149,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         subscription: true,
         marketplace_permission: true,
         setting: true,
+        support: true,
       },
     };
     setSidebarModulesAdmin(defaultModules);
@@ -209,6 +211,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             ai_video_logs: modules.admin?.ai_video_logs ?? true,
             marketplace_permission:
               modules.admin?.marketplace_permission ?? true,
+            support: modules.admin?.support ?? true,
           },
         }));
       } catch (error) {
@@ -245,6 +248,7 @@ export default function SettingsSidebarModulesAdmin(props) {
             subscription: true,
             marketplace_permission: true,
             setting: true,
+            support: true,
           },
         };
         setSidebarModulesAdmin(defaultModules);
@@ -369,6 +373,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           description: t('兑换码生成管理'),
         },
         { key: 'user', title: t('用户管理'), description: t('用户账户管理') },
+        {
+          key: 'support',
+          title: t('客服工作台'),
+          description: t('客服会话'),
+        },
         {
           key: 'setting',
           title: t('系统设置'),

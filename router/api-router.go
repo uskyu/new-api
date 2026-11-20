@@ -345,6 +345,27 @@ func SetApiRouter(router *gin.Engine) {
 			supportRoute.POST("/users/:id/quota/adjust", controller.SupportAdjustUserQuota)
 			supportRoute.POST("/users/:id/quota/decrease", controller.SupportDecreaseUserQuota)
 		}
+		supportChatRoute := apiRouter.Group("/support")
+		supportChatRoute.Use(middleware.UserAuth())
+		{
+			supportChatRoute.GET("/conversation/current", controller.GetCurrentSupportConversation)
+			supportChatRoute.POST("/conversation", controller.CreateSupportConversation)
+			supportChatRoute.GET("/conversation/:id/messages", controller.GetSupportConversationMessages)
+			supportChatRoute.POST("/conversation/:id/messages", controller.SendSupportConversationMessage)
+			supportChatRoute.POST("/conversation/:id/read", controller.MarkSupportConversationRead)
+			supportChatRoute.POST("/conversation/:id/close", controller.CloseSupportConversation)
+		}
+		supportAdminRoute := apiRouter.Group("/support/admin")
+		supportAdminRoute.Use(middleware.PermissionAuth(common.PermissionSupportReply))
+		{
+			supportAdminRoute.GET("/conversations", controller.ListAdminSupportConversations)
+			supportAdminRoute.GET("/conversations/:id/messages", controller.AdminGetSupportConversationMessages)
+			supportAdminRoute.POST("/conversations/:id/messages", controller.AdminSendSupportMessage)
+			supportAdminRoute.POST("/conversations/:id/claim", controller.AdminClaimSupportConversation)
+			supportAdminRoute.POST("/conversations/:id/close", controller.AdminCloseSupportConversation)
+			supportAdminRoute.POST("/conversations/:id/read", controller.AdminMarkSupportConversationRead)
+			supportAdminRoute.GET("/unread", controller.AdminSupportUnreadCount)
+		}
 		logRoute := apiRouter.Group("/log")
 		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)
 		logRoute.DELETE("/", middleware.AdminAuth(), controller.DeleteHistoryLogs)

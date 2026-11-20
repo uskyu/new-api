@@ -3997,6 +3997,24 @@
     "填写 LiveHelperChat 站点根地址，例如 https://chat.example.com；生产环境必须使用 HTTPS。": "Nhập URL gốc của trang LiveHelperChat, ví dụ https://chat.example.com. HTTPS là bắt buộc trong môi trường sản xuất.",
     "请先填写 LiveHelperChat 地址": "Vui lòng nhập URL LiveHelperChat trước",
     "在线客服配置已保存，刷新页面后生效": "Đã lưu cài đặt hỗ trợ trực tuyến. Làm mới trang để áp dụng.",
-    "加载在线客服设置失败": "Không thể tải cài đặt hỗ trợ trực tuyến"
+    "加载在线客服设置失败": "Không thể tải cài đặt hỗ trợ trực tuyến",
+    "客服工作台": "Không gian hỗ trợ",
+    "客服会话": "Hội thoại hỗ trợ",
+    "暂无会话": "Chưa có hội thoại",
+    "请选择会话": "Vui lòng chọn hội thoại",
+    "请输入消息": "Vui lòng nhập tin nhắn",
+    "发送": "Gửi",
+    "领取会话": "Nhận hội thoại",
+    "关闭会话": "Đóng hội thoại",
+    "会话已关闭": "Hội thoại đã đóng",
+    "等待客服接入": "Đang chờ nhân viên hỗ trợ",
+    "客服已接入": "Nhân viên hỗ trợ đã tiếp nhận",
+    "加载客服工作台失败": "Không thể tải không gian hỗ trợ",
+    "加载消息失败": "Không thể tải tin nhắn",
+    "消息发送失败，请重试": "Gửi tin nhắn thất bại, vui lòng thử lại",
+    "没有可接待的会话": "Không có hội thoại cần xử lý",
+    "客服": "Nhân viên hỗ trợ",
+    "已关闭": "Đã đóng",
+    "暂无消息，开始和客服对话吧。": "Chưa có tin nhắn. Hãy bắt đầu cuộc trò chuyện với bộ phận hỗ trợ."
   }
 }

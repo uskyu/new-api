@@ -63,6 +63,7 @@ export const DEFAULT_ADMIN_CONFIG = {
     subscription: true,
     marketplace_permission: true,
     setting: true,
+    support: true,
   },
 };
 

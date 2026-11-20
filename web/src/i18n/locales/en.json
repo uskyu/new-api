@@ -3492,6 +3492,24 @@
     "填写 LiveHelperChat 站点根地址，例如 https://chat.example.com；生产环境必须使用 HTTPS。": "Enter the LiveHelperChat site root URL, for example https://chat.example.com. HTTPS is required in production.",
     "请先填写 LiveHelperChat 地址": "Please enter the LiveHelperChat URL first",
     "在线客服配置已保存，刷新页面后生效": "Online support settings saved. Refresh the page to apply.",
-    "加载在线客服设置失败": "Failed to load online support settings"
+    "加载在线客服设置失败": "Failed to load online support settings",
+    "客服工作台": "Support workspace",
+    "客服会话": "Support conversations",
+    "暂无会话": "No conversations",
+    "请选择会话": "Select a conversation",
+    "请输入消息": "Enter a message",
+    "发送": "Send",
+    "领取会话": "Claim conversation",
+    "关闭会话": "Close conversation",
+    "会话已关闭": "Conversation closed",
+    "等待客服接入": "Waiting for an agent",
+    "客服已接入": "Agent connected",
+    "加载客服工作台失败": "Failed to load support workspace",
+    "加载消息失败": "Failed to load messages",
+    "消息发送失败，请重试": "Failed to send message, please try again",
+    "没有可接待的会话": "No conversations to handle",
+    "客服": "Agent",
+    "已关闭": "Closed",
+    "暂无消息，开始和客服对话吧。": "No messages yet. Start the conversation with support."
   }
 }

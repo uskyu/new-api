@@ -45,6 +45,8 @@ export const PERMISSIONS = {
   AGENT_DOWNLINE_ASSIGN: 'agent.downline.assign',
   AGENT_DOWNLINE_TRANSFER: 'agent.downline.transfer',
   AGENT_BALANCE_ADJUST: 'agent.balance.adjust',
+  SUPPORT_REPLY: 'support.reply',
+  SUPPORT_MANAGE: 'support.manage',
 };
 
 const rolePermissions = {
@@ -56,6 +58,8 @@ const rolePermissions = {
     [PERMISSIONS.AGENT_DOWNLINE_ASSIGN]: true,
     [PERMISSIONS.AGENT_DOWNLINE_TRANSFER]: true,
     [PERMISSIONS.AGENT_BALANCE_ADJUST]: true,
+    [PERMISSIONS.SUPPORT_REPLY]: true,
+    [PERMISSIONS.SUPPORT_MANAGE]: true,
   },
   [USER_ROLES.ADMIN]: {
     [PERMISSIONS.REDEMPTION_READ]: true,
@@ -66,6 +70,8 @@ const rolePermissions = {
     [PERMISSIONS.AGENT_DOWNLINE_ASSIGN]: true,
     [PERMISSIONS.AGENT_DOWNLINE_TRANSFER]: true,
     [PERMISSIONS.AGENT_BALANCE_ADJUST]: true,
+    [PERMISSIONS.SUPPORT_REPLY]: true,
+    [PERMISSIONS.SUPPORT_MANAGE]: true,
   },
   [USER_ROLES.ROOT]: {
     [PERMISSIONS.REDEMPTION_READ]: true,
@@ -76,6 +82,8 @@ const rolePermissions = {
     [PERMISSIONS.AGENT_DOWNLINE_ASSIGN]: true,
     [PERMISSIONS.AGENT_DOWNLINE_TRANSFER]: true,
     [PERMISSIONS.AGENT_BALANCE_ADJUST]: true,
+    [PERMISSIONS.SUPPORT_REPLY]: true,
+    [PERMISSIONS.SUPPORT_MANAGE]: true,
   },
 };
 

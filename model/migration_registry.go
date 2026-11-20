@@ -87,6 +87,8 @@ func CoreSchemaModels() []interface{} {
 		&SubscriptionPreConsumeRecord{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
+		&SupportConversation{},
+		&SupportMessage{},
 	}
 }
 

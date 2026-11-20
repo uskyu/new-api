@@ -174,6 +174,8 @@ const (
 	PermissionAgentDownlineAssign   = "agent.downline.assign"
 	PermissionAgentDownlineTransfer = "agent.downline.transfer"
 	PermissionAgentBalanceAdjust    = "agent.balance.adjust"
+	PermissionSupportReply          = "support.reply"
+	PermissionSupportManage         = "support.manage"
 )
 
 var RolePermissions = map[int]map[string]bool{
@@ -185,6 +187,8 @@ var RolePermissions = map[int]map[string]bool{
 		PermissionAgentDownlineAssign:   true,
 		PermissionAgentDownlineTransfer: true,
 		PermissionAgentBalanceAdjust:    true,
+		PermissionSupportReply:          true,
+		PermissionSupportManage:         true,
 	},
 	RoleAdminUser: {
 		PermissionRedemptionRead:        true,
@@ -195,6 +199,8 @@ var RolePermissions = map[int]map[string]bool{
 		PermissionAgentDownlineAssign:   true,
 		PermissionAgentDownlineTransfer: true,
 		PermissionAgentBalanceAdjust:    true,
+		PermissionSupportReply:          true,
+		PermissionSupportManage:         true,
 	},
 	RoleRootUser: {
 		PermissionRedemptionRead:        true,
@@ -205,6 +211,8 @@ var RolePermissions = map[int]map[string]bool{
 		PermissionAgentDownlineAssign:   true,
 		PermissionAgentDownlineTransfer: true,
 		PermissionAgentBalanceAdjust:    true,
+		PermissionSupportReply:          true,
+		PermissionSupportManage:         true,
 	},
 }
 

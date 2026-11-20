@@ -58,6 +58,7 @@ const routerMap = {
   ai_video_logs: '/console/ai-video-logs',
   playground: '/console/playground',
   personal: '/console/personal',
+  support: '/console/support',
 };
 
 const SiderBar = ({ onNavigate = () => {} }) => {
@@ -213,6 +214,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         itemKey: 'user',
         to: '/user',
         className: can(PERMISSIONS.USER_QUOTA_DECREASE) ? '' : 'tableHiddle',
+      },
+      {
+        text: t('客服工作台'),
+        itemKey: 'support',
+        to: '/console/support',
+        className: can(PERMISSIONS.SUPPORT_REPLY) ? '' : 'tableHiddle',
       },
       {
         text: t('系统设置'),
@@ -458,7 +465,8 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           isAdmin() ||
           can(PERMISSIONS.REDEMPTION_READ) ||
           can(PERMISSIONS.USER_QUOTA_DECREASE) ||
-          can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN)
+          can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN) ||
+          can(PERMISSIONS.SUPPORT_REPLY)
         }
       >
         <Nav
@@ -537,7 +545,8 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           {(isAdmin() ||
             can(PERMISSIONS.REDEMPTION_READ) ||
             can(PERMISSIONS.USER_QUOTA_DECREASE) ||
-            can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN)) &&
+            can(PERMISSIONS.AGENT_DOWNLINE_ASSIGN) ||
+            can(PERMISSIONS.SUPPORT_REPLY)) &&
             hasSectionVisibleModules('admin') && (
               <>
                 <Divider className='sidebar-divider' />

@@ -3448,6 +3448,24 @@
     "填写 LiveHelperChat 站点根地址，例如 https://chat.example.com；生产环境必须使用 HTTPS。": "Saisissez l'URL racine du site LiveHelperChat, par exemple https://chat.example.com. HTTPS est requis en production.",
     "请先填写 LiveHelperChat 地址": "Veuillez d'abord saisir l'URL LiveHelperChat",
     "在线客服配置已保存，刷新页面后生效": "Paramètres du support en ligne enregistrés. Actualisez la page pour les appliquer.",
-    "加载在线客服设置失败": "Échec du chargement des paramètres du support en ligne"
+    "加载在线客服设置失败": "Échec du chargement des paramètres du support en ligne",
+    "客服工作台": "Espace de support",
+    "客服会话": "Conversations de support",
+    "暂无会话": "Aucune conversation",
+    "请选择会话": "Sélectionnez une conversation",
+    "请输入消息": "Saisissez un message",
+    "发送": "Envoyer",
+    "领取会话": "Prendre en charge",
+    "关闭会话": "Fermer la conversation",
+    "会话已关闭": "Conversation fermée",
+    "等待客服接入": "En attente d'un agent",
+    "客服已接入": "Agent connecté",
+    "加载客服工作台失败": "Échec du chargement de l'espace de support",
+    "加载消息失败": "Échec du chargement des messages",
+    "消息发送失败，请重试": "Échec de l'envoi du message, veuillez réessayer",
+    "没有可接待的会话": "Aucune conversation à traiter",
+    "客服": "Agent",
+    "已关闭": "Fermé",
+    "暂无消息，开始和客服对话吧。": "Aucun message pour le moment. Commencez la conversation avec le support."
   }
 }

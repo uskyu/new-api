@@ -63,6 +63,7 @@ import MarketplacePermissionPage from './pages/MarketplacePermission';
 import Playground from './pages/Playground';
 import Subscription from './pages/Subscription';
 import Agent from './pages/Agent';
+import Support from './pages/Support';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
@@ -278,6 +279,14 @@ function App() {
           element={
             <PermissionRoute permission={PERMISSIONS.USER_QUOTA_DECREASE}>
               <User />
+            </PermissionRoute>
+          }
+        />
+        <Route
+          path='/console/support'
+          element={
+            <PermissionRoute permission={PERMISSIONS.SUPPORT_REPLY}>
+              <Support />
             </PermissionRoute>
           }
         />

@@ -49,7 +49,6 @@ import DrawingSetting from '../../components/settings/DrawingSetting';
 import PaymentSetting from '../../components/settings/PaymentSetting';
 import ModelDeploymentSetting from '../../components/settings/ModelDeploymentSetting';
 import PerformanceSetting from '../../components/settings/PerformanceSetting';
-import LiveHelperChatSetting from '../../components/settings/LiveHelperChatSetting';
 
 const Setting = () => {
   const { t } = useTranslation();
@@ -178,16 +177,6 @@ const Setting = () => {
       ),
       content: <OtherSetting />,
       itemKey: 'other',
-    });
-    panes.push({
-      tab: (
-        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <MessageSquare size={18} />
-          {t('在线客服')}
-        </span>
-      ),
-      content: <LiveHelperChatSetting />,
-      itemKey: 'live-helper-chat',
     });
   }
   const onChangeTab = (key) => {
