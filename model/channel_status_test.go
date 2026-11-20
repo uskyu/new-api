@@ -26,6 +26,26 @@ func setupChannelStatusTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestChannelInfoScanAcceptsDriverStringAndBytes(t *testing.T) {
+	payload := `{"is_multi_key":true,"multi_key_size":2,"multi_key_status_list":{"1":1},"multi_key_polling_index":1,"multi_key_mode":""}`
+
+	var fromString ChannelInfo
+	require.NoError(t, fromString.Scan(payload))
+	assert.True(t, fromString.IsMultiKey)
+	assert.Equal(t, 2, fromString.MultiKeySize)
+	assert.Equal(t, map[int]int{1: common.ChannelStatusEnabled}, fromString.MultiKeyStatusList)
+
+	var fromBytes ChannelInfo
+	require.NoError(t, fromBytes.Scan([]byte(payload)))
+	assert.Equal(t, fromString, fromBytes)
+
+	var fromNil ChannelInfo
+	require.NoError(t, fromNil.Scan(nil))
+	assert.False(t, fromNil.IsMultiKey)
+
+	require.Error(t, (&ChannelInfo{}).Scan(42))
+}
+
 func TestAutoDisableKeepsManualDisable(t *testing.T) {
 	for _, cacheEnabled := range []bool{false, true} {
 		for _, tc := range []struct {
