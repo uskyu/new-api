@@ -26,6 +26,7 @@ plans
 electron/node_modules
 electron/dist
 data/
+support-attachments/
 .gomodcache/
 .gocache-temp
 .gopath

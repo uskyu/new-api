@@ -28,10 +28,28 @@ import {
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess } from '../../helpers';
 import { UserContext } from '../../context/User';
+import {
+  buildSupportMessageFormData,
+  createSupportComposerItem,
+  extractClipboardImageFiles,
+  releaseSupportComposerItem,
+  validateSupportImageFiles,
+} from '../support/supportAttachmentUtils';
+import SupportAttachmentGrid from '../support/SupportAttachmentView';
+import {
+  SupportComposerAttachments,
+  SupportImagePicker,
+} from '../support/SupportComposerAttachments';
 
 const CONVERSATION_ENDPOINT = '/api/support/conversation';
 const POLL_INTERVAL_MS = 2000;
 const UNREAD_POLL_INTERVAL_MS = 5000;
+
+const SUPPORT_IMAGE_ERROR_KEYS = {
+  unsupported: '仅支持 JPG、PNG、GIF、WebP 图片',
+  too_large: '单张图片不能超过 5MB',
+  too_many: '每条消息最多发送 4 张图片',
+};
 
 function unwrapPayload(response) {
   return response?.data?.data ?? response?.data ?? null;
@@ -101,9 +119,23 @@ function normalizeMessage(raw, index) {
   }
 
   const id = raw.id ?? raw.message_id ?? raw.msg_id;
-  const contentValue = raw.content ?? raw.message ?? raw.text ?? raw.body;
+  const attachments = Array.from(raw.attachments || [])
+    .filter((attachment) => attachment && attachment.id != null)
+    .map((attachment) => ({
+      id: attachment.id,
+      file_name: attachment.file_name ?? '',
+      mime_type: attachment.mime_type ?? '',
+      size_bytes: attachment.size_bytes ?? null,
+      width: attachment.width ?? null,
+      height: attachment.height ?? null,
+      expired: Boolean(attachment.expired),
+    }));
+  let contentValue = raw.content ?? raw.message ?? raw.text ?? raw.body;
   if (contentValue === null || contentValue === undefined) {
-    return null;
+    if (attachments.length === 0) {
+      return null;
+    }
+    contentValue = '';
   }
 
   const senderValue = String(
@@ -148,6 +180,7 @@ function normalizeMessage(raw, index) {
     numericId: Number.isFinite(numericId) ? numericId : 0,
     isAdmin,
     content: String(contentValue),
+    attachments,
     createdAt,
     senderName:
       typeof senderName === 'string' && senderName.trim()
@@ -265,6 +298,7 @@ const SupportChatWidget = () => {
   const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
+  const [composerAttachments, setComposerAttachments] = useState([]);
   const [isCreating, setIsCreating] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [conversationErrorKey, setConversationErrorKey] = useState('');
@@ -279,6 +313,7 @@ const SupportChatWidget = () => {
   const refreshMessagesRef = useRef(null);
   const messageListRef = useRef(null);
   const mountedRef = useRef(true);
+  const composerAttachmentsRef = useRef([]);
 
   const pathname = location.pathname;
   const isConsoleRoute =
@@ -318,6 +353,32 @@ const SupportChatWidget = () => {
   }, []);
 
   useEffect(() => {
+    composerAttachmentsRef.current = composerAttachments;
+  }, [composerAttachments]);
+
+  useEffect(() => {
+    return () => {
+      composerAttachmentsRef.current.forEach(releaseSupportComposerItem);
+      composerAttachmentsRef.current = [];
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      return;
+    }
+
+    const pending = composerAttachmentsRef.current;
+    if (pending.length === 0) {
+      return;
+    }
+
+    composerAttachmentsRef.current = [];
+    pending.forEach(releaseSupportComposerItem);
+    setComposerAttachments([]);
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isOpen) {
       return undefined;
     }
@@ -341,7 +402,7 @@ const SupportChatWidget = () => {
     if (messageList) {
       messageList.scrollTop = messageList.scrollHeight;
     }
-  }, [isOpen, visible, messages]);
+  }, [isOpen, visible, messages, composerAttachments]);
 
   useEffect(() => {
     if (!visible || !isOpen) {
@@ -656,12 +717,75 @@ const SupportChatWidget = () => {
     setIsOpen(false);
   };
 
+  const appendComposerFiles = (files) => {
+    const { accepted, errors } = validateSupportImageFiles(
+      files,
+      composerAttachmentsRef.current.length,
+    );
+
+    if (accepted.length > 0) {
+      const next = [
+        ...composerAttachmentsRef.current,
+        ...accepted.map((file) => createSupportComposerItem(file)),
+      ];
+      composerAttachmentsRef.current = next;
+      setComposerAttachments(next);
+    }
+
+    const seenCodes = new Set();
+    errors.forEach(({ code }) => {
+      if (seenCodes.has(code)) {
+        return;
+      }
+      seenCodes.add(code);
+      const messageKey = SUPPORT_IMAGE_ERROR_KEYS[code];
+      if (messageKey) {
+        showError(t(messageKey));
+      }
+    });
+  };
+
+  const handlePaste = (event) => {
+    const current = conversationRef.current;
+    if (!current || current.status === 'closed' || isCreating || isSending) {
+      return;
+    }
+
+    const files = extractClipboardImageFiles(event);
+    if (files.length === 0) {
+      return;
+    }
+
+    appendComposerFiles(files);
+  };
+
+  const handleRemoveComposerAttachment = (key) => {
+    if (isSending) {
+      return;
+    }
+
+    const target = composerAttachmentsRef.current.find(
+      (item) => item.key === key,
+    );
+    if (!target) {
+      return;
+    }
+
+    releaseSupportComposerItem(target);
+    const next = composerAttachmentsRef.current.filter(
+      (item) => item.key !== key,
+    );
+    composerAttachmentsRef.current = next;
+    setComposerAttachments(next);
+  };
+
   const handleSend = async () => {
     const content = inputValue.trim();
+    const files = composerAttachmentsRef.current.map((item) => item.file);
     const current = conversationRef.current;
 
     if (
-      !content ||
+      (!content && files.length === 0) ||
       !current ||
       current.status === 'closed' ||
       isSending
@@ -672,11 +796,14 @@ const SupportChatWidget = () => {
     setIsSending(true);
 
     try {
-      const response = await API.post(
-        `${CONVERSATION_ENDPOINT}/${current.id}/messages`,
-        { content },
-        { skipErrorHandler: true },
-      );
+      const url = `${CONVERSATION_ENDPOINT}/${current.id}/messages`;
+      const response = files.length
+        ? await API.post(
+            url,
+            buildSupportMessageFormData(content, files),
+            { skipErrorHandler: true },
+          )
+        : await API.post(url, { content }, { skipErrorHandler: true });
       if (!mountedRef.current) {
         return;
       }
@@ -690,6 +817,10 @@ const SupportChatWidget = () => {
       );
 
       setInputValue('');
+      const sentItems = composerAttachmentsRef.current;
+      composerAttachmentsRef.current = [];
+      sentItems.forEach(releaseSupportComposerItem);
+      setComposerAttachments([]);
       if (sentMessage) {
         const next = mergeMessages(messagesRef.current, [sentMessage]);
         messagesRef.current = next;
@@ -849,6 +980,8 @@ const SupportChatWidget = () => {
             ? message.senderName || t('在线客服')
             : message.senderName || userName || '我';
           const time = formatMessageTime(message.createdAt);
+          const hasText = Boolean(message.content.trim());
+          const mediaOnly = !hasText && message.attachments.length > 0;
 
           return (
             <div
@@ -865,8 +998,15 @@ const SupportChatWidget = () => {
                   <span className='support-chat-message__time'>{time}</span>
                 )}
               </div>
-              <div className='support-chat-message__bubble'>
-                {message.content}
+              <div
+                className={`support-chat-message__bubble${
+                  mediaOnly ? ' support-chat-message__bubble--media' : ''
+                }`}
+              >
+                {hasText && message.content}
+                {message.attachments.length > 0 && (
+                  <SupportAttachmentGrid attachments={message.attachments} />
+                )}
               </div>
             </div>
           );
@@ -879,13 +1019,14 @@ const SupportChatWidget = () => {
     Boolean(conversation) &&
     !conversationClosed &&
     !isSending &&
-    Boolean(inputValue.trim());
+    (Boolean(inputValue.trim()) || composerAttachments.length > 0);
 
   return (
     <div
       className='support-chat-panel'
       role='dialog'
       aria-label={t('在线客服')}
+      onPaste={handlePaste}
     >
       <div className='support-chat-panel__header'>
         <div className='support-chat-panel__heading'>
@@ -936,7 +1077,19 @@ const SupportChatWidget = () => {
             </Button>
           </div>
         )}
+        <SupportComposerAttachments
+          items={composerAttachments}
+          onRemove={handleRemoveComposerAttachment}
+          disabled={isSending}
+        />
         <div className='support-chat-panel__composer'>
+          <SupportImagePicker
+            className='support-chat-panel__image-picker'
+            onSelectFiles={appendComposerFiles}
+            disabled={
+              !conversation || conversationClosed || isCreating || isSending
+            }
+          />
           <Input
             className='support-chat-panel__input'
             value={inputValue}

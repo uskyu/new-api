@@ -89,6 +89,7 @@ func CoreSchemaModels() []interface{} {
 		&UserOAuthBinding{},
 		&SupportConversation{},
 		&SupportMessage{},
+		&SupportMessageAttachment{},
 	}
 }
 

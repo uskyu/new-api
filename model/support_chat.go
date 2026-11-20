@@ -58,6 +58,9 @@ type SupportMessage struct {
 	SenderName     string `json:"sender_name" gorm:"type:varchar(64);not null;default:''"`
 	Content        string `json:"content" gorm:"type:text;not null"`
 	CreatedAt      int64  `json:"created_at" gorm:"type:bigint;not null;default:0;autoCreateTime:false"`
+
+	// Attachments 由 LoadSupportMessageAttachments 或创建消息时填充，不参与 GORM 关联。
+	Attachments []SupportMessageAttachment `json:"attachments" gorm:"-"`
 }
 
 // GetOpenSupportConversationByUserId 获取用户当前进行中的会话，没有则返回 nil。
@@ -172,54 +175,9 @@ func ListSupportMessages(conversationId int, afterId int, limit int) ([]SupportM
 }
 
 // CreateSupportMessage 创建消息并同步更新会话的未读数、预览与最后消息时间。
+// 无附件场景的包装函数，保留旧调用行为。
 func CreateSupportMessage(message *SupportMessage) error {
-	if message == nil {
-		return errors.New("message is nil")
-	}
-	if message.ConversationId <= 0 {
-		return errors.New("invalid conversation id")
-	}
-	switch message.SenderType {
-	case SupportSenderTypeUser, SupportSenderTypeAdmin:
-	default:
-		return errors.New("invalid sender type")
-	}
-
-	return DB.Transaction(func(tx *gorm.DB) error {
-		var conversation SupportConversation
-		if err := lockForUpdate(tx).
-			Where("id = ?", message.ConversationId).
-			First(&conversation).Error; err != nil {
-			return err
-		}
-		if conversation.Status != SupportConversationStatusOpen {
-			return errors.New("support conversation is closed")
-		}
-
-		now := common.GetTimestamp()
-		message.CreatedAt = now
-		if err := tx.Create(message).Error; err != nil {
-			return err
-		}
-
-		updates := map[string]interface{}{
-			"last_message_at":      now,
-			"last_message_preview": buildSupportMessagePreview(message.Content),
-			"updated_at":           now,
-		}
-		if message.SenderType == SupportSenderTypeUser {
-			updates["admin_unread"] = gorm.Expr("admin_unread + ?", 1)
-		} else {
-			updates["user_unread"] = gorm.Expr("user_unread + ?", 1)
-			if conversation.AssignedAdminId == 0 {
-				updates["assigned_admin_id"] = message.SenderId
-			}
-		}
-
-		return tx.Model(&SupportConversation{}).
-			Where("id = ?", message.ConversationId).
-			Updates(updates).Error
-	})
+	return CreateSupportMessageWithAttachments(message, nil)
 }
 
 // MarkSupportConversationRead 标记会话已读。

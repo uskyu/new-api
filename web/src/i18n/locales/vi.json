@@ -4015,6 +4015,22 @@
     "没有可接待的会话": "Không có hội thoại cần xử lý",
     "客服": "Nhân viên hỗ trợ",
     "已关闭": "Đã đóng",
-    "暂无消息，开始和客服对话吧。": "Chưa có tin nhắn. Hãy bắt đầu cuộc trò chuyện với bộ phận hỗ trợ."
+    "暂无消息，开始和客服对话吧。": "Chưa có tin nhắn. Hãy bắt đầu cuộc trò chuyện với bộ phận hỗ trợ.",
+    "图片": "Hình ảnh",
+    "图片预览": "Xem trước ảnh",
+    "图片已过期": "Hình ảnh đã hết hạn",
+    "图片加载失败": "Không tải được hình ảnh",
+    "移除图片": "Xóa ảnh",
+    "仅支持 JPG、PNG、GIF、WebP 图片": "Chỉ hỗ trợ ảnh JPG, PNG, GIF, WebP",
+    "单张图片不能超过 5MB": "Mỗi ảnh không được vượt quá 5MB",
+    "每条消息最多发送 4 张图片": "Tối đa 4 ảnh mỗi tin nhắn",
+    "会话数据留存": "Lưu giữ dữ liệu hội thoại",
+    "留存天数（天）": "Số ngày lưu giữ",
+    "已关闭的会话超过设定天数后，将自动删除会话记录、聊天消息和图片附件。0 表示永久保留。": "Các hội thoại đã đóng quá số ngày đã đặt sẽ tự động bị xóa cùng tin nhắn và ảnh đính kèm. 0 nghĩa là lưu giữ vĩnh viễn.",
+    "留存设置已保存": "Đã lưu cài đặt lưu giữ",
+    "图片上传失败，请重试": "Tải ảnh thất bại, vui lòng thử lại",
+    "加载留存设置失败": "Không tải được cài đặt lưu giữ",
+    "留存天数需为 0 至 3650 的整数": "Số ngày lưu giữ phải là số nguyên từ 0 đến 3650",
+    "保存留存设置失败": "Lưu cài đặt lưu giữ thất bại"
   }
 }

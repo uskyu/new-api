@@ -3466,6 +3466,22 @@
     "没有可接待的会话": "Aucune conversation à traiter",
     "客服": "Agent",
     "已关闭": "Fermé",
-    "暂无消息，开始和客服对话吧。": "Aucun message pour le moment. Commencez la conversation avec le support."
+    "暂无消息，开始和客服对话吧。": "Aucun message pour le moment. Commencez la conversation avec le support.",
+    "图片": "Image",
+    "图片预览": "Aperçu de l'image",
+    "图片已过期": "Image expirée",
+    "图片加载失败": "Échec du chargement de l'image",
+    "移除图片": "Supprimer l'image",
+    "仅支持 JPG、PNG、GIF、WebP 图片": "Seules les images JPG, PNG, GIF et WebP sont prises en charge",
+    "单张图片不能超过 5MB": "Chaque image doit faire 5 Mo maximum",
+    "每条消息最多发送 4 张图片": "Jusqu'à 4 images par message",
+    "会话数据留存": "Conservation des données de conversation",
+    "留存天数（天）": "Durée de conservation (jours)",
+    "已关闭的会话超过设定天数后，将自动删除会话记录、聊天消息和图片附件。0 表示永久保留。": "Les conversations fermées depuis plus longtemps que le nombre de jours configuré verront leurs enregistrements, messages et pièces jointes supprimés automatiquement. 0 signifie conserver pour toujours.",
+    "留存设置已保存": "Paramètres de conservation enregistrés",
+    "图片上传失败，请重试": "Échec du téléchargement des images, veuillez réessayer",
+    "加载留存设置失败": "Échec du chargement des paramètres de conservation",
+    "留存天数需为 0 至 3650 的整数": "La durée de conservation doit être un nombre entier entre 0 et 3650",
+    "保存留存设置失败": "Échec de l'enregistrement des paramètres de conservation"
   }
 }

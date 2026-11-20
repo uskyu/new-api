@@ -354,6 +354,7 @@ func SetApiRouter(router *gin.Engine) {
 			supportChatRoute.POST("/conversation/:id/messages", controller.SendSupportConversationMessage)
 			supportChatRoute.POST("/conversation/:id/read", controller.MarkSupportConversationRead)
 			supportChatRoute.POST("/conversation/:id/close", controller.CloseSupportConversation)
+			supportChatRoute.GET("/attachments/:id", controller.GetSupportAttachment)
 		}
 		supportAdminRoute := apiRouter.Group("/support/admin")
 		supportAdminRoute.Use(middleware.PermissionAuth(common.PermissionSupportReply))
@@ -365,6 +366,12 @@ func SetApiRouter(router *gin.Engine) {
 			supportAdminRoute.POST("/conversations/:id/close", controller.AdminCloseSupportConversation)
 			supportAdminRoute.POST("/conversations/:id/read", controller.AdminMarkSupportConversationRead)
 			supportAdminRoute.GET("/unread", controller.AdminSupportUnreadCount)
+		}
+		supportAdminSettingsRoute := apiRouter.Group("/support/admin/settings")
+		supportAdminSettingsRoute.Use(middleware.PermissionAuth(common.PermissionSupportManage))
+		{
+			supportAdminSettingsRoute.GET("", controller.GetSupportChatSettings)
+			supportAdminSettingsRoute.PUT("", controller.UpdateSupportChatSettings)
 		}
 		logRoute := apiRouter.Group("/log")
 		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)

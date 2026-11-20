@@ -4,12 +4,11 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
-	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -81,24 +80,6 @@ func getSupportConversationForAdmin(c *gin.Context, conversationId int) (*model.
 	return conversation, true
 }
 
-func parseSupportMessageContent(c *gin.Context) (string, bool) {
-	var request supportMessageRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
-		return "", false
-	}
-	content := strings.TrimSpace(request.Content)
-	if content == "" {
-		common.ApiErrorMsg(c, "消息内容不能为空")
-		return "", false
-	}
-	if utf8.RuneCountInString(content) > supportMessageMaxRunes {
-		common.ApiErrorMsg(c, "消息内容不能超过 2000 个字符")
-		return "", false
-	}
-	return content, true
-}
-
 func parseSupportReadRequest(c *gin.Context) (int, bool) {
 	var request supportReadRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -164,6 +145,10 @@ func GetSupportConversationMessages(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
 		return
 	}
+	if err := model.LoadSupportMessageAttachments(messages); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+		return
+	}
 	conversation, err := model.GetSupportConversationById(conversationId)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
@@ -191,7 +176,7 @@ func SendSupportConversationMessage(c *gin.Context) {
 		return
 	}
 
-	content, ok := parseSupportMessageContent(c)
+	payload, ok := parseSupportMessagePayload(c, conversationId)
 	if !ok {
 		return
 	}
@@ -200,9 +185,10 @@ func SendSupportConversationMessage(c *gin.Context) {
 		SenderType:     model.SupportSenderTypeUser,
 		SenderId:       userId,
 		SenderName:     c.GetString("username"),
-		Content:        content,
+		Content:        payload.Content,
 	}
-	if err := model.CreateSupportMessage(message); err != nil {
+	if err := model.CreateSupportMessageWithAttachments(message, payload.Attachments); err != nil {
+		service.CleanupStoredSupportAttachments(payload.Stored)
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
@@ -328,6 +314,10 @@ func AdminGetSupportConversationMessages(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
 		return
 	}
+	if err := model.LoadSupportMessageAttachments(messages); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+		return
+	}
 	conversation, err := model.GetSupportConversationById(conversationId)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
@@ -354,7 +344,7 @@ func AdminSendSupportMessage(c *gin.Context) {
 		return
 	}
 
-	content, ok := parseSupportMessageContent(c)
+	payload, ok := parseSupportMessagePayload(c, conversationId)
 	if !ok {
 		return
 	}
@@ -363,9 +353,10 @@ func AdminSendSupportMessage(c *gin.Context) {
 		SenderType:     model.SupportSenderTypeAdmin,
 		SenderId:       c.GetInt("id"),
 		SenderName:     c.GetString("username"),
-		Content:        content,
+		Content:        payload.Content,
 	}
-	if err := model.CreateSupportMessage(message); err != nil {
+	if err := model.CreateSupportMessageWithAttachments(message, payload.Attachments); err != nil {
+		service.CleanupStoredSupportAttachments(payload.Stored)
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}

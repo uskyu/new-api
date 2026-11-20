@@ -30,15 +30,36 @@ import {
   Button,
   Card,
   Empty,
+  InputNumber,
+  Modal,
   Pagination,
   Spin,
   Tag,
   TextArea,
   Typography,
 } from '@douyinfe/semi-ui';
-import { ArrowLeft, Send, UserRound, X } from 'lucide-react';
-import { API, getUserIdFromLocalStorage, showError } from '../../helpers';
+import { ArrowLeft, Send, Settings, UserRound, X } from 'lucide-react';
+import {
+  API,
+  can,
+  getUserIdFromLocalStorage,
+  PERMISSIONS,
+  showError,
+  showSuccess,
+} from '../../helpers';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
+import {
+  buildSupportMessageFormData,
+  createSupportComposerItem,
+  extractClipboardImageFiles,
+  releaseSupportComposerItem,
+  validateSupportImageFiles,
+} from '../../components/support/supportAttachmentUtils';
+import { SupportAttachmentGrid } from '../../components/support/SupportAttachmentView';
+import {
+  SupportComposerAttachments,
+  SupportImagePicker,
+} from '../../components/support/SupportComposerAttachments';
 
 const { Text, Title } = Typography;
 
@@ -47,6 +68,8 @@ const MESSAGE_PAGE_SIZE = 100;
 const INCREMENTAL_MESSAGE_LIMIT = 50;
 const LIST_POLL_INTERVAL = 3000;
 const MESSAGE_POLL_INTERVAL = 2000;
+const DEFAULT_RETENTION_DAYS = 180;
+const MAX_RETENTION_DAYS = 3650;
 
 const resolveErrorMessage = (error, fallback) => {
   const responseMessage = error?.response?.data?.message;
@@ -225,9 +248,14 @@ const Support = () => {
   const [messages, setMessages] = useState([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [input, setInput] = useState('');
+  const [composerAttachments, setComposerAttachments] = useState([]);
   const [sending, setSending] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [retentionVisible, setRetentionVisible] = useState(false);
+  const [retentionDays, setRetentionDays] = useState(DEFAULT_RETENTION_DAYS);
+  const [retentionLoading, setRetentionLoading] = useState(false);
+  const [retentionSaving, setRetentionSaving] = useState(false);
 
   const listLoadingRef = useRef(false);
   const messagesLoadingRef = useRef(false);
@@ -237,6 +265,7 @@ const Support = () => {
   const listErrorRef = useRef(false);
   const messagesErrorRef = useRef(false);
   const messagesContainerRef = useRef(null);
+  const composerAttachmentsRef = useRef([]);
 
   const fetchConversations = useCallback(
     async ({ silent = false } = {}) => {
@@ -436,6 +465,84 @@ const Support = () => {
     }
   }, [messages, selectedId]);
 
+  const resetComposerAttachments = useCallback(() => {
+    const items = composerAttachmentsRef.current;
+    composerAttachmentsRef.current = [];
+    items.forEach(releaseSupportComposerItem);
+    setComposerAttachments([]);
+  }, []);
+
+  const appendComposerFiles = useCallback(
+    (files) => {
+      const current = composerAttachmentsRef.current;
+      const { accepted, errors } = validateSupportImageFiles(
+        files,
+        current.length,
+      );
+      if (accepted.length > 0) {
+        const next = [...current, ...accepted.map(createSupportComposerItem)];
+        composerAttachmentsRef.current = next;
+        setComposerAttachments(next);
+      }
+      const reportedCodes = new Set();
+      errors.forEach((error) => {
+        const code = error?.code;
+        if (reportedCodes.has(code)) {
+          return;
+        }
+        reportedCodes.add(code);
+        if (code === 'unsupported') {
+          showError(t('仅支持 JPG、PNG、GIF、WebP 图片'));
+        } else if (code === 'too_large') {
+          showError(t('单张图片不能超过 5MB'));
+        } else if (code === 'too_many') {
+          showError(t('每条消息最多发送 4 张图片'));
+        }
+      });
+    },
+    [t],
+  );
+
+  const handleComposerPaste = (event) => {
+    if (sending) {
+      return;
+    }
+    const files = extractClipboardImageFiles(event);
+    if (files.length === 0) {
+      return;
+    }
+    appendComposerFiles(files);
+  };
+
+  const handleSelectComposerFiles = (files) => {
+    if (sending) {
+      return;
+    }
+    appendComposerFiles(files);
+  };
+
+  const handleRemoveComposerAttachment = (key) => {
+    if (sending) {
+      return;
+    }
+    const current = composerAttachmentsRef.current;
+    const target = current.find((item) => item.key === key);
+    if (!target) {
+      return;
+    }
+    releaseSupportComposerItem(target);
+    const next = current.filter((item) => item.key !== key);
+    composerAttachmentsRef.current = next;
+    setComposerAttachments(next);
+  };
+
+  useEffect(() => {
+    return () => {
+      composerAttachmentsRef.current.forEach(releaseSupportComposerItem);
+      composerAttachmentsRef.current = [];
+    };
+  }, []);
+
   const selectConversation = (conversation) => {
     if (!conversation) {
       return;
@@ -445,6 +552,7 @@ const Support = () => {
     setSelectedConversation(conversation);
     setMessages([]);
     setInput('');
+    resetComposerAttachments();
     lastMessageIdRef.current = null;
     lastReadIdRef.current = '';
     messagesErrorRef.current = false;
@@ -456,6 +564,7 @@ const Support = () => {
     setSelectedConversation(null);
     setMessages([]);
     setInput('');
+    resetComposerAttachments();
     lastMessageIdRef.current = null;
     lastReadIdRef.current = '';
   };
@@ -481,16 +590,26 @@ const Support = () => {
   const handleSend = async () => {
     const content = input.trim();
     const conversationId = selectedIdRef.current;
-    if (!content || conversationId == null || sending) {
+    const attachments = composerAttachmentsRef.current;
+    if (conversationId == null || sending) {
+      return;
+    }
+    if (!content && attachments.length === 0) {
       return;
     }
     setSending(true);
     try {
-      const res = await API.post(
-        `/api/support/admin/conversations/${conversationId}/messages`,
-        { content },
-        { skipErrorHandler: true },
-      );
+      const url = `/api/support/admin/conversations/${conversationId}/messages`;
+      let res;
+      if (attachments.length > 0) {
+        const formData = buildSupportMessageFormData(
+          content,
+          attachments.map((item) => item.file),
+        );
+        res = await API.post(url, formData, { skipErrorHandler: true });
+      } else {
+        res = await API.post(url, { content }, { skipErrorHandler: true });
+      }
       if (!res.data?.success) {
         throw new Error(res.data?.message || t('消息发送失败，请重试'));
       }
@@ -504,6 +623,7 @@ const Support = () => {
         }
       }
       setInput('');
+      resetComposerAttachments();
       fetchMessages({ incremental: true, silent: true });
       fetchConversations({ silent: true });
     } catch (error) {
@@ -575,11 +695,78 @@ const Support = () => {
       setSelectedConversation((previous) =>
         previous ? { ...previous, ...updatedData, status: 'closed' } : previous,
       );
+      resetComposerAttachments();
       fetchConversations({ silent: true });
     } catch (error) {
       showError(resolveErrorMessage(error, t('加载客服工作台失败')));
     } finally {
       setClosing(false);
+    }
+  };
+
+  const openRetentionModal = async () => {
+    setRetentionVisible(true);
+    setRetentionLoading(true);
+    try {
+      const res = await API.get('/api/support/admin/settings', {
+        skipErrorHandler: true,
+      });
+      if (!res.data?.success) {
+        throw new Error(res.data?.message || t('加载留存设置失败'));
+      }
+      const rawDays = res.data?.data?.retention_days;
+      const parsedDays = Number(rawDays);
+      setRetentionDays(
+        rawDays == null || !Number.isFinite(parsedDays)
+          ? DEFAULT_RETENTION_DAYS
+          : parsedDays,
+      );
+    } catch (error) {
+      showError(resolveErrorMessage(error, t('加载留存设置失败')));
+    } finally {
+      setRetentionLoading(false);
+    }
+  };
+
+  const closeRetentionModal = () => {
+    if (retentionSaving) {
+      return;
+    }
+    setRetentionVisible(false);
+  };
+
+  const handleSaveRetention = async () => {
+    if (retentionSaving || retentionLoading) {
+      return;
+    }
+    const rawDays = retentionDays;
+    const days = Number(rawDays);
+    if (
+      rawDays === '' ||
+      rawDays == null ||
+      !Number.isInteger(days) ||
+      days < 0 ||
+      days > MAX_RETENTION_DAYS
+    ) {
+      showError(t('留存天数需为 0 至 3650 的整数'));
+      return;
+    }
+    setRetentionSaving(true);
+    try {
+      const res = await API.put(
+        '/api/support/admin/settings',
+        { retention_days: days },
+        { skipErrorHandler: true },
+      );
+      if (!res.data?.success) {
+        throw new Error(res.data?.message || t('保存留存设置失败'));
+      }
+      showSuccess(t('留存设置已保存'));
+      setRetentionVisible(false);
+    } catch (error) {
+      showError(resolveErrorMessage(error, t('保存留存设置失败')));
+    } finally {
+      setRetentionSaving(false);
     }
   };
 
@@ -696,6 +883,11 @@ const Support = () => {
     }
     return messages.map((message, index) => {
       const userMessage = isUserMessage(message, selectedConversation);
+      const content = getMessageContent(message);
+      const hasContent = content.trim().length > 0;
+      const attachments = Array.isArray(message?.attachments)
+        ? message.attachments
+        : [];
       return (
         <div
           key={getMessageKey(message, index)}
@@ -711,20 +903,26 @@ const Support = () => {
               {userMessage ? t('用户') : t('客服')} ·{' '}
               {formatTime(getMessageTime(message))}
             </div>
-            <div
-              style={{
-                padding: '10px 12px',
-                borderRadius: 8,
-                background: userMessage
-                  ? 'var(--semi-color-fill-0)'
-                  : 'var(--semi-color-primary-light-default)',
-                color: 'var(--semi-color-text-0)',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}
-            >
-              {getMessageContent(message)}
-            </div>
+            {hasContent && (
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  background: userMessage
+                    ? 'var(--semi-color-fill-0)'
+                    : 'var(--semi-color-primary-light-default)',
+                  color: 'var(--semi-color-text-0)',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {content}
+              </div>
+            )}
+            <SupportAttachmentGrid
+              attachments={attachments}
+              className={hasContent ? 'mt-1' : ''}
+            />
           </div>
         </div>
       );
@@ -851,7 +1049,13 @@ const Support = () => {
               padding: 12,
               borderTop: '1px solid var(--semi-color-border)',
             }}
+            onPaste={handleComposerPaste}
           >
+            <SupportComposerAttachments
+              items={composerAttachments}
+              onRemove={handleRemoveComposerAttachment}
+              disabled={sending}
+            />
             <TextArea
               value={input}
               onChange={setInput}
@@ -869,13 +1073,19 @@ const Support = () => {
                 }
               }}
             />
-            <div className='flex justify-end mt-2'>
+            <div className='flex items-center justify-between gap-2 mt-2'>
+              <SupportImagePicker
+                onSelectFiles={handleSelectComposerFiles}
+                disabled={sending}
+              />
               <Button
                 type='primary'
                 theme='solid'
                 icon={<Send size={14} />}
                 loading={sending}
-                disabled={!input.trim()}
+                disabled={
+                  sending || (!input.trim() && composerAttachments.length === 0)
+                }
                 onClick={handleSend}
               >
                 {t('发送')}
@@ -888,6 +1098,7 @@ const Support = () => {
   };
 
   const panelHeight = isMobile ? 'calc(100vh - 190px)' : 'calc(100vh - 240px)';
+  const canManageSupport = can(PERMISSIONS.SUPPORT_MANAGE);
 
   const statusOptions = [
     { key: 'all', label: t('全部') },
@@ -897,11 +1108,24 @@ const Support = () => {
 
   return (
     <div className='mt-[60px] px-2 pb-6'>
-      <div className='flex items-center gap-2 mb-3'>
-        <Title heading={4} style={{ margin: 0 }}>
-          {t('客服工作台')}
-        </Title>
-        <Badge count={unreadCount} overflowCount={99} />
+      <div className='flex items-center justify-between gap-2 flex-wrap mb-3'>
+        <div className='flex items-center gap-2'>
+          <Title heading={4} style={{ margin: 0 }}>
+            {t('客服工作台')}
+          </Title>
+          <Badge count={unreadCount} overflowCount={99} />
+        </div>
+        {canManageSupport && (
+          <Button
+            size='small'
+            type='tertiary'
+            theme='light'
+            icon={<Settings size={14} />}
+            onClick={openRetentionModal}
+          >
+            {t('会话数据留存')}
+          </Button>
+        )}
       </div>
 
       <div
@@ -993,6 +1217,42 @@ const Support = () => {
           </Card>
         )}
       </div>
+
+      <Modal
+        title={t('会话数据留存')}
+        visible={retentionVisible}
+        onCancel={closeRetentionModal}
+        onOk={handleSaveRetention}
+        okText={t('保存')}
+        cancelText={t('取消')}
+        confirmLoading={retentionLoading || retentionSaving}
+        maskClosable={!retentionSaving}
+        closable={!retentionSaving}
+        width={isMobile ? '100%' : 480}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <Text type='secondary' size='small' style={{ lineHeight: 1.6 }}>
+            {t(
+              '已关闭的会话超过设定天数后，将自动删除会话记录、聊天消息和图片附件。0 表示永久保留。',
+            )}
+          </Text>
+          <div>
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>
+              {t('留存天数（天）')}
+            </Text>
+            <InputNumber
+              min={0}
+              max={MAX_RETENTION_DAYS}
+              precision={0}
+              step={1}
+              value={retentionDays}
+              disabled={retentionLoading || retentionSaving}
+              onChange={setRetentionDays}
+              style={{ width: '100%' }}
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };
