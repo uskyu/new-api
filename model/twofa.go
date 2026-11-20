@@ -120,14 +120,28 @@ func (t *TwoFA) ResetFailedAttempts() error {
 
 // IncrementFailedAttempts 增加失败尝试次数
 func (t *TwoFA) IncrementFailedAttempts() error {
-	t.FailedAttempts++
-
-	// 检查是否需要锁定
-	if t.FailedAttempts >= common.MaxFailAttempts {
-		lockUntil := time.Now().Add(time.Duration(common.LockoutDuration) * time.Second)
-		t.LockedUntil = &lockUntil
+	now := time.Now()
+	// 仍在锁定期内：保持原锁定时间，不延长锁定
+	if t.LockedUntil != nil && now.Before(*t.LockedUntil) {
+		return nil
 	}
 
+	nextFailedAttempts := t.FailedAttempts + 1
+	nextLockedUntil := t.LockedUntil
+	if t.LockedUntil != nil {
+		// 上一次锁定已过期，本次失败重新开始计数
+		nextFailedAttempts = 1
+		nextLockedUntil = nil
+	}
+
+	// 检查是否需要锁定
+	if nextFailedAttempts >= common.MaxFailAttempts {
+		lockUntil := now.Add(time.Duration(common.LockoutDuration) * time.Second)
+		nextLockedUntil = &lockUntil
+	}
+
+	t.FailedAttempts = nextFailedAttempts
+	t.LockedUntil = nextLockedUntil
 	return t.Update()
 }
 
