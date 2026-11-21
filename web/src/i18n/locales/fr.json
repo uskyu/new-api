@@ -3482,6 +3482,11 @@
     "图片上传失败，请重试": "Échec du téléchargement des images, veuillez réessayer",
     "加载留存设置失败": "Échec du chargement des paramètres de conservation",
     "留存天数需为 0 至 3650 的整数": "La durée de conservation doit être un nombre entier entre 0 et 3650",
-    "保存留存设置失败": "Échec de l'enregistrement des paramètres de conservation"
+    "保存留存设置失败": "Échec de l'enregistrement des paramètres de conservation",
+    "登录后才可发送消息": "Veuillez vous connecter avant d'envoyer des messages",
+    "去登录": "Se connecter",
+    "未登录": "Non connecté",
+    "有问题随时联系": "Contactez-nous à tout moment",
+    "登录后即可联系": "Connectez-vous pour nous contacter"
   }
 }

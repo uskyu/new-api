@@ -3526,6 +3526,11 @@
     "图片上传失败，请重试": "Failed to upload images, please try again",
     "加载留存设置失败": "Failed to load retention settings",
     "留存天数需为 0 至 3650 的整数": "Retention days must be an integer between 0 and 3650",
-    "保存留存设置失败": "Failed to save retention settings"
+    "保存留存设置失败": "Failed to save retention settings",
+    "登录后才可发送消息": "Please log in before sending messages",
+    "去登录": "Log in",
+    "未登录": "Not logged in",
+    "有问题随时联系": "Contact us anytime",
+    "登录后即可联系": "Log in to contact us"
   }
 }

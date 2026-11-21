@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useContext, useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button, Input, Spin } from '@douyinfe/semi-ui';
 import {
@@ -292,6 +292,7 @@ function mergeMessages(current, incoming) {
 const SupportChatWidget = () => {
   const [userState] = useContext(UserContext);
   const location = useLocation();
+  const navigate = useNavigate();
   const { t } = useTranslation();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -316,13 +317,13 @@ const SupportChatWidget = () => {
   const composerAttachmentsRef = useRef([]);
 
   const pathname = location.pathname;
-  const isConsoleRoute =
-    pathname === '/console' || pathname.startsWith('/console/');
   const isSupportWorkbench =
     pathname === '/console/support' ||
     pathname.startsWith('/console/support/');
-  const visible =
-    Boolean(userState?.user) && isConsoleRoute && !isSupportWorkbench;
+  const isLoggedIn = Boolean(userState?.user);
+  // 客服入口在所有前台/控制台页面展示；客服工作台本身已有完整聊天界面，
+  // 不再重复显示右下角入口，避免挡住会话列表。
+  const visible = !isSupportWorkbench;
 
   const conversationClosed = conversation?.status === 'closed';
   const adminJoined =
@@ -362,6 +363,24 @@ const SupportChatWidget = () => {
       composerAttachmentsRef.current = [];
     };
   }, []);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      return;
+    }
+
+    conversationRef.current = null;
+    messagesRef.current = [];
+    lastMessageIdRef.current = 0;
+    setConversation(null);
+    setMessages([]);
+    setConversationErrorKey('');
+    setMessagesErrorKey('');
+    setIsCreating(false);
+    setIsLoadingMessages(false);
+    setIsSending(false);
+    setIsClosing(false);
+  }, [isLoggedIn]);
 
   useEffect(() => {
     if (isOpen) {
@@ -409,6 +428,10 @@ const SupportChatWidget = () => {
       if (!visible && isOpen) {
         setIsOpen(false);
       }
+      return undefined;
+    }
+
+    if (!isLoggedIn) {
       return undefined;
     }
 
@@ -656,10 +679,10 @@ const SupportChatWidget = () => {
       stopPolling();
       refreshMessagesRef.current = null;
     };
-  }, [isOpen, visible]);
+  }, [isOpen, visible, isLoggedIn]);
 
   useEffect(() => {
-    if (!visible || isOpen) {
+    if (!isLoggedIn || !visible || isOpen) {
       return undefined;
     }
 
@@ -711,7 +734,7 @@ const SupportChatWidget = () => {
       active = false;
       clearInterval(timer);
     };
-  }, [isOpen, visible]);
+  }, [isOpen, visible, isLoggedIn]);
 
   const handleClosePanel = () => {
     setIsOpen(false);
@@ -894,28 +917,87 @@ const SupportChatWidget = () => {
 
   if (!isOpen) {
     return (
-      <button
-        type='button'
-        className='support-chat-fab'
-        aria-label={t('在线客服')}
-        title={t('在线客服')}
-        onClick={() => setIsOpen(true)}
-      >
-        <span className='support-chat-fab__shine' aria-hidden='true' />
-        <span className='support-chat-fab__wave' aria-hidden='true' />
-        <span
-          className='support-chat-fab__wave support-chat-fab__wave--delay'
-          aria-hidden='true'
-        />
-        <span className='support-chat-fab__icon' aria-hidden='true'>
-          <IconCustomerSupport size='extra-large' />
-        </span>
-        {unreadCount > 0 && (
-          <span className='support-chat-fab__badge'>
-            {unreadCount > 99 ? '99+' : unreadCount}
+      <div className='support-chat-entry'>
+        <button
+          type='button'
+          className='support-chat-fab'
+          aria-label={t('在线客服')}
+          title={t('在线客服')}
+          onClick={() => setIsOpen(true)}
+        >
+          <span className='support-chat-fab__shine' aria-hidden='true' />
+          <span className='support-chat-fab__wave' aria-hidden='true' />
+          <span
+            className='support-chat-fab__wave support-chat-fab__wave--delay'
+            aria-hidden='true'
+          />
+          <span className='support-chat-fab__icon' aria-hidden='true'>
+            <IconCustomerSupport size='extra-large' />
           </span>
-        )}
-      </button>
+          {isLoggedIn && unreadCount > 0 && (
+            <span className='support-chat-fab__badge'>
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+        </button>
+        <span className='support-chat-entry__caption' aria-hidden='true'>
+          <span className='support-chat-entry__caption-title'>
+            {t('在线客服')}
+          </span>
+          <span className='support-chat-entry__caption-sub'>
+            {t(isLoggedIn ? '有问题随时联系' : '登录后即可联系')}
+          </span>
+        </span>
+      </div>
+    );
+  }
+
+  if (!isLoggedIn) {
+    return (
+      <div className='support-chat-panel' role='dialog' aria-label={t('在线客服')}>
+        <div className='support-chat-panel__header'>
+          <div className='support-chat-panel__heading'>
+            <span className='support-chat-panel__avatar' aria-hidden='true'>
+              <IconCustomerSupport size='large' />
+            </span>
+            <div className='support-chat-panel__title-block'>
+              <div className='support-chat-panel__title'>{t('在线客服')}</div>
+              <span className='support-chat-panel__status is-waiting'>
+                <span className='support-chat-panel__status-dot' aria-hidden='true' />
+                {t('未登录')}
+              </span>
+            </div>
+          </div>
+          <Button
+            theme='borderless'
+            type='tertiary'
+            icon={<IconClose />}
+            aria-label='关闭'
+            onClick={handleClosePanel}
+          />
+        </div>
+        <div className='support-chat-panel__body'>
+          <div className='support-chat-panel__state'>
+            <IconCustomerSupport size='extra-large' />
+            <span className='support-chat-panel__state-text'>
+              {t('登录后才可发送消息')}
+            </span>
+          </div>
+        </div>
+        <div className='support-chat-panel__footer'>
+          <Button
+            theme='solid'
+            type='primary'
+            style={{ width: '100%' }}
+            onClick={() => {
+              setIsOpen(false);
+              navigate('/login');
+            }}
+          >
+            {t('去登录')}
+          </Button>
+        </div>
+      </div>
     );
   }
 

@@ -4031,6 +4031,11 @@
     "图片上传失败，请重试": "Tải ảnh thất bại, vui lòng thử lại",
     "加载留存设置失败": "Không tải được cài đặt lưu giữ",
     "留存天数需为 0 至 3650 的整数": "Số ngày lưu giữ phải là số nguyên từ 0 đến 3650",
-    "保存留存设置失败": "Lưu cài đặt lưu giữ thất bại"
+    "保存留存设置失败": "Lưu cài đặt lưu giữ thất bại",
+    "登录后才可发送消息": "Vui lòng đăng nhập trước khi gửi tin nhắn",
+    "去登录": "Đăng nhập",
+    "未登录": "Chưa đăng nhập",
+    "有问题随时联系": "Liên hệ bất cứ lúc nào",
+    "登录后即可联系": "Đăng nhập để liên hệ"
   }
 }
