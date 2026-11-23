@@ -1,0 +1,224 @@
+# Harness 联调反馈差异与处理指引
+
+**文档版本**：V1.0（2026-11-23）\
+**对应网关版本**：`harness-api-20261117-b040241`\
+**测试 Base URL**：`https://testapi.soloai.chat`\
+**对照基线**：《New API 网关 ↔ 平台 接口对接方案 V2.3》、Harness V1.1（2026-11-17）\
+**用途**：只说明差异、处理动作和复测标准；完整接口手册作为参考，不要求本次逐页重读。
+
+## 1. 结论速览
+
+| 领域 | 当前结论 | 本次动作 |
+| --- | --- | --- |
+| 鉴权与 A3 基础链路 | 已通过 | 保持 |
+| 文字模型 | Harness 11-21 实测 26/26；11-23 有 3 条上游失败记录 | 按模型备注复测，不改成自用模式 |
+| 图片 | GPT Image 4/4；Nano Banana 4/6 | 修长请求超时与 MIME 接收规则 |
+| 视频 | 抽样提交/查询/完成/下载通过 | 清理已下架模型，按可复测清单验收 |
+| A3 目录 | 当前 video 83 / plan 80；初步可调 49 / 17 | 区分目录候选与真实可调 |
+| B1/B3 | 基础流程通过；媒体单位字段仍为 token | 明确字段限制与金额口径 |
+| 文档 | V2.3 与当前实现存在多处差异 | 以本指引 + 11/12 号文档为当前口径 |
+
+**本次没有生产代码、渠道或网络配置变更。** 需要修复的项已明确标注责任方和验收标准。
+
+## 2. 逐项差异与处理
+
+### 01 · Run ID 上限与必填规则
+
+| 项目 | 内容 |
+| --- | --- |
+| 差异 | V2.3 写上限 80，现网实际为 64 |
+| 当前实现 | `X-Harness-Request-Id`、`X-Harness-Run-Id` 均必填，1–64 字符，仅允许 `A-Z a-z 0-9 - _`；不强制前缀或 ULID |
+| 拒绝行为 | 缺失、空值、非法字符、超过 64 字符均在转发上游前返回 `400 REQUEST_INVALID`，不产生费用和 B1/B3 |
+| Harness 动作 | 将客户端校验改为 1–64；不要截断超长 ID；不要用响应体 model 反查账本 |
+| 网关动作 | 无需改代码；修订共同文档，将 80 改为 64 |
+| 复测标准 | 64 字符通过；65 字符、缺失、非法字符均 400，且查不到 B1/B3 |
+
+### 02 · 模型与路由契约
+
+| 项目 | 内容 |
+| --- | --- |
+| 差异 | V2.3 未定义图片、视频和 plan 媒体接口，也未说明 `X-Route-Group` |
+| 当前实现 | A3 返回 `chat/video/image/audio/plan` 五个池；`chat` 默认，`image/video/plan` 必须显式传对应池；未知池返回 `403 access_denied` |
+| 模型路由 | 模型 ID 不会被池路由重写；池只限制可选渠道集合 |
+| Harness 动作 | SDK 按协议拼接路径；媒体请求必须带 `X-Route-Group`；不要假设 `/v1` 一定需要或一定不需要，按 SDK 要求处理 |
+| 网关动作 | 在共同文档补充媒体提交、查询、下载、错误和计费字段 |
+| 复测标准 | 同一模型在指定池内可路由；未知池 403；不传媒体池头时按默认 chat 处理并可能失败 |
+
+### 03 · 目录与渠道
+
+| 项目 | 内容 |
+| --- | --- |
+| 差异 | V1.1 写 video 53 / plan 42；A3 v10 当前返回 video 83 / plan 80，且存在 68 个跨池重复 ID |
+| 重要澄清 | **跨池重复本身合法**，两个池可以引用同一供应商或同一模型；不能以“交集必须为 0”作为验收标准 |
+| 真实问题 | 部分渠道 `models` 声明了上游不提供或已下架的模型，导致目录候选多于真实可调 |
+| 当前快照 | A3：chat 26 / video 83 / image 10 / audio 0 / plan 80；初步核实可调：video 49 / plan 17 |
+| 能力标签 | A3 `capabilities` 是池级端点类型汇总，可能含 `chat/stream/tools`，不能据此判断图片/视频真实能力 |
+| Harness 动作 | 目录校正完成前，以第 12 号文档的可复测清单为准；不要仅凭 A3 条目提交付费任务 |
+| 网关动作 | 按上游实时目录逐渠道校正 `models`，移除已下架/跨组声明 |
+| 复测标准 | 每个上线目录条目都能在指定池找到有效渠道；已下架模型不再作为当前候选 |
+
+### 04 · 视频任务失败
+
+| 项目 | 内容 |
+| --- | --- |
+| 差异 | TA token 抽样在 video/plan 合计 5 次提交返回 500；另 1 个 plan 按次模型返回 400 `MODEL_DISABLED` |
+| 根因 | TA Seedance Token 22 档已在上游当前目录中不可用；另有 7 个视频规格已下架/停用 |
+| 当前行为 | 这些旧 ID 仍可能出现在历史文档或旧 A3 快照中，调用失败属于预期拒绝 |
+| Harness 动作 | 从当前模型配置中移除 TA token 和已下架 ID；改用第 12 号清单 |
+| 网关动作 | 从渠道 `models` 和当前目录声明中移除/禁用旧模型 |
+| 复测标准 | 可复测清单中的模型不再出现“可用渠道不存在”；旧模型明确标记下架，不作为上线候选 |
+
+### 05 · Nano Banana 接口与超时
+
+| 项目 | 内容 |
+| --- | --- |
+| 差异 | 同步 1K 返回 524，4K 返回 500；旧说明中的异步 `/v1/videos` 代表请求返回 503；成功样本有 JPEG 被标为 PNG |
+| 当前正式协议 | Nano Banana 使用同步图片接口，不返回 task id；旧异步 `/v1/videos` 合同不代表当前正式协议 |
+| Harness 动作 | 使用同步图片协议；客户端设置足够长的超时；超时后先按请求 ID 查 B3/产物，再决定是否重试；保存文件时按 PNG/JPEG 文件头判断真实格式 |
+| 网关动作 | 拉长 OpenResty/图片长请求超时；修正 MIME 或在文档明确接收端校验规则 |
+| 复测标准 | 1K/4K 在约定超时内返回或给出明确终态；不因代理 60 秒默认超时提前断开；文件可正确解码 |
+
+### 06 · 异步视频账本
+
+| 项目 | 内容 |
+| --- | --- |
+| 差异 | 历史 TA 完成记录报告 40,594 tokens；B1 复查仍只有版本 1 且为零 |
+| 当前实现 | 上游不返回 usage 的异步视频，B1 使用 `usage_source=unavailable`，token 字段为 `null`，`split_known=false`，`total_tokens` 省略 |
+| 重要澄清 | `null/unavailable` 不是“实测为 0”；不得伪造 token 用量 |
+| Harness 动作 | 不要用 B1 token 判断视频任务是否完成；完成与费用以 B3 `settled` 和任务状态为准 |
+| 网关动作 | 维持 unavailable/null；如需历史回补，必须由上游提供可信 usage 和请求映射 |
+| 复测标准 | 无 usage 的视频任务 B1 为 unavailable/null；B3 仍正常结算 |
+
+### 07 · 非 token 计费与用量
+
+| 项目 | 内容 |
+| --- | --- |
+| 差异 | 视频按次/按秒、图片按张，但 B1/B3 单位字段仍标 token；Nano Banana 可能回传估算 token |
+| 当前实现 | B1 `usage_unit=token`；B3 `billing_basis=token`。这是当前字段限制，不代表媒体按 token 计费 |
+| 金额口径 | 以 B3 最新版本 `total_amount`、`status=settled` 和提交时价格版本为准 |
+| 估算口径 | `usage_source=estimated` 表示估算；Gemini thinking tokens 按当前 B1 归一化结果读取，不另行相加 |
+| Harness 动作 | 不依赖 `usage_unit/billing_basis` 判断媒体实际单位；按模型价格/表达式和 B3 金额对账 |
+| 网关动作 | 后续将单位字段修正为 second/per_call/image，或双方确认保留 token 限制 |
+| 复测标准 | 媒体金额与模型价格一致；字段限制有明确文档，不产生重复计费 |
+
+### 08 · 响应字段及文档
+
+| 项目 | 内容 |
+| --- | --- |
+| 差异 | 部分 401/403 缺 `retryable` 或 `request_id`；MiniMax MP4 返回通用 MIME；旧统计与当前样本不同 |
+| 当前错误体 | JWT 401、模型 scope 403、A3/B1/B3 403 使用不同错误体；`retryable/details/request_id/type` 不能全局强依赖 |
+| 下载 MIME | 视频下载当前透传上游 `Content-Type`；接收端应结合文件头校验 |
+| A5 | `count_tokens` 当前未交付：Claude 路由未注册，Gemini `:countTokens` 返回 404 |
+| 分页 | B1/B3 `limit` 默认 50、最大 200；超过 200 静默 clamp 到 200，并返回 `next_cursor` |
+| BatchGet | 最多 100 个 request ID、合计 500 条事件；跨请求超 500 返回前 500 条并标 `truncated=true`；单请求自身超 500 返回 `400 EVENT_LIMIT_EXCEEDED` |
+| `/api/pricing` | 通用定价展示接口，默认公开但可配置关闭/鉴权；不是 A3，也不是 B3 对账依据 |
+| Harness 动作 | 错误解析保持宽容；分页按 `next_cursor` 继续；下载校验文件头；A5 暂按 404 处理 |
+| 网关动作 | 统一错误体和 MIME；维护唯一当前版本说明 |
+| 复测标准 | 401/403/404/400 行为与文档一致；分页和 BatchGet 边界可复现 |
+
+## 3. 模型目录变更摘要
+
+| 池 | A3 当前条目 | 初步核实可调 | 当前处理 |
+| --- | ---: | ---: | --- |
+| chat | 26 | 26 | 正常复测；关注 3 条上游失败备注 |
+| image | 10 | 10 | GPT Image 4 款正常；Nano Banana 2 款与超时/MIME 整改相关 |
+| video | 83 | **49** | 34 个当前不可调或已下架 |
+| plan | 80 | **17** | 63 个当前不可调或已下架 |
+| audio | 0 | 0 | 预留池，本期不可调用 |
+
+**可复测模型完整清单见 `12-retest-model-list-20261123.md`。本指引不重复罗列 66 个当前候选，避免信息过载。**
+
+## 4. Harness 侧修改清单
+
+- [ ] Request ID / Run ID 校验改为必填、1–64 字符。
+- [ ] `chat` 默认池；`image/video/plan` 显式传 `X-Route-Group`。
+- [ ] 从当前模型配置移除 TA token 和已下架/停用 ID。
+- [ ] 不要用 A3 `capabilities` 判断媒体真实能力。
+- [ ] 不要用响应体 `model` 反查账本，统一用请求 ID 关联 B1/B3。
+- [ ] Nano Banana 使用同步图片协议；长超时后先查 B3/产物再重试。
+- [ ] 图片/视频保存时按文件头校验真实格式。
+- [ ] 视频完成与费用以任务终态和 B3 `settled` 为准，不把 B1 `null` 当 0。
+- [ ] 错误解析兼容不同错误体；分页按 `next_cursor` 继续。
+- [ ] A5 `count_tokens` 当前按 404 处理。
+
+## 5. 网关侧修复清单
+
+- [ ] 按上游实时目录逐渠道校正 `models`，移除已下架/跨组声明。
+- [ ] 拉长 OpenResty/图片长请求超时，避免 60 秒默认超时。
+- [ ] 修正图片/视频 MIME，或明确接收端文件头校验规则。
+- [ ] 评估 B1/B3 媒体单位字段修正为 second/per_call/image。
+- [ ] 统一 401/403 错误体、request_id 和 retryable 口径。
+- [ ] 将 V2.3 修订为双方共同版本，纳入本指引的 8 项差异。
+
+## 6. 联合复测用例
+
+| # | 用例 | 预期结果 |
+| --- | --- | --- |
+| 1 | Request ID/Run ID = 64 字符 | 正常进入模型调用 |
+| 2 | Request ID/Run ID = 65 字符或缺失 | 400 `REQUEST_INVALID`，无 B1/B3 |
+| 3 | chat / image / video / plan 各选 1 个当前清单模型 | 指定池路由成功，返回有效内容或 task id |
+| 4 | TA token 或已下架模型 | 不再作为当前候选；如调用则明确拒绝 |
+| 5 | Nano Banana 1K/4K | 约定超时内返回或明确终态；超时后可查 B3/产物 |
+| 6 | 无 usage 的异步视频 | B1 `unavailable/null`，B3 正常结算 |
+| 7 | B1/B3 `limit=201` | clamp 到 200，返回 `next_cursor` |
+| 8 | BatchGet 100 个 ID / 101 个 ID | 100 正常；101 拒绝；跨请求超 500 条标 `truncated=true` |
+| 9 | A5 `count_tokens` | 当前 404，文档标注未交付 |
+| 10 | 请求 ID 关联 B1/B3 | 同一请求可关联 usage 与 cost，金额一致 |
+
+## 7. 验收标准
+
+本次反馈关闭需同时满足：
+
+1. 8 项差异均有双方确认的处理结论和责任方。
+2. Harness 侧完成第 4 节修改。
+3. 网关侧完成第 5 节修复，或明确列为双方接受的已知限制。
+4. 第 6 节 10 个复测用例通过。
+5. 当前可复测清单中的模型不再出现“目录有、渠道无”的假候选。
+6. 最终 Base URL、DNS、证书续期和回退方式由双方运维确认。
+
+## 8. 待双方确认
+
+| 事项 | 需要确认 |
+| --- | --- |
+| 共同文档版本 | V2.3 是否升级为 V2.4，并引用本指引与 11/12 号文档 |
+| 目录校正 | 是否以 video 49 / plan 17 作为切换前临时复测基线 |
+| 媒体单位字段 | 立即修正，还是阶段性保留 `usage_unit/billing_basis=token` |
+| A5 | 本期明确 404，还是纳入后续实现 |
+| 最终入口 | 公网域名、Harness 内网域名、DNS 拆分解析和证书续期方式 |
+| 回退 | 渠道配置备份、回切公网入口和旧版本镜像的触发条件 |
+
+## 附录：已下架/停用模型（29）
+
+```text
+grok-video1.5-480p-second
+minimax-h3-max-480p-second
+minimax-h3-max-768p-second
+minimax-h3-max-1080p-second
+seedance2-480p-once
+seedance2-1080p-once
+seedance2-fast-720p-once-2
+seedance2-480p-token-no-video
+seedance2-480p-token-with-video
+seedance2-720p-token-no-video
+seedance2-720p-token-with-video
+seedance2-1080p-token-no-video
+seedance2-1080p-token-with-video
+seedance2-4k-token-no-video
+seedance2-4k-token-with-video
+seedance2-mini-480p-token-no-video
+seedance2-mini-480p-token-with-video
+seedance2-mini-720p-token-no-video
+seedance2-mini-720p-token-with-video
+seedance2-fast-480p-token-no-video
+seedance2-fast-480p-token-with-video
+seedance2-fast-720p-token-no-video
+seedance2-fast-720p-token-with-video
+seedance2.5-480p-token-no-video
+seedance2.5-480p-token-with-video
+seedance2.5-720p-token-no-video
+seedance2.5-720p-token-with-video
+seedance2.5-1080p-token-no-video
+seedance2.5-1080p-token-with-video
+```
+
+以上模型不得作为当前上线或复测清单；完整在架候选见第 12 号文档。
