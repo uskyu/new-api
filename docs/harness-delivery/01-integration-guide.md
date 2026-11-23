@@ -1,11 +1,15 @@
 # Harness 网关接口接入指南
 
-**版本**：V0.13（2026-11-17 修订）
-**对应网关版本**：`harness-api` 分支；已部署 82 实例 `harness-api-20261117-b040241`（revision `b04024190`），全模型验收见 `10-full-model-acceptance-20261117.md`
-**2026-11-17 变更**：`video` / `plan` 池语义更新为按秒 / 按次视频模型；新增 5 个 Seedance 2.5 Flash 规格（3 个按秒进 `video`、2 个按次进 `plan`），A3 实测 `catalog_version` `"10"`
+**版本**：V1.2（2026-11-23 修订）\
+**测试 Base URL**：`https://testapi.soloai.chat`\
+**对应网关版本**：`harness-api-20261117-b040241`（revision `b04024190`）\
+**A3 目录版本**：`catalog_version=10`\
+**B4 接口版本**：`interface_version=v2`（与本文档 V1.2 不是同一版本号）\
 **面向**：Harness 后端开发与联调
 
-本文档给出网关侧全部对外接口的调用方法。字段语义细节见
+本文档给出网关侧对外接口的当前调用方法。当前反馈结论见
+[11-feedback-resolution-20261123.md](./11-feedback-resolution-20261123.md)，模型复测以
+[12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md) 为准；字段语义细节见
 `03-data-contract.md`，鉴权配置见 `02-auth-setup.md`。
 
 ---
@@ -22,16 +26,19 @@
 | A9 | POST | `/v1beta/models/{model}:{action}` | `gateway.chat` |
 
 请求/响应体遵循各自官方协议（OpenAI Chat / OpenAI Responses / Anthropic
-Messages / Gemini 原生）。网关侧仅在以下方面与官方协议不同：
+Messages / Gemini 原生）。网关侧在以下方面与官方协议不同：
 
-- `model` 字段填 **A3 目录 `models[]` 中的真实模型 id**（如 `deepseek-v4.1-flash`），
-  不是池 id。**路由完全由网关负责**：Harness 只需要调一个模型 id，不需要区分
-  经济/企业档，也不需要按档位选择渠道
-- 请求头 `X-Route-Group` 为**可选**，仅通过 Harness JWT 校验的调用方可以使用。
-  `chat` 模型不传（默认 `chat` 池）；`video` / `image` / `plan` 池模型必须传对应
-  池 id，见第二节
-- 鉴权用 Harness JWT（见鉴权指南）
-- 响应头返回 `X-NewAPI-Request-Id`
+- 所有请求使用测试 Base URL `https://testapi.soloai.chat`。
+- `model` 字段填 **A3 目录 `models[]` 中的真实模型 id**（如 `deepseek-flash`），
+  不是池 id。**路由完全由网关负责**：Harness 不需要区分经济/企业档，也不需要按
+  档位选择渠道。A3 条目不保证当前均可调用，模型选择以第 12 号可复测清单为准。
+- `X-Route-Group` 仅对通过 Harness JWT 校验的调用方生效。`chat` 模型不传（默认
+  `chat` 池）；`video` / `image` / `plan` 池模型必须显式传对应池 id，见第二节。
+- 每次模型调用必须携带 `X-Harness-Request-Id` 和 `X-Harness-Run-Id`，均为 1–64
+  字符，合法字符为 `A-Z`、`a-z`、`0-9`、`-`、`_`；不强制 `hrq_` / `run_` 前缀，
+  不校验 ULID 格式。
+- 鉴权用 Harness JWT（见鉴权指南）。
+- 响应头返回 `X-NewAPI-Request-Id`。
 
 响应体中的 `model` 字段是**上游模型名**（如 `deepseek-flash`），与请求里的 id 不一定
 相同。对账请用 `X-Harness-Request-Id` / `X-NewAPI-Request-Id`，不要用响应体的
@@ -62,13 +69,13 @@ Messages / Gemini 原生）。网关侧仅在以下方面与官方协议不同�
 | 头 | 方向 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `Authorization` | Harness → 网关 | ✓ | `Bearer <JWT>` |
-| `X-Harness-Request-Id` | Harness → 网关 | ✓ | 一次模型调用一个，建议 `hrq_<ULID>`，**≤ 64 字符** |
-| `X-Harness-Run-Id` | Harness → 网关 | ✓ | 一次任务执行一个，建议 `run_<ULID>`，**≤ 64 字符** |
-| `X-Route-Group` | Harness → 网关 | ✗ | 可选，仅经验证的 Harness 调用方可用。`chat` 模型不传（默认 `chat`）；`video` 池模型传 `video`；`image` 池模型传 `image`；`plan` 池模型传 `plan` |
+| `X-Harness-Request-Id` | Harness → 网关 | ✓ | 一次模型调用一个，**1–64 字符**，只允许 `A-Z`、`a-z`、`0-9`、`-`、`_` |
+| `X-Harness-Run-Id` | Harness → 网关 | ✓ | 一次任务执行一个，**1–64 字符**，只允许 `A-Z`、`a-z`、`0-9`、`-`、`_` |
+| `X-Route-Group` | Harness → 网关 | 视池而定 | `chat` 可不传（默认池）；`video` / `image` / `plan` 必须传对应池 id；仅经验证的 Harness 调用方可用 |
 | `X-NewAPI-Request-Id` | 网关 → Harness | 响应头 | 网关请求 ID，即账本中的 `gateway_request_id` |
 
-两个关联 ID 都只允许 `A-Z a-z 0-9 - _`，且都必须非空。缺失或格式不合法时，
-网关在**转发上游之前**返回：
+两个关联 ID 都必须非空，不强制 `hrq_` / `run_` 前缀，也不校验 ULID 格式。缺失、
+空值、非法字符或超过 64 字符时，网关在**转发上游之前**返回：
 
 ```http
 HTTP/1.1 400 Bad Request
@@ -78,18 +85,19 @@ HTTP/1.1 400 Bad Request
 {"error":{"code":"REQUEST_INVALID","message":"X-Harness-Run-Id is required","type":"new_api_error"}}
 ```
 
-即：被拒绝的调用不会产生费用，也不会产生账本事件。长度上限是账本列的宽度，
-超过 64 字符的值会被拒绝，而不是截断。
+即：被拒绝的调用不会产生费用，也不会产生 B1/B3 事件。超过 64 字符的值会被拒绝，
+而不是截断；旧文档中的 80 字符上限已废止。
 
 **为什么两个 ID 都必填**：`X-Harness-Request-Id` 是账本主键（B1/B3 都按它查）；
 `X-Harness-Run-Id` 会写入每条账本行并在 B1 事件中返回，让同一轮任务的多次调用
 可以聚合。一个 run 对应 N 次调用，两者不是重复关系。
 
-### 2.1 资源池（可选头 `X-Route-Group`）
+### 2.1 资源池（`X-Route-Group`）
 
-**路由归属网关。** 经济/企业档的划分已取消：Harness 只需调用 A3 返回的模型 id，
-由网关自行决定走哪个渠道、哪个上游。调用 `chat` 模型不需要选择资源池；调用
-`video` / `image` / `plan` 池模型时必须传对应池 id，否则请求落到默认 `chat` 池并因模型不在该池而失败。
+**路由归属网关。** 经济/企业档的划分已取消：Harness 调用真实模型 id，由网关自行
+决定走哪个渠道、哪个上游。`chat` 模型可不传 `X-Route-Group`，使用默认池；`video` /
+`image` / `plan` 模型必须显式传对应池 id，否则请求落到默认 `chat` 池并因模型不在
+该池而失败。
 
 **只有通过 Harness JWT 校验的调用方才能使用该头**；普通 API 令牌即使携带，也不
 参与资源池选择。资源池是产品线，不是价格档位。当前有五个池：
@@ -97,10 +105,10 @@ HTTP/1.1 400 Bad Request
 | 池 id | 显示名 | `kind` | 说明 |
 | --- | --- | --- | --- |
 | `chat` | 通用对话 | `text` | **默认池**。不传 `X-Route-Group` 时的落点；A1/A2/A4/A9 的常规调用都走这里 |
-| `video` | 视频 | `video` | 视频任务池，按秒视频模型（PAI 按秒、TA 按秒、video-line 按秒）；**池级不标注 `billing`** |
-| `image` | 图片生成 | `image` | 图片生成池。当前配置 10 个图片模型（4 个 GPT Image 同步 + 6 个 Nano Banana Gemini 同步），按张计价，**池级不标注 `billing`**；可调用 |
+| `video` | 视频 | `video` | 视频任务池，按秒视频模型（PAI 按秒、video-line 按秒等）；**池级不标注 `billing`** |
+| `image` | 图片生成 | `image` | 图片生成池。A3 声明 10 个图片模型（4 个 GPT Image 同步 + 6 个 Nano Banana Gemini 同步），按张计价，**池级不标注 `billing`** |
 | `audio` | 语音 | `audio` | 语音/TTS 预留池，当前仅占位；渠道尚未接入，**本期不可调用** |
-| `plan` | 畅用计划 | `video` | 按次视频模型（TA token、PAI 按次、Wan 按次、video-line 按次）；池级 `billing: per_call`（按次计费） |
+| `plan` | 畅用计划 | `video` | 按次视频模型（PAI 按次、Wan 按次、video-line 按次等）；池级 `billing: per_call`（按次计费） |
 
 | 情况 | 行为 |
 | --- | --- |
@@ -108,19 +116,26 @@ HTTP/1.1 400 Bad Request
 | 传 `video` | 使用视频池；调用 `video` 池的按秒视频模型时必须传 |
 | 传 `plan` | 使用畅用计划池；调用 `plan` 池的按次视频模型时必须传 |
 | 传 `chat` | 显式绑定 chat 池 |
-| 传 `image` | 使用图片生成池；调用 `image` 池的 10 个图片模型时必须传 |
+| 传 `image` | 使用图片生成池；调用 `image` 池模型时必须传 |
 | 传 `audio` | 使用语音池；该池当前无可用模型，调用会失败 |
 | 传不存在的池 id | `403 access_denied`，消息 `requested resource pool is not configured` |
 
-截至 2026-11-17 实测（revision `b04024190`，`catalog_version` `"10"`）：`chat` 26 个、`video` 83 个、`plan` 80 个、`image` 10 个、`audio` 0 个；各池模型集合与数量以 A3 实际响应为准。
+截至 2026-11-23，A3 v10 的目录声明为 `chat=26`、`video=83`、`plan=80`、
+`image=10`、`audio=0`；按上游实时目录与抽样调用初步核实可调为 `chat=26`、
+`video=49`、`plan=17`、`image=10`、`audio=0`。两者不能混用：A3 条目不等于当前均可
+直接调用，Harness 在目录校正完成前以第 12 号可复测清单为准。
+
+跨池重复本身合法，同一模型可以出现在多个池；池只限制可选渠道集合，不会重写模型
+ID。A3 的 `capabilities` 是池级端点类型汇总，可能包含 `chat` / `stream` / `tools`
+等通用标签，不能据此判断图片或视频的真实能力。
 
 不存在「全渠道优先级」全局池：`global_channel_order` 已移除，资源池的渠道顺序
 是唯一的路由顺序，也没有 `global` 池可供选择。池是硬绑定：选中的池里没有该模型
 的可用渠道时直接失败，不会改用另一个池。
 
-`audio` 的渠道尚未配置，该池的 `models` 可能合法地返回空数组，此时该池不可调用。
-`video`、`image` 与 `plan` 已配置渠道与模型，以 A3 返回的 `models` 为准。
-池的存在只表示产品线已定义，不表示已经可以接单。
+`audio` 的渠道尚未配置，该池的 `models` 合法地返回空数组，此时该池不可调用。
+`video`、`image` 与 `plan` 已配置渠道与模型，但具体可调集合以第 12 号文档和最新
+现场确认为准。池的存在只表示产品线已定义，不表示已经可以接单。
 
 供应商税率已取消，B3 金额不再含税额。`billing.group_ratio` 来自采购计价分组，
 不是资源池的倍率；`pricing_group_order` 只判断哪些渠道+模型能力具备采购分组
@@ -144,7 +159,7 @@ Authorization: Bearer <JWT>
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
-ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
+ETag: W/"example-catalog-etag"
 ```
 
 ```json
@@ -156,7 +171,7 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
       "object": "model",
       "display_name": "通用对话",
       "kind": "text",
-      "models": ["claude-fable-5", "claude-fable-5-1", "claude-haiku-5-5", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5", "deepseek-flash", "deepseek-v4-pro", "glm-5.3", "glm-5.3-flash", "kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"],
+      "models": ["claude-fable-5", "deepseek-flash"],
       "capabilities": ["chat", "stream", "tools"]
     },
     {
@@ -164,7 +179,7 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
       "object": "model",
       "display_name": "视频",
       "kind": "video",
-      "models": ["seedance2-1080p-once", "seedance2-480p-once", "seedance2-720p-once-1", "seedance2-720p-once-2", "seedance2-720p-once-3", "seedance2-fast-720p-once-1", "seedance2-fast-720p-once-2", "seedance2.5-720p-once"],
+      "models": ["MiniMax-H3-Max-480p", "seedance2-1080p-second-1"],
       "capabilities": []
     },
     {
@@ -172,7 +187,7 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
       "object": "model",
       "display_name": "图片生成",
       "kind": "image",
-      "models": ["Nano Banana 2.1 1K", "Nano Banana 2.1 2K", "Nano Banana 2.1 4K", "Nano Banana Pro 1K", "Nano Banana Pro 2K", "Nano Banana Pro 4K", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"],
+      "models": ["Nano Banana 2.1 1K", "gpt-image-2.6-flare"],
       "capabilities": []
     },
     {
@@ -189,18 +204,21 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
       "display_name": "畅用计划",
       "kind": "video",
       "billing": "per_call",
-      "models": ["seedance2-1080p-token-no-video", "seedance2-1080p-token-with-video", "seedance2-480p-token-no-video", "seedance2-480p-token-with-video", "seedance2-4k-token-no-video", "seedance2-4k-token-with-video", "seedance2-720p-token-no-video", "seedance2-720p-token-with-video", "seedance2-fast-480p-token-no-video", "seedance2-fast-480p-token-with-video", "seedance2-fast-720p-token-no-video", "seedance2-fast-720p-token-with-video", "seedance2-mini-480p-token-no-video", "seedance2-mini-480p-token-with-video", "seedance2-mini-720p-token-no-video", "seedance2-mini-720p-token-with-video", "seedance2.5-1080p-token-no-video", "seedance2.5-1080p-token-with-video", "seedance2.5-480p-token-no-video", "seedance2.5-480p-token-with-video", "seedance2.5-720p-token-no-video", "seedance2.5-720p-token-with-video"],
+      "models": ["gemini-omni-1.2-flash-720p-10s", "seedance2-720p-once-1"],
       "capabilities": []
     }
   ],
-  "catalog_version": "7",
-  "etag": "W/\"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3\""
+  "catalog_version": "10",
+  "etag": "W/\"example-catalog-etag\""
 }
 ```
 
-> `etag` 为示例值；以下 JSON 为**历史样例**（2026-11-14 的 82 实例，仅用于说明响应结构），数量与模型集合以实际响应为准，不要按样例数量做校验。
->
-> 历史样例中：`chat` 池 15 个模型，`video` 池 8 个模型（旧语义：PAI 按次），`image` 池 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana），`plan` 池 22 个 TA token 模型；`audio` 池当前没有可用渠道，`models` 为空。2026-11-17 实测（revision `b04024190`）`catalog_version` 为 `"10"`，各池数量为 `chat` 26 / `video` 83 / `plan` 80 / `image` 10 / `audio` 0，新增模型见 3.7。`models` 按模型 id 字典序返回，模型集合会随渠道与价格变化。
+> `etag` 与 `models` 均为示例值；JSON 仅说明响应结构，不是完整目录快照。
+> 2026-11-23 A3 v10 目录声明为 `chat=26`、`video=83`、`plan=80`、`image=10`、
+> `audio=0`；初步核实可调为 `chat=26`、`video=49`、`plan=17`、`image=10`、
+> `audio=0`。模型选择以 [12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md)
+> 为准，不要按样例数量做校验。`models` 按模型 id 字典序返回，模型集合会随渠道与
+> 价格变化。
 
 | 字段 | 说明 |
 | --- | --- |
@@ -208,8 +226,8 @@ ETag: W/"e10bdaded71746aa5b1890a9a0f5e6259d3e5f744a2115f8b951694906bb7fe3"
 | `data[].display_name` | 运营配置的显示名，仅用于界面展示 |
 | `data[].kind` | `text` / `video` / `image` / `audio` |
 | `data[].billing` | 仅 `plan` 池返回 `per_call`；`video` 池为按秒视频模型、`image` 池按张计价，均不标注池级 `billing` |
-| `data[].models` | 该池可路由的**真实模型 id**，直接用作请求的 `model` 字段；空数组表示该池尚无可调模型 |
-| `data[].capabilities` | 该池支持的能力枚举：`chat` / `stream` / `tools`，按池聚合，不区分单个模型 |
+| `data[].models` | 该池渠道声明的**真实模型 id**，可用作请求的 `model` 字段；不保证当前均可调用，复测以第 12 号文档为准；空数组表示该池没有目录候选 |
+| `data[].capabilities` | 池级端点类型汇总，可能包含 `chat` / `stream` / `tools` 等通用标签；不区分单个模型，不能据此判断图片或视频的真实能力 |
 | `catalog_version` | 单调递增的整数（字符串形式），不是时间戳 |
 | `etag` | 弱 ETag，同时出现在响应体和 `ETag` 响应头 |
 
@@ -221,10 +239,12 @@ A3 的 `data[]` 仍以资源池为单位返回，但平台侧模型列表现按�
 | --- | --- | --- | --- |
 | 文字模型 | `chat` | `kind: text` | 默认池；A1/A2/A4/A9 常规调用 |
 | 图片生成模型 | `image` | `kind: image` | 图片生成池；当前 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana） |
-| 视频模型 | `video` | `kind: video` | 视频任务池；按秒视频模型（PAI 按秒、TA 按秒、video-line 按秒） |
-| plan 计划 | `plan` | `kind: video` + `billing: per_call` | 畅用计划；按次视频模型（TA token、PAI 按次、Wan 按次、video-line 按次）；单独展示为 plan 分区，不并入视频分区 |
+| 视频模型 | `video` | `kind: video` | 视频任务池；按秒视频模型（PAI 按秒、video-line 按秒等） |
+| plan 计划 | `plan` | `kind: video` + `billing: per_call` | 畅用计划；按次视频模型（PAI 按次、Wan 按次、video-line 按次等）；单独展示为 plan 分区，不并入视频分区 |
 
-> 2026-11-17 实测（`catalog_version` `"10"`）：`chat` 26 / `video` 83 / `plan` 80 / `image` 10 / `audio` 0；数量与集合以 A3 实际响应为准。
+> 2026-11-23 A3 v10 目录声明为 `chat` 26 / `video` 83 / `plan` 80 / `image` 10 /
+> `audio` 0；初步核实可调为 `chat` 26 / `video` 49 / `plan` 17 / `image` 10 /
+> `audio` 0。展示目录不等于当前可调清单，模型选择以第 12 号文档为准。
 
 `audio` 仍是预留资源池（`kind: audio`），本期不进入这四个对外分区；有音频渠道后再定义它的展示位置。
 
@@ -246,13 +266,16 @@ HTTP/1.1 304 Not Modified
 
 ### 3.5 约束
 
-- 只返回**可路由且已配置价格**的模型：列表里的模型都可以直接调用；渠道被删除、
-  价格被移除后，该模型会从列表消失
-- 返回真实模型 id，但**不返回渠道、上游厂商和采购价**
-- 池即使暂时没有可调模型也会返回（`models: []`），便于对接方按最终结构开发。
-  `audio` 池当前就是这种情况：产品线已定义，渠道尚未配置；`video` / `image` / `plan` 已有模型
-- 目录变更时 `etag` 与 `catalog_version` 同时变化
-- 目录是**调用能力**的快照，不保证当时有可用渠道；限流或额度耗尽仍可能返回 503
+- 返回资源池和渠道声明的真实模型 id，但**不返回渠道、上游厂商和采购价**。
+- A3 条目不等于当前均可直接调用。渠道 `models` 中的过期或跨组声明可能导致目录候选
+  多于真实可调集合；历史 TA Token 模型和已下架 ID 不得当作当前在售模型。
+- 池即使暂时没有目录候选也会返回（`models: []`），便于对接方按最终结构开发。
+  `audio` 池当前就是这种情况：产品线已定义，渠道尚未配置。
+- 跨池重复合法，不应以“交集必须为 0”作为验收标准；需要校正的是渠道声明了上游
+  不提供或已下架的模型。
+- 目录变更时 `etag` 与 `catalog_version` 同时变化。
+- A3 是**目录声明**的快照，不是调用能力保证；限流、额度耗尽、线路故障或模型下架
+  仍可能返回 4xx / 5xx。目录校正完成前，以第 12 号可复测清单和最新现场确认为准。
 
 ### 3.6 图片生成（简要）
 
@@ -266,41 +289,43 @@ HTTP/1.1 304 Not Modified
 GPT Image 使用 `model` / `prompt` / `n: 1` / `size`（1K 为 `1024x1024`），不要依赖
 `response_format=url`；Nano Banana 使用 `contents` / `generationConfig.imageConfig.imageSize`
 （1K/2K/4K），当前只验证 `aspectRatio: "1:1"` 与 `candidateCount: 1`。
-图片按张计费，B1 中图片任务没有状态字段且 Token 数不代表费用（Nano Banana 同步
-请求为 `usage_source=estimated`，按请求估算 prompt Token；GPT Image 同步为
-`usage_source=upstream`，携带上游实际 Token），不能用于判断完成；完成与成本以
-B3 `status_change` → `settled` 为准。完整样例见
-[09-image-api-examples.md](./09-image-api-examples.md)。
+
+**Nano Banana 超时与重试**：该接口为同步图片协议，不返回 task id。1K/4K 长请求
+可能触发 524/500；客户端应使用足够长的超时。超时后先核对 B3 的 `request_id` 和
+产物，再决定是否有限重试；没有统一 task id，不能盲目重提。
+
+**MIME 校验**：成功样本可能出现实际 JPEG 内容被标为 PNG 的情况。保存文件时应按
+文件头判断真实格式，不要只信 MIME 或扩展名。视频下载同样可能透传上游通用
+`Content-Type`，接收端也应结合文件头校验。
+
+图片按张计费，B1 没有状态字段且 Token 数不代表费用（Nano Banana 同步请求可能为
+`usage_source=estimated`；GPT Image 同步可为 `usage_source=upstream`）。B1
+`usage_unit=token` 与 B3 `billing_basis=token` 是当前字段限制，不表示图片按 Token
+计费；完成与成本以 B3 `status_change` → `settled`、`total_amount` 和提交时价格版本
+为准。完整样例见 [09-image-api-examples.md](./09-image-api-examples.md)。
 
 > 视频任务（`video` / `plan` 池）的请求字段差异、轮询和内容下载样例，见
 > [08-video-api-examples.md](./08-video-api-examples.md)。
 
-### 3.7 2026-11-17 目录增量：Seedance 2.5 Flash
+### 3.7 2026-11-23 目录校准
 
-2026-11-17 部署 `harness-api-20261117-b040241`（revision `b04024190`）后实测
-`GET /v1/models`：`catalog_version` 为 `"10"`，各池数量为 `chat` 26、`video` 83、
-`plan` 80、`image` 10、`audio` 0。数量与模型集合以 A3 实际响应为准。
+当前 A3 v10 返回的目录声明与 2026-11-23 初步核实可调集合如下：
 
-本次新增 5 个 Seedance 2.5 Flash 规格，3 个按秒进 `video` 池，2 个按次进 `plan` 池：
+| 池 | A3 当前条目 | 初步核实可调 | 说明 |
+| --- | ---: | ---: | --- |
+| `chat` | 26 | 26 | 11-21 实测 26/26；11-23 有 3 条上游失败记录，见第 12 号文档 |
+| `image` | 10 | 10 | GPT Image 4/4；Nano Banana 4/6 |
+| `video` | 83 | **49** | 其余 34 个条目当前不可调或已下架 |
+| `plan` | 80 | **17** | 其余 63 个条目当前不可调或已下架 |
+| `audio` | 0 | 0 | 预留池，本期不可调用 |
 
-| 模型 | 池 | 调用头 | 价格（USD，分组倍率 1 已含） |
-| --- | --- | --- | --- |
-| `seedance2.5-flash-480p-second-1` | `video` | `X-Route-Group: video` | 无参考 0.05/生成秒；带参考 0.09×生成秒 + ceil(实际参考总秒)×0.05 |
-| `seedance2.5-flash-720p-second-1` | `video` | `X-Route-Group: video` | 无参考 0.06/生成秒；带参考 0.13×生成秒 + ceil(实际参考总秒)×0.065 |
-| `seedance2.5-flash-720p-second-2` | `video` | `X-Route-Group: video` | 0.06/生成秒 |
-| `seedance2.5-flash-480p-once-1` | `plan` | `X-Route-Group: plan` | 0.78/条 |
-| `seedance2.5-flash-720p-once-1` | `plan` | `X-Route-Group: plan` | 0.95/条 |
-
-- 3 个按秒模型进入 `video` 池，2 个按次模型进入 `plan` 池；`video` 池仍不标注池级
-  `billing`，`plan` 池为 `billing: per_call`。
-- 按秒价格按生成秒计费，带参考时参考秒另计；按次价格每条固定，不乘秒数。所有
-  Flash 视频调用仍走统一入口 `POST /v1/videos`，请求字段与样例见
-  [08-video-api-examples.md](./08-video-api-examples.md) 第 10 节。
-- 上游对 Flash 按秒任务的完成响应当前不返回 `usage`；带参考时网关按请求 `seconds`
-  估算参考秒并按两段式价格预扣/结算，上游补 `input_seconds` 后按实际值校准。B1 为
-  `usage_source=unavailable`、Token 字段 `null`，费用以 B3 `settled` 为准。详见
-  [10-full-model-acceptance-20261117.md](./10-full-model-acceptance-20261117.md) 第 4.5 节。
-- 模型已启用并配置价格不等于已完成全量验收；未测规格不要写成已验收（见 10 文档 4.5）。
+- A3 目录声明不等于实测可调集合；`video=49`、`plan=17` 也不等于所有模型已在同一
+  窗口完成生成验收。完整模型 ID、Chat 复测备注和已下架清单见
+  [12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md)。
+- `plan` 的池级语义为按次视频；具体价格、时长和素材限制以每个精确模型的目录价格
+  和接口说明为准。历史 TA Token 模型不得当作当前在售模型。
+- 上游不返回 `usage` 的异步视频任务，B1 使用 `usage_source=unavailable`、Token
+  字段 `null`、`split_known=false`，`total_tokens` 省略；费用以 B3 `settled` 为准。
 
 ---
 
@@ -316,7 +341,7 @@ Authorization: Bearer <JWT>
 | 参数 | 必填 | 说明 |
 | --- | --- | --- |
 | `cursor` | ✗ | 上一页返回的 `next_cursor`，首次不传 |
-| `limit` | ✗ | 默认 50，上限 200 |
+| `limit` | ✗ | 默认 50，最大 200；超过 200 时静默 clamp 到 200，并继续返回 `next_cursor` |
 | `from` | ✗ | 起始时间，RFC3339，与 `to` 跨度 ≤ 24h |
 | `to` | ✗ | 结束时间，RFC3339 |
 
@@ -351,6 +376,31 @@ Authorization: Bearer <JWT>
   "has_more": true
 }
 ```
+
+**异步视频无上游 usage 时**，B1 事件使用以下口径：
+
+```json
+{
+  "usage_unit": "token",
+  "usage": {
+    "input_tokens": null,
+    "output_tokens": null,
+    "cache_read_tokens": null,
+    "cache_write_tokens": null,
+    "split_known": false
+  },
+  "usage_source": "unavailable",
+  "is_estimated": false
+}
+```
+
+`total_tokens` 省略，四个 Token 分项为 `null`，表示未测量，**不是实测 0 Token**。
+历史 TA Token 完成记录中的 Token 数不能直接回补到当前 B1。B1 `usage_unit=token`
+是当前字段限制，不表示图片或视频按 Token 计费；B3 `settled` 和金额仍是费用依据。
+
+Nano Banana 同步图片请求可能返回 `usage_source=estimated`，表示估算 Token，不等同
+于上游官方 usage。Gemini thinking tokens 是否计入 output，以当前归一化实现和 B1
+实际返回为准，不另行相加。
 
 ### 4.3 翻页
 
@@ -405,6 +455,11 @@ Authorization: Bearer <JWT>
 ```
 
 **金额为字符串十进制**，不可当作 float 解析。
+
+**单位字段限制**：B3 `billing_basis` 当前固定为 `token`，不表示图片或视频按 Token
+计费，也不存在 B3 `usage_unit` 字段。图片按张、视频按秒 / 按次的金额以 B3 最新版本
+`total_amount`、`status=settled` 和提交时价格版本为准。`pending` 或零额退款记录的
+`procurement_price_version` 可能为空，是否为有效终态需结合事件类型和后续版本链判断。
 
 **税额已取消**：`total_amount = base_amount × group_ratio`，不存在税额乘数。
 `tax_rate_percent` 仍出现在报文里且恒为 `0`，只为兼容旧解析器保留，属**废弃字段**，
@@ -482,7 +537,8 @@ Content-Type: application/json
 | 项 | 规则 |
 | --- | --- |
 | Request ID 数量 | 最多 100，超限 `400 REQUEST_INVALID` |
-| 事件数量 | 最多 500，超限 `truncated: true` |
+| 跨请求事件总数 | 合计最多 500；超过时返回前 500 条并标 `truncated=true` |
+| 单请求事件数 | 单个请求自身超过 500 条时返回 `400 EVENT_LIMIT_EXCEEDED` |
 | 缺失 ID | 放入 `missing_request_ids`，**不整体失败** |
 | 多事件排序 | 按 `observed_at`、`event_id` 升序 |
 | 幂等 | 只读，重复调用结果一致 |
@@ -588,10 +644,11 @@ Authorization: Bearer <JWT>
 | 项 | 规则 |
 | --- | --- |
 | 日常增量默认 limit | 50 |
-| 日常增量上限 limit | 200 |
+| 日常增量最大 limit | 200；超过 200 静默 clamp 到 200，并返回 `next_cursor` |
 | 日常增量时间窗 | ≤ 24 小时 |
 | BatchGet Request ID 上限 | 100 |
-| BatchGet 事件上限 | 500 |
+| BatchGet 跨请求事件上限 | 合计 500；超过时返回前 500 条并标 `truncated=true` |
+| BatchGet 单请求事件上限 | 单个请求自身超过 500 条返回 `400 EVENT_LIMIT_EXCEEDED` |
 | 时间格式 | RFC3339 UTC，统一三位毫秒：`2026-10-25T11:20:37.068Z` |
 
 ---
@@ -599,6 +656,39 @@ Authorization: Bearer <JWT>
 ## 十、错误码
 
 ### 10.1 错误响应结构
+
+错误体尚未完全统一，Harness 应按接口和错误类型分别解析。
+
+**JWT 401：OpenAI 风格**
+
+```json
+{
+  "error": {
+    "message": "Invalid authentication credentials",
+    "type": "invalid_request_error",
+    "code": "invalid_api_key"
+  }
+}
+```
+
+不保证包含 `retryable` 或 `request_id`。
+
+**Scope 403：模型调用**
+
+```json
+{
+  "error": {
+    "code": "access_denied",
+    "message": "requested resource pool is not configured",
+    "type": "new_api_error"
+  }
+}
+```
+
+A3/B1/B3 的 scope 错误可能使用 `GATEWAY_UNAUTHORIZED`，并带 `retryable=false` 或
+`details.required_scope`；不要假设所有 403 都是同一种结构。
+
+**网关参数 / 游标 / 窗口错误**
 
 ```json
 {
@@ -611,17 +701,30 @@ Authorization: Bearer <JWT>
 }
 ```
 
+**任务插件错误**：部分错误可能使用顶层 `{code,message,data}` 或插件原生错误体。
+Harness 应同时兼容嵌套 `error` 与顶层字段，并保留原始状态码和消息用于诊断。
+
 ### 10.2 错误码表
 
-| HTTP | code | 含义 | 是否可重试 |
+| HTTP | code / 类型 | 含义 | 是否可重试 |
 | --- | --- | --- | --- |
-| 401 | `GATEWAY_UNAUTHORIZED` | JWT 无效或过期 | 否 |
-| 403 | `GATEWAY_UNAUTHORIZED` | 缺少所需 scope。B1/B3 在 `details.required_scope` 中给出所需 scope；A3 只返回 `code` + `message`，不带 `details` | 否 |
-| 400 | `REQUEST_INVALID` | 请求体不合法 | 否 |
+| 401 | OpenAI 风格 `error.code/type/message` | JWT 无效或过期；字段不保证齐全 | 否 |
+| 403 | `access_denied` | 模型调用缺少资源池或调用权限 | 否 |
+| 403 | `GATEWAY_UNAUTHORIZED` | A3/B1/B3 缺少所需 scope；可能带 `details.required_scope` | 否 |
+| 400 | `REQUEST_INVALID` | 请求体、关联 ID 或 BatchGet 参数不合法 | 否 |
 | 400 | `CURSOR_INVALID` | 游标格式错误或流不匹配 | 否 |
 | 400 | `WINDOW_TOO_LARGE` | 时间窗超过 24h | 否 |
+| 400 | `EVENT_LIMIT_EXCEEDED` | BatchGet 中单个请求自身超过 500 条事件 | 否 |
 | 404 | `REQUEST_NOT_FOUND` | 请求 ID 不存在 | 否 |
-| 500 | `GATEWAY_UPSTREAM` | 网关内部错误 | 是 |
+| 500 | `GATEWAY_UPSTREAM` / 插件原生错误 | 网关、上游或任务插件错误 | 视错误类型 |
+
+### 10.3 A5 与 `/api/pricing`
+
+- **A5 `count_tokens` 当前未交付**：Claude 路由未注册，Gemini `:countTokens`
+  返回 404。Harness 不应把 404 当作临时故障自动重试。
+- **`/api/pricing` 不是合同接口**：它是通用定价展示接口，默认公开但可配置关闭或
+  鉴权；不是 A3 目录，也不是 B3 对账依据。目录以 A3 + 第 12 号清单为准，费用以
+  B3 `settled` 记录为准。
 
 ---
 
@@ -630,21 +733,21 @@ Authorization: Bearer <JWT>
 ### 11.1 拉取健康状态
 
 ```bash
-curl -sS "http://<gateway>/internal/v1/gateway/health" \
+curl -sS "https://testapi.soloai.chat/internal/v1/gateway/health" \
   -H "Authorization: Bearer $HARNESS_JWT"
 ```
 
 ### 11.2 增量拉取用量
 
 ```bash
-curl -sS "http://<gateway>/internal/v1/gateway/usage-events?limit=50" \
+curl -sS "https://testapi.soloai.chat/internal/v1/gateway/usage-events?limit=50" \
   -H "Authorization: Bearer $HARNESS_JWT"
 ```
 
 ### 11.3 批量补查成本
 
 ```bash
-curl -sS -X POST "http://<gateway>/internal/v1/gateway/cost-records:batchGet" \
+curl -sS -X POST "https://testapi.soloai.chat/internal/v1/gateway/cost-records:batchGet" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "Content-Type: application/json" \
   -d '{"request_ids":["hrq_01H8X"],"include_status_events":true}'
@@ -654,11 +757,11 @@ curl -sS -X POST "http://<gateway>/internal/v1/gateway/cost-records:batchGet" \
 
 ```bash
 # 首次
-curl -sS -D- "http://<gateway>/v1/models" \
+curl -sS -D- "https://testapi.soloai.chat/v1/models" \
   -H "Authorization: Bearer $HARNESS_JWT"
 
 # 拿到 ETag 后
-curl -sS -D- "http://<gateway>/v1/models" \
+curl -sS -D- "https://testapi.soloai.chat/v1/models" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H 'If-None-Match: W/"e10bdade..."'
 ```
@@ -666,34 +769,36 @@ curl -sS -D- "http://<gateway>/v1/models" \
 ### 11.5 发起模型调用
 
 ```bash
-# 先拉目录，从 data[].models 里选一个真实模型 id。
-# 普通调用不传 X-Route-Group，使用默认 chat 池。
-curl -sS -X POST "http://<gateway>/v1/chat/completions" \
+# 先拉目录，并按第 12 号可复测清单选择真实模型 id。
+# 普通 chat 调用不传 X-Route-Group，使用默认 chat 池。
+curl -sS -X POST "https://testapi.soloai.chat/v1/chat/completions" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "X-Harness-Request-Id: hrq_01H8X2K9" \
   -H "X-Harness-Run-Id: run_01H8Z3M1" \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4.1-flash","messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"hi"}]}'
 
 # 流式：同一模型，加 "stream": true，同样不传池头
-curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
+curl -sS -N -X POST "https://testapi.soloai.chat/v1/chat/completions" \
   -H "Authorization: Bearer $HARNESS_JWT" \
   -H "X-Harness-Request-Id: hrq_01H8X2KA" \
   -H "X-Harness-Run-Id: run_01H8Z3M1" \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4.1-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"deepseek-flash","stream":true,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
 > `X-Route-Group` 用于绑定非默认池：`video` 池模型传
 > `-H "X-Route-Group: video"`，`image` 池模型传 `-H "X-Route-Group: image"`，
-> `plan` 池模型传 `-H "X-Route-Group: plan"`；`chat` 模型不要传。该头仅对通过
+> `plan` 池模型传 `-H "X-Route-Group: plan"`；`chat` 模型可不传。该头仅对通过
 > Harness JWT 校验的调用方生效，不需要额外的令牌授权。`audio` 池当前没有可用渠道，
-> 不要用它发起调用；`video` / `image` / `plan` 已有可用模型，图片调用样例见
-> [09-image-api-examples.md](./09-image-api-examples.md)。
+> 不要用它发起调用；`video` / `image` / `plan` 的具体可调模型以第 12 号清单为准，
+> 图片调用样例见 [09-image-api-examples.md](./09-image-api-examples.md)。
 
 ---
 
 ## 十二、变更记录
+
+> 历史版本记录仅用于追溯，不代表当前目录、协议或可调范围；与 V1.2 不一致时，以本版及后续修订为准。
 
 | 日期 | 版本 | 内容 |
 | --- | --- | --- |
@@ -708,3 +813,4 @@ curl -sS -N -X POST "http://<gateway>/v1/chat/completions" \
 | 2026-11-15 | V0.11（修订） | 异步任务无 Token 用量时 B1 改为 `usage_source=unavailable`、Token 字段 `null`、`split_known=false`；已有 `total_tokens` 保持 `upstream`；撤销 B1 结算收尾事件。部署 `harness-api-20261115-de7fce8`，三模型 E2E 复测通过 |
 | 2026-11-17 | V0.12 | Nano Banana 改为 Gemini 同步 `generateContent`（无轮询）；B1 为 `estimated` prompt Token，B3 固定按张价；`supplyvideo` 1.4.0 补齐新视频模型；全模型验收 语言 35/38、图片 10/10、视频 55/61。部署 `harness-api-20261116-df87870` |
 | 2026-11-17 | V0.13 | 资源池语义更新：`video` 为按秒视频模型（PAI 按秒、TA 按秒、video-line 按秒），`plan` 为按次视频模型（TA token、PAI 按次、Wan 按次、video-line 按次）；新增 Seedance 2.5 Flash 5 个规格（3 个按秒进 `video`、2 个按次进 `plan`）及价格摘要；补充 Flash 按秒上游不返回 `usage` 时网关按请求 `seconds` 估算参考秒的结算口径。对应网关 `harness-api-20261117-b040241`（revision `b04024190`），A3 实测 `catalog_version` `"10"`：chat 26 / video 83 / plan 80 / image 10 / audio 0 |
+| 2026-11-23 | V1.2 | Base URL 更新为 `https://testapi.soloai.chat`；Run ID 校准为必填 1–64 字符；明确 `X-Route-Group` 必填规则；区分 A3 v10 目录声明与初步核实可调 `chat=26` / `image=10` / `video=49` / `plan=17`；补充 Nano Banana 同步协议、超时与 MIME、异步视频 B1 `unavailable/null`、B1/B3 `token` 单位字段限制、实际错误体、分页 clamp 200、BatchGet 100 ID / 500 事件、A5 404 与 `/api/pricing` 非合同口径。事实源见第 11、12 号文档 |

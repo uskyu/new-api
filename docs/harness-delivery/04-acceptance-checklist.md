@@ -1,7 +1,10 @@
 # Harness 联调验收清单
 
-**版本**：V0.12（2026-11-17 修订）
-**对应网关版本**：`harness-api` 分支；已部署 82 实例 `harness-api-20261116-df87870`，本清单仍需逐项验收；全模型验收见 `10-full-model-acceptance-20261117.md`
+**版本**：V1.2（2026-11-23 修订）\
+**对应网关版本**：`harness-api-20261117-b040241`（revision `b04024190`）\
+**依据**：本文测试用例保持原有结构；当前模型范围与可复测清单以
+[12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md) 为准，反馈结论见
+[11-feedback-resolution-20261123.md](./11-feedback-resolution-20261123.md)。文中旧模型样例与旧条目数均为历史记录，保留不改写。
 
 本文档供双方逐项核验。每项包含：执行方、请求、预期响应、通过标准。
 
@@ -16,7 +19,7 @@
 | `aud` 值 | 双方商定 | ✅ `new-api` |
 | 服务主体 `sub` | Harness | ✅ `harness-gateway` |
 | 网关地址 | New API | ✅ `https://testapi.soloai.chat` |
-| 资源池 id（`chat` / `video` / `image` / `audio` / `plan`）与池内模型 id | New API | ✅ A3 动态返回；`image` 池 10 个图片模型、`video` 8 个、`plan` 22 个已配置；`audio` 渠道未接入，`models` 为空属预期 |
+| 资源池 id（`chat` / `video` / `image` / `audio` / `plan`）与池内模型 id | New API | ✅ A3 当前返回 `chat=26`、`video=83`、`image=10`、`audio=0`、`plan=80`（`catalog_version=10`）；其中 `video` 初步核实可调 49、`plan` 初步核实可调 17，复测以 [12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md) 为清单依据，不要仅凭 A3 条目提交付费任务；`audio` 渠道未接入，`models` 为空属预期 |
 | 路由配置：资源池渠道顺序是唯一路由顺序；`global_channel_order` / 全渠道优先级全局池与 `token_group_access` / 令牌授权已移除；`pricing_group_order` 仅决定采购分组资格与倍率（当前 `["default"]`，倍率 1），不是渠道路由顺序 | New API | ✅ 已构建并部署，待逐项复验 |
 
 ---
@@ -228,7 +231,13 @@ curl -sS -D- "http://<gateway>/v1/models" \
 }
 ```
 
-> 样例取自 2026-11-14 的 82 实例：`chat` 池 15 个模型，`video` 池 8 个 PAI 按次模型，`image` 池 10 个图片模型（4 个 GPT Image + 6 个 Nano Banana），`plan` 池 22 个 TA token 模型；`audio` 当前没有可用渠道，`models` 为空。`models` 按模型 id 字典序返回，实际验收以实例返回为准。
+> **历史样例（保留，不代表当前目录）**：以下 JSON 取自 2026-11-14 的 82 实例：
+> `chat` 池 15 个模型，`video` 池 8 个 PAI 按次模型，`image` 池 10 个图片模型
+> （4 个 GPT Image + 6 个 Nano Banana），`plan` 池 22 个 TA token 模型；`audio`
+> 当前没有可用渠道，`models` 为空。当前 A3 为 `catalog_version=10`，条目数
+> `chat=26` / `video=83` / `image=10` / `audio=0` / `plan=80`，模型复测以
+> [12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md) 为准；
+> `models` 按模型 id 字典序返回，实际验收以实例返回为准。
 
 **通过标准**：
 - [ ] HTTP 200
@@ -644,3 +653,4 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?from=2026-10-01T00:0
 | 2026-11-06 | V0.10（修订） | 前置条件补充路由配置：资源池是唯一路由顺序，全局池与令牌授权已移除，`pricing_group_order` 仅决定采购资格与倍率；2.4 / 2.5 明确 `X-Route-Group` 仅经验证 Harness 调用方可用且仅 `plan` 有业务含义；5.2 补充当前 `group_ratio = 1` |
 | 2026-11-14 | V0.11 | A3 样例 `image` 池改为 10 个图片模型、`catalog_version` 为 `"7"`；前置条件与 2.5 说明 `image` 已配置、`audio` 仍为空；新增 4.6 图片生成验收（GPT Image 同步 0.018、Nano Banana 异步 0.009、B1 仅 usage / B3 `settled`）；部署 `harness-api-20261114-c29f1a6` |
 | 2026-11-15 | V0.11（修订） | 图片验收改为：无 Token 用量时 B1 `usage_source=unavailable`、Token 字段 `null`、`split_known=false`，结算不再追加同值 `usage_correction`；GPT Image 保持 `upstream`。部署 `harness-api-20261115-de7fce8` |
+| 2026-11-23 | V1.2 | 交付包与当前网关对齐；前置条件改为 A3 当前条目数 `chat=26`/`video=83`/`image=10`/`audio=0`/`plan=80`，并明确复测以 `12-retest-model-list-20261123.md` 为准；A3 旧样例标注为历史记录 |

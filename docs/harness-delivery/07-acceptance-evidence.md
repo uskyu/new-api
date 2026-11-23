@@ -1,11 +1,17 @@
 # Harness 联调验收结果（真实 JWT / 本地临时 JWT）
 
-**交付包版本**：V0.12（下列证据对应 V0.9.1 构建；V0.10 构建/部署见第十四节，V0.11 图片验收见第十五节，2026-11-15 修复复测见第十六节，2026-11-17 全模型验收见第十七节）
+**交付包版本**：V1.2（2026-11-23；本文为历史验收证据，记录截至 2026-11-17）
 **日期**：2026-10-26（2026-10-29 复测；2026-11-14 图片模型验收见第十五节；2026-11-15 用量来源修复复测见第十六节；2026-11-17 全模型验收见第十七节）
-**网关版本**：复测记录为 `ec3cdc0`（版本头 `harness-api-20261029-ec3cdc0`）；
-V0.9.1 交付构建为 `fd00dae`（含 run id 校验补丁）；V0.10 构建 `bb266025`，镜像 `harness-api-20261108-bb26602`；V0.11 镜像 `harness-api-20261114-c29f1a6`；V0.11 修订镜像 `harness-api-20261115-de7fce8`；V0.12 镜像 `harness-api-20261116-df87870`（revision `df8787085`），已部署 82 实例
+**网关版本**：当前网关为 `harness-api-20261117-b040241`（revision `b04024190`）；下列历史记录依次对应 `ec3cdc0`（版本头 `harness-api-20261029-ec3cdc0`）、V0.9.1 交付构建 `fd00dae`（含 run id 校验补丁）、V0.10 构建 `bb266025` / 镜像 `harness-api-20261108-bb26602`、V0.11 镜像 `harness-api-20261114-c29f1a6`、V0.11 修订镜像 `harness-api-20261115-de7fce8`、V0.12 镜像 `harness-api-20261116-df87870`（revision `df8787085`）
 **JWT 来源**：Harness 正式签发（JWKS `https://alphapro-test.xyz/.well-known/jwks.json`）；第十五节及第十六节 16.1–16.4 为本地临时 JWT，16.5 为 Harness 正式 JWT
 **Token 有效期**：至 2026-11-18
+
+> 本文是**历史验收证据**，各节记录的是对应构建在当时窗口的实测结果，按原样保留。
+> 当前反馈处理结论与已知限制见
+> [11-feedback-resolution-20261123.md](./11-feedback-resolution-20261123.md)，当前模型范围
+> 与复测清单见
+> [12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md)。历史事实不改写；
+> 若历史记录与当前实现不一致，以 11/12 和最新现场结果为准。
 
 > 第一至十一节是 V0.9.1 构建的历史实测记录。其中出现的 `economy` / `enterprise`
 > 池 id、按池变化的税率（税 3% / 10%）以及含税额的 `total_amount` 都属于旧口径；
@@ -220,6 +226,7 @@ B1/B3 另含 `details.required_scope`。这是当前契约定义，不是缺陷�
 | 2026-11-05 | 记录 V0.10 口径变更（五池产品线、`X-Route-Group` 仅 `plan`、取消税额）为分支已改、未部署未验证；旧证据保持原样 |
 | 2026-11-14 | 新增第十五节：图片模型 E2E（本地临时 JWT），A3 `image` 池 10 模型，Nano Banana 2.1 1K `0.009` USD、GPT Image 2.6-flare `0.018` USD；真实 Harness JWT 图片 E2E 待执行 |
 | 2026-11-15 | 修复异步任务用量来源：无 Token 用量时 B1 为 `usage_source=unavailable`、Token 字段为 `null`，仅有 `total_tokens` 时保持 `upstream`；撤销 B1 强制收尾事件。部署 `harness-api-20261115-de7fce8`，完成 Nano Banana / GPT Image / PAI 三模型复测（第十六节） |
+| 2026-11-23 | V1.2 交付包：页首补充当前网关 `harness-api-20261117-b040241`，链接第 11、12 号文档；本文继续作为历史验收证据，历史事实不改写 |
 
 ---
 

@@ -1,7 +1,11 @@
 # Harness 鉴权配置指南
 
-**版本**：V0.10（鉴权部分内容未变）
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交；已部署 82 实例 `harness-api-20261108-bb26602`；鉴权契约未变）
+**版本**：V1.2（2026-11-23 修订；鉴权规则未变，仅校准版本与 Base URL）\
+**测试 Base URL**：`https://testapi.soloai.chat`\
+**对应网关版本**：`harness-api-20261117-b040241`（revision `b04024190`）\
+**说明**：本文鉴权契约自 V0.10 起未变（RS256、claim、scope 与主体映射规则均保持原样）；正文历史配置与验证记录按原文保留，不作改写。当前契约与已知限制见
+[11-feedback-resolution-20261123.md](./11-feedback-resolution-20261123.md)，模型复测见
+[12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md)。
 
 本文档说明网关侧的 JWT 校验实现，以及需要 Harness 提供的信息。
 
@@ -208,6 +212,11 @@ curl -sS "http://<gateway>/internal/v1/gateway/health" \
 | 自签 JWT + 自建 JWKS 集成测试 | ✅ 已通过 |
 | **Harness 真实 JWKS 联调** | ❌ **未开始**（等待对方提供配置） |
 
+> **历史状态说明**：上表“未开始”是本文初次撰写时的状态，按原文保留。Harness 真实
+> JWT 端到端验收已于 2026-10-26 与 2026-10-29 两轮通过，2026-11-15 完成正式 JWT
+> 四模型复测，详见 `07-acceptance-evidence.md`；当前契约状态以
+> `11-feedback-resolution-20261123.md` 为准。
+
 **重要说明**：网关侧自签 JWT 的本地联调已完成；使用 Harness 真实签发 JWT 的
 端到端验收已于 2026-10-26 与 2026-10-29 两轮通过，详见
 `07-acceptance-evidence.md`。测试 JWT 有效期至 2026-11-18，到期需换发。
@@ -221,3 +230,4 @@ curl -sS "http://<gateway>/internal/v1/gateway/health" \
 | 2026-10-25 | V0.9 | 初版 |
 | 2026-10-29 | V0.9.1 | 更新网关版本；记录真实 JWT 联调已完成及 Token 有效期 |
 | 2026-11-05 | V0.10 | 版本对齐交付包；鉴权与 Scope 规则未变（V0.10 只调整资源池与金额口径） |
+| 2026-11-23 | V1.2 | 交付包版本对齐；补充测试 Base URL 与当前网关 `harness-api-20261117-b040241`；鉴权规则未变，历史内容保留 |

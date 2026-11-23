@@ -1,9 +1,12 @@
 # Harness 账本数据契约说明
 
-**版本**：V0.11（2026-11-15 修订）
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交；已部署 82 实例 `harness-api-20261115-de7fce8`）
+**版本**：V1.2（2026-11-23 修订）\
+**测试 Base URL**：`https://testapi.soloai.chat`\
+**对应网关版本**：`harness-api-20261117-b040241`（revision `b04024190`）
 
-本文档说明 B1 用量事件与 B3 成本记录的字段语义、事件模型和金额口径。
+本文档说明 B1 用量事件与 B3 成本记录的字段语义、事件模型和金额口径。当前反馈结论见
+[11-feedback-resolution-20261123.md](./11-feedback-resolution-20261123.md)，模型范围与
+复测要求见 [12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md)。
 
 ---
 
@@ -13,7 +16,7 @@
 
 | 流 | 回答的问题 | 前缀 | 对应接口 |
 | --- | --- | --- | --- |
-| **B1 用量** | 这次请求消耗了多少 Token？ | `ue_` | usage-events |
+| **B1 用量** | 这次请求取得了哪些 Token 用量或用量元数据？ | `ue_` | usage-events |
 | **B3 成本** | 这次采购花了多少钱？当前什么状态？ | `ce_` | cost-records |
 
 **独立性的含义**：
@@ -35,8 +38,8 @@ Harness 不能假设"每条 B3 事件都对应一条 B1 事件"。
 | `event_type` | string | ✓ | `usage` / `usage_correction` |
 | `request_id` | string | ✓ | Harness Request ID（`X-Harness-Request-Id`） |
 | `gateway_request_id` | string | ✓ | New API 请求 ID |
-| `run_id` | string | ✓ | Harness Run ID（`X-Harness-Run-Id`），≤64 字符，恒非空 |
-| `usage_unit` | string | ✓ | 本期恒为 `token`（见第五节） |
+| `run_id` | string | ✓ | Harness Run ID（`X-Harness-Run-Id`），必填且 1–64 字符，恒非空 |
+| `usage_unit` | string | ✓ | 当前恒为 `token`，是已知字段限制；不表示媒体按 Token 计费（见 6.1） |
 | `usage` | object | ✓ | 见 2.1 |
 | `usage_source` | string | ✓ | `upstream` / `estimated` / `unavailable` |
 | `is_estimated` | bool | ✓ | 是否估算 |
@@ -44,9 +47,11 @@ Harness 不能假设"每条 B3 事件都对应一条 B1 事件"。
 | `record_version` | int | ✓ | 从 1 开始 |
 | `supersedes_event_id` | string\|null | ✓ | 首次为 `null` |
 
-`run_id` 来自请求头 `X-Harness-Run-Id`。该头是模型调用的必填头，缺失或超过 64 字符时
-网关在转发上游之前返回 400，因此账本里不会出现 `run_id` 为空的事件。一个 run 可以
-包含多次模型调用，B1 事件按 `request_id` 唯一、按 `run_id` 可聚合。
+`run_id` 来自请求头 `X-Harness-Run-Id`。该头是模型调用的必填头，1–64 字符，只允许
+`A-Z`、`a-z`、`0-9`、`-`、`_`，不强制前缀或 ULID。缺失、空值、非法字符或超过 64
+字符时，网关在转发上游之前返回 `400 REQUEST_INVALID`，不产生费用和 B1/B3 事件，
+因此账本里不会出现 `run_id` 为空的事件。一个 run 可以包含多次模型调用，B1 事件按
+`request_id` 唯一、按 `run_id` 可聚合。
 
 B3 成本记录按第四轮冻结的字段表**不返回** `run_id`，但账本行仍存储该值；需要时可由
 网关侧补充输出。
@@ -70,8 +75,8 @@ B3 成本记录按第四轮冻结的字段表**不返回** `run_id`，但账本�
 | `output_tokens` | int \| null | 输出 Token；`null` 表示未测量 |
 | `cache_read_tokens` | int \| null | 缓存读取 |
 | `cache_write_tokens` | int \| null | 缓存写入 |
-| `total_tokens` | int \| null | 上游报告的总量（**待确认字段**） |
-| `split_known` | bool | 输入/输出是否分别观测（**待确认字段**） |
+| `total_tokens` | int \| null | 上游报告的总量；完全无用量数据时省略，不是 0 |
+| `split_known` | bool | 输入/输出是否分别观测；无用量数据时为 `false` |
 
 ### 2.2 `null` 与 `0` 的区别
 
@@ -102,18 +107,17 @@ B3 成本记录按第四轮冻结的字段表**不返回** `run_id`，但账本�
 {"input_tokens": null, "output_tokens": null, "cache_read_tokens": null, "cache_write_tokens": null, "split_known": false}
 ```
 
-区分 B 与 C 靠 `usage_source`：B 为 `upstream`，C 为 `unavailable`。
-
-> **待确认**：`null`、`total_tokens`、`split_known` 三项尚未与 Harness 冻结，
-> 见 `05-pending-confirmations.md`。
+区分 B 与 C 靠 `usage_source`：B 为 `upstream`，C 为 `unavailable`。场景 C 是当前
+上游不返回 `usage` 的异步视频任务的口径：`total_tokens` 省略，四个分项为 `null`，
+`split_known=false`。历史 TA Token 完成记录中的 Token 数不能直接回补到当前 B1。
 
 ### 2.3 usage_source 三态
 
 | 值 | 含义 | `is_estimated` |
 | --- | --- | --- |
-| `upstream` | 上游返回的实测值 | `false` |
-| `estimated` | 网关本地计数或估算 | `true` |
-| `unavailable` | 完全无可用数据 | `false` |
+| `upstream` | 上游返回的实测值；只有总量时分项可为 `null` | `false` |
+| `estimated` | 网关本地计数或估算；Nano Banana 可能回传估算 Token，不等同于上游官方 usage | `true` |
+| `unavailable` | 当前未取得可用 usage；异步视频的 Token 分项为 `null`，`total_tokens` 省略 | `false` |
 
 ---
 
@@ -129,8 +133,8 @@ B3 成本记录按第四轮冻结的字段表**不返回** `run_id`，但账本�
 | `status` | string | ✓ | `pending` / `settled` / `refunded` / `adjusted` |
 | `currency` | string | ✓ | 本期恒为 `USD` |
 | `billing` | object | ✓ | 见 3.1 |
-| `billing_basis` | string | ✓ | 与 `usage_unit` 一致 |
-| `procurement_price_version` | string | ✓ | 采购价配置版本 |
+| `billing_basis` | string | ✓ | 当前固定为 `token`，是已知字段限制；不表示媒体按 Token 计费 |
+| `procurement_price_version` | string | 可空 | 采购价配置版本；`pending` 或零额退款记录可能为空，需结合事件类型和版本链判断终态 |
 | `record_version` | int | ✓ | 从 1 开始 |
 | `supersedes_event_id` | string\|null | ✓ | 首次为 `null` |
 | `observed_at` | string | ✓ | RFC3339 UTC 毫秒 |
@@ -184,34 +188,44 @@ total_amount = base_amount × group_ratio
 
 Harness 应将其视为「网关计价结果」，而非「供应商已确认的实付金额」。
 
-### 3.4 图片任务的 B1/B3 口径
+### 3.4 媒体任务的 B1/B3 口径
 
-图片生成任务与文本任务共用 B1/B3，但完成判定与用量来源不同：
+图片和视频任务与文本任务共用 B1/B3，但用量来源、完成判定和计费单位不同：
 
-- **B1 只有用量，没有 `status` 字段。** 图片任务不按 Token 计费，B1 也不能用于
-  判断完成：
-  - **GPT Image 同步请求**：保持 `usage_source=upstream`，携带上游实际
-    `input_tokens` / `output_tokens`（修复前实测 99 / 7,028，修复后复测 98 / 7,028；
-    该行为不受本次修复影响）。
-  - **Nano Banana 同步请求（Gemini `generateContent`）**：B1 为
-    `usage_source=estimated`，按请求估算 prompt Token（实测 `prompt_tokens=10`、
-    `completion_tokens=0`、`total_tokens=10`、`split_known=true`）。图片本身不是
-    Token 用量，B1 的 Token 数不代表图片费用；旧异步合同的 `unavailable`/`null`
-    口径不再适用于 Nano Banana。
-  - **无 Token 用量的异步视频任务（PAI/Seedance）**：B1 为
-    `usage_source=unavailable`，`input_tokens` / `output_tokens` /
-    `cache_read_tokens` / `cache_write_tokens` 均为 `null`，`split_known=false`，
-    `total_tokens` 省略（未测量）。`null` 表示未测量，**不是 0 Token**。
+- **B1 只有用量，没有 `status` 字段。** B1 不能用于判断媒体任务完成：
+  - **GPT Image 同步请求**：可为 `usage_source=upstream`，携带上游实际 Token。
+  - **Nano Banana 同步请求（Gemini `generateContent`）**：使用同步图片协议，
+    不返回 task id；B1 可能为 `usage_source=estimated`，表示估算 Token，不等同
+    于上游官方 usage。旧异步 `/v1/videos` 合同不代表当前正式协议。
+  - **上游不返回 `usage` 的异步视频任务**：B1 为 `usage_source=unavailable`，
+    `input_tokens` / `output_tokens` / `cache_read_tokens` /
+    `cache_write_tokens` 均为 `null`，`split_known=false`，`total_tokens` 省略。
+    `null` 表示未测量，**不是 0 Token**。
   - **异步任务只拿到 `total_tokens`**：`usage_source=upstream`，`total_tokens=N`，
     四个分项 Token 为 `null`，`split_known=false`。
   - B1 只在用量或用量元数据（`usage_source`、`split_known`、`total_tokens`
     是否已知等）变化时追加事件；结算不再追加同值 `usage_correction`。
-- **B3 才带 `status`。** 成功的图片任务最终会产生 `status_change`，`status` 为
-  `settled`，`pricing_group=图片自营号池`，`group_ratio=1`，
-  `billing.total_amount` 为按张价格（Nano Banana 2.1 1K 为 `0.009`，
-  Pro 1K 为 `0.016`，GPT Image 2.6 为 `0.018`）。
-- **完成与成本以 B3 为准。** `image_count` 为本次生成张数（当前只验证 `n=1`），
-  用于网关按张计费，不通过 B1 暴露。
+- **B3 才带 `status`。** 成功的媒体任务最终会产生 `status_change`，`status` 为
+  `settled`；费用依据是最新版本 `billing.total_amount` 和提交时价格版本。
+- **完成与成本以 B3 为准。** 图片按张、视频按秒 / 按次的金额不通过 B1 Token 推导。
+  `image_count` 为本次生成张数（当前只验证 `n=1`），用于网关按张计费，不通过 B1
+  暴露。
+- **超时处理**：Nano Banana 长请求可能触发 524/500；超时后先核对 B3 的
+  `request_id` 和产物，再决定是否有限重试。同步图片没有统一 task id，不能盲目
+  重提。视频任务只轮询原 task id，不因轮询超时盲目重提。
+
+### 3.5 媒体单位字段限制与实际计费
+
+| 字段 | 当前值 | 限制 |
+| --- | --- | --- |
+| B1 `usage_unit` | `token` | 已知字段限制，不表示图片或视频按 Token 计费 |
+| B3 `billing_basis` | `token` | 已知字段限制，不表示图片或视频按 Token 计费；B3 没有 `usage_unit` 字段 |
+
+实际计费仍按模型价格 / 表达式执行：文本按 Token，图片按张，视频按秒或按次。
+图片按张、视频按秒 / 按次的金额以 B3 最新版本 `total_amount`、`status=settled`
+和提交时价格版本为准。`pending` 或零额退款记录的价格版本可能为空，是否为有效
+终态需结合事件类型和后续版本链判断。Gemini thinking tokens 是否计入 output，以
+当前归一化实现和 B1 实际返回为准，不另行相加。
 
 ---
 
@@ -305,25 +319,27 @@ Harness 更新自己的账本时应：
 
 | 项 | 本期实现 |
 | --- | --- |
-| `usage_unit` | **只产生 `token`**；Nano Banana 同步请求为 `usage_source=estimated`（prompt Token 估算，图片本身不是 Token 用量）；无 Token 用量的异步视频任务为 `usage_source=unavailable`、Token 字段为 `null`；GPT Image 同步保持上游实际 Token |
+| B1 `usage_unit` | **只产生 `token`**，是已知字段限制；Nano Banana 可能为 `estimated`，无 usage 的异步视频为 `unavailable` / Token `null`，GPT Image 可为 `upstream` |
+| B3 `billing_basis` | **固定 `token`**，是已知字段限制；不表示媒体按 Token 计费，B3 没有 `usage_unit` 字段 |
 | `currency` | **固定 `USD`** |
-| 计费对象 | 文本按 Token；图片按张（`image_count`，当前只验证 `n=1`）；`plan` 池按次计费渠道尚未接入 |
+| 计费对象 | 文本按 Token；图片按张（`image_count`，当前只验证 `n=1`）；视频按秒或按次；`plan` 池为按次视频，具体可调模型以第 12 号清单为准 |
 | 独立工具计费 | 不做 |
-| 图像计费 | **已接入**：B3 按张计价，`0.009` / `0.011` / `0.016` / `0.018` USD/张 |
-| 音频计费 | 不做 |
+| 图像计费 | **已接入**：金额以 B3 `settled` 和提交时价格版本为准 |
+| 音频计费 | 不做；`audio` 池当前不可调用 |
 | `status = failed` | 内部状态，**不会出现在 B3** |
 
-### 6.1 关于 usage_unit
+### 6.1 关于 usage_unit 与 billing_basis
 
-第四轮文档列出 `token` / `image` / `audio_second` / `character` / `request` / `other`
-是为未来定义可选值。**本期实际只会产生 `token`**，其他值不会出现。Nano Banana
-已改为 Gemini 同步请求，同样产生 `token` 单位的用量事件；B1 为
-`usage_source=estimated`，按请求估算 prompt Token（实测 `prompt_tokens=10`、
-`completion_tokens=0`），图片本身不是 Token 用量。无 Token 用量的异步视频任务
-仍为 `usage_source=unavailable`、四个基础 Token 字段为 `null`、`total_tokens`
-省略；只拿到 `total_tokens` 时按上游总量输出（`usage_source=upstream`）。GPT Image
-同步请求保持 `usage_source=upstream` 与上游实际 input/output Token。按张计费只
-体现在 B3 金额，不引入 `image` 单位。
+B1 `usage_unit` 和 B3 `billing_basis` 当前都固定为 `token`，这是已知字段限制，
+**不表示**图片按 Token、视频按 Token 计费。第四轮文档列出的其他单位是未来可选值，
+本期不会出现。Nano Banana 同步图片请求可能产生 `estimated` Token；无 Token 用量
+的异步视频任务为 `usage_source=unavailable`、四个基础 Token 字段 `null`、
+`total_tokens` 省略；只拿到 `total_tokens` 时按上游总量输出
+（`usage_source=upstream`）。GPT Image 可为 `usage_source=upstream`。
+
+图片按张、视频按秒 / 按次只体现在 B3 金额和状态，不引入 B1 `image` 单位，也不
+存在 B3 `usage_unit` 字段。媒体单位字段修正属于后续代码工作；在修正前，Harness
+不得用这两个 `token` 字段推导媒体费用。
 
 ### 6.2 关于 status = failed
 
@@ -335,12 +351,15 @@ Harness 更新自己的账本时应：
 
 ## 七、变更记录
 
+> 历史版本记录仅用于追溯，不代表当前字段口径；与 V1.2 不一致时，以本版及后续修订为准。
+
 | 日期 | 版本 | 内容 |
 | --- | --- | --- |
 | 2026-10-25 | V0.9 | 初版 |
 | 2026-10-29 | V0.9.1 | 明确 `run_id` 必填且 ≤64、缺失时调用被拒绝；说明 B3 不返回 `run_id` 但账本仍存储 |
 | 2026-11-05 | V0.10 | 金额口径改为 `total_amount = base_amount × group_ratio`，取消供应商税率；`tax_rate_percent` 恒 0 并标记废弃；事件类型判定去掉税率项；补充 `group_ratio` 由网关按资源池决定 |
 | 2026-11-06 | V0.10（修订） | 更正 `group_ratio` 来源：来自采购计价分组 `pricing_group_order`，不由资源池决定；明确计价分组优先级是采购资格/倍率分组，不是渠道路由顺序；当前单 `default` 分组、倍率 1 |
-| 2026-11-14 | V0.11 | 新增「图片任务的 B1/B3 口径」：B1 无 `status`；Nano Banana 异步任务 Token 为 0（修复前口径），GPT Image 同步可携带 Token；完成与成本以 B3 `status_change`/`settled` 为准；`image_count` 按张计费且不在 B1 暴露；更新本期范围中的图像计费状态 |
+| 2026-11-14 | V0.11 | 新增「图片任务的 B1/B3 口径」：B1 无 `status`；Nano Banana 当时采用异步任务口径（无用量部分已于 11-15 修正为 `unavailable`/`null`，11-17 改为同步协议），GPT Image 同步可携带 Token；完成与成本以 B3 `status_change`/`settled` 为准；`image_count` 按张计费且不在 B1 暴露；更新本期范围中的图像计费状态 |
 | 2026-11-15 | V0.11（修订） | 异步任务用量来源修复：无 Token 用量时 B1 为 `usage_source=unavailable`，`input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_write_tokens` 均为 `null`，`split_known=false`，`total_tokens` 省略；仅有 `total_tokens` 时为 `usage_source=upstream`；B1 只在用量或用量元数据变化时追加事件，结算不再追加同值 `usage_correction`；B3 金额口径不变。已部署 `harness-api-20261115-de7fce8`，真实 Harness JWT 四模型 E2E 通过（Banana/PAI `unavailable`，GPT Image `upstream`，B3 金额不变） |
 | 2026-11-17 | V0.12 | Nano Banana 改为 Gemini 同步 `generateContent`：B1 为 `usage_source=estimated`（prompt Token 估算，图片本身不是 Token 用量），B3 按张固定价；旧异步合同停用。全模型验收结果见 `10-full-model-acceptance-20261117.md`：语言 35/38、图片 10/10、视频 55/61，6 个视频模型为上游阻塞。已部署 `harness-api-20261116-df87870` |
+| 2026-11-23 | V1.2 | Base URL 更新为 `https://testapi.soloai.chat`，对应 `harness-api-20261117-b040241`；Run ID 明确为必填 1–64 字符；异步视频 B1 固定 `unavailable` / Token `null` / `split_known=false` / `total_tokens` 省略；披露 B1 `usage_unit=token` 与 B3 `billing_basis=token` 的已知限制；媒体费用以 B3 `settled` 金额和提交时价格版本为准；补充 Nano Banana 同步、超时与 MIME 注意事项。事实源见第 11、12 号文档 |

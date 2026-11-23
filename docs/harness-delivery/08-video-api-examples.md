@@ -1,8 +1,8 @@
 # 视频调用样例与模型差异
 
-**版本**：V0.13（2026-11-17 修订）
+**版本**：V0.14（2026-11-23 修订）
 **对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261117-b040241`
-**日期**：2026-11-14（2026-11-15、2026-11-17 修订）
+**日期**：2026-11-14（2026-11-15、2026-11-17、2026-11-23 修订）
 **适用对象**：Harness 后端与视频调用联调
 
 本文只说明视频生成调用。所有视频模型都使用同一个 OpenAI Video 入口，差异在
@@ -17,17 +17,32 @@
 | 提交 | `POST /v1/videos` | 创建视频任务 |
 | 查询 | `GET /v1/videos/{task_id}` | 轮询状态与最终用量 |
 | 内容 | `GET /v1/videos/{task_id}/content` | 下载视频；支持 `Range` |
-| 内容（可选） | `HEAD /v1/videos/{task_id}/content` | 探测大小/类型；部分 TA token 模型不支持 HEAD，见第七节 |
+| 内容（可选） | `HEAD /v1/videos/{task_id}/content` | 探测大小/类型；历史 TA token 模型曾出现 HEAD 502，相关模型已下架，见第 4、7 节 |
 
 所有接口使用 Harness JWT，scope 为 `gateway.chat`。**提交接口**还必须带
 `X-Harness-Request-Id` 和 `X-Harness-Run-Id`（均 ≤64 字符）；查询和内容接口
 只需要 JWT。
 
-当前模型池与模型 id 以 [A3 模型目录更新](./A3-model-catalog-update.md) 为准：
+当前模型池与模型 id 以 A3 `GET /v1/models` 和
+[12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md) 为准。
+2026-11-23 校准时 A3 `catalog_version=10`，目录条目与初步核实可调数量如下：
 
-- `video` 池：按秒视频模型（PAI 按秒、TA 按秒、video-line 按秒线路）
-- `plan` 池：按次视频模型（TA token、PAI 按次、Wan 按次、video-line 按次）
-- `image` 池已配置 10 个图片模型（见 [09-image-api-examples.md](./09-image-api-examples.md)）；`audio` 仍为空
+| 池 | A3 当前返回条目 | 2026-11-23 初步核实可调 | 当前用法 |
+| --- | ---: | ---: | --- |
+| `video` | 83 | **49** | 按秒视频；提交时显式传 `X-Route-Group: video` |
+| `plan` | 80 | **17** | 按次视频；提交时显式传 `X-Route-Group: plan` |
+| `image` | 10 | 10 | 图片模型，见 [09-image-api-examples.md](./09-image-api-examples.md) |
+| `chat` | 26 | 26 | 默认池；11-23 有 3 条上游失败记录，详见第 12 号文档 |
+| `audio` | 0 | 0 | 预留池，本期不可调用 |
+
+**A3 候选不等于当前可调。** 上表 83/80 是目录声明，49/17 是按上游实时目录与
+抽样调用初步核实的可调数量；后者不表示这些模型已在同一窗口全部完成生成验收。
+目录校正完成前，应以第 12 号文档的精确模型清单作为复测和上线选择依据，不要仅凭
+A3 条目提交付费任务。
+
+**跨池重复本身合法。** 同一供应商或同一模型可以出现在多个池，不应以“交集必须为 0”
+作为验收标准。当前需要区分的是目录声明、池内启用渠道和真实供货，而不是删除合法重复。
+A3 的 `capabilities` 是池级端点类型汇总，也不能据此判断某个图片/视频模型的真实能力。
 
 **池选择头**：
 
@@ -45,8 +60,8 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | PAI 按次 | `seedance2-fast-720p-once-1` | 按次 | 整数，按模型 4–15 或 1–60/5–30 | 按模型声明；Seedance 2.5 Flash 按次支持参考素材（≤10 图/5 视频/5 音频） | 不允许发送 | 通常无 `usage`；B1 为 `usage_source=unavailable`、Token 字段为 `null` |
 | PAI 按秒 | `seedance2-mini-480p-second` | 按秒 | 整数，按模型范围 | 已支持参考图/视频/音频（按模型声明） | 不允许发送 | 可能无 `usage`；B1 为 `usage_source=unavailable`、Token 字段为 `null`；有 `usage` 时按 `output_seconds` / `input_seconds` 结算，无 `usage` 时按请求生成秒数估算参考秒 |
-| TA token | `seedance2-mini-480p-token-no-video` | 按 token | 整数，4–15；2.5 系列 4–30 | 支持图片/参考视频 | 可选，但必须与模型 id 一致 | `total_tokens` |
 | TA 按秒 | `wan3.0-video-480p` | 按输出/输入秒 | 整数，按 family 范围；`wan` 支持 `-1` 自动 | 按 family 限制 | 由模型 id 锁定 | `output_seconds` / `input_seconds` |
+| TA token（历史，已下架） | 见第 11 节 | 旧记录按 token | 旧合同 4–15 秒；2.5 系列 4–30 秒 | 旧合同支持图片/参考视频 | 旧合同由模型 id 锁定 | **不得作为当前样例**；历史 token 数不能回补当前 B1 |
 
 补充：
 
@@ -55,10 +70,11 @@
 - PAI 模型仍不接受 `resolution`、`size`，分辨率由模型 id 锁定；PAI 按秒已支持
   `image_with_roles` / `video_with_roles` / `audio_with_roles`，PAI 按次以模型声明
   为准（Seedance 2.5 Flash 按次声明支持参考素材，最多 10 图 / 5 视频 / 5 音频）。
-- TA token 模型的分辨率也由模型 id 决定；发送冲突的 `resolution` / `size` 会被
-  拒绝。`size` 只接受 `1280x720` / `720x1280`，且只对 720p 模型有效。
+- TA token 是历史合同，当前规格已下架，不能再作为当前调用样例；旧字段约束仅用于
+  识别历史请求和任务，完整禁用清单见第 11 节。
 - `with-video` 模型必须提供至少一个 `reference_video`；`no-video` 模型拒绝参考视频。
-- TA token 当前不支持 `audio_with_roles`；TA 按秒模型按 family 支持部分音频输入。
+  该规则只对声明对应能力的当前模型适用，不代表所有按秒/按次模型都支持视频参考。
+- TA 按秒模型按 family 支持部分音频输入；是否可用仍以第 12 号文档的当前模型清单为准。
 - PAI 按秒有 `usage` 时按 `output_seconds` / `input_seconds` 结算；Seedance 2.5
   Flash `second-1` 带参考时，上游当前完成响应不返回 `usage`，网关按请求
   `seconds` 估算参考秒并按两段式价格结算；上游后续返回实际 `input_seconds`
@@ -129,104 +145,30 @@ curl -sS "http://<gateway>/v1/videos/task_xxxxxxxx/content" \
 
 ---
 
-## 4. 样例 B：TA token 文字生成（plan 池）
+## 4. 历史 TA token 样例（已下架，禁止当前调用）
 
-以 `seedance2-mini-480p-token-no-video` 为例。模型 id 已锁定 480p，不需要再传
-`resolution`；`no-video` 模型不接受参考视频。
+原 `seedance2-mini-480p-token-no-video`、`seedance2-480p-token-with-video` 等
+TA token 样例已从当前调用示例移除。2026-11-23 核实，TA Seedance Token 22 档在
+上游当前目录中已不可用；旧渠道声明或旧文档仍可能展示这些 id，但提交出现
+400/500/503 属于预期拒绝，不应作为当前可上线模型。
 
-```bash
-curl -sS -X POST "http://<gateway>/v1/videos" \
-  -H "Authorization: Bearer $HARNESS_JWT" \
-  -H "X-Harness-Request-Id: hrq_video_token_001" \
-  -H "X-Harness-Run-Id: run_video_token_001" \
-  -H "X-Route-Group: plan" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "seedance2-mini-480p-token-no-video",
-    "prompt": "A paper boat drifting down a quiet stream, soft morning light",
-    "seconds": 4,
-    "aspect_ratio": "16:9"
-  }'
-```
+历史完成响应中的 `usage.total_tokens` 只对当时那笔任务有效，不能直接回补到当前
+B1，尤其不能用于推断已下架模型当前仍有 token 用量。当前异步视频在上游不返回
+usage 时，B1 使用 `usage_source=unavailable`，Token 字段为 `null`，
+`split_known=false`，`total_tokens` 省略；这不是“实测为 0”，也不代表免费。
+费用以 B3 最新 `status=settled` 记录的 `total_amount` 和提交时价格版本为准。
 
-完成响应会带 token 用量，例如：
-
-```json
-{
-  "id": "task_xxxxxxxx",
-  "object": "video",
-  "model": "seedance2-mini-480p-token-no-video",
-  "status": "completed",
-  "progress": 100,
-  "created_at": 1794112000,
-  "usage": {
-    "total_tokens": 40594
-  }
-}
-```
-
-`aspect_ratio` 可选，默认 `16:9`；允许
-`21:9` / `16:9` / `4:3` / `1:1` / `3:4` / `9:16` / `adaptive`。
-`seedance2.5` 系列最长 30 秒，其他 token 模型最长 15 秒。
+旧 token 请求中的 `aspect_ratio`、首尾帧、参考图和参考视频约束仅保留为历史排障
+背景，不再提供可复制的当前调用样例。已下架/停用模型完整清单见第 11 节。
 
 ---
 
-## 5. 样例 C：TA token 带参考视频（plan 池）
+## 5. 其他按秒模型样例（video 池）
 
-`with-video` 模型必须带至少一个 `reference_video`。素材 URL 必须是公网可访问的
-HTTP/HTTPS 地址，不能带网关不认识的鉴权头。
+以下仅展示请求形状，是否能调以第 12 号文档的 49 个 `video` 模型清单为准。
+所有提交都必须显式传 `X-Route-Group: video`。
 
-```bash
-curl -sS -X POST "http://<gateway>/v1/videos" \
-  -H "Authorization: Bearer $HARNESS_JWT" \
-  -H "X-Harness-Request-Id: hrq_video_video_001" \
-  -H "X-Harness-Run-Id: run_video_video_001" \
-  -H "X-Route-Group: plan" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "seedance2-480p-token-with-video",
-    "prompt": "Keep the subject and camera motion, replace the background with a snowy forest",
-    "seconds": 4,
-    "aspect_ratio": "16:9",
-    "video_with_roles": [
-      {
-        "url": "https://cdn.example.com/reference.mp4",
-        "role": "reference_video"
-      }
-    ]
-  }'
-```
-
-也支持参考图 / 首尾帧：
-
-```json
-{
-  "model": "seedance2-480p-token-no-video",
-  "prompt": "Animate the still image with a slow zoom",
-  "seconds": 4,
-  "aspect_ratio": "adaptive",
-  "image_with_roles": [
-    { "url": "https://cdn.example.com/first.png", "role": "first_frame" },
-    { "url": "https://cdn.example.com/last.png", "role": "last_frame" }
-  ]
-}
-```
-
-规则：
-
-- `image_with_roles` 的 role 只能是 `first_frame` / `last_frame` / `reference_image`
-- `last_frame` 必须和 `first_frame` 成对；帧模式不能和 `reference_image` 混用
-- 帧模式不能和 `reference_video` 混用
-- `seedance2.5` 使用 `last_frame` 时，`aspect_ratio` 必须是 `adaptive`
-
----
-
-## 6. 其他已支持但当前未上池的模型
-
-这些模型已在网关侧适配并有实测记录，但当前没有加入 `video` / `plan` 池；
-加入池后按对应池 id 传 `X-Route-Group`。
-
-### 6.1 TA 按秒
+### 5.1 TA 按秒
 
 ```json
 {
@@ -248,12 +190,15 @@ curl -sS -X POST "http://<gateway>/v1/videos" \
 
 ```json
 {
-  "model": "grok-video1.5-480p-second",
+  "model": "grok-video1.5-720p-second",
   "prompt": "A cat leaping between two rooftops",
   "seconds": 1,
   "aspect_ratio": "16:9"
 }
 ```
+
+`grok-video1.5-480p-second` 已下架，不再作为当前样例；不要与仍可复测的
+`grok-video1.5-720p-second` 混淆。
 
 TA 按秒模型的 `seconds` 范围、aspect 和素材限制按 family 不同：
 
@@ -265,7 +210,7 @@ TA 按秒模型的 `seconds` 范围、aspect 和素材限制按 family 不同：
 | kling | 3–30 | auto / 16:9 / 9:16 / 1:1 / 21:9 | 按模型：with-video 必须，no-video 禁止 | 最多 10，first/last/reference | 不支持 |
 | minimax | 5–15 | 21:9 / 16:9 / 4:3 / 1:1 / 3:4 / 9:16 / adaptive | 可选，最多 3 | 最多 9，first/last/reference | 最多 3，需要图片或视频素材 |
 
-### 6.2 PAI 按秒
+### 5.2 PAI 按秒
 
 ```json
 {
@@ -282,64 +227,78 @@ PAI 按秒与 PAI 按次使用同一基础请求形状：`model` / `prompt` / `s
 
 ---
 
-## 7. 已完成实测记录
+## 6. 已完成实测记录（当前模型）
 
-以下为 2026-11-07 前后在联调环境实际跑通并结算的模型；金额是当时配置的采购价，
-当前价格以 B3 / 账本为准。
+以下为 2026-11-07 前后在联调环境实际跑通并结算、且仍列入 2026-11-23 可复测清单的
+模型；金额是当时配置的采购价，只用于历史核对，当前费用以 B3 为准。
 
-| 模型 | 类型 | 请求参数 | 结果 | 金额（USD） |
+| 模型 | 类型 | 请求参数 | 结果 | 历史金额（USD） |
 | --- | --- | --- | --- | --- |
-| `seedance2-mini-480p-token-no-video` | TA token | 480p, no-video | 40,594 tokens，SUCCESS，settled | $0.09296026 |
-| `seedance2-480p-token-no-video` | TA token | 480p, no-video | 40,594 tokens，SUCCESS，settled | $0.3227223 |
 | `wan3.0-video-480p` | TA 按秒 | 2 秒 | SUCCESS，settled | $0.08 |
 | `happyhorse1.1-720p-second` | TA 按秒 | 3 秒 | SUCCESS，settled | $0.24 |
-| `grok-video1.5-480p-second` | TA 按秒 | 1 秒 | SUCCESS，settled | $0.02 |
 | `seedance2-mini-480p-second` | PAI 按秒 | 4 秒 | SUCCESS，settled | $0.16 |
 | `seedance2-fast-720p-once-1` | PAI 按次 | 按次 | SUCCESS，settled | $0.52 |
 
+TA token 与 `grok-video1.5-480p-second` 的历史成功记录已从当前样例移除：这些
+规格当前已下架，历史成功不能证明现在可调，历史 token 数也不能用于当前 B1。
 这些记录的共同结论：
 
 - 提交、轮询、内容下载、B1/B3 结算均跑通
-- TA token 任务完成后返回 `usage.total_tokens`
 - TA 按秒任务完成后返回 `usage.output_seconds` / `input_seconds`
 - PAI 完成响应可能没有 `usage`；B1 为 `usage_source=unavailable`、Token 字段为
-  `null`，不代表免费，费用以 B3 为准；按次模型按次结算，按秒模型目前按请求秒数结算
-- PAI 内容可直接从结果 URL 代理下载；TA token 内容通过网关 `/content` 读取
+  `null`，不代表免费；按次模型按次结算，按秒模型目前按请求秒数结算
+- 费用以 B3 最新 `status=settled` 记录的 `total_amount` 和提交时价格版本为准，
+  不以 B1 的 token 字段或历史样例金额替代
 
 ---
 
-## 8. 已知差异与坑
+## 7. 已知差异与坑
 
-1. **PAI 的 `seconds` 在客户端仍是整数。** 网关会在提交时转成上游需要
+1. **先选当前模型，再构造请求。** A3 的 83 个 `video`、80 个 `plan` 条目是目录
+   候选，不是可调保证；当前初步核实为 49/17，精确清单见第 12 号文档。跨池重复
+   合法，但重复声明不等于两个池都有有效供货。
+2. **PAI 的 `seconds` 在客户端仍是整数。** 网关会在提交时转成上游需要
    `seconds` 字符串 + `duration` 数字；不要自己传字符串 `seconds` 或额外构造
    `duration`（传了也必须与 `seconds` 相等）。
-2. **PAI 不接受 `resolution` / `size`。** 分辨率由模型 id 决定；PAI 按秒已支持
+3. **PAI 不接受 `resolution` / `size`。** 分辨率由模型 id 决定；PAI 按秒已支持
    `image_with_roles` / `video_with_roles` / `audio_with_roles`，按次以模型声明为准。
-3. **TA token 的 `resolution` / `size` 必须和模型 id 一致。** 例如
-   `seedance2-mini-480p-token-no-video` 只能 480p；传 `720p` 会 400。最稳妥的做法
-   是直接省略这两个字段。
-4. **`with-video` / `no-video` 不能混用。** `with-video` 必须提供
-   `reference_video`；`no-video` 传了参考视频会 400。
-5. **TA token 当前不支持音频输入。** `audio_with_roles` 会 400；TA 按秒的部分
-   family 才支持音频。
-6. **TA token 的 `content` 建议用 GET。** 部分模型的 HEAD 会返回 502；GET/带
-   `Range` 的 GET 正常（可返回 206）。PAI 的 HEAD 正常。
-7. **PAI 完成响应可能没有 `usage`。** 此时 B1 为 `usage_source=unavailable`，
-   Token 字段为 `null`，不要据此判断免费；按次/按秒的价格和结算在网关 B3 账本里。
-   PAI 按秒有 `usage` 时按 `output_seconds` / `input_seconds` 结算；Flash `second-1`
-   带参考时上游当前不返回 `usage`，网关按请求 `seconds` 估算参考秒并按两段式价格
-   结算；上游后续返回实际 `input_seconds` 时以实际值为准。
+4. **`with-video` / `no-video` 不能混用。** 仅对声明这类能力的模型适用；
+   `with-video` 必须提供 `reference_video`，`no-video` 传了参考视频会 400。
+5. **异步视频 B1 可能没有真实 usage。** 上游不返回 usage 时，B1 为
+   `usage_source=unavailable`，Token 字段为 `null`，`split_known=false`，
+   `total_tokens` 省略。`null` 不是 0，也不代表免费；不得用历史 TA token 数补齐。
+6. **B3 金额是结算依据。** 按次、按秒、按 token 的历史价格说明都不能替代 B3
+   最新 `status=settled` 记录的 `total_amount` 和提交时价格版本；B1 的
+   `usage_unit=token` 只是当前字段限制，不表示视频按 token 计费。
+7. **PAI 完成响应可能没有 `usage`。** PAI 按秒有 `usage` 时按
+   `output_seconds` / `input_seconds` 结算；Flash `second-1` 带参考时上游当前不返回
+   `usage`，网关按请求 `seconds` 估算参考秒并按两段式价格结算；上游后续返回实际
+   `input_seconds` 时以实际值为准。
 8. **`capabilities` 是池级汇总。** 不能拿它判断池内每个模型都支持 `tools` 等能力；
-   视频池当前 `capabilities` 为空。
+   也不能据此判断图片/视频生成能力。
 9. **`models` 是字典序数组。** A3 返回的模型顺序不等于后台渠道配置顺序；不要依赖
-   渠道顺序，按模型 id 选择即可。
+   渠道顺序，按当前清单中的模型 id 选择即可。
 
 ---
 
-## 9. 2026-11-17 新视频规格与编辑合同
+## 8. 2026-11-23 复测与对账要求
 
-本节补充 2026-11-17 全模型验收覆盖的新规格；完整结果和模型清单见
+1. 每次模型调用携带 `X-Harness-Request-Id` 和 `X-Harness-Run-Id`，均为 1–64 字符。
+2. `video` / `plan` 必须显式传对应 `X-Route-Group`；先核对第 12 号文档的精确
+   模型 id，不要把 A3 条目数当成可调数量。
+3. 视频提交成功后只轮询原 task id，不因轮询超时盲目重提。
+4. 使用请求 ID 关联 B1/B3，不要用响应体 `model` 反查账本。
+5. B1 的 `usage_source=unavailable` / Token `null` 不表示零用量或免费；费用以
+   B3 最新 `status=settled` 记录的金额为准。
+
+---
+
+## 9. 2026-11-17 新视频规格与编辑合同（历史验收记录）
+
+本节保留 2026-11-17 全模型验收覆盖的请求形状；完整历史结果见
 [10-full-model-acceptance-20261117.md](./10-full-model-acceptance-20261117.md)。
+**本节出现不等于当前可调**，当前调用必须再核对第 12 号文档；已下架 id 不得因
+历史验收通过而重新加入调用清单。
 
 ### 9.1 Wan 3.0 按秒 / 按次
 
@@ -421,7 +380,10 @@ Muse：
   720P 级 MP4；低分辨率/不可达 URL 会被上游拒绝。
 - 首尾帧：`images` 必须两张不同 URL；同一 URL 会 400。
 
-### 9.7 已知上游阻塞
+### 9.7 2026-11-17 已知上游阻塞（历史记录）
+
+以下只描述 11-17 验收时的现象，不代表 2026-11-23 的当前状态；当前是否可调以
+第 12 号文档和现场复测为准：
 
 - MiniMax 4 个 `video-line-v1-second` 模型：上游 401 `fail_to_fetch_task` /
   `unauthorized`；网关已声明，直连上游复现。
@@ -433,8 +395,9 @@ Muse：
 ## 10. Seedance 2.5 Flash（2026-11-17 新增）
 
 2026-11-16 供应侧新增 5 个已启用的 Seedance 2.5 Flash 规格，2026-11-17 同步到本文。
-清晰度由模型 id 锁定，客户端不要再传 `resolution` / `size`。配置启用不等于生成、
-健康或计费已全量验收；下面的价格与边界以当前生效配置为准。
+这 5 个 id 均列入 2026-11-23 的可复测清单。清晰度由模型 id 锁定，客户端不要再传
+`resolution` / `size`。配置启用不等于生成、健康或计费已全量验收；下面的价格与边界
+以当前生效配置为准，实际结算金额以 B3 为准。
 
 ### 10.1 模型与价格
 
@@ -514,8 +477,52 @@ Flash 的参考秒，网关按请求 `seconds` 估算：5 秒生成 + 5 秒参�
 
 ---
 
+## 11. 已下架/停用模型（禁止作为当前调用清单）
+
+以下 29 个模型在供应商当前目录中已下架或停用，部分仍可能出现在旧 A3 快照、旧渠道
+声明或历史文档中。调用出现 400/500/503 属于预期拒绝，不应作为当前可上线模型；
+历史成功记录、token 数或金额也不能证明其当前可用。
+
+```text
+grok-video1.5-480p-second
+minimax-h3-max-480p-second
+minimax-h3-max-768p-second
+minimax-h3-max-1080p-second
+seedance2-480p-once
+seedance2-1080p-once
+seedance2-fast-720p-once-2
+seedance2-480p-token-no-video
+seedance2-480p-token-with-video
+seedance2-720p-token-no-video
+seedance2-720p-token-with-video
+seedance2-1080p-token-no-video
+seedance2-1080p-token-with-video
+seedance2-4k-token-no-video
+seedance2-4k-token-with-video
+seedance2-mini-480p-token-no-video
+seedance2-mini-480p-token-with-video
+seedance2-mini-720p-token-no-video
+seedance2-mini-720p-token-with-video
+seedance2-fast-480p-token-no-video
+seedance2-fast-480p-token-with-video
+seedance2-fast-720p-token-no-video
+seedance2-fast-720p-token-with-video
+seedance2.5-480p-token-no-video
+seedance2.5-480p-token-with-video
+seedance2.5-720p-token-no-video
+seedance2.5-720p-token-with-video
+seedance2.5-1080p-token-no-video
+seedance2.5-1080p-token-with-video
+```
+
+渠道声明校正后，以新版本 A3 和第 12 号文档的后续修订为准；在收到新的可复测依据前，
+不得自行将上述 id 恢复为当前样例。
+
+---
+
 ## 变更记录
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
 | V0.13 | 2026-11-17 | 新增第 10 节 Seedance 2.5 Flash（3 个按秒 / 2 个按次）的池、价格、请求规则与 3 个 JSON 样例；修正第 2 节 PAI 参考素材输入与按秒结算描述。 |
+| V0.14 | 2026-11-23 | 按第 11、12 号文档校准 A3 83/80 与初步核实可调 49/17，明确跨池重复合法、A3 候选不等于可调；移除 TA token 当前样例并列出 29 个已下架/停用模型；明确异步视频 B1 `unavailable` / `null`、B3 金额为结算依据。 |

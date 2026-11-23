@@ -1,26 +1,26 @@
 # 图片生成调用样例（GPT Image 同步 / Nano Banana Gemini 同步）
 
-**版本**：V0.13（2026-11-17 修订）
-**日期**：2026-11-14（2026-11-17 修订）
+**版本**：V0.14（2026-11-23 修订）
+**日期**：2026-11-14（2026-11-17、2026-11-23 修订）
 **对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261117-b040241`（Nano Banana 实测证据来自 `harness-api-20261116-df87870`，图片接口未变）
 **适用对象**：Harness 后端与图片生成联调
 
 本文只说明图片生成调用。图片池 `image` 当前有 10 个模型，按协议分为两类：
-GPT Image 2.5/2.6 使用同步 `POST /v1/images/generations`；Nano Banana 使用同步
-Gemini `POST /v1beta/models/{URL编码模型}:generateContent`，直接读取
-`candidates[].content.parts[].inlineData.data`，**不再使用 `/v1/videos` 异步任务**。
-所有图片生成提交请求都要带 `X-Route-Group: image`，使用 Harness JWT，scope 为
-`gateway.chat`；提交接口还需带 `X-Harness-Request-Id` / `X-Harness-Run-Id`
-（均 ≤64 字符）。
+GPT Image 2.5/2.6 使用同步 `POST /v1/images/generations`；Nano Banana 的正式协议是
+同步 Gemini `POST /v1beta/models/{URL编码模型}:generateContent`，直接读取
+`candidates[].content.parts[].inlineData.data`，**不返回 task id，也不再使用
+`/v1/videos` 异步任务**。所有图片生成提交请求都要带 `X-Route-Group: image`，
+使用 Harness JWT，scope 为 `gateway.chat`；提交接口还需带
+`X-Harness-Request-Id` / `X-Harness-Run-Id`（均 1–64 字符）。
 
 ---
 
 ## 1. 图片池与模型
 
-2026-11-14 的 82 实例中，A3 `image` 池 `catalog_version` 为 `"7"`，按以下顺序
-返回 10 个模型：
+2026-11-23 校准时，A3 `image` 池 `catalog_version` 为 `"10"`，返回 10 个模型。
+下表价格沿用 2026-11-17 配置口径，实际金额以 B3 最新 `settled` 记录为准。
 
-| 顺序 | 模型 id | 协议 | 价格（USD/张） |
+| 示例顺序 | 模型 id | 协议 | 价格（USD/张） |
 | --- | --- | --- | --- |
 | 1 | `Nano Banana 2.1 1K` | Nano Banana 同步（Gemini） | 0.009 |
 | 2 | `Nano Banana 2.1 2K` | Nano Banana 同步（Gemini） | 0.009 |
@@ -34,7 +34,9 @@ Gemini `POST /v1beta/models/{URL编码模型}:generateContent`，直接读取
 | 10 | `gpt-image-2.6-sunburst` | GPT Image 同步 | 0.018 |
 
 模型 id 必须按 A3 返回值原样传给 `model`（Nano Banana 的 id 含空格）。
-`X-Route-Group: image` 是图片池的池选择头，所有图片生成提交调用都要携带。
+`X-Route-Group: image` 是图片池的池选择头，所有图片生成提交调用都要携带，不能省略。
+2026-11-23 反馈处理记录为 GPT Image 4/4、Nano Banana 4/6；Nano Banana 余下 2 款
+与超时/MIME 整改相关，不应把 10 个目录条目理解为 10/10 生成验收通过。
 
 ---
 
@@ -46,6 +48,8 @@ Gemini `POST /v1beta/models/{URL编码模型}:generateContent`，直接读取
 | 调用方式 | 同步 | 同步（Gemini `generateContent`） |
 | 提交接口 | `POST /v1/images/generations` | `POST /v1beta/models/{URL编码模型}:generateContent` |
 | 查询接口 | 无（提交即返回结果） | 无（同步返回） |
+| task id | 无 | **无**；不要构造或轮询视频 task id |
+| 长请求 | 使用足够长的客户端超时 | 1K/4K 均可能触发 524/500；使用足够长的客户端超时 |
 | 关键请求字段 | `model` / `prompt` / `n=1` / `size` | `contents` / `generationConfig.imageConfig.imageSize` / `responseModalities` / `candidateCount` |
 | 结果位置 | `data[0].b64_json`（可能） | `candidates[].content.parts[].inlineData.data`（Base64） |
 | 下载方式 | 解码 `b64_json` | 解码 `inlineData.data` |
@@ -135,17 +139,22 @@ curl -sS -X POST "http://<gateway>/v1beta/models/Nano%20Banana%202.1%201K:genera
 }
 ```
 
-- **同步返回，不需要轮询，也没有 task id。**
+- **这是正式同步图片协议：同步返回，不需要轮询，也没有 task id。** 旧异步
+  `/v1/videos` 说明不代表当前 Nano Banana 合同；不要用视频 task 状态判断图片完成。
 - `imageSize` 必须按模型填写：1K / 2K / 4K；`aspectRatio` 供应网关已补测 10 种
   比例（1:1、16:9、9:16、3:2、2:3、4:3、3:4、5:4、4:5、21:9，见 4.1）；请求仍用
   `generationConfig.imageConfig.aspectRatio` + `imageSize`，`candidateCount=1`；
   下游走 Gemini 原生透传，比例不影响按张价格。
-- 实际字节可能是 JPEG 或 PNG；`inlineData.mimeType` 可能误标 `image/png`，
-  必须按文件头判断格式。
-- 4K 响应体可能很大（实测约 8.7 MB Base64），客户端要允许大响应和较长超时。
-- 上游偶发 524 超时；重试前先确认是否已经生成，避免重复扣费。
+- 实际字节可能是 JPEG 或 PNG；`inlineData.mimeType` 可能误标 `image/png`。
+  保存时必须按文件头识别真实格式（PNG 或 JPEG），不要只信 MIME 或扩展名。
+- 客户端必须允许长超时和大响应；4K 响应体可能很大（历史实测约 8.7 MB Base64）。
+  本文不规定未经统一复测的超时秒数，接入方应按实际网络与代理链路配置，不能沿用
+  小 JSON 请求的读取上限。
+- 1K/4K 长请求可能触发 524/500。**超时或网络中断不等于确定失败，也不要盲目
+  重提**：先按 `X-Harness-Request-Id` 查 B3，并核对可取得的响应/产物，确认是否
+  已生成或计费后再决定是否重试。同步协议没有 task id，不能靠轮询任务替代这一步。
 - 价格：2.1 1K/2K 为 0.009 USD/张，2.1 4K 为 0.011 USD/张，Pro 1K/2K/4K 为
-  0.016 USD/张。
+  0.016 USD/张；实际金额以 B3 为准。
 
 ### 4.1 比例与实测像素（2026-11-16 供应网关补测）
 
@@ -178,7 +187,11 @@ curl -sS -X POST "http://<gateway>/v1beta/models/Nano%20Banana%202.1%201K:genera
 | B1 用量 | **没有 `status` 字段**；Nano Banana 同步请求走 Gemini 路径，B1 为 `usage_source=estimated`，按请求估算 prompt Token（实测 `total_tokens=10`、`prompt_tokens=10`、`completion_tokens=0`、`split_known=false`）；GPT Image 同步为 `usage_source=upstream`，带上游实际 input/output Token | 不要用于判断完成 |
 | B3 成本 | 有 `status`；成功任务最终为 `status_change`，`status=settled`，`pricing_group=图片自营号池`，`group_ratio=1`，`billing.total_amount` 为按张价格（Nano Banana 0.009/0.011/0.016，GPT Image 0.018） | 完成与成本以 B3 为准 |
 
-- B1 的 Token 数不代表费用；图片按张计费，费用只体现在 B3。
+- B1 的 Token 数不代表费用；图片按张计费，费用以 B3 为准。
+- 当前 B1 的 `usage_unit=token`、B3 的 `billing_basis=token` 是已知字段限制，
+  **不表示图片按 token 计费**。Nano Banana 的 `usage_source=estimated` 和估算
+  Token 也不等同于上游官方 usage；按张金额以 B3 最新版本的 `total_amount`、
+  `status=settled` 和提交时价格版本为准。
 - Nano Banana 已改为 Gemini 同步请求，B1 的 Token 是估算值；旧异步合同的
   `unavailable` / `null` 口径不再适用于 Nano Banana。无 Token 用量的异步视频任务
   （PAI/Seedance）仍按 `03-data-contract.md` 的 `unavailable` 语义处理。
@@ -200,13 +213,16 @@ curl -sS -X POST "http://<gateway>/v1beta/models/Nano%20Banana%202.1%201K:genera
    编辑、GIF、并发、退款均未验证，异步接口仍停用，原始响应披露尚未验收。
 2. GPT Image 样例只覆盖 `gpt-image-2.6-flare` + `1024x1024` + `n=1`；4 个
    GPT Image 模型共用同一同步接口和价格。
-3. 同步请求超时或网络中断时不要盲目重试；先确认是否已经生成并计费，再决定是否
-   重新提交。上游偶发 524，重试前先查 B3 或实际产物。
+3. 同步请求超时或网络中断时不要盲目重试；Nano Banana 没有 task id，先按请求 ID
+   查 B3，并核对可取得的响应/产物，确认是否已生成或计费后再决定是否重新提交。
+   上游 1K/4K 长请求可能返回 524/500，客户端应使用足够长的超时。
 4. 网关不暴露供应商 URL 和密钥；下游只使用网关接口和 Harness JWT。
-5. Nano Banana 同步响应体可能很大（4K 约 8.7 MB Base64）；客户端要允许大响应和
-   较长超时，不要按小 JSON 设置读取上限。
-6. 本节样例基于 2026-11-17 的 `harness-api-20261116-df87870` 实测；Nano Banana
-   已使用 Harness JWT 完成同步调用（1K/2K/4K 均通过，实际字节按文件头识别）。
+5. Nano Banana 同步响应体可能很大（4K 历史实测约 8.7 MB Base64）；客户端要允许
+   大响应和较长超时，不要按小 JSON 设置读取上限。实际 PNG/JPEG 格式按文件头识别，
+   不要依赖 `inlineData.mimeType` 或文件扩展名。
+6. 2026-11-23 反馈处理记录为 GPT Image 4/4、Nano Banana 4/6；Nano Banana 余下
+   2 款与超时/MIME 整改相关。历史供应网关补测覆盖 1K/2K/4K 与 10 种比例，但不等于
+   6 款模型已全部完成当前窗口的生成验收。
 
 ---
 
@@ -215,3 +231,4 @@ curl -sS -X POST "http://<gateway>/v1beta/models/Nano%20Banana%202.1%201K:genera
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
 | V0.13 | 2026-11-17 | Nano Banana 章节补充供应网关 2026-11-16 的 10 种比例 × 1K/2K/4K 实测像素表（2.1 与 Pro 同档位像素相同）；更新 `aspectRatio` 支持范围与已知限制。Nano Banana 实测证据来自 `harness-api-20261116-df87870`；当前实例已升级到 `harness-api-20261117-b040241`（Flash 修复），图片接口未变。 |
+| V0.14 | 2026-11-23 | 按第 11、12 号文档校准 A3 `catalog_version=10` 与 Nano Banana 4/6 记录；强化正式同步协议、无 task id、`X-Route-Group: image`、长超时、524/500 后先查 B3/产物、PNG/JPEG 文件头识别，以及 B3 `billing_basis=token` 字段限制。 |

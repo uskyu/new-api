@@ -1,11 +1,21 @@
-# 待确认事项
+# 待确认事项（历史记录）
 
-**版本**：V0.11（2026-11-15 修订）
-**对应网关版本**：`harness-api` 分支（已合入 RC48 候选提交；已部署 82 实例 `harness-api-20261115-de7fce8`；契约待确认项不变）
+**版本**：V1.2（2026-11-23 归档标注；正文为 V0.11 历史记录）\
+**对应网关版本**：正文记录对应历史实例 `harness-api-20261115-de7fce8`；当前网关为 `harness-api-20261117-b040241`（revision `b04024190`）
+
+> **显著说明：本文已归档为历史待确认事项。**
+> 本文记录的是 2026-10 至 2026-11 中旬的契约差异与当时结论，正文事实保留不回写。
+> **当前状态、已定案结论、已知限制与后续待办，以
+> [11-feedback-resolution-20261123.md](./11-feedback-resolution-20261123.md) 为准；
+> 当前模型范围与复测清单，以
+> [12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md) 为准。**
+> 例如 B1 `usage_unit` / B3 `billing_basis` 仍为 `token` 属已知字段限制，
+> 异步视频 `usage_source=unavailable` 的口径已在第 11 号文档定稿；本文相关段落
+> 只反映当时讨论状态。
 
 ---
 
-## 重要说明
+## 历史重要说明
 
 本文档列出与 Harness 之间**尚未冻结**的契约差异，以及本轮已经定案的硬性要求。
 
@@ -308,3 +318,4 @@ total_amount = base_amount × group_ratio
 | 2026-11-06 | V0.10（修订） | 硬性要求表补充：全局池与令牌授权已移除、资源池是唯一路由顺序；`X-Route-Group` 仅经验证 Harness 调用方可用；`pricing_group_order` 是采购资格与倍率来源，不是路由顺序；待确认项不变 |
 | 2026-11-14 | V0.11 | 硬性要求表更新图片池：4 个 GPT Image（同步、0.018 USD/张）+ 6 个 Nano Banana（异步、0.009/0.011/0.016 USD/张），`X-Route-Group: image` 生效；`audio` 仍为空；补充 B1 仅 usage、B3 `settled` 为图片任务完成依据。部署 `harness-api-20261114-c29f1a6` |
 | 2026-11-15 | V0.11（修订） | 图片任务账本语义更新：无 Token 用量时 B1 `usage_source=unavailable`、Token 字段 `null`、`split_known=false`；只有 `total_tokens` 时保持 `upstream`；结算不再追加同值 `usage_correction`。部署 `harness-api-20261115-de7fce8` |
+| 2026-11-23 | V1.2 | 本文归档为历史待确认事项；页首增加当前状态说明，当前结论以 `11-feedback-resolution-20261123.md` 和 `12-retest-model-list-20261123.md` 为准；历史正文保留 |
