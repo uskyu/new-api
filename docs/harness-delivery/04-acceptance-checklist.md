@@ -19,7 +19,7 @@
 | `aud` 值 | 双方商定 | ✅ `new-api` |
 | 服务主体 `sub` | Harness | ✅ `harness-gateway` |
 | 网关地址 | New API | ✅ `https://testapi.soloai.chat` |
-| 资源池 id（`chat` / `video` / `image` / `audio` / `plan`）与池内模型 id | New API | ✅ A3 当前返回 `chat=26`、`video=83`、`image=10`、`audio=0`、`plan=80`（`catalog_version=10`）；其中 `video` 初步核实可调 49、`plan` 初步核实可调 17，复测以 [12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md) 为清单依据，不要仅凭 A3 条目提交付费任务；`audio` 渠道未接入，`models` 为空属预期 |
+| 资源池 id（`chat` / `video` / `image` / `audio` / `plan`）与池内模型 id | New API | ✅ 2026-11-25 对齐后 A3 返回 `chat=26`、`video=49`、`image=10`、`audio=0`、`plan=17`；11-23 的 `video=83`、`plan=80` 为历史目录声明。复测以 [12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md) 为清单依据；`audio` 渠道未接入，`models` 为空属预期 |
 | 路由配置：资源池渠道顺序是唯一路由顺序；`global_channel_order` / 全渠道优先级全局池与 `token_group_access` / 令牌授权已移除；`pricing_group_order` 仅决定采购分组资格与倍率（当前 `["default"]`，倍率 1），不是渠道路由顺序 | New API | ✅ 已构建并部署，待逐项复验 |
 
 ---
@@ -234,8 +234,9 @@ curl -sS -D- "http://<gateway>/v1/models" \
 > **历史样例（保留，不代表当前目录）**：以下 JSON 取自 2026-11-14 的 82 实例：
 > `chat` 池 15 个模型，`video` 池 8 个 PAI 按次模型，`image` 池 10 个图片模型
 > （4 个 GPT Image + 6 个 Nano Banana），`plan` 池 22 个 TA token 模型；`audio`
-> 当前没有可用渠道，`models` 为空。当前 A3 为 `catalog_version=10`，条目数
-> `chat=26` / `video=83` / `image=10` / `audio=0` / `plan=80`，模型复测以
+> 当前没有可用渠道，`models` 为空。2026-11-25 对齐后 A3 条目数为
+> `chat=26` / `video=49` / `image=10` / `audio=0` / `plan=17`；11-23 的 `video=83`、
+> `plan=80` 为历史目录声明。模型复测以
 > [12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md) 为准；
 > `models` 按模型 id 字典序返回，实际验收以实例返回为准。
 
@@ -654,3 +655,4 @@ curl -sS "http://<gateway>/internal/v1/gateway/usage-events?from=2026-10-01T00:0
 | 2026-11-14 | V0.11 | A3 样例 `image` 池改为 10 个图片模型、`catalog_version` 为 `"7"`；前置条件与 2.5 说明 `image` 已配置、`audio` 仍为空；新增 4.6 图片生成验收（GPT Image 同步 0.018、Nano Banana 异步 0.009、B1 仅 usage / B3 `settled`）；部署 `harness-api-20261114-c29f1a6` |
 | 2026-11-15 | V0.11（修订） | 图片验收改为：无 Token 用量时 B1 `usage_source=unavailable`、Token 字段 `null`、`split_known=false`，结算不再追加同值 `usage_correction`；GPT Image 保持 `upstream`。部署 `harness-api-20261115-de7fce8` |
 | 2026-11-23 | V1.2 | 交付包与当前网关对齐；前置条件改为 A3 当前条目数 `chat=26`/`video=83`/`image=10`/`audio=0`/`plan=80`，并明确复测以 `12-retest-model-list-20261123.md` 为准；A3 旧样例标注为历史记录 |
+| 2026-11-25 | V1.3 | 渠道声明与上游对齐，前置条件改为 A3 `chat=26`/`video=49`/`image=10`/`audio=0`/`plan=17`；补充 95% 轮询与图片超时注意 |

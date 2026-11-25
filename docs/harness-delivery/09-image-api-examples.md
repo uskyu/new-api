@@ -1,7 +1,7 @@
 # 图片生成调用样例（GPT Image 同步 / Nano Banana Gemini 同步）
 
-**版本**：V0.14（2026-11-23 修订）
-**日期**：2026-11-14（2026-11-17、2026-11-23 修订）
+**版本**：V0.15（2026-11-25 修订）
+**日期**：2026-11-14（2026-11-17、2026-11-23、2026-11-25 修订）
 **对应网关版本**：`harness-api` 分支，82 实例 `harness-api-20261117-b040241`（Nano Banana 实测证据来自 `harness-api-20261116-df87870`，图片接口未变）
 **适用对象**：Harness 后端与图片生成联调
 
@@ -12,6 +12,10 @@ GPT Image 2.5/2.6 使用同步 `POST /v1/images/generations`；Nano Banana 的�
 `/v1/videos` 异步任务**。所有图片生成提交请求都要带 `X-Route-Group: image`，
 使用 Harness JWT，scope 为 `gateway.chat`；提交接口还需带
 `X-Harness-Request-Id` / `X-Harness-Run-Id`（均 1–64 字符）。
+
+> **2026-11-25 实测**：`testapi.soloai.chat` 与 `papi.soloai.chat` 的 OpenResty 代理读超时已放宽到 600 秒。
+> Nano Banana 2.1 1K 公网 44.7 秒返回 200，4K 公网 109.5 秒返回 200；4K 响应约 26.9MB。
+> `inlineData.mimeType` 仍可能标为 `image/png` 而实际文件头是 JPEG（`ffd8ffe0`），接收端必须按文件头识别。
 
 ---
 
@@ -223,6 +227,9 @@ curl -sS -X POST "http://<gateway>/v1beta/models/Nano%20Banana%202.1%201K:genera
 6. 2026-11-23 反馈处理记录为 GPT Image 4/4、Nano Banana 4/6；Nano Banana 余下
    2 款与超时/MIME 整改相关。历史供应网关补测覆盖 1K/2K/4K 与 10 种比例，但不等于
    6 款模型已全部完成当前窗口的生成验收。
+7. 2026-11-25 公网复测：1K/4K 均返回 200（44.7s / 109.5s），但 MIME 仍把 JPEG 标成 PNG；
+   GPT Image 2.6 flare 遇供应商侧 524。网关侧 quota 0，未向用户计费；超时后仍须先查
+   B3/产物再决定是否重试。
 
 ---
 
@@ -232,3 +239,4 @@ curl -sS -X POST "http://<gateway>/v1beta/models/Nano%20Banana%202.1%201K:genera
 | --- | --- | --- |
 | V0.13 | 2026-11-17 | Nano Banana 章节补充供应网关 2026-11-16 的 10 种比例 × 1K/2K/4K 实测像素表（2.1 与 Pro 同档位像素相同）；更新 `aspectRatio` 支持范围与已知限制。Nano Banana 实测证据来自 `harness-api-20261116-df87870`；当前实例已升级到 `harness-api-20261117-b040241`（Flash 修复），图片接口未变。 |
 | V0.14 | 2026-11-23 | 按第 11、12 号文档校准 A3 `catalog_version=10` 与 Nano Banana 4/6 记录；强化正式同步协议、无 task id、`X-Route-Group: image`、长超时、524/500 后先查 B3/产物、PNG/JPEG 文件头识别，以及 B3 `billing_basis=token` 字段限制。 |
+| V0.15 | 2026-11-25 | 记录公网 1K/4K 实测、OpenResty 600 秒超时修复、MIME 仍标错与 GPT Image 供应商 524；4K 响应约 26.9MB。 |

@@ -120,10 +120,9 @@ HTTP/1.1 400 Bad Request
 | 传 `audio` | 使用语音池；该池当前无可用模型，调用会失败 |
 | 传不存在的池 id | `403 access_denied`，消息 `requested resource pool is not configured` |
 
-截至 2026-11-23，A3 v10 的目录声明为 `chat=26`、`video=83`、`plan=80`、
-`image=10`、`audio=0`；按上游实时目录与抽样调用初步核实可调为 `chat=26`、
-`video=49`、`plan=17`、`image=10`、`audio=0`。两者不能混用：A3 条目不等于当前均可
-直接调用，Harness 在目录校正完成前以第 12 号可复测清单为准。
+2026-11-25 渠道声明已与上游 `/v1/models` 对齐，A3 当前返回
+`chat=26`、`video=49`、`plan=17`、`image=10`、`audio=0`。A3 已与可调清单一致；
+精确模型 ID、复测备注与已下架清单仍以第 12 号文档为准。
 
 跨池重复本身合法，同一模型可以出现在多个池；池只限制可选渠道集合，不会重写模型
 ID。A3 的 `capabilities` 是池级端点类型汇总，可能包含 `chat` / `stream` / `tools`
@@ -214,11 +213,10 @@ ETag: W/"example-catalog-etag"
 ```
 
 > `etag` 与 `models` 均为示例值；JSON 仅说明响应结构，不是完整目录快照。
-> 2026-11-23 A3 v10 目录声明为 `chat=26`、`video=83`、`plan=80`、`image=10`、
-> `audio=0`；初步核实可调为 `chat=26`、`video=49`、`plan=17`、`image=10`、
-> `audio=0`。模型选择以 [12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md)
-> 为准，不要按样例数量做校验。`models` 按模型 id 字典序返回，模型集合会随渠道与
-> 价格变化。
+> 2026-11-25 对齐后 A3 为 `chat=26`、`video=49`、`plan=17`、`image=10`、
+> `audio=0`；11-23 的 `video=83`、`plan=80` 为历史目录声明。模型选择以
+> [12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md) 为准，
+> 不要按样例数量做校验。`models` 按模型 id 字典序返回，模型集合会随渠道与价格变化。
 
 | 字段 | 说明 |
 | --- | --- |
@@ -242,9 +240,8 @@ A3 的 `data[]` 仍以资源池为单位返回，但平台侧模型列表现按�
 | 视频模型 | `video` | `kind: video` | 视频任务池；按秒视频模型（PAI 按秒、video-line 按秒等） |
 | plan 计划 | `plan` | `kind: video` + `billing: per_call` | 畅用计划；按次视频模型（PAI 按次、Wan 按次、video-line 按次等）；单独展示为 plan 分区，不并入视频分区 |
 
-> 2026-11-23 A3 v10 目录声明为 `chat` 26 / `video` 83 / `plan` 80 / `image` 10 /
-> `audio` 0；初步核实可调为 `chat` 26 / `video` 49 / `plan` 17 / `image` 10 /
-> `audio` 0。展示目录不等于当前可调清单，模型选择以第 12 号文档为准。
+> 2026-11-25 对齐后 A3 为 `chat` 26 / `video` 49 / `plan` 17 / `image` 10 /
+> `audio` 0；11-23 的 `video` 83 / `plan` 80 为历史目录声明。模型选择以第 12 号文档为准。
 
 `audio` 仍是预留资源池（`kind: audio`），本期不进入这四个对外分区；有音频渠道后再定义它的展示位置。
 
@@ -271,11 +268,12 @@ HTTP/1.1 304 Not Modified
   多于真实可调集合；历史 TA Token 模型和已下架 ID 不得当作当前在售模型。
 - 池即使暂时没有目录候选也会返回（`models: []`），便于对接方按最终结构开发。
   `audio` 池当前就是这种情况：产品线已定义，渠道尚未配置。
-- 跨池重复合法，不应以“交集必须为 0”作为验收标准；需要校正的是渠道声明了上游
-  不提供或已下架的模型。
+- 跨池重复合法，不应以“交集必须为 0”作为验收标准；2026-11-25 已清理渠道声明中
+  上游不提供或已下架的模型。
 - 目录变更时 `etag` 与 `catalog_version` 同时变化。
 - A3 是**目录声明**的快照，不是调用能力保证；限流、额度耗尽、线路故障或模型下架
-  仍可能返回 4xx / 5xx。目录校正完成前，以第 12 号可复测清单和最新现场确认为准。
+  仍可能返回 4xx / 5xx。2026-11-25 目录已对齐；仍以第 12 号可复测清单和最新现场
+  确认为准。
 
 ### 3.6 图片生成（简要）
 
@@ -309,14 +307,14 @@ GPT Image 使用 `model` / `prompt` / `n: 1` / `size`（1K 为 `1024x1024`），
 
 ### 3.7 2026-11-23 目录校准
 
-当前 A3 v10 返回的目录声明与 2026-11-23 初步核实可调集合如下：
+2026-11-25 对齐后 A3 直接返回可调集合：
 
-| 池 | A3 当前条目 | 初步核实可调 | 说明 |
+| 池 | 2026-11-23 A3（历史） | 2026-11-25 A3（当前） | 说明 |
 | --- | ---: | ---: | --- |
 | `chat` | 26 | 26 | 11-21 实测 26/26；11-23 有 3 条上游失败记录，见第 12 号文档 |
-| `image` | 10 | 10 | GPT Image 4/4；Nano Banana 4/6 |
-| `video` | 83 | **49** | 其余 34 个条目当前不可调或已下架 |
-| `plan` | 80 | **17** | 其余 63 个条目当前不可调或已下架 |
+| `image` | 10 | 10 | GPT Image 4/4；Nano Banana 4/6，MIME 仍待整改 |
+| `video` | 83 | **49** | 渠道声明已与上游对齐 |
+| `plan` | 80 | **17** | TA token 22 档已移除 |
 | `audio` | 0 | 0 | 预留池，本期不可调用 |
 
 - A3 目录声明不等于实测可调集合；`video=49`、`plan=17` 也不等于所有模型已在同一
@@ -814,3 +812,4 @@ curl -sS -N -X POST "https://testapi.soloai.chat/v1/chat/completions" \
 | 2026-11-17 | V0.12 | Nano Banana 改为 Gemini 同步 `generateContent`（无轮询）；B1 为 `estimated` prompt Token，B3 固定按张价；`supplyvideo` 1.4.0 补齐新视频模型；全模型验收 语言 35/38、图片 10/10、视频 55/61。部署 `harness-api-20261116-df87870` |
 | 2026-11-17 | V0.13 | 资源池语义更新：`video` 为按秒视频模型（PAI 按秒、TA 按秒、video-line 按秒），`plan` 为按次视频模型（TA token、PAI 按次、Wan 按次、video-line 按次）；新增 Seedance 2.5 Flash 5 个规格（3 个按秒进 `video`、2 个按次进 `plan`）及价格摘要；补充 Flash 按秒上游不返回 `usage` 时网关按请求 `seconds` 估算参考秒的结算口径。对应网关 `harness-api-20261117-b040241`（revision `b04024190`），A3 实测 `catalog_version` `"10"`：chat 26 / video 83 / plan 80 / image 10 / audio 0 |
 | 2026-11-23 | V1.2 | Base URL 更新为 `https://testapi.soloai.chat`；Run ID 校准为必填 1–64 字符；明确 `X-Route-Group` 必填规则；区分 A3 v10 目录声明与初步核实可调 `chat=26` / `image=10` / `video=49` / `plan=17`；补充 Nano Banana 同步协议、超时与 MIME、异步视频 B1 `unavailable/null`、B1/B3 `token` 单位字段限制、实际错误体、分页 clamp 200、BatchGet 100 ID / 500 事件、A5 404 与 `/api/pricing` 非合同口径。事实源见第 11、12 号文档 |
+| 2026-11-25 | V1.3 | 渠道 `models` 与上游 `/v1/models` 对齐，A3 变为 `chat=26` / `video=49` / `image=10` / `plan=17`；7 个上游分组代表视频模型实测最终全部 SUCCESS；OpenResty 代理超时放宽到 600 秒；Nano Banana 1K/4K 公网通过，MIME 仍待修正 |
