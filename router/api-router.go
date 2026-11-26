@@ -345,6 +345,7 @@ func SetApiRouter(router *gin.Engine) {
 			supportRoute.POST("/users/:id/quota/adjust", controller.SupportAdjustUserQuota)
 			supportRoute.POST("/users/:id/quota/decrease", controller.SupportDecreaseUserQuota)
 		}
+		apiRouter.GET("/support/appearance", controller.GetSupportChatAppearance)
 		supportChatRoute := apiRouter.Group("/support")
 		supportChatRoute.Use(middleware.UserAuth())
 		{

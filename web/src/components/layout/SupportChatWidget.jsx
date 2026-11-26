@@ -306,6 +306,11 @@ const SupportChatWidget = () => {
   const [messagesErrorKey, setMessagesErrorKey] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const [appearance, setAppearance] = useState({
+    uiScale: 100,
+    textScale: 100,
+    prominence: 100,
+  });
 
   const conversationRef = useRef(null);
   const messagesRef = useRef([]);
@@ -340,6 +345,11 @@ const SupportChatWidget = () => {
       ? 'is-active'
       : 'is-waiting';
   const unreadCount = conversation?.userUnread || 0;
+  const appearanceStyle = {
+    '--support-ui-scale': appearance.uiScale / 100,
+    '--support-text-scale': appearance.textScale / 100,
+    '--support-prominence': appearance.prominence / 100,
+  };
   const userName =
     userState?.user?.username ||
     userState?.user?.display_name ||
@@ -356,6 +366,45 @@ const SupportChatWidget = () => {
   useEffect(() => {
     composerAttachmentsRef.current = composerAttachments;
   }, [composerAttachments]);
+
+  useEffect(() => {
+    let active = true;
+
+    const parsePercent = (value, fallback) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    };
+
+    const loadAppearance = async () => {
+      try {
+        const response = await API.get('/api/support/appearance', {
+          skipErrorHandler: true,
+          disableDuplicate: true,
+        });
+        if (!active) {
+          return;
+        }
+        const data = unwrapPayload(response);
+        if (!data || typeof data !== 'object') {
+          return;
+        }
+        setAppearance({
+          uiScale: parsePercent(data.ui_scale, 100),
+          textScale: parsePercent(data.text_scale, 100),
+          prominence: parsePercent(data.prominence, 100),
+        });
+      } catch {
+        // Appearance settings are optional; keep the local defaults.
+      }
+    };
+
+    loadAppearance();
+    const timer = window.setInterval(loadAppearance, 60000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -917,7 +966,27 @@ const SupportChatWidget = () => {
 
   if (!isOpen) {
     return (
-      <div className='support-chat-entry'>
+      <div className='support-chat-entry' style={appearanceStyle}>
+        <span
+          className='support-chat-entry__caption'
+          role='button'
+          tabIndex={0}
+          aria-label={t('在线客服')}
+          onClick={() => setIsOpen(true)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              setIsOpen(true);
+            }
+          }}
+        >
+          <span className='support-chat-entry__caption-title'>
+            {t('在线客服')}
+          </span>
+          <span className='support-chat-entry__caption-sub'>
+            {t(isLoggedIn ? '有问题随时联系' : '登录后即可联系')}
+          </span>
+        </span>
         <button
           type='button'
           className='support-chat-fab'
@@ -940,21 +1009,18 @@ const SupportChatWidget = () => {
             </span>
           )}
         </button>
-        <span className='support-chat-entry__caption' aria-hidden='true'>
-          <span className='support-chat-entry__caption-title'>
-            {t('在线客服')}
-          </span>
-          <span className='support-chat-entry__caption-sub'>
-            {t(isLoggedIn ? '有问题随时联系' : '登录后即可联系')}
-          </span>
-        </span>
       </div>
     );
   }
 
   if (!isLoggedIn) {
     return (
-      <div className='support-chat-panel' role='dialog' aria-label={t('在线客服')}>
+      <div
+        className='support-chat-panel'
+        role='dialog'
+        aria-label={t('在线客服')}
+        style={appearanceStyle}
+      >
         <div className='support-chat-panel__header'>
           <div className='support-chat-panel__heading'>
             <span className='support-chat-panel__avatar' aria-hidden='true'>
@@ -1109,6 +1175,7 @@ const SupportChatWidget = () => {
       className='support-chat-panel'
       role='dialog'
       aria-label={t('在线客服')}
+      style={appearanceStyle}
       onPaste={handlePaste}
     >
       <div className='support-chat-panel__header'>

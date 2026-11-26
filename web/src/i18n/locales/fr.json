@@ -3487,6 +3487,15 @@
     "去登录": "Se connecter",
     "未登录": "Non connecté",
     "有问题随时联系": "Contactez-nous à tout moment",
-    "登录后即可联系": "Connectez-vous pour nous contacter"
+    "登录后即可联系": "Connectez-vous pour nous contacter",
+    "客服设置": "Paramètres du support",
+    "客服入口外观": "Apparence de l'entrée du support",
+    "拖动滑块调整客服入口与聊天窗口的整体大小、文字大小和显眼度，保存后对访客和客服生效。": "Faites glisser les curseurs pour ajuster la taille globale, la taille du texte et la visibilité de l'entrée du support et de la fenêtre de chat. Les modifications s'appliquent aux visiteurs et aux agents après enregistrement.",
+    "卡片大小": "Taille de la carte",
+    "文字大小": "Taille du texte",
+    "显眼度": "Visibilité",
+    "客服设置已保存": "Paramètres du support enregistrés",
+    "外观参数需在允许的百分比范围内": "Les valeurs d'apparence doivent être dans la plage de pourcentage autorisée",
+    "恢复默认": "Rétablir les valeurs par défaut"
   }
 }

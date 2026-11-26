@@ -33,12 +33,14 @@ import {
   InputNumber,
   Modal,
   Pagination,
+  Slider,
   Spin,
   Tag,
   TextArea,
   Typography,
 } from '@douyinfe/semi-ui';
 import { ArrowLeft, Send, Settings, UserRound, X } from 'lucide-react';
+import { IconCustomerSupport } from '@douyinfe/semi-icons';
 import {
   API,
   can,
@@ -70,6 +72,12 @@ const LIST_POLL_INTERVAL = 3000;
 const MESSAGE_POLL_INTERVAL = 2000;
 const DEFAULT_RETENTION_DAYS = 180;
 const MAX_RETENTION_DAYS = 3650;
+const MIN_UI_SCALE = 80;
+const MAX_UI_SCALE = 160;
+const MIN_TEXT_SCALE = 80;
+const MAX_TEXT_SCALE = 160;
+const MIN_PROMINENCE = 0;
+const MAX_PROMINENCE = 100;
 
 const resolveErrorMessage = (error, fallback) => {
   const responseMessage = error?.response?.data?.message;
@@ -254,6 +262,9 @@ const Support = () => {
   const [closing, setClosing] = useState(false);
   const [retentionVisible, setRetentionVisible] = useState(false);
   const [retentionDays, setRetentionDays] = useState(DEFAULT_RETENTION_DAYS);
+  const [uiScale, setUiScale] = useState(100);
+  const [textScale, setTextScale] = useState(100);
+  const [prominence, setProminence] = useState(100);
   const [retentionLoading, setRetentionLoading] = useState(false);
   const [retentionSaving, setRetentionSaving] = useState(false);
 
@@ -714,13 +725,15 @@ const Support = () => {
       if (!res.data?.success) {
         throw new Error(res.data?.message || t('加载留存设置失败'));
       }
-      const rawDays = res.data?.data?.retention_days;
-      const parsedDays = Number(rawDays);
-      setRetentionDays(
-        rawDays == null || !Number.isFinite(parsedDays)
-          ? DEFAULT_RETENTION_DAYS
-          : parsedDays,
-      );
+      const data = res.data?.data || {};
+      const parseValue = (raw, fallback) => {
+        const parsed = Number(raw);
+        return raw == null || !Number.isFinite(parsed) ? fallback : parsed;
+      };
+      setRetentionDays(parseValue(data.retention_days, DEFAULT_RETENTION_DAYS));
+      setUiScale(parseValue(data.ui_scale, 100));
+      setTextScale(parseValue(data.text_scale, 100));
+      setProminence(parseValue(data.prominence, 100));
     } catch (error) {
       showError(resolveErrorMessage(error, t('加载留存设置失败')));
     } finally {
@@ -751,17 +764,36 @@ const Support = () => {
       showError(t('留存天数需为 0 至 3650 的整数'));
       return;
     }
+    const invalidScale =
+      !Number.isInteger(uiScale) ||
+      uiScale < MIN_UI_SCALE ||
+      uiScale > MAX_UI_SCALE ||
+      !Number.isInteger(textScale) ||
+      textScale < MIN_TEXT_SCALE ||
+      textScale > MAX_TEXT_SCALE ||
+      !Number.isInteger(prominence) ||
+      prominence < MIN_PROMINENCE ||
+      prominence > MAX_PROMINENCE;
+    if (invalidScale) {
+      showError(t('外观参数需在允许的百分比范围内'));
+      return;
+    }
     setRetentionSaving(true);
     try {
       const res = await API.put(
         '/api/support/admin/settings',
-        { retention_days: days },
+        {
+          retention_days: days,
+          ui_scale: uiScale,
+          text_scale: textScale,
+          prominence,
+        },
         { skipErrorHandler: true },
       );
       if (!res.data?.success) {
         throw new Error(res.data?.message || t('保存留存设置失败'));
       }
-      showSuccess(t('留存设置已保存'));
+      showSuccess(t('客服设置已保存'));
       setRetentionVisible(false);
     } catch (error) {
       showError(resolveErrorMessage(error, t('保存留存设置失败')));
@@ -893,7 +925,7 @@ const Support = () => {
           key={getMessageKey(message, index)}
           className={`flex mb-3 ${userMessage ? 'justify-start' : 'justify-end'}`}
         >
-          <div style={{ maxWidth: '78%', minWidth: 0 }}>
+          <div style={{ maxWidth: '82%', minWidth: 0 }}>
             <div
               className={`text-xs mb-1 ${
                 userMessage ? 'text-left' : 'text-right'
@@ -906,12 +938,14 @@ const Support = () => {
             {hasContent && (
               <div
                 style={{
-                  padding: '10px 12px',
-                  borderRadius: 8,
+                  padding: '12px 15px',
+                  borderRadius: 10,
                   background: userMessage
                     ? 'var(--semi-color-fill-0)'
                     : 'var(--semi-color-primary-light-default)',
                   color: 'var(--semi-color-text-0)',
+                  fontSize: 16,
+                  lineHeight: 1.65,
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                 }}
@@ -1060,7 +1094,8 @@ const Support = () => {
               value={input}
               onChange={setInput}
               placeholder={t('请输入消息')}
-              autosize={{ minRows: 1, maxRows: 4 }}
+              autosize={{ minRows: 1, maxRows: 5 }}
+              style={{ fontSize: 15.5 }}
               disabled={sending}
               onKeyDown={(event) => {
                 if (
@@ -1123,7 +1158,7 @@ const Support = () => {
             icon={<Settings size={14} />}
             onClick={openRetentionModal}
           >
-            {t('会话数据留存')}
+            {t('客服设置')}
           </Button>
         )}
       </div>
@@ -1219,7 +1254,7 @@ const Support = () => {
       </div>
 
       <Modal
-        title={t('会话数据留存')}
+        title={t('客服设置')}
         visible={retentionVisible}
         onCancel={closeRetentionModal}
         onOk={handleSaveRetention}
@@ -1228,7 +1263,7 @@ const Support = () => {
         confirmLoading={retentionLoading || retentionSaving}
         maskClosable={!retentionSaving}
         closable={!retentionSaving}
-        width={isMobile ? '100%' : 480}
+        width={isMobile ? '100%' : 560}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Text type='secondary' size='small' style={{ lineHeight: 1.6 }}>
@@ -1249,6 +1284,98 @@ const Support = () => {
               disabled={retentionLoading || retentionSaving}
               onChange={setRetentionDays}
               style={{ width: '100%' }}
+            />
+          </div>
+
+          <div
+            className='support-settings-divider'
+            role='separator'
+            aria-hidden='true'
+          />
+
+          <div className='support-settings-appearance-head'>
+            <Text strong>{t('客服入口外观')}</Text>
+            <Button
+              size='small'
+              theme='borderless'
+              type='tertiary'
+              disabled={retentionLoading || retentionSaving}
+              onClick={() => {
+                setUiScale(100);
+                setTextScale(100);
+                setProminence(100);
+              }}
+            >
+              {t('恢复默认')}
+            </Button>
+          </div>
+          <Text type='secondary' size='small' style={{ lineHeight: 1.6 }}>
+            {t('拖动滑块调整客服入口与聊天窗口的整体大小、文字大小和显眼度，保存后对访客和客服生效。')}
+          </Text>
+
+          <div
+            className='support-settings-preview'
+            style={{
+              '--support-ui-scale': uiScale / 100,
+              '--support-text-scale': textScale / 100,
+              '--support-prominence': prominence / 100,
+            }}
+          >
+            <div className='support-settings-preview__caption'>
+              <span className='support-settings-preview__title'>
+                {t('在线客服')}
+              </span>
+              <span className='support-settings-preview__sub'>
+                {t('有问题随时联系')}
+              </span>
+            </div>
+            <span className='support-settings-preview__fab'>
+              <IconCustomerSupport size='large' />
+            </span>
+          </div>
+
+          <div className='support-settings-slider'>
+            <div className='support-settings-slider__head'>
+              <Text strong>{t('卡片大小')}</Text>
+              <Text type='secondary'>{uiScale}%</Text>
+            </div>
+            <Slider
+              min={MIN_UI_SCALE}
+              max={MAX_UI_SCALE}
+              step={5}
+              value={uiScale}
+              disabled={retentionLoading || retentionSaving}
+              onChange={setUiScale}
+            />
+          </div>
+
+          <div className='support-settings-slider'>
+            <div className='support-settings-slider__head'>
+              <Text strong>{t('文字大小')}</Text>
+              <Text type='secondary'>{textScale}%</Text>
+            </div>
+            <Slider
+              min={MIN_TEXT_SCALE}
+              max={MAX_TEXT_SCALE}
+              step={5}
+              value={textScale}
+              disabled={retentionLoading || retentionSaving}
+              onChange={setTextScale}
+            />
+          </div>
+
+          <div className='support-settings-slider'>
+            <div className='support-settings-slider__head'>
+              <Text strong>{t('显眼度')}</Text>
+              <Text type='secondary'>{prominence}%</Text>
+            </div>
+            <Slider
+              min={MIN_PROMINENCE}
+              max={MAX_PROMINENCE}
+              step={5}
+              value={prominence}
+              disabled={retentionLoading || retentionSaving}
+              onChange={setProminence}
             />
           </div>
         </div>

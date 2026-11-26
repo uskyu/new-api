@@ -3531,6 +3531,15 @@
     "去登录": "Log in",
     "未登录": "Not logged in",
     "有问题随时联系": "Contact us anytime",
-    "登录后即可联系": "Log in to contact us"
+    "登录后即可联系": "Log in to contact us",
+    "客服设置": "Support settings",
+    "客服入口外观": "Support entry appearance",
+    "拖动滑块调整客服入口与聊天窗口的整体大小、文字大小和显眼度，保存后对访客和客服生效。": "Drag the sliders to adjust the overall size, text size and prominence of the support entry and chat window. Changes apply to visitors and agents after saving.",
+    "卡片大小": "Card size",
+    "文字大小": "Text size",
+    "显眼度": "Prominence",
+    "客服设置已保存": "Support settings saved",
+    "外观参数需在允许的百分比范围内": "Appearance values must be within the allowed percentage range",
+    "恢复默认": "Restore defaults"
   }
 }

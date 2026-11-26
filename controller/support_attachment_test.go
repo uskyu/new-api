@@ -582,3 +582,78 @@ func TestSupportChatSettingsAdminAPI(t *testing.T) {
 	response = decodeSupportAttachmentResponse(t, recorder)
 	require.True(t, response.Success, response.Message)
 }
+
+func TestSupportChatAppearanceSettings(t *testing.T) {
+	setupSupportAttachmentControllerTestDB(t)
+
+	cfg, ok := config.GlobalConfig.Get("support_chat").(*system_setting.SupportChatSettings)
+	require.True(t, ok)
+	previous := *cfg
+	*cfg = system_setting.SupportChatSettings{
+		RetentionDays: system_setting.DefaultSupportChatRetentionDays,
+		UIScale:       100,
+		TextScale:     100,
+		Prominence:    100,
+	}
+	t.Cleanup(func() { *cfg = previous })
+
+	// 公开外观接口无需登录即可访问。
+	ctx, recorder := newSupportAttachmentTestContext(t, http.MethodGet, "/api/support/appearance", nil, "", 0, common.RoleGuestUser, nil)
+	GetSupportChatAppearance(ctx)
+	response := decodeSupportAttachmentResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	var appearance map[string]int
+	require.NoError(t, common.Unmarshal(response.Data, &appearance))
+	assert.Equal(t, 100, appearance["ui_scale"])
+	assert.Equal(t, 100, appearance["text_scale"])
+	assert.Equal(t, 100, appearance["prominence"])
+
+	// 客服保存外观设置。
+	body, err := common.Marshal(map[string]any{
+		"ui_scale":   130,
+		"text_scale": 120,
+		"prominence": 0,
+	})
+	require.NoError(t, err)
+	ctx, recorder = newSupportAttachmentTestContext(t, http.MethodPut, "/api/support/admin/settings", body, "application/json", 3004, common.RoleSupportUser, nil)
+	UpdateSupportChatSettings(ctx)
+	response = decodeSupportAttachmentResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	require.NoError(t, common.Unmarshal(response.Data, &appearance))
+	assert.Equal(t, 130, appearance["ui_scale"])
+	assert.Equal(t, 120, appearance["text_scale"])
+	assert.Equal(t, 0, appearance["prominence"])
+
+	var scaleOption model.Option
+	require.NoError(t, model.DB.First(&scaleOption, "key = ?", system_setting.SupportChatUIScaleOption).Error)
+	assert.Equal(t, "130", scaleOption.Value)
+	var prominenceOption model.Option
+	require.NoError(t, model.DB.First(&prominenceOption, "key = ?", system_setting.SupportChatProminenceOption).Error)
+	assert.Equal(t, "0", prominenceOption.Value)
+
+	ctx, recorder = newSupportAttachmentTestContext(t, http.MethodGet, "/api/support/appearance", nil, "", 0, common.RoleGuestUser, nil)
+	GetSupportChatAppearance(ctx)
+	response = decodeSupportAttachmentResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	require.NoError(t, common.Unmarshal(response.Data, &appearance))
+	assert.Equal(t, 130, appearance["ui_scale"])
+	assert.Equal(t, 0, appearance["prominence"])
+
+	// 越界值拒绝。
+	for _, payload := range []map[string]any{
+		{"ui_scale": 70},
+		{"ui_scale": 170},
+		{"text_scale": 70},
+		{"text_scale": 170},
+		{"prominence": -5},
+		{"prominence": 105},
+	} {
+		body, err = common.Marshal(payload)
+		require.NoError(t, err)
+		ctx, recorder = newSupportAttachmentTestContext(t, http.MethodPut, "/api/support/admin/settings", body, "application/json", 3005, common.RoleAdminUser, nil)
+		UpdateSupportChatSettings(ctx)
+		response = decodeSupportAttachmentResponse(t, recorder)
+		assert.False(t, response.Success)
+		assert.NotEmpty(t, response.Message)
+	}
+}

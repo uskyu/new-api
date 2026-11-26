@@ -4036,6 +4036,15 @@
     "去登录": "Đăng nhập",
     "未登录": "Chưa đăng nhập",
     "有问题随时联系": "Liên hệ bất cứ lúc nào",
-    "登录后即可联系": "Đăng nhập để liên hệ"
+    "登录后即可联系": "Đăng nhập để liên hệ",
+    "客服设置": "Cài đặt hỗ trợ",
+    "客服入口外观": "Giao diện lối vào hỗ trợ",
+    "拖动滑块调整客服入口与聊天窗口的整体大小、文字大小和显眼度，保存后对访客和客服生效。": "Kéo thanh trượt để điều chỉnh kích thước tổng thể, cỡ chữ và độ nổi bật của lối vào hỗ trợ và cửa sổ chat. Thay đổi áp dụng cho khách và nhân viên sau khi lưu.",
+    "卡片大小": "Kích thước thẻ",
+    "文字大小": "Cỡ chữ",
+    "显眼度": "Độ nổi bật",
+    "客服设置已保存": "Đã lưu cài đặt hỗ trợ",
+    "外观参数需在允许的百分比范围内": "Giá trị giao diện phải nằm trong phạm vi phần trăm cho phép",
+    "恢复默认": "Khôi phục mặc định"
   }
 }

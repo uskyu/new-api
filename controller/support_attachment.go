@@ -31,6 +31,9 @@ type parsedSupportMessagePayload struct {
 
 type supportChatSettingsRequest struct {
 	RetentionDays *int `json:"retention_days"`
+	UIScale       *int `json:"ui_scale"`
+	TextScale     *int `json:"text_scale"`
+	Prominence    *int `json:"prominence"`
 }
 
 // parseSupportMessagePayload 解析文本/ multipart 发消息请求，并保存上传的图片。
@@ -248,13 +251,28 @@ func requireSupportSettingsPermission(c *gin.Context) bool {
 	return false
 }
 
-// GetSupportChatSettings 返回客服会话留存设置。
+// GetSupportChatAppearance 返回客服入口外观配置，供所有访客读取。
+func GetSupportChatAppearance(c *gin.Context) {
+	settings := system_setting.GetSupportChatSettings()
+	supportChatSuccess(c, gin.H{
+		"ui_scale":   settings.UIScale,
+		"text_scale": settings.TextScale,
+		"prominence": settings.Prominence,
+	})
+}
+
+// GetSupportChatSettings 返回客服会话留存与外观设置。
 func GetSupportChatSettings(c *gin.Context) {
 	if !requireSupportSettingsPermission(c) {
 		return
 	}
 	settings := system_setting.GetSupportChatSettings()
-	supportChatSuccess(c, gin.H{"retention_days": settings.RetentionDays})
+	supportChatSuccess(c, gin.H{
+		"retention_days": settings.RetentionDays,
+		"ui_scale":       settings.UIScale,
+		"text_scale":     settings.TextScale,
+		"prominence":     settings.Prominence,
+	})
 }
 
 // UpdateSupportChatSettings 更新客服会话留存设置，0 表示永久保留。
@@ -265,21 +283,64 @@ func UpdateSupportChatSettings(c *gin.Context) {
 
 	var request supportChatSettingsRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		common.ApiErrorMsg(c, "留存天数格式不正确")
+		common.ApiErrorMsg(c, "设置格式不正确")
 		return
 	}
-	if request.RetentionDays == nil {
-		common.ApiErrorMsg(c, "留存天数不能为空")
+
+	type optionUpdate struct {
+		key   string
+		value int
+	}
+	updates := make([]optionUpdate, 0, 4)
+	if request.RetentionDays != nil {
+		days := *request.RetentionDays
+		if days < 0 || days > 3650 {
+			common.ApiErrorMsg(c, "留存天数必须在 0 到 3650 之间（0 表示永久保留）")
+			return
+		}
+		updates = append(updates, optionUpdate{system_setting.SupportChatRetentionDaysOption, days})
+	}
+	if request.UIScale != nil {
+		scale := *request.UIScale
+		if scale < 80 || scale > 160 {
+			common.ApiErrorMsg(c, "卡片大小必须在 80% 到 160% 之间")
+			return
+		}
+		updates = append(updates, optionUpdate{system_setting.SupportChatUIScaleOption, scale})
+	}
+	if request.TextScale != nil {
+		scale := *request.TextScale
+		if scale < 80 || scale > 160 {
+			common.ApiErrorMsg(c, "文字大小必须在 80% 到 160% 之间")
+			return
+		}
+		updates = append(updates, optionUpdate{system_setting.SupportChatTextScaleOption, scale})
+	}
+	if request.Prominence != nil {
+		prominence := *request.Prominence
+		if prominence < 0 || prominence > 100 {
+			common.ApiErrorMsg(c, "显眼度必须在 0% 到 100% 之间")
+			return
+		}
+		updates = append(updates, optionUpdate{system_setting.SupportChatProminenceOption, prominence})
+	}
+	if len(updates) == 0 {
+		common.ApiErrorMsg(c, "没有需要保存的设置")
 		return
 	}
-	days := *request.RetentionDays
-	if days < 0 || days > 3650 {
-		common.ApiErrorMsg(c, "留存天数必须在 0 到 3650 之间（0 表示永久保留）")
-		return
+
+	for _, item := range updates {
+		if err := model.UpdateOption(item.key, strconv.Itoa(item.value)); err != nil {
+			common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+			return
+		}
 	}
-	if err := model.UpdateOption(system_setting.SupportChatRetentionDaysOption, strconv.Itoa(days)); err != nil {
-		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
-		return
-	}
-	supportChatSuccess(c, gin.H{"retention_days": system_setting.GetSupportChatSettings().RetentionDays})
+
+	settings := system_setting.GetSupportChatSettings()
+	supportChatSuccess(c, gin.H{
+		"retention_days": settings.RetentionDays,
+		"ui_scale":       settings.UIScale,
+		"text_scale":     settings.TextScale,
+		"prominence":     settings.Prominence,
+	})
 }
