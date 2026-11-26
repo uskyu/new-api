@@ -3540,6 +3540,15 @@
     "显眼度": "Prominence",
     "客服设置已保存": "Support settings saved",
     "外观参数需在允许的百分比范围内": "Appearance values must be within the allowed percentage range",
-    "恢复默认": "Restore defaults"
+    "恢复默认": "Restore defaults",
+    "入口文案": "Entry texts",
+    "标题文案": "Title text",
+    "已登录副文案": "Logged-in subtitle",
+    "未登录副文案": "Guest subtitle",
+    "留空则使用默认文案，最多 40 个字符。": "Leave blank to use the default text. Maximum 40 characters.",
+    "文案不能超过 40 个字符": "Text must be 40 characters or fewer",
+    "底部位置": "Bottom offset",
+    "数值越大越靠上，用于避开分页等底部控件。": "Larger values move the entry higher, helping it avoid pagination and other bottom controls.",
+    "拖动滑块调整客服入口与聊天窗口的整体大小、文字大小、显眼度和底部位置，保存后对访客和客服生效。": "Drag the sliders to adjust the overall size, text size, prominence and bottom offset of the support entry and chat window. Changes apply to visitors and agents after saving."
   }
 }

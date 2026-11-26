@@ -11,6 +11,14 @@ const (
 	SupportChatTextScaleOption = "support_chat.text_scale"
 	// SupportChatProminenceOption 在线客服入口动效显眼度百分比。
 	SupportChatProminenceOption = "support_chat.prominence"
+	// SupportChatCustomTitleOption 客服入口标题自定义文案。
+	SupportChatCustomTitleOption = "support_chat.custom_title"
+	// SupportChatCustomSubLoginOption 已登录用户看到的客服入口副标题。
+	SupportChatCustomSubLoginOption = "support_chat.custom_sub_login"
+	// SupportChatCustomSubGuestOption 未登录访客看到的客服入口副标题。
+	SupportChatCustomSubGuestOption = "support_chat.custom_sub_guest"
+	// SupportChatBottomOffsetOption 客服入口距屏幕底部的距离（像素）。
+	SupportChatBottomOffsetOption = "support_chat.bottom_offset"
 
 	// DefaultSupportChatRetentionDays 默认留存 180 天。
 	DefaultSupportChatRetentionDays = 180
@@ -26,6 +34,14 @@ type SupportChatSettings struct {
 	TextScale int `json:"text_scale"`
 	// Prominence 入口闪光、水波与光晕的显眼度百分比，0 为关闭动效。
 	Prominence int `json:"prominence"`
+	// CustomTitle 客服入口标题，留空使用默认“在线客服”。
+	CustomTitle string `json:"custom_title"`
+	// CustomSubLogin 已登录用户的入口副标题，留空使用默认文案。
+	CustomSubLogin string `json:"custom_sub_login"`
+	// CustomSubGuest 未登录访客的入口副标题，留空使用默认文案。
+	CustomSubGuest string `json:"custom_sub_guest"`
+	// BottomOffset 客服入口距屏幕底部的像素距离，避免遮挡分页等控件。
+	BottomOffset int `json:"bottom_offset"`
 }
 
 var defaultSupportChatSettings = SupportChatSettings{
@@ -33,6 +49,7 @@ var defaultSupportChatSettings = SupportChatSettings{
 	UIScale:       100,
 	TextScale:     100,
 	Prominence:    100,
+	BottomOffset:  96,
 }
 
 func init() {

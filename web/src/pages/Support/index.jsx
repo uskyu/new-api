@@ -30,6 +30,7 @@ import {
   Button,
   Card,
   Empty,
+  Input,
   InputNumber,
   Modal,
   Pagination,
@@ -78,6 +79,9 @@ const MIN_TEXT_SCALE = 80;
 const MAX_TEXT_SCALE = 160;
 const MIN_PROMINENCE = 0;
 const MAX_PROMINENCE = 100;
+const MIN_BOTTOM_OFFSET = 16;
+const MAX_BOTTOM_OFFSET = 240;
+const DEFAULT_BOTTOM_OFFSET = 96;
 
 const resolveErrorMessage = (error, fallback) => {
   const responseMessage = error?.response?.data?.message;
@@ -265,6 +269,10 @@ const Support = () => {
   const [uiScale, setUiScale] = useState(100);
   const [textScale, setTextScale] = useState(100);
   const [prominence, setProminence] = useState(100);
+  const [bottomOffset, setBottomOffset] = useState(DEFAULT_BOTTOM_OFFSET);
+  const [customTitle, setCustomTitle] = useState('');
+  const [customSubLogin, setCustomSubLogin] = useState('');
+  const [customSubGuest, setCustomSubGuest] = useState('');
   const [retentionLoading, setRetentionLoading] = useState(false);
   const [retentionSaving, setRetentionSaving] = useState(false);
 
@@ -734,6 +742,16 @@ const Support = () => {
       setUiScale(parseValue(data.ui_scale, 100));
       setTextScale(parseValue(data.text_scale, 100));
       setProminence(parseValue(data.prominence, 100));
+      setBottomOffset(parseValue(data.bottom_offset, DEFAULT_BOTTOM_OFFSET));
+      setCustomTitle(
+        typeof data.custom_title === 'string' ? data.custom_title : '',
+      );
+      setCustomSubLogin(
+        typeof data.custom_sub_login === 'string' ? data.custom_sub_login : '',
+      );
+      setCustomSubGuest(
+        typeof data.custom_sub_guest === 'string' ? data.custom_sub_guest : '',
+      );
     } catch (error) {
       showError(resolveErrorMessage(error, t('加载留存设置失败')));
     } finally {
@@ -773,9 +791,21 @@ const Support = () => {
       textScale > MAX_TEXT_SCALE ||
       !Number.isInteger(prominence) ||
       prominence < MIN_PROMINENCE ||
-      prominence > MAX_PROMINENCE;
+      prominence > MAX_PROMINENCE ||
+      !Number.isInteger(bottomOffset) ||
+      bottomOffset < MIN_BOTTOM_OFFSET ||
+      bottomOffset > MAX_BOTTOM_OFFSET;
     if (invalidScale) {
       showError(t('外观参数需在允许的百分比范围内'));
+      return;
+    }
+    const texts = [
+      customTitle,
+      customSubLogin,
+      customSubGuest,
+    ].map((value) => value.trim());
+    if (texts.some((value) => Array.from(value).length > 40)) {
+      showError(t('文案不能超过 40 个字符'));
       return;
     }
     setRetentionSaving(true);
@@ -787,6 +817,10 @@ const Support = () => {
           ui_scale: uiScale,
           text_scale: textScale,
           prominence,
+          bottom_offset: bottomOffset,
+          custom_title: texts[0],
+          custom_sub_login: texts[1],
+          custom_sub_guest: texts[2],
         },
         { skipErrorHandler: true },
       );
@@ -1304,13 +1338,17 @@ const Support = () => {
                 setUiScale(100);
                 setTextScale(100);
                 setProminence(100);
+                setBottomOffset(DEFAULT_BOTTOM_OFFSET);
+                setCustomTitle('');
+                setCustomSubLogin('');
+                setCustomSubGuest('');
               }}
             >
               {t('恢复默认')}
             </Button>
           </div>
           <Text type='secondary' size='small' style={{ lineHeight: 1.6 }}>
-            {t('拖动滑块调整客服入口与聊天窗口的整体大小、文字大小和显眼度，保存后对访客和客服生效。')}
+            {t('拖动滑块调整客服入口与聊天窗口的整体大小、文字大小、显眼度和底部位置，保存后对访客和客服生效。')}
           </Text>
 
           <div
@@ -1323,10 +1361,10 @@ const Support = () => {
           >
             <div className='support-settings-preview__caption'>
               <span className='support-settings-preview__title'>
-                {t('在线客服')}
+                {customTitle.trim() || t('在线客服')}
               </span>
               <span className='support-settings-preview__sub'>
-                {t('有问题随时联系')}
+                {customSubLogin.trim() || t('有问题随时联系')}
               </span>
             </div>
             <span className='support-settings-preview__fab'>
@@ -1376,6 +1414,73 @@ const Support = () => {
               value={prominence}
               disabled={retentionLoading || retentionSaving}
               onChange={setProminence}
+            />
+          </div>
+
+          <div className='support-settings-slider'>
+            <div className='support-settings-slider__head'>
+              <Text strong>{t('底部位置')}</Text>
+              <Text type='secondary'>{bottomOffset}px</Text>
+            </div>
+            <Slider
+              min={MIN_BOTTOM_OFFSET}
+              max={MAX_BOTTOM_OFFSET}
+              step={4}
+              value={bottomOffset}
+              disabled={retentionLoading || retentionSaving}
+              onChange={setBottomOffset}
+            />
+            <Text type='secondary' size='small'>
+              {t('数值越大越靠上，用于避开分页等底部控件。')}
+            </Text>
+          </div>
+
+          <div
+            className='support-settings-divider'
+            role='separator'
+            aria-hidden='true'
+          />
+
+          <Text strong style={{ display: 'block' }}>
+            {t('入口文案')}
+          </Text>
+          <Text type='secondary' size='small' style={{ lineHeight: 1.6 }}>
+            {t('留空则使用默认文案，最多 40 个字符。')}
+          </Text>
+
+          <div className='support-settings-field'>
+            <Text strong>{t('标题文案')}</Text>
+            <Input
+              value={customTitle}
+              maxLength={40}
+              showCount
+              placeholder={t('在线客服')}
+              disabled={retentionLoading || retentionSaving}
+              onChange={setCustomTitle}
+            />
+          </div>
+
+          <div className='support-settings-field'>
+            <Text strong>{t('已登录副文案')}</Text>
+            <Input
+              value={customSubLogin}
+              maxLength={40}
+              showCount
+              placeholder={t('有问题随时联系')}
+              disabled={retentionLoading || retentionSaving}
+              onChange={setCustomSubLogin}
+            />
+          </div>
+
+          <div className='support-settings-field'>
+            <Text strong>{t('未登录副文案')}</Text>
+            <Input
+              value={customSubGuest}
+              maxLength={40}
+              showCount
+              placeholder={t('登录后即可联系')}
+              disabled={retentionLoading || retentionSaving}
+              onChange={setCustomSubGuest}
             />
           </div>
         </div>

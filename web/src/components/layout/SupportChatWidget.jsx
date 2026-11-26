@@ -310,6 +310,10 @@ const SupportChatWidget = () => {
     uiScale: 100,
     textScale: 100,
     prominence: 100,
+    customTitle: '',
+    customSubLogin: '',
+    customSubGuest: '',
+    bottomOffset: 96,
   });
 
   const conversationRef = useRef(null);
@@ -349,7 +353,12 @@ const SupportChatWidget = () => {
     '--support-ui-scale': appearance.uiScale / 100,
     '--support-text-scale': appearance.textScale / 100,
     '--support-prominence': appearance.prominence / 100,
+    '--support-bottom-offset': `${appearance.bottomOffset}px`,
   };
+  const entryTitle = appearance.customTitle || t('在线客服');
+  const entrySubtitle = isLoggedIn
+    ? appearance.customSubLogin || t('有问题随时联系')
+    : appearance.customSubGuest || t('登录后即可联系');
   const userName =
     userState?.user?.username ||
     userState?.user?.display_name ||
@@ -388,10 +397,16 @@ const SupportChatWidget = () => {
         if (!data || typeof data !== 'object') {
           return;
         }
+        const parseText = (value) =>
+          typeof value === 'string' ? value.trim() : '';
         setAppearance({
           uiScale: parsePercent(data.ui_scale, 100),
           textScale: parsePercent(data.text_scale, 100),
           prominence: parsePercent(data.prominence, 100),
+          customTitle: parseText(data.custom_title),
+          customSubLogin: parseText(data.custom_sub_login),
+          customSubGuest: parseText(data.custom_sub_guest),
+          bottomOffset: parsePercent(data.bottom_offset, 96),
         });
       } catch {
         // Appearance settings are optional; keep the local defaults.
@@ -981,10 +996,10 @@ const SupportChatWidget = () => {
           }}
         >
           <span className='support-chat-entry__caption-title'>
-            {t('在线客服')}
+            {entryTitle}
           </span>
           <span className='support-chat-entry__caption-sub'>
-            {t(isLoggedIn ? '有问题随时联系' : '登录后即可联系')}
+            {entrySubtitle}
           </span>
         </span>
         <button
@@ -1027,7 +1042,7 @@ const SupportChatWidget = () => {
               <IconCustomerSupport size='extra-large' />
             </span>
             <div className='support-chat-panel__title-block'>
-              <div className='support-chat-panel__title'>{t('在线客服')}</div>
+              <div className='support-chat-panel__title'>{entryTitle}</div>
               <span className='support-chat-panel__status is-waiting'>
                 <span className='support-chat-panel__status-dot' aria-hidden='true' />
                 {t('未登录')}
@@ -1184,7 +1199,7 @@ const SupportChatWidget = () => {
             <IconCustomerSupport size='extra-large' />
           </span>
           <div className='support-chat-panel__title-block'>
-            <div className='support-chat-panel__title'>{t('在线客服')}</div>
+            <div className='support-chat-panel__title'>{entryTitle}</div>
             <span
               className={`support-chat-panel__status ${statusClass}`}
             >

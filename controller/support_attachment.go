@@ -30,11 +30,17 @@ type parsedSupportMessagePayload struct {
 }
 
 type supportChatSettingsRequest struct {
-	RetentionDays *int `json:"retention_days"`
-	UIScale       *int `json:"ui_scale"`
-	TextScale     *int `json:"text_scale"`
-	Prominence    *int `json:"prominence"`
+	RetentionDays  *int    `json:"retention_days"`
+	UIScale        *int    `json:"ui_scale"`
+	TextScale      *int    `json:"text_scale"`
+	Prominence     *int    `json:"prominence"`
+	CustomTitle    *string `json:"custom_title"`
+	CustomSubLogin *string `json:"custom_sub_login"`
+	CustomSubGuest *string `json:"custom_sub_guest"`
+	BottomOffset   *int    `json:"bottom_offset"`
 }
+
+const supportCustomTextMaxRunes = 40
 
 // parseSupportMessagePayload 解析文本/ multipart 发消息请求，并保存上传的图片。
 // 返回 false 时已写入错误响应；返回 true 时调用方负责在后续失败时清理 Stored 文件。
@@ -255,9 +261,13 @@ func requireSupportSettingsPermission(c *gin.Context) bool {
 func GetSupportChatAppearance(c *gin.Context) {
 	settings := system_setting.GetSupportChatSettings()
 	supportChatSuccess(c, gin.H{
-		"ui_scale":   settings.UIScale,
-		"text_scale": settings.TextScale,
-		"prominence": settings.Prominence,
+		"ui_scale":         settings.UIScale,
+		"text_scale":       settings.TextScale,
+		"prominence":       settings.Prominence,
+		"custom_title":     settings.CustomTitle,
+		"custom_sub_login": settings.CustomSubLogin,
+		"custom_sub_guest": settings.CustomSubGuest,
+		"bottom_offset":    settings.BottomOffset,
 	})
 }
 
@@ -268,10 +278,14 @@ func GetSupportChatSettings(c *gin.Context) {
 	}
 	settings := system_setting.GetSupportChatSettings()
 	supportChatSuccess(c, gin.H{
-		"retention_days": settings.RetentionDays,
-		"ui_scale":       settings.UIScale,
-		"text_scale":     settings.TextScale,
-		"prominence":     settings.Prominence,
+		"retention_days":   settings.RetentionDays,
+		"ui_scale":         settings.UIScale,
+		"text_scale":       settings.TextScale,
+		"prominence":       settings.Prominence,
+		"custom_title":     settings.CustomTitle,
+		"custom_sub_login": settings.CustomSubLogin,
+		"custom_sub_guest": settings.CustomSubGuest,
+		"bottom_offset":    settings.BottomOffset,
 	})
 }
 
@@ -289,16 +303,32 @@ func UpdateSupportChatSettings(c *gin.Context) {
 
 	type optionUpdate struct {
 		key   string
-		value int
+		value string
 	}
-	updates := make([]optionUpdate, 0, 4)
+	updates := make([]optionUpdate, 0, 7)
+	appendInt := func(key string, value int) {
+		updates = append(updates, optionUpdate{key, strconv.Itoa(value)})
+	}
+	appendText := func(key string, value *string) bool {
+		if value == nil {
+			return true
+		}
+		text := strings.TrimSpace(*value)
+		if utf8.RuneCountInString(text) > supportCustomTextMaxRunes {
+			common.ApiErrorMsg(c, "文案不能超过 40 个字符")
+			return false
+		}
+		updates = append(updates, optionUpdate{key, text})
+		return true
+	}
+
 	if request.RetentionDays != nil {
 		days := *request.RetentionDays
 		if days < 0 || days > 3650 {
 			common.ApiErrorMsg(c, "留存天数必须在 0 到 3650 之间（0 表示永久保留）")
 			return
 		}
-		updates = append(updates, optionUpdate{system_setting.SupportChatRetentionDaysOption, days})
+		appendInt(system_setting.SupportChatRetentionDaysOption, days)
 	}
 	if request.UIScale != nil {
 		scale := *request.UIScale
@@ -306,7 +336,7 @@ func UpdateSupportChatSettings(c *gin.Context) {
 			common.ApiErrorMsg(c, "卡片大小必须在 80% 到 160% 之间")
 			return
 		}
-		updates = append(updates, optionUpdate{system_setting.SupportChatUIScaleOption, scale})
+		appendInt(system_setting.SupportChatUIScaleOption, scale)
 	}
 	if request.TextScale != nil {
 		scale := *request.TextScale
@@ -314,7 +344,7 @@ func UpdateSupportChatSettings(c *gin.Context) {
 			common.ApiErrorMsg(c, "文字大小必须在 80% 到 160% 之间")
 			return
 		}
-		updates = append(updates, optionUpdate{system_setting.SupportChatTextScaleOption, scale})
+		appendInt(system_setting.SupportChatTextScaleOption, scale)
 	}
 	if request.Prominence != nil {
 		prominence := *request.Prominence
@@ -322,7 +352,24 @@ func UpdateSupportChatSettings(c *gin.Context) {
 			common.ApiErrorMsg(c, "显眼度必须在 0% 到 100% 之间")
 			return
 		}
-		updates = append(updates, optionUpdate{system_setting.SupportChatProminenceOption, prominence})
+		appendInt(system_setting.SupportChatProminenceOption, prominence)
+	}
+	if request.BottomOffset != nil {
+		offset := *request.BottomOffset
+		if offset < 16 || offset > 240 {
+			common.ApiErrorMsg(c, "底部位置必须在 16 到 240 像素之间")
+			return
+		}
+		appendInt(system_setting.SupportChatBottomOffsetOption, offset)
+	}
+	if !appendText(system_setting.SupportChatCustomTitleOption, request.CustomTitle) {
+		return
+	}
+	if !appendText(system_setting.SupportChatCustomSubLoginOption, request.CustomSubLogin) {
+		return
+	}
+	if !appendText(system_setting.SupportChatCustomSubGuestOption, request.CustomSubGuest) {
+		return
 	}
 	if len(updates) == 0 {
 		common.ApiErrorMsg(c, "没有需要保存的设置")
@@ -330,7 +377,7 @@ func UpdateSupportChatSettings(c *gin.Context) {
 	}
 
 	for _, item := range updates {
-		if err := model.UpdateOption(item.key, strconv.Itoa(item.value)); err != nil {
+		if err := model.UpdateOption(item.key, item.value); err != nil {
 			common.ApiErrorI18n(c, i18n.MsgDatabaseError)
 			return
 		}
@@ -338,9 +385,13 @@ func UpdateSupportChatSettings(c *gin.Context) {
 
 	settings := system_setting.GetSupportChatSettings()
 	supportChatSuccess(c, gin.H{
-		"retention_days": settings.RetentionDays,
-		"ui_scale":       settings.UIScale,
-		"text_scale":     settings.TextScale,
-		"prominence":     settings.Prominence,
+		"retention_days":   settings.RetentionDays,
+		"ui_scale":         settings.UIScale,
+		"text_scale":       settings.TextScale,
+		"prominence":       settings.Prominence,
+		"custom_title":     settings.CustomTitle,
+		"custom_sub_login": settings.CustomSubLogin,
+		"custom_sub_guest": settings.CustomSubGuest,
+		"bottom_offset":    settings.BottomOffset,
 	})
 }

@@ -4045,6 +4045,15 @@
     "显眼度": "Độ nổi bật",
     "客服设置已保存": "Đã lưu cài đặt hỗ trợ",
     "外观参数需在允许的百分比范围内": "Giá trị giao diện phải nằm trong phạm vi phần trăm cho phép",
-    "恢复默认": "Khôi phục mặc định"
+    "恢复默认": "Khôi phục mặc định",
+    "入口文案": "Nội dung lối vào",
+    "标题文案": "Nội dung tiêu đề",
+    "已登录副文案": "Phụ đề khi đã đăng nhập",
+    "未登录副文案": "Phụ đề khi chưa đăng nhập",
+    "留空则使用默认文案，最多 40 个字符。": "Để trống để dùng nội dung mặc định. Tối đa 40 ký tự.",
+    "文案不能超过 40 个字符": "Nội dung không được vượt quá 40 ký tự",
+    "底部位置": "Vị trí phía dưới",
+    "数值越大越靠上，用于避开分页等底部控件。": "Giá trị càng lớn thì càng dịch lên trên, giúp tránh thanh phân trang và các điều khiển ở đáy.",
+    "拖动滑块调整客服入口与聊天窗口的整体大小、文字大小、显眼度和底部位置，保存后对访客和客服生效。": "Kéo thanh trượt để điều chỉnh kích thước tổng thể, cỡ chữ, độ nổi bật và vị trí phía dưới của lối vào hỗ trợ và cửa sổ chat. Thay đổi áp dụng cho khách và nhân viên sau khi lưu."
   }
 }

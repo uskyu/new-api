@@ -49,6 +49,17 @@ type supportAttachmentMessagesData struct {
 	Conversation model.SupportConversation `json:"conversation"`
 }
 
+type supportChatSettingsTestPayload struct {
+	RetentionDays  int    `json:"retention_days"`
+	UIScale        int    `json:"ui_scale"`
+	TextScale      int    `json:"text_scale"`
+	Prominence     int    `json:"prominence"`
+	CustomTitle    string `json:"custom_title"`
+	CustomSubLogin string `json:"custom_sub_login"`
+	CustomSubGuest string `json:"custom_sub_guest"`
+	BottomOffset   int    `json:"bottom_offset"`
+}
+
 func setupSupportAttachmentControllerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -513,9 +524,9 @@ func TestSupportChatSettingsAdminAPI(t *testing.T) {
 	GetSupportChatSettings(ctx)
 	response := decodeSupportAttachmentResponse(t, recorder)
 	require.True(t, response.Success, response.Message)
-	var settings map[string]int
+	var settings supportChatSettingsTestPayload
 	require.NoError(t, common.Unmarshal(response.Data, &settings))
-	assert.Equal(t, system_setting.DefaultSupportChatRetentionDays, settings["retention_days"])
+	assert.Equal(t, system_setting.DefaultSupportChatRetentionDays, settings.RetentionDays)
 
 	// 普通用户无权限。
 	ctx, recorder = newSupportAttachmentTestContext(t, http.MethodGet, "/api/support/admin/settings", nil, "", 1006, common.RoleCommonUser, nil)
@@ -532,7 +543,7 @@ func TestSupportChatSettingsAdminAPI(t *testing.T) {
 	response = decodeSupportAttachmentResponse(t, recorder)
 	require.True(t, response.Success, response.Message)
 	require.NoError(t, common.Unmarshal(response.Data, &settings))
-	assert.Equal(t, 90, settings["retention_days"])
+	assert.Equal(t, 90, settings.RetentionDays)
 	assert.Equal(t, 90, system_setting.GetSupportChatSettings().RetentionDays)
 
 	var option model.Option
@@ -548,7 +559,7 @@ func TestSupportChatSettingsAdminAPI(t *testing.T) {
 		response = decodeSupportAttachmentResponse(t, recorder)
 		require.True(t, response.Success, response.Message)
 		require.NoError(t, common.Unmarshal(response.Data, &settings))
-		assert.Equal(t, days, settings["retention_days"])
+		assert.Equal(t, days, settings.RetentionDays)
 	}
 
 	// 非法取值。
@@ -594,6 +605,7 @@ func TestSupportChatAppearanceSettings(t *testing.T) {
 		UIScale:       100,
 		TextScale:     100,
 		Prominence:    100,
+		BottomOffset:  96,
 	}
 	t.Cleanup(func() { *cfg = previous })
 
@@ -602,17 +614,23 @@ func TestSupportChatAppearanceSettings(t *testing.T) {
 	GetSupportChatAppearance(ctx)
 	response := decodeSupportAttachmentResponse(t, recorder)
 	require.True(t, response.Success, response.Message)
-	var appearance map[string]int
+	var appearance supportChatSettingsTestPayload
 	require.NoError(t, common.Unmarshal(response.Data, &appearance))
-	assert.Equal(t, 100, appearance["ui_scale"])
-	assert.Equal(t, 100, appearance["text_scale"])
-	assert.Equal(t, 100, appearance["prominence"])
+	assert.Equal(t, 100, appearance.UIScale)
+	assert.Equal(t, 100, appearance.TextScale)
+	assert.Equal(t, 100, appearance.Prominence)
+	assert.Equal(t, 96, appearance.BottomOffset)
+	assert.Equal(t, "", appearance.CustomTitle)
 
 	// 客服保存外观设置。
 	body, err := common.Marshal(map[string]any{
-		"ui_scale":   130,
-		"text_scale": 120,
-		"prominence": 0,
+		"ui_scale":         130,
+		"text_scale":       120,
+		"prominence":       0,
+		"custom_title":     "专属客服",
+		"custom_sub_login": "有问题随时联系我",
+		"custom_sub_guest": "登录后联系我们",
+		"bottom_offset":    120,
 	})
 	require.NoError(t, err)
 	ctx, recorder = newSupportAttachmentTestContext(t, http.MethodPut, "/api/support/admin/settings", body, "application/json", 3004, common.RoleSupportUser, nil)
@@ -620,9 +638,14 @@ func TestSupportChatAppearanceSettings(t *testing.T) {
 	response = decodeSupportAttachmentResponse(t, recorder)
 	require.True(t, response.Success, response.Message)
 	require.NoError(t, common.Unmarshal(response.Data, &appearance))
-	assert.Equal(t, 130, appearance["ui_scale"])
-	assert.Equal(t, 120, appearance["text_scale"])
-	assert.Equal(t, 0, appearance["prominence"])
+	assert.Equal(t, 130, appearance.UIScale)
+	assert.Equal(t, 120, appearance.TextScale)
+	assert.Equal(t, 0, appearance.Prominence)
+	assert.Equal(t, "专属客服", appearance.CustomTitle)
+	assert.Equal(t, 120, appearance.BottomOffset)
+	assert.Equal(t, "有问题随时联系我", appearance.CustomSubLogin)
+	assert.Equal(t, "登录后联系我们", appearance.CustomSubGuest)
+	assert.Equal(t, 120, appearance.BottomOffset)
 
 	var scaleOption model.Option
 	require.NoError(t, model.DB.First(&scaleOption, "key = ?", system_setting.SupportChatUIScaleOption).Error)
@@ -636,8 +659,13 @@ func TestSupportChatAppearanceSettings(t *testing.T) {
 	response = decodeSupportAttachmentResponse(t, recorder)
 	require.True(t, response.Success, response.Message)
 	require.NoError(t, common.Unmarshal(response.Data, &appearance))
-	assert.Equal(t, 130, appearance["ui_scale"])
-	assert.Equal(t, 0, appearance["prominence"])
+	assert.Equal(t, 130, appearance.UIScale)
+	assert.Equal(t, 0, appearance.Prominence)
+	assert.Equal(t, "专属客服", appearance.CustomTitle)
+
+	var titleOption model.Option
+	require.NoError(t, model.DB.First(&titleOption, "key = ?", system_setting.SupportChatCustomTitleOption).Error)
+	assert.Equal(t, "专属客服", titleOption.Value)
 
 	// 越界值拒绝。
 	for _, payload := range []map[string]any{
@@ -647,6 +675,9 @@ func TestSupportChatAppearanceSettings(t *testing.T) {
 		{"text_scale": 170},
 		{"prominence": -5},
 		{"prominence": 105},
+		{"bottom_offset": 8},
+		{"bottom_offset": 300},
+		{"custom_title": "12345678901234567890123456789012345678901"},
 	} {
 		body, err = common.Marshal(payload)
 		require.NoError(t, err)

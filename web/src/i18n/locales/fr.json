@@ -3496,6 +3496,15 @@
     "显眼度": "Visibilité",
     "客服设置已保存": "Paramètres du support enregistrés",
     "外观参数需在允许的百分比范围内": "Les valeurs d'apparence doivent être dans la plage de pourcentage autorisée",
-    "恢复默认": "Rétablir les valeurs par défaut"
+    "恢复默认": "Rétablir les valeurs par défaut",
+    "入口文案": "Textes de l'entrée",
+    "标题文案": "Texte du titre",
+    "已登录副文案": "Sous-titre connecté",
+    "未登录副文案": "Sous-titre visiteur",
+    "留空则使用默认文案，最多 40 个字符。": "Laissez vide pour utiliser le texte par défaut. Maximum 40 caractères.",
+    "文案不能超过 40 个字符": "Le texte ne doit pas dépasser 40 caractères",
+    "底部位置": "Position verticale",
+    "数值越大越靠上，用于避开分页等底部控件。": "Une valeur plus grande remonte l'entrée, pour éviter la pagination et les autres contrôles du bas.",
+    "拖动滑块调整客服入口与聊天窗口的整体大小、文字大小、显眼度和底部位置，保存后对访客和客服生效。": "Faites glisser les curseurs pour ajuster la taille globale, la taille du texte, la visibilité et la position verticale de l'entrée du support et de la fenêtre de chat. Les modifications s'appliquent aux visiteurs et aux agents après enregistrement."
   }
 }
