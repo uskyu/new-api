@@ -40,7 +40,6 @@ export function SupportImagePicker({
         className={className}
         theme='borderless'
         type='tertiary'
-        size='small'
         icon={<IconImage />}
         disabled={disabled}
         onClick={() => inputRef.current?.click()}

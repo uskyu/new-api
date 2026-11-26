@@ -958,7 +958,7 @@ const SupportChatWidget = () => {
         <div className='support-chat-panel__header'>
           <div className='support-chat-panel__heading'>
             <span className='support-chat-panel__avatar' aria-hidden='true'>
-              <IconCustomerSupport size='large' />
+              <IconCustomerSupport size='extra-large' />
             </span>
             <div className='support-chat-panel__title-block'>
               <div className='support-chat-panel__title'>{t('在线客服')}</div>
@@ -971,7 +971,8 @@ const SupportChatWidget = () => {
           <Button
             theme='borderless'
             type='tertiary'
-            icon={<IconClose />}
+            icon={<IconClose size='large' />}
+            size='large'
             aria-label='关闭'
             onClick={handleClosePanel}
           />
@@ -1113,7 +1114,7 @@ const SupportChatWidget = () => {
       <div className='support-chat-panel__header'>
         <div className='support-chat-panel__heading'>
           <span className='support-chat-panel__avatar' aria-hidden='true'>
-            <IconCustomerSupport size='large' />
+            <IconCustomerSupport size='extra-large' />
           </span>
           <div className='support-chat-panel__title-block'>
             <div className='support-chat-panel__title'>{t('在线客服')}</div>
@@ -1131,7 +1132,8 @@ const SupportChatWidget = () => {
         <Button
           theme='borderless'
           type='tertiary'
-          icon={<IconClose />}
+          icon={<IconClose size='large' />}
+          size='large'
           aria-label='关闭'
           onClick={handleClosePanel}
         />
@@ -1174,6 +1176,7 @@ const SupportChatWidget = () => {
           />
           <Input
             className='support-chat-panel__input'
+            size='large'
             value={inputValue}
             placeholder={t('请输入消息')}
             disabled={!conversation || conversationClosed || isCreating}
@@ -1184,6 +1187,7 @@ const SupportChatWidget = () => {
           <Button
             theme='solid'
             type='primary'
+            size='large'
             icon={<IconSend />}
             loading={isSending}
             disabled={!canSend}
