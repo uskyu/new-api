@@ -102,29 +102,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			if c.Writer.Written() && relayFormat != types.RelayFormatOpenAIRealtime && !streamResponse {
 				return
 			}
-			// A Harness caller gets the structured upstream answer for a call whose
-			// candidates all failed. Ordinary clients keep the legacy OpenAI error
-			// shape below, unchanged.
-			if _, harness := middleware.GetHarnessPrincipal(c); harness && relayFormat != types.RelayFormatOpenAIRealtime {
-				if attempts := harnessUpstreamAttempts(c); len(attempts) > 0 {
-					upstreamURLs := common.UpstreamAddresses(c)
-					body := buildHarnessUpstreamErrorBody(
-						c, requestId, harnessModelName(c),
-						middleware.HarnessRouteGroupID(c, common.GetContextKeyString(c, constant.ContextKeyUsingGroup)),
-						attempts, string(newAPIError.GetErrorCode()),
-						newAPIError.MaskSensitiveError(upstreamURLs...),
-					)
-					if streamResponse {
-						writeHarnessRelayStreamError(c, relayFormat, body, newAPIError)
-						return
-					}
-					if relayFormat != types.RelayFormatOpenAIRealtime {
-						c.Header("Content-Type", "application/json; charset=utf-8")
-					}
-					writeHarnessRelayError(c, relayFormat, body)
-					return
-				}
-			}
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			upstreamURLs := common.UpstreamAddresses(c)
 			if streamResponse {
@@ -267,7 +244,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
-		recordHarnessUpstreamAttempt(c, channel.Id, newAPIError.StatusCode, string(newAPIError.GetErrorCode()), newAPIError.MaskSensitiveError(common.UpstreamAddresses(c)...))
 
 		decision := service.DecideRelayRetry(c, newAPIError, retryLimit-retryParam.GetRetry())
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
@@ -715,7 +691,6 @@ func executeTaskSubmissionWith(
 		decision := decideTaskRetry(c, taskErr, retryLimit-retryParam.GetRetry())
 		service.RecordPolicyFailure(c, channel.Id, taskAPIError, decision)
 		if !taskErr.LocalError {
-			recordHarnessUpstreamAttempt(c, channel.Id, taskErr.StatusCode, taskErr.Code, taskErr.Message)
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
@@ -950,16 +925,6 @@ func respondTaskSubmissionError(c *gin.Context, taskErr *taskdto.TaskError) {
 	// including any error event; nothing can follow them.
 	if c.Writer.Written() {
 		return
-	}
-	// A Harness task call that failed on every candidate channel answers with the
-	// same structured body as the text relay, so /v1/videos can tell a permanent
-	// model/catalog problem from a retryable upstream failure without parsing
-	// provider prose. Requests that never reached a channel keep the legacy shape.
-	if _, harness := middleware.GetHarnessPrincipal(c); harness {
-		if attempts := harnessUpstreamAttempts(c); len(attempts) > 0 {
-			writeHarnessTaskSubmissionError(c, taskErr, attempts)
-			return
-		}
 	}
 	if middleware.RespondTaskPluginError(c, taskErr) {
 		return

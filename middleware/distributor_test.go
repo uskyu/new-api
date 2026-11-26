@@ -14,7 +14,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/gin-gonic/gin"
@@ -465,69 +464,6 @@ func harnessPoolContext(t *testing.T, modelName string, harness bool, header str
 // publishHarnessPools installs the pool labels the resolver validates against,
 // then restores the previous option so cases stay independent. The option map is
 // created on demand because a test binary may never have initialised it.
-// A Harness caller whose model has no enabled channel in the selected group
-// gets a permanent 404 model_not_found with the routing facts the platform uses
-// to tell "this model is not sold" apart from a transient upstream failure.
-func TestDistributeHarnessNoAvailableChannelReturnsStructuredNotFound(t *testing.T) {
-	require.NoError(t, i18n.Init())
-	previousCacheEnabled := common.MemoryCacheEnabled
-	common.MemoryCacheEnabled = true
-	t.Cleanup(func() { common.MemoryCacheEnabled = previousCacheEnabled })
-
-	// The default pool is configured but has no channel in its order: the model
-	// has no candidate anywhere in the selected route group.
-	publishHarnessPools(t)
-	previousRouting := setting.GetIntelligentRoutingConfig()
-	t.Cleanup(func() { require.NoError(t, setting.UpdateIntelligentRoutingConfig(previousRouting)) })
-	require.NoError(t, setting.UpdateIntelligentRoutingConfig(setting.IntelligentRoutingConfig{
-		Groups: []setting.IntelligentRoutingGroup{{ID: "chat", Name: "Chat", ChannelOrder: []int{}}},
-	}))
-
-	router := gin.New()
-	router.Use(RequestId())
-	router.POST("/v1/videos", func(c *gin.Context) {
-		common.SetContextKey(c, constant.ContextKeyUsingGroup, "harness-empty-pool")
-		c.Set(HarnessPrincipalContextKey, HarnessPrincipal{Subject: "harness-gateway"})
-	}, Distribute(), func(c *gin.Context) {
-		t.Error("a request without a candidate channel must stop before the relay handler")
-		c.Status(http.StatusNoContent)
-	})
-
-	request := httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{"model":"video-model"}`))
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept-Language", "en")
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusNotFound, recorder.Code)
-	requestID := recorder.Header().Get(common.RequestIdKey)
-	require.NotEmpty(t, requestID)
-
-	var payload struct {
-		Error struct {
-			Message   string `json:"message"`
-			Type      string `json:"type"`
-			Code      string `json:"code"`
-			Retryable bool   `json:"retryable"`
-			RequestId string `json:"request_id"`
-			Details   struct {
-				Model      string `json:"model"`
-				RouteGroup string `json:"route_group"`
-				RequestId  string `json:"request_id"`
-			} `json:"details"`
-		} `json:"error"`
-	}
-	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
-	assert.Equal(t, string(types.ErrorCodeModelNotFound), payload.Error.Code)
-	assert.Equal(t, "new_api_error", payload.Error.Type)
-	assert.False(t, payload.Error.Retryable, "a missing model or channel is permanent")
-	assert.Equal(t, requestID, payload.Error.RequestId)
-	assert.Equal(t, "video-model", payload.Error.Details.Model)
-	assert.Equal(t, "chat", payload.Error.Details.RouteGroup, "the selected resource pool is reported back")
-	assert.Equal(t, requestID, payload.Error.Details.RequestId)
-	assert.Contains(t, payload.Error.Message, "video-model")
-}
-
 func publishHarnessPools(t *testing.T) {
 	t.Helper()
 	payload, err := common.Marshal(setting.HarnessCatalogConfig{
