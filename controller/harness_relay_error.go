@@ -182,11 +182,26 @@ func buildHarnessUpstreamErrorBody(c *gin.Context, requestID string, modelName s
 	}
 }
 
+// harnessErrorHTTPStatus maps the machine-readable code to the conventional
+// HTTP status for a gateway-side upstream failure. Retry policy still comes from
+// the explicit retryable flag; the status is here so generic HTTP clients apply
+// their normal rate-limit / bad-gateway handling without parsing provider prose.
+func harnessErrorHTTPStatus(code string) int {
+	switch code {
+	case harnessCodeUpstreamRateLimited:
+		return http.StatusTooManyRequests
+	case harnessCodeUpstreamAuthError, harnessCodeUpstreamInvalidResponse:
+		return http.StatusBadGateway
+	default:
+		return http.StatusServiceUnavailable
+	}
+}
+
 // writeHarnessRelayError renders the structured body on an HTTP relay response.
-// All upstream outcomes are a gateway-side 503: the caller's request is valid,
-// and the code plus retryable flag says whether retrying can help.
+// The caller's request is valid; the code, retryable flag and HTTP status say
+// whether retrying can help.
 func writeHarnessRelayError(c *gin.Context, relayFormat types.RelayFormat, body middleware.HarnessErrorBody) {
-	status := http.StatusServiceUnavailable
+	status := harnessErrorHTTPStatus(body.Code)
 	if relayFormat == types.RelayFormatClaude {
 		// Claude clients keep their top-level type marker; the error object gains
 		// the structured Harness fields.
@@ -228,5 +243,5 @@ func writeHarnessTaskSubmissionError(c *gin.Context, taskErr *taskdto.TaskError,
 		c, requestID, harnessModelName(c), routeGroup, attempts,
 		taskErr.Code, taskErr.Message,
 	)
-	c.JSON(http.StatusServiceUnavailable, middleware.HarnessErrorEnvelope{Error: body})
+	c.JSON(harnessErrorHTTPStatus(body.Code), middleware.HarnessErrorEnvelope{Error: body})
 }

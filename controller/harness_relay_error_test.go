@@ -130,30 +130,41 @@ func TestWriteHarnessRelayErrorCarriesAttemptsAndRoutingFacts(t *testing.T) {
 		"when the loop ran out of candidates the last real upstream failure supplies the message")
 }
 
-func TestHarnessTaskSubmissionFailureReturns503WithAttempts(t *testing.T) {
+func TestHarnessTaskSubmissionFailureReturnsStructuredStatusWithAttempts(t *testing.T) {
 	for _, testCase := range []struct {
-		name      string
-		attempt   harnessUpstreamAttempt
-		wantCode  string
-		retryable bool
+		name       string
+		attempt    harnessUpstreamAttempt
+		wantCode   string
+		retryable  bool
+		wantStatus int
 	}{
 		{
-			name:      "all candidates failed",
-			attempt:   harnessUpstreamAttempt{ChannelId: 21, Status: http.StatusInternalServerError, Code: "fail_to_fetch_task", Message: "upstream returned 500"},
-			wantCode:  harnessCodeUpstreamUnavailable,
-			retryable: true,
+			name:       "all candidates failed",
+			attempt:    harnessUpstreamAttempt{ChannelId: 21, Status: http.StatusInternalServerError, Code: "fail_to_fetch_task", Message: "upstream returned 500"},
+			wantCode:   harnessCodeUpstreamUnavailable,
+			retryable:  true,
+			wantStatus: http.StatusServiceUnavailable,
 		},
 		{
-			name:      "upstream rejected the key",
-			attempt:   harnessUpstreamAttempt{ChannelId: 21, Status: http.StatusUnauthorized, Code: "fail_to_fetch_task", Message: "upstream returned 401"},
-			wantCode:  harnessCodeUpstreamAuthError,
-			retryable: false,
+			name:       "upstream rejected the key",
+			attempt:    harnessUpstreamAttempt{ChannelId: 21, Status: http.StatusUnauthorized, Code: "fail_to_fetch_task", Message: "upstream returned 401"},
+			wantCode:   harnessCodeUpstreamAuthError,
+			retryable:  false,
+			wantStatus: http.StatusBadGateway,
 		},
 		{
-			name:      "upstream rate limited",
-			attempt:   harnessUpstreamAttempt{ChannelId: 21, Status: http.StatusTooManyRequests, Code: "fail_to_fetch_task", Message: "upstream returned 429"},
-			wantCode:  harnessCodeUpstreamRateLimited,
-			retryable: true,
+			name:       "upstream rate limited",
+			attempt:    harnessUpstreamAttempt{ChannelId: 21, Status: http.StatusTooManyRequests, Code: "fail_to_fetch_task", Message: "upstream returned 429"},
+			wantCode:   harnessCodeUpstreamRateLimited,
+			retryable:  true,
+			wantStatus: http.StatusTooManyRequests,
+		},
+		{
+			name:       "upstream returned an invalid body",
+			attempt:    harnessUpstreamAttempt{ChannelId: 21, Status: http.StatusBadGateway, Code: string(types.ErrorCodeBadResponseBody), Message: "upstream returned a non-JSON body"},
+			wantCode:   harnessCodeUpstreamInvalidResponse,
+			retryable:  true,
+			wantStatus: http.StatusBadGateway,
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -167,7 +178,7 @@ func TestHarnessTaskSubmissionFailureReturns503WithAttempts(t *testing.T) {
 				StatusCode: testCase.attempt.Status,
 			})
 
-			require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+			require.Equal(t, testCase.wantStatus, recorder.Code)
 			var payload struct {
 				Error struct {
 					Code      string `json:"code"`
