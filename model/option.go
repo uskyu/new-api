@@ -133,6 +133,8 @@ func InitOptionMap() {
 	common.OptionMap["AutoGroups"] = setting.AutoGroups2JsonString()
 	common.OptionMap["DefaultUseAutoGroup"] = strconv.FormatBool(setting.DefaultUseAutoGroup)
 	common.OptionMap[setting.IntelligentRoutingOptionKey] = `{"pricing_group_order":[],"groups":[]}`
+	common.OptionMap[setting.UpstreamSyncEnabledOptionKey] = strconv.FormatBool(setting.UpstreamSyncEnabled)
+	common.OptionMap[setting.UpstreamSyncIntervalMinutesOptionKey] = strconv.Itoa(setting.UpstreamSyncIntervalMinutes)
 	common.OptionMap["MaxTokenAutoGroups"] = strconv.Itoa(setting.GetMaxTokenAutoGroups())
 	common.OptionMap["PayMethods"] = operation_setting.PayMethods2JsonString()
 	common.OptionMap["GitHubClientId"] = ""
@@ -278,6 +280,9 @@ func validateOptionValue(key string, value string) error {
 	}
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)
+	}
+	if key == setting.UpstreamSyncEnabledOptionKey || key == setting.UpstreamSyncIntervalMinutesOptionKey {
+		return setting.ValidateUpstreamSyncOption(key, value)
 	}
 	return nil
 }
@@ -665,6 +670,10 @@ func updateOptionMap(key string, value string) (err error) {
 		common.RetryTimes, _ = strconv.Atoi(value)
 	case setting.IntelligentRoutingOptionKey:
 		err = setting.UpdateIntelligentRoutingConfigJSON(value)
+	case setting.UpstreamSyncEnabledOptionKey:
+		err = setting.UpdateUpstreamSyncEnabled(value)
+	case setting.UpstreamSyncIntervalMinutesOptionKey:
+		err = setting.UpdateUpstreamSyncIntervalMinutes(value)
 	case "DataExportInterval":
 		common.DataExportInterval, _ = strconv.Atoi(value)
 	case "DataExportDefaultTime":

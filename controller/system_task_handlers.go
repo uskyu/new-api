@@ -8,17 +8,19 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
 
 // RegisterScheduledSystemTasks wires the periodic channel test, upstream model
-// update, and async task polling (Midjourney / Suno / video) jobs into the
-// system task framework so a DB lease dedups execution across multiple master
-// instances and each run is recorded as one task row. Call this before
-// service.StartSystemTaskRunner.
+// update, unified upstream model/price sync, and async task polling
+// (Midjourney / Suno / video) jobs into the system task framework so a DB lease
+// dedups execution across multiple master instances and each run is recorded as
+// one task row. Call this before service.StartSystemTaskRunner.
 func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(channelTestHandler{})
 	service.RegisterSystemTaskHandler(modelUpdateHandler{})
+	service.RegisterSystemTaskHandler(upstreamSyncHandler{})
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
 }
@@ -107,6 +109,49 @@ func (modelUpdateHandler) Run(ctx context.Context, task *model.SystemTask, runne
 		return
 	}
 	summary := runChannelUpstreamModelUpdateTaskOnce(ctx, payload.Manual, !payload.Manual, service.NewSystemTaskProgressReporter(task, runnerID))
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
+}
+
+// upstreamSyncHandler runs the unified model-and-price sync. It fetches each
+// enabled channel's upstream /api/pricing, replaces the group's model list and
+// writes the upstream base prices without ever copying upstream group ratios.
+type upstreamSyncHandler struct{}
+
+func (upstreamSyncHandler) Type() string { return model.SystemTaskTypeUpstreamSync }
+
+func (upstreamSyncHandler) Enabled() bool {
+	return setting.GetUpstreamSyncEnabled()
+}
+
+func (upstreamSyncHandler) Interval() time.Duration {
+	minutes := setting.GetUpstreamSyncIntervalMinutes()
+	if minutes < 1 {
+		minutes = 1
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+func (upstreamSyncHandler) NewPayload() any { return upstreamSyncTaskPayload{} }
+
+type upstreamSyncTaskPayload struct {
+	Manual bool `json:"manual,omitempty"`
+}
+
+func (upstreamSyncHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	payload := upstreamSyncTaskPayload{}
+	if err := task.DecodePayload(&payload); err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	trigger := "scheduled"
+	if payload.Manual {
+		trigger = "manual"
+	}
+	summary, err := service.RunUpstreamSync(ctx, trigger, service.NewSystemTaskProgressReporter(task, runnerID))
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, err)
+		return
+	}
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
 }
 

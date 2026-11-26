@@ -24,6 +24,7 @@ import { LogSettingsSection } from '../maintenance/log-settings-section'
 import { PerformanceSection } from '../maintenance/performance-section'
 import { UpdateCheckerSection } from '../maintenance/update-checker-section'
 import type { OperationsSettings } from '../types'
+import { UpstreamSyncSection } from '../upstream-sync/upstream-sync-section'
 import { createSectionRegistry } from '../utils/section-registry'
 
 const OPERATIONS_SECTIONS = [
@@ -137,6 +138,11 @@ const OPERATIONS_SECTIONS = [
         }}
       />
     ),
+  },
+  {
+    id: 'upstream-sync',
+    titleKey: 'Upstream Sync',
+    build: () => <UpstreamSyncSection />,
   },
   {
     id: 'update-checker',

@@ -132,6 +132,17 @@ func Distribute() func(c *gin.Context) {
 				if selectErr.FilterKind == taskdto.FilterTaskPluginIdentity {
 					logTaskPluginChannelDecision(c, selectErr.Channel, modelRequest.Model, "channel_rejected", "identity_mismatch")
 				}
+				// A Harness caller needs a permanent-versus-transient answer. "No
+				// enabled channel serves this model in the selected pool" is
+				// permanent (a 404 model_not_found with details), while every other
+				// rejection keeps the legacy OpenAI-shaped 503 so ordinary clients
+				// are unaffected.
+				if selectErr.NoAvailableChannel {
+					if _, harness := GetHarnessPrincipal(c); harness {
+						abortWithHarnessModelNotFound(c, modelRequest.Model, usingGroup, HarnessRouteGroupID(c, usingGroup))
+						return
+					}
+				}
 				message := selectErr.Message
 				if selectErr.NoAvailableChannel {
 					message = noAvailableChannelMessage(c, usingGroup, modelRequest.Model)

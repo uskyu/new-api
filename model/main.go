@@ -40,6 +40,12 @@ func jsonScanBytes(value any) []byte {
 	}
 }
 
+// InitColumnNames initializes dialect-specific column quoting for embedders
+// and tests that inject their own *gorm.DB instead of calling InitDB.
+func InitColumnNames() {
+	initCol()
+}
+
 func initCol() {
 	// init common column names
 	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
@@ -375,6 +381,7 @@ func migrateDB() error {
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
+		&UpstreamSyncLog{},
 		&CasbinRule{},
 		&AuthzRole{},
 		&UserAccessToken{},

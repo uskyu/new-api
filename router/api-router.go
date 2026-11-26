@@ -353,6 +353,14 @@ func SetApiRouter(router *gin.Engine) {
 			systemTaskRoute.GET("/current", controller.GetCurrentSystemTask)
 			systemTaskRoute.GET("/:task_id", controller.GetSystemTask)
 		}
+		upstreamSyncRoute := apiRouter.Group("/upstream-sync")
+		upstreamSyncRoute.Use(middleware.RootAuth())
+		{
+			upstreamSyncRoute.GET("/config", controller.GetUpstreamSyncConfig)
+			upstreamSyncRoute.PUT("/config", controller.UpdateUpstreamSyncConfig)
+			upstreamSyncRoute.GET("/logs", controller.ListUpstreamSyncLogs)
+			upstreamSyncRoute.POST("/run", controller.RunUpstreamSyncTask)
+		}
 		systemInfoRoute := apiRouter.Group("/system-info")
 		systemInfoRoute.Use(middleware.RootAuth())
 		{
