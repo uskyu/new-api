@@ -3505,6 +3505,7 @@
     "文案不能超过 40 个字符": "Le texte ne doit pas dépasser 40 caractères",
     "底部位置": "Position verticale",
     "数值越大越靠上，用于避开分页等底部控件。": "Une valeur plus grande remonte l'entrée, pour éviter la pagination et les autres contrôles du bas.",
-    "拖动滑块调整客服入口与聊天窗口的整体大小、文字大小、显眼度和底部位置，保存后对访客和客服生效。": "Faites glisser les curseurs pour ajuster la taille globale, la taille du texte, la visibilité et la position verticale de l'entrée du support et de la fenêtre de chat. Les modifications s'appliquent aux visiteurs et aux agents après enregistrement."
+    "拖动滑块调整客服入口与聊天窗口的整体大小、文字大小、显眼度和底部位置，保存后对访客和客服生效。": "Faites glisser les curseurs pour ajuster la taille globale, la taille du texte, la visibilité et la position verticale de l'entrée du support et de la fenêtre de chat. Les modifications s'appliquent aux visiteurs et aux agents après enregistrement.",
+    "客户也可以直接在页面上拖动客服图标，拖动后的位置只保存在其浏览器本地。": "Les clients peuvent également faire glisser l'icône du support directement sur la page. La position est enregistrée uniquement dans leur navigateur."
   }
 }

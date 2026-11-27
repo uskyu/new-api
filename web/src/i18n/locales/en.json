@@ -3549,6 +3549,7 @@
     "文案不能超过 40 个字符": "Text must be 40 characters or fewer",
     "底部位置": "Bottom offset",
     "数值越大越靠上，用于避开分页等底部控件。": "Larger values move the entry higher, helping it avoid pagination and other bottom controls.",
-    "拖动滑块调整客服入口与聊天窗口的整体大小、文字大小、显眼度和底部位置，保存后对访客和客服生效。": "Drag the sliders to adjust the overall size, text size, prominence and bottom offset of the support entry and chat window. Changes apply to visitors and agents after saving."
+    "拖动滑块调整客服入口与聊天窗口的整体大小、文字大小、显眼度和底部位置，保存后对访客和客服生效。": "Drag the sliders to adjust the overall size, text size, prominence and bottom offset of the support entry and chat window. Changes apply to visitors and agents after saving.",
+    "客户也可以直接在页面上拖动客服图标，拖动后的位置只保存在其浏览器本地。": "Customers can also drag the support icon directly on the page. The dragged position is stored only in their browser."
   }
 }

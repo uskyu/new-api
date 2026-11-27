@@ -2072,6 +2072,9 @@ html.dark .support-chat-message--admin .support-chat-message__bubble {
 /* Support chat entry: caption on the left, FAB on the right */
 .support-chat-entry {
   position: fixed;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
   right: calc(24px + env(safe-area-inset-right, 0px));
   bottom: calc(var(--support-bottom-offset, 96px) + env(safe-area-inset-bottom, 0px));
   z-index: 901;
@@ -2079,6 +2082,10 @@ html.dark .support-chat-message--admin .support-chat-message__bubble {
   flex-direction: row;
   align-items: center;
   gap: 14px;
+}
+
+.support-chat-entry.is-dragging {
+  cursor: grabbing;
 }
 
 .support-chat-entry .support-chat-fab {

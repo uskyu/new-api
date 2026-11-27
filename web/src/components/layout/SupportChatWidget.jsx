@@ -272,6 +272,38 @@ function formatMessageTime(value) {
   });
 }
 
+const SUPPORT_ENTRY_POSITION_KEY = 'support-chat-entry-position';
+
+function readSupportEntryPosition() {
+  try {
+    const raw = localStorage.getItem(SUPPORT_ENTRY_POSITION_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    if (
+      !parsed ||
+      !Number.isFinite(Number(parsed.left)) ||
+      !Number.isFinite(Number(parsed.top))
+    ) {
+      return null;
+    }
+    return { left: Number(parsed.left), top: Number(parsed.top) };
+  } catch {
+    return null;
+  }
+}
+
+function clampSupportEntryPosition(left, top, width, height) {
+  const margin = 8;
+  const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+  const maxTop = Math.max(margin, window.innerHeight - height - margin);
+  return {
+    left: Math.min(Math.max(left, margin), maxLeft),
+    top: Math.min(Math.max(top, margin), maxTop),
+  };
+}
+
 function mergeMessages(current, incoming) {
   const map = new Map(current.map((message) => [message.key, message]));
   incoming.forEach((message) => {
@@ -306,6 +338,8 @@ const SupportChatWidget = () => {
   const [messagesErrorKey, setMessagesErrorKey] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const [entryPosition, setEntryPosition] = useState(readSupportEntryPosition);
+  const [isDraggingEntry, setIsDraggingEntry] = useState(false);
   const [appearance, setAppearance] = useState({
     uiScale: 100,
     textScale: 100,
@@ -324,6 +358,31 @@ const SupportChatWidget = () => {
   const messageListRef = useRef(null);
   const mountedRef = useRef(true);
   const composerAttachmentsRef = useRef([]);
+  const entryRef = useRef(null);
+  const dragRef = useRef(null);
+  const suppressEntryClickRef = useRef(false);
+
+  useEffect(() => {
+    const clampCurrent = () => {
+      const element = entryRef.current;
+      if (!element || !entryPosition) {
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      const next = clampSupportEntryPosition(
+        entryPosition.left,
+        entryPosition.top,
+        rect.width,
+        rect.height,
+      );
+      if (next.left !== entryPosition.left || next.top !== entryPosition.top) {
+        setEntryPosition(next);
+      }
+    };
+    window.addEventListener('resize', clampCurrent);
+    clampCurrent();
+    return () => window.removeEventListener('resize', clampCurrent);
+  }, [entryPosition, appearance.uiScale, appearance.textScale]);
 
   const pathname = location.pathname;
   const isSupportWorkbench =
@@ -800,6 +859,94 @@ const SupportChatWidget = () => {
     };
   }, [isOpen, visible, isLoggedIn]);
 
+  const openEntryPanel = () => {
+    if (suppressEntryClickRef.current) {
+      suppressEntryClickRef.current = false;
+      return;
+    }
+    setIsOpen(true);
+  };
+
+  const handleEntryPointerDown = (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+    const element = entryRef.current;
+    if (!element) {
+      return;
+    }
+    const rect = element.getBoundingClientRect();
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originLeft: rect.left,
+      originTop: rect.top,
+      width: rect.width,
+      height: rect.height,
+      moved: false,
+    };
+    element.setPointerCapture?.(event.pointerId);
+  };
+
+  const handleEntryPointerMove = (event) => {
+    const drag = dragRef.current;
+    if (!drag || event.pointerId !== drag.pointerId) {
+      return;
+    }
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(deltaX, deltaY) < 5) {
+      return;
+    }
+    drag.moved = true;
+    if (!isDraggingEntry) {
+      setIsDraggingEntry(true);
+    }
+    event.preventDefault();
+    const next = clampSupportEntryPosition(
+      drag.originLeft + deltaX,
+      drag.originTop + deltaY,
+      drag.width,
+      drag.height,
+    );
+    setEntryPosition(next);
+  };
+
+  const finishEntryDrag = (event) => {
+    const drag = dragRef.current;
+    if (!drag) {
+      return;
+    }
+    if (event.pointerId !== drag.pointerId) {
+      return;
+    }
+    dragRef.current = null;
+    setIsDraggingEntry(false);
+    if (!drag.moved) {
+      return;
+    }
+    suppressEntryClickRef.current = true;
+    window.setTimeout(() => {
+      suppressEntryClickRef.current = false;
+    }, 0);
+    const rect = entryRef.current?.getBoundingClientRect();
+    if (rect) {
+      const next = clampSupportEntryPosition(
+        rect.left,
+        rect.top,
+        rect.width,
+        rect.height,
+      );
+      setEntryPosition(next);
+      try {
+        localStorage.setItem(SUPPORT_ENTRY_POSITION_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore storage failures; the position stays for this session.
+      }
+    }
+  };
+
   const handleClosePanel = () => {
     setIsOpen(false);
   };
@@ -981,17 +1128,37 @@ const SupportChatWidget = () => {
 
   if (!isOpen) {
     return (
-      <div className='support-chat-entry' style={appearanceStyle}>
+      <div
+        ref={entryRef}
+        className={`support-chat-entry${
+          isDraggingEntry ? ' is-dragging' : ''
+        }`}
+        style={{
+          ...appearanceStyle,
+          ...(entryPosition
+            ? {
+                left: `${entryPosition.left}px`,
+                top: `${entryPosition.top}px`,
+                right: 'auto',
+                bottom: 'auto',
+              }
+            : null),
+        }}
+        onPointerDown={handleEntryPointerDown}
+        onPointerMove={handleEntryPointerMove}
+        onPointerUp={finishEntryDrag}
+        onPointerCancel={finishEntryDrag}
+      >
         <span
           className='support-chat-entry__caption'
           role='button'
           tabIndex={0}
           aria-label={t('在线客服')}
-          onClick={() => setIsOpen(true)}
+          onClick={openEntryPanel}
           onKeyDown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault();
-              setIsOpen(true);
+              openEntryPanel();
             }
           }}
         >
@@ -1007,7 +1174,7 @@ const SupportChatWidget = () => {
           className='support-chat-fab'
           aria-label={t('在线客服')}
           title={t('在线客服')}
-          onClick={() => setIsOpen(true)}
+          onClick={openEntryPanel}
         >
           <span className='support-chat-fab__shine' aria-hidden='true' />
           <span className='support-chat-fab__wave' aria-hidden='true' />

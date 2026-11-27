@@ -1433,6 +1433,9 @@ const Support = () => {
             <Text type='secondary' size='small'>
               {t('数值越大越靠上，用于避开分页等底部控件。')}
             </Text>
+            <Text type='secondary' size='small'>
+              {t('客户也可以直接在页面上拖动客服图标，拖动后的位置只保存在其浏览器本地。')}
+            </Text>
           </div>
 
           <div

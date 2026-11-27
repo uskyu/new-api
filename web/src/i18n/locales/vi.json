@@ -4054,6 +4054,7 @@
     "文案不能超过 40 个字符": "Nội dung không được vượt quá 40 ký tự",
     "底部位置": "Vị trí phía dưới",
     "数值越大越靠上，用于避开分页等底部控件。": "Giá trị càng lớn thì càng dịch lên trên, giúp tránh thanh phân trang và các điều khiển ở đáy.",
-    "拖动滑块调整客服入口与聊天窗口的整体大小、文字大小、显眼度和底部位置，保存后对访客和客服生效。": "Kéo thanh trượt để điều chỉnh kích thước tổng thể, cỡ chữ, độ nổi bật và vị trí phía dưới của lối vào hỗ trợ và cửa sổ chat. Thay đổi áp dụng cho khách và nhân viên sau khi lưu."
+    "拖动滑块调整客服入口与聊天窗口的整体大小、文字大小、显眼度和底部位置，保存后对访客和客服生效。": "Kéo thanh trượt để điều chỉnh kích thước tổng thể, cỡ chữ, độ nổi bật và vị trí phía dưới của lối vào hỗ trợ và cửa sổ chat. Thay đổi áp dụng cho khách và nhân viên sau khi lưu.",
+    "客户也可以直接在页面上拖动客服图标，拖动后的位置只保存在其浏览器本地。": "Khách hàng cũng có thể kéo trực tiếp biểu tượng hỗ trợ trên trang. Vị trí sau khi kéo chỉ được lưu trong trình duyệt của họ."
   }
 }
