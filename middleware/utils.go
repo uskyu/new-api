@@ -16,6 +16,12 @@ func abortWithOpenAiMessage(c *gin.Context, statusCode int, message string, code
 	if len(code) > 0 {
 		codeStr = string(code[0])
 	}
+	if statusCode == http.StatusTooManyRequests && c.Writer.Header().Get("Retry-After") == "" {
+		// The gateway knows the configured window; a conservative whole-window
+		// value is better than an absent header. Upstream-provided values are set
+		// before this helper is reached and are never overwritten.
+		c.Header("Retry-After", "60")
+	}
 	userId := c.GetInt("id")
 	_, preparedPluginRoute := c.Get(pluginruntime.ContextKeyRouteRequest)
 	if !preparedPluginRoute || !RespondTaskPluginError(c, &dto.TaskError{

@@ -45,6 +45,10 @@ const (
 	// and for adaptors that build official endpoints themselves.
 	ContextKeyUpstreamRequestOrigin ContextKey = "upstream_request_origin"
 
+	// ContextKeyUpstreamRetryAfter carries the sanitized Retry-After value from
+	// the last upstream response so a Harness 429 can echo it.
+	ContextKeyUpstreamRetryAfter ContextKey = "upstream_retry_after"
+
 	ContextKeyAutoGroup           ContextKey = "auto_group"
 	ContextKeyAutoGroupIndex      ContextKey = "auto_group_index"
 	ContextKeyAutoGroupRetryIndex ContextKey = "auto_group_retry_index"

@@ -139,11 +139,13 @@ seedance2-fast-720p-once-1
 seedance2-fast-720p-once-3
 seedance2-fast-720p-once-4
 seedance2.5-720p-once
-seedance2.5-flash-480p-once-1
-seedance2.5-flash-720p-once-1
+seedance2.5-flash-480p-once-2
+seedance2.5-flash-720p-once-2
 wan3-1080p-once
 wan3-720p-once
 ```
+
+> **2026-11-26 更新**：上游同步已将 `seedance2.5-flash-480p-once-1` / `seedance2.5-flash-720p-once-1` 替换为 `-once-2`；当前生产渠道 69 与 A3 `plan` 返回 `-once-2`。`-once-1` 仅保留在历史记录中，不得作为当前调用清单。
 
 调用必须传 `X-Route-Group: plan`。`plan` 的池级语义为按次视频；具体价格、时长和素材限制仍以每个精确模型的目录价格和接口说明为准。
 

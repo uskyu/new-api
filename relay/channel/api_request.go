@@ -507,6 +507,10 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
+	if retryAfter := strings.TrimSpace(resp.Header.Get("Retry-After")); retryAfter != "" &&
+		len(retryAfter) <= 256 && !strings.ContainsAny(retryAfter, "\r\n") {
+		c.Set(string(appconstant.ContextKeyUpstreamRetryAfter), retryAfter)
+	}
 
 	_ = req.Body.Close()
 	_ = c.Request.Body.Close()

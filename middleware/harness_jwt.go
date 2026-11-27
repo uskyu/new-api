@@ -173,9 +173,14 @@ func abortWithHarnessUnauthorized(c *gin.Context) {
 	//
 	// The code is part of the published contract: a rejected platform credential
 	// answers GATEWAY_UNAUTHORIZED, the same code the read scopes use for a missing
-	// permission. Reusing the dashboard's token message here left the code empty,
-	// so a client branching on the contract could not tell a refused credential
-	// from an unrelated gateway error.
+	// permission. Internal gateway routes use the contract envelope; model routes
+	// keep the native OpenAI/Claude shape and rely on X-NewAPI-Request-Id.
+	if IsHarnessInternalPath(c) {
+		WriteHarnessContractError(c, http.StatusUnauthorized,
+			string(harnessUnauthorizedCode),
+			"a verified Harness credential is required", false, nil)
+		return
+	}
 	abortWithOpenAiMessage(c, http.StatusUnauthorized,
 		"a verified Harness credential is required", harnessUnauthorizedCode)
 }

@@ -80,6 +80,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	var (
 		newAPIError *types.NewAPIError
 		ws          *websocket.Conn
+		// harnessUpstreamFailure keeps the last real upstream failure so a later
+		// "no candidate/model_not_found" marker cannot hide a 429/5xx that actually
+		// happened. It is only used for verified Harness callers.
+		harnessUpstreamFailure *types.NewAPIError
 	)
 
 	if relayFormat == types.RelayFormatOpenAIRealtime {
@@ -95,6 +99,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
+			newAPIError = normalizeHarnessRelayError(c, newAPIError)
+			if newAPIError.StatusCode == http.StatusTooManyRequests {
+				setRelayRetryAfter(c)
+			}
 			service.RecordRequestPolicyTermination(c, newAPIError)
 			logger.LogError(c, common.LogText("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			streamResponse := relayFormat != types.RelayFormatOpenAIRealtime &&
@@ -196,6 +204,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		relayInfo.RetryIndex = retryParam.GetRetry()
 		channel, channelErr := getChannel(c, relayInfo, retryParam)
 		if channelErr != nil {
+			if _, isHarness := middleware.GetHarnessPrincipal(c); isHarness &&
+				channelErr.GetErrorCode() == types.ErrorCodeGetChannelFailed {
+				// The pool has no usable candidate. V2.3 fixes the wire contract at
+				// 503 model_not_found; the internal selection reason stays in the
+				// policy/error log.
+				channelErr = types.NewErrorWithStatusCode(errors.New(channelErr.Error()),
+					types.ErrorCodeModelNotFound, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
+			}
 			logger.LogError(c, channelErr.Error())
 			newAPIError = channelErr
 			break
@@ -244,6 +260,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
+		if _, isHarness := middleware.GetHarnessPrincipal(c); isHarness && harnessUpstreamFailureCandidate(newAPIError) {
+			harnessUpstreamFailure = newAPIError
+		}
 
 		decision := service.DecideRelayRetry(c, newAPIError, retryLimit-retryParam.GetRetry())
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
@@ -252,6 +271,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if decision.Action != "retry" {
 			break
 		}
+	}
+
+	if _, isHarness := middleware.GetHarnessPrincipal(c); isHarness && harnessUpstreamFailure != nil &&
+		newAPIError != nil &&
+		(newAPIError.GetErrorCode() == types.ErrorCodeModelNotFound ||
+			newAPIError.GetErrorCode() == types.ErrorCodeGetChannelFailed) {
+		// A real upstream failure happened earlier; do not let the final
+		// no-candidate marker erase it. The caller sees the upstream class.
+		newAPIError = harnessUpstreamFailure
 	}
 
 	useChannel := c.GetStringSlice("use_channel")
@@ -451,6 +479,11 @@ func RelayNotFound(c *gin.Context) {
 	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, private, max-age=0")
 	c.Header("Pragma", "no-cache")
 	c.Header("Expires", "0")
+	if middleware.IsHarnessInternalPath(c) {
+		middleware.WriteHarnessContractError(c, http.StatusNotFound,
+			"REQUEST_NOT_FOUND", "unknown gateway operation", false, nil)
+		return
+	}
 	err := types.OpenAIError{
 		Message: fmt.Sprintf("Invalid URL (%s %s)", c.Request.Method, c.Request.URL.Path),
 		Type:    "invalid_request_error",
@@ -655,7 +688,12 @@ func executeTaskSubmissionWith(
 			channel, channelErr = getChannel(c, relayInfo, retryParam)
 			if channelErr != nil {
 				logger.LogError(c, channelErr.Error())
-				taskErr = service.TaskErrorWrapperLocal(channelErr.Err, "get_channel_failed", channelErr.StatusCode)
+				code, status := "get_channel_failed", channelErr.StatusCode
+				if _, isHarness := middleware.GetHarnessPrincipal(c); isHarness &&
+					channelErr.GetErrorCode() == types.ErrorCodeGetChannelFailed {
+					code, status = string(types.ErrorCodeModelNotFound), http.StatusServiceUnavailable
+				}
+				taskErr = service.TaskErrorWrapperLocal(channelErr.Err, code, status)
 				break
 			}
 		}
@@ -709,6 +747,19 @@ func executeTaskSubmissionWith(
 	if len(useChannel) > 1 {
 		retryLogStr := common.LogText("retry: %s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
+	}
+
+	if _, isHarness := middleware.GetHarnessPrincipal(c); isHarness && taskErr != nil {
+		// Media submission follows the same class rules as text calls: a missing
+		// candidate is a routing miss (503 model_not_found), while an actual
+		// upstream 5xx must not be flattened into a plain 500 or model_not_found.
+		if taskErr.Code == "get_channel_failed" {
+			taskErr.Code = string(types.ErrorCodeModelNotFound)
+			taskErr.StatusCode = http.StatusServiceUnavailable
+		} else if taskErr.StatusCode >= http.StatusInternalServerError &&
+			taskErr.StatusCode != http.StatusServiceUnavailable && !taskErr.LocalError {
+			taskErr.StatusCode = http.StatusBadGateway
+		}
 	}
 
 	if taskErr != nil {
@@ -936,6 +987,7 @@ func respondTaskSubmissionError(c *gin.Context, taskErr *taskdto.TaskError) {
 func respondTaskError(c *gin.Context, taskErr *taskdto.TaskError) {
 	if taskErr.StatusCode == http.StatusTooManyRequests {
 		taskErr.Message = i18n.T(c, i18n.MsgRelayGroupUpstreamSaturated)
+		setRelayRetryAfter(c)
 	}
 	c.JSON(taskErr.StatusCode, taskErr)
 }

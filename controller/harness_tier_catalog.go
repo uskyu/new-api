@@ -137,6 +137,11 @@ func harnessTierCatalogCapabilities(endpointTypes []constant.EndpointType) []str
 // the platform's model list follows channel changes automatically and the catalog
 // can never advertise a model the pool cannot route.
 func buildHarnessTierCatalog(pricingByModel map[string]model.Pricing) []harnessTierCatalogItem {
+	items, _ := buildHarnessTierCatalogWithError(pricingByModel)
+	return items
+}
+
+func buildHarnessTierCatalogWithError(pricingByModel map[string]model.Pricing) ([]harnessTierCatalogItem, error) {
 	config := setting.GetHarnessCatalogConfig()
 	items := make([]harnessTierCatalogItem, 0, len(config.Tiers))
 	for _, tier := range config.Tiers {
@@ -144,7 +149,10 @@ func buildHarnessTierCatalog(pricingByModel map[string]model.Pricing) []harnessT
 		// would send the platform a model it can never call, so it is dropped
 		// here: the catalog lists exactly the models that are both routable and
 		// billable, which is the set A1-A9 can actually serve.
-		routable := model.ResourcePoolModels(tier.ID)
+		routable, err := model.ResourcePoolModelsWithError(tier.ID)
+		if err != nil {
+			return nil, err
+		}
 		models := make([]string, 0, len(routable))
 		capabilities := make([]string, 0, 3)
 		for _, modelName := range routable {
@@ -168,7 +176,7 @@ func buildHarnessTierCatalog(pricingByModel map[string]model.Pricing) []harnessT
 			Capabilities: capabilities,
 		})
 	}
-	return items
+	return items, nil
 }
 
 // harnessTierCatalogModelIsBillable reports whether a price is configured for
@@ -237,13 +245,15 @@ type harnessTierCatalogErrorBody struct {
 	Retryable bool   `json:"retryable"`
 }
 
-// writeHarnessTierCatalogError renders the contract error body.
-func writeHarnessTierCatalogError(c *gin.Context, status int, code, message string) {
-	c.JSON(status, harnessTierCatalogErrorEnvelope{Error: harnessTierCatalogErrorBody{
-		Code:      code,
-		Message:   message,
-		Retryable: false,
-	}})
+// writeHarnessTierCatalogError renders the contract error body. The helper adds
+// request_id and uses retryable=true for 5xx; details can carry the missing
+// scope without changing the three-field public shape of successful reads.
+func writeHarnessTierCatalogError(c *gin.Context, status int, code, message string, details ...map[string]any) {
+	var detail map[string]any
+	if len(details) > 0 {
+		detail = details[0]
+	}
+	middleware.WriteHarnessContractError(c, status, code, message, middleware.HarnessRetryable(status), detail)
 }
 
 // GetHarnessTierCatalog serves A3.
@@ -266,16 +276,22 @@ func GetHarnessTierCatalog(c *gin.Context) {
 	// granted only ledger access must not learn which tiers an operator sells.
 	if !slices.Contains(principal.Scopes, harnessCatalogReadScope) {
 		writeHarnessTierCatalogError(c, http.StatusForbidden,
-			"GATEWAY_UNAUTHORIZED", "the credential lacks the "+harnessCatalogReadScope+" scope")
+			"GATEWAY_UNAUTHORIZED", "the credential lacks the "+harnessCatalogReadScope+" scope",
+			map[string]any{"required_scope": harnessCatalogReadScope})
 		return
 	}
 
-	items := buildHarnessTierCatalog(harnessTierCatalogPricingByModel())
+	items, err := buildHarnessTierCatalogWithError(harnessTierCatalogPricingByModel())
+	if err != nil {
+		writeHarnessTierCatalogError(c, http.StatusInternalServerError,
+			"GATEWAY_UPSTREAM", "the gateway could not render its catalog")
+		return
+	}
 
 	// The fingerprint covers the rendered tiers only, never the version: a
 	// version inside its own fingerprint would advance on every read.
-	content, err := common.Marshal(items)
-	if err != nil {
+	content, marshalErr := common.Marshal(items)
+	if marshalErr != nil {
 		writeHarnessTierCatalogError(c, http.StatusInternalServerError,
 			"GATEWAY_UPSTREAM", "the gateway could not render its catalog")
 		return

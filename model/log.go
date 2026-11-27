@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -281,6 +282,16 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
+	if other == nil {
+		other = NewLogOther()
+	}
+	// Persist the platform correlation on failed calls too. Without this, a
+	// request that never reaches settlement can only be reconciled by time and
+	// gateway request id, which is exactly the TVC 2026-11-24 gap.
+	if harnessRequestId := c.GetString(string(constant.ContextKeyHarnessRequestId)); harnessRequestId != "" {
+		other.SetPublic("harness_request_id", harnessRequestId)
+		other.SetPublic("harness_run_id", c.GetString(string(constant.ContextKeyHarnessRunId)))
+	}
 	otherStr := other.JSONString()
 	// 判断是否需要记录 IP
 	needRecordIp := false

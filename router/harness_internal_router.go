@@ -54,11 +54,8 @@ func harnessBatchGetChain(wantParam string, handler gin.HandlerFunc) []gin.Handl
 func harnessVerbGuard(wantParam string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Param("batchGet") != wantParam {
-			c.JSON(404, gin.H{"error": gin.H{
-				"code":    "REQUEST_NOT_FOUND",
-				"message": "unknown gateway operation",
-			}})
-			c.Abort()
+			middleware.WriteHarnessContractError(c, 404,
+				"REQUEST_NOT_FOUND", "unknown gateway operation", false, nil)
 			return
 		}
 		c.Next()

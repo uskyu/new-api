@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 )
@@ -26,10 +27,12 @@ const harnessHealthTimeFormat = "2006-01-02T15:04:05.000Z"
 // platform polls liveness and must not receive a success envelope for a "down"
 // gateway.
 type harnessHealthResponse struct {
-	Status           string `json:"status"`
-	InterfaceVersion string `json:"interface_version"`
-	UpstreamBaseline string `json:"upstream_baseline"`
-	Time             string `json:"time"`
+	Status           string                               `json:"status"`
+	InterfaceVersion string                               `json:"interface_version"`
+	UpstreamBaseline string                               `json:"upstream_baseline"`
+	Time             string                               `json:"time"`
+	RequestId        string                               `json:"request_id"`
+	Error            *middleware.HarnessContractErrorBody `json:"error,omitempty"`
 }
 
 // GetHarnessHealth serves B4: liveness, the interface version, and the tracked
@@ -48,11 +51,13 @@ type harnessHealthResponse struct {
 // required for "ok" because a gateway with no enabled channel can accept a request
 // but never serve it.
 func GetHarnessHealth(c *gin.Context) {
+	requestID := middleware.HarnessRequestID(c)
 	response := harnessHealthResponse{
 		Status:           "ok",
 		InterfaceVersion: harnessInterfaceVersion,
 		UpstreamBaseline: harnessUpstreamBaseline,
 		Time:             time.Now().UTC().Format(harnessHealthTimeFormat),
+		RequestId:        requestID,
 	}
 
 	// The nil check comes first: model.PingDB dereferences model.DB, so an
@@ -63,6 +68,13 @@ func GetHarnessHealth(c *gin.Context) {
 	switch {
 	case !dbReachable:
 		response.Status = "down"
+		response.Error = &middleware.HarnessContractErrorBody{
+			Code:      "GATEWAY_UPSTREAM",
+			Message:   "the gateway database is unreachable",
+			Retryable: true,
+			RequestId: requestID,
+			Details:   map[string]any{"status": "down"},
+		}
 		status = http.StatusServiceUnavailable
 	case len(model.GetAllEnableAbilities()) == 0:
 		response.Status = "degraded"

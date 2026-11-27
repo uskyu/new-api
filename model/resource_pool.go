@@ -17,23 +17,73 @@ import (
 // storing it means the catalog can never advertise a model the pool cannot
 // route, and the platform's model list follows channel changes automatically.
 //
-// Only channels that exist and are enabled contribute: a disabled channel is
-// temporarily out of service, so its models must not be offered. The result is
-// sorted so the catalog fingerprint cannot depend on map or insert order.
+// A declared model is only offered when the same channel also has an enabled
+// ability for it. Channel declarations and abilities can drift (a manual DB
+// edit, a failed ability refresh after an upstream sync), and an enabled
+// channel's models string alone is not proof that the channel can actually
+// serve the model.
 func ResourcePoolModels(poolID string) []string {
+	models, _ := ResourcePoolModelsWithError(poolID)
+	return models
+}
+
+// ResourcePoolModelsWithError is ResourcePoolModels with the database error
+// surfaced instead of collapsed into an empty pool. The catalog handler must
+// answer 500 rather than publish an empty catalog and advance its version.
+func ResourcePoolModelsWithError(poolID string) ([]string, error) {
 	order, ok := setting.GetIntelligentRoutingGroupChannelOrder(poolID)
 	if !ok || len(order) == 0 {
-		return []string{}
+		return []string{}, nil
 	}
 	channels, err := GetChannelsByIds(order)
 	if err != nil {
 		common.SysLog(common.LogText("failed to load channels for resource pool %q: %v", poolID, err))
-		return []string{}
+		return nil, err
 	}
 	channelByID := make(map[int]*Channel, len(channels))
 	for _, channel := range channels {
 		channelByID[channel.Id] = channel
 	}
+
+	enabledIDs := make([]int, 0, len(order))
+	for _, channelID := range order {
+		channel := channelByID[channelID]
+		if channel != nil && channel.Status == common.ChannelStatusEnabled {
+			enabledIDs = append(enabledIDs, channelID)
+		}
+	}
+	if len(enabledIDs) == 0 {
+		return []string{}, nil
+	}
+
+	// DB is nil in unit tests that only exercise the pure channel-order logic;
+	// in that case preserve the historical behavior and skip the ability filter.
+	var abilityModels map[int]map[string]struct{}
+	var abilityNormalized map[int]map[string]struct{}
+	if DB != nil {
+		var abilities []Ability
+		if err := DB.Where("channel_id IN ? AND enabled = ?", enabledIDs, true).Find(&abilities).Error; err != nil {
+			common.SysLog(common.LogText("failed to load abilities for resource pool %q: %v", poolID, err))
+			return nil, err
+		}
+		abilityModels = make(map[int]map[string]struct{}, len(enabledIDs))
+		abilityNormalized = make(map[int]map[string]struct{}, len(enabledIDs))
+		for _, ability := range abilities {
+			name := strings.TrimSpace(ability.Model)
+			if name == "" {
+				continue
+			}
+			if abilityModels[ability.ChannelId] == nil {
+				abilityModels[ability.ChannelId] = make(map[string]struct{})
+				abilityNormalized[ability.ChannelId] = make(map[string]struct{})
+			}
+			abilityModels[ability.ChannelId][name] = struct{}{}
+			if normalized := ratio_setting.RoutingMatchModelName(name); normalized != "" {
+				abilityNormalized[ability.ChannelId][normalized] = struct{}{}
+			}
+		}
+	}
+
 	seen := make(map[string]struct{}, len(order))
 	models := make([]string, 0, len(order))
 	// Walk the configured order rather than the query result so the union stays
@@ -51,12 +101,30 @@ func ResourcePoolModels(poolID string) []string {
 			if _, exists := seen[name]; exists {
 				continue
 			}
+			if DB != nil && !resourcePoolAbilityAllows(abilityModels[channelID], abilityNormalized[channelID], name) {
+				continue
+			}
 			seen[name] = struct{}{}
 			models = append(models, name)
 		}
 	}
 	sort.Strings(models)
-	return models
+	return models, nil
+}
+
+// resourcePoolAbilityAllows reports whether the channel has an enabled ability
+// for the declared model. Exact names are checked first; the routing-normalized
+// name covers the same aliases channel selection uses.
+func resourcePoolAbilityAllows(exact, normalized map[string]struct{}, modelName string) bool {
+	if _, ok := exact[modelName]; ok {
+		return true
+	}
+	if normalizedName := ratio_setting.RoutingMatchModelName(modelName); normalizedName != "" {
+		if _, ok := normalized[normalizedName]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // CountResourcePoolModelChannels counts how many enabled channels in the pool's

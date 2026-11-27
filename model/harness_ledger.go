@@ -64,7 +64,10 @@ type HarnessLedgerEvent struct {
 	EventType        string `json:"event_type" gorm:"type:varchar(32);default:''"`
 	HarnessRequestId string `json:"harness_request_id" gorm:"type:varchar(64);index:idx_harness_ledger_harness_request_id;index:idx_harness_ledger_batch,priority:1;default:''"`
 	GatewayRequestId string `json:"gateway_request_id" gorm:"type:varchar(64);index:idx_harness_ledger_gateway_request_id;default:''"`
-	RunId            string `json:"run_id" gorm:"type:varchar(64);default:''"`
+	// RunId is varchar(96), wider than the middleware's 80-character contract
+	// limit, so a V2.3 80-character run id is stored and echoed by B1 without
+	// truncation. It has no index; widening it cannot affect index length.
+	RunId            string `json:"run_id" gorm:"type:varchar(96);default:''"`
 	Status           string `json:"status" gorm:"type:varchar(20);default:''"`
 	Currency         string `json:"currency" gorm:"type:varchar(16);default:''"`
 	UsageUnit        string `json:"usage_unit" gorm:"type:varchar(24);default:''"`

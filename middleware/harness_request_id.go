@@ -21,14 +21,15 @@ const (
 	HarnessRunIdContextKey     = "harness_run_id"
 
 	// harnessRequestIdMaxLength and harnessRunIdMaxLength bound the correlation
-	// ids to what the ledger can store. Both columns are varchar(64): a longer
-	// value would pass this check, the call would succeed and be billed, and the
-	// insert would then fail on MySQL with "data too long" — logged, never
-	// returned, so the platform would see a 200 for a request it can never
+	// ids to what the ledger can store. The request id column is varchar(64);
+	// the run id columns are varchar(96) so the V2.3 80-character run id fits.
+	// A longer value would pass this check, the call would succeed and be billed,
+	// and the insert would then fail on MySQL with "data too long" — logged,
+	// never returned, so the platform would see a 200 for a request it can never
 	// reconcile. Accepting no more than the column holds keeps every accepted id
 	// reconcilable.
 	harnessRequestIdMaxLength = 64
-	harnessRunIdMaxLength     = 64
+	harnessRunIdMaxLength     = 80
 )
 
 // RequireHarnessCorrelation rejects a Harness model call that carries no usable

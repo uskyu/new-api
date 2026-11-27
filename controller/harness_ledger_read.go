@@ -32,18 +32,11 @@ type harnessReadErrorBody struct {
 // writeHarnessReadError renders one contract error. The request id comes from
 // the middleware so a caller can correlate the failure with our logs.
 func writeHarnessReadError(c *gin.Context, failure *service.HarnessReadError) {
-	body := harnessReadErrorEnvelope{Error: harnessReadErrorBody{
-		Code:      failure.Code,
-		Message:   failure.Message,
-		Retryable: failure.Retryable,
-		RequestId: c.GetString(common.RequestIdKey),
-		Details:   failure.Details,
-	}}
 	status := failure.StatusCode
 	if status == 0 {
 		status = http.StatusBadRequest
 	}
-	c.JSON(status, body)
+	middleware.WriteHarnessContractError(c, status, failure.Code, failure.Message, failure.Retryable, failure.Details)
 }
 
 // writeHarnessInternalError maps an unexpected failure to GATEWAY_UPSTREAM with

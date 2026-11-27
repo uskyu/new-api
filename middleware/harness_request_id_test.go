@@ -67,15 +67,15 @@ func TestRequireHarnessCorrelationRejectsMissingOrMalformedIds(t *testing.T) {
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name:       "run id at 64 stays accepted",
+			name:       "run id at 80 stays accepted",
 			requestId:  strPtr("hrq_01ABC"),
-			runId:      strPtr(strings.Repeat("r", 64)),
+			runId:      strPtr(strings.Repeat("r", 80)),
 			wantStatus: http.StatusOK,
 		},
 		{
-			name:       "run id at 65 is rejected",
+			name:       "run id at 81 is rejected",
 			requestId:  strPtr("hrq_01ABC"),
-			runId:      strPtr(strings.Repeat("r", 65)),
+			runId:      strPtr(strings.Repeat("r", 81)),
 			wantStatus: http.StatusBadRequest,
 		},
 	}
@@ -130,10 +130,10 @@ func TestRequireHarnessCorrelationLeavesNonHarnessCallersUntouched(t *testing.T)
 }
 
 func TestSanitizeHarnessCorrelationIdHonoursPerHeaderLimits(t *testing.T) {
-	sixtyFour := strings.Repeat("r", 64)
-	assert.Equal(t, sixtyFour, sanitizeHarnessCorrelationId(sixtyFour, harnessRunIdMaxLength),
-		"a 64-character run id fits the ledger column and is kept")
-	assert.Empty(t, sanitizeHarnessCorrelationId(sixtyFour+"r", harnessRunIdMaxLength),
+	eighty := strings.Repeat("r", 80)
+	assert.Equal(t, eighty, sanitizeHarnessCorrelationId(eighty, harnessRunIdMaxLength),
+		"an 80-character run id fits the ledger column and is kept")
+	assert.Empty(t, sanitizeHarnessCorrelationId(eighty+"r", harnessRunIdMaxLength),
 		"a value one character over the column width is dropped rather than truncated")
 	assert.Empty(t, sanitizeHarnessCorrelationId("abc def", harnessRunIdMaxLength))
 	assert.Empty(t, sanitizeHarnessCorrelationId("", harnessRunIdMaxLength))

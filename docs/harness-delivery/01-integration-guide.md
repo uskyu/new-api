@@ -1,10 +1,10 @@
 # Harness 网关接口接入指南
 
-**版本**：V1.2（2026-11-23 修订）\
+**版本**：V1.3（2026-11-27 修订）\
 **测试 Base URL**：`https://testapi.soloai.chat`\
-**对应网关版本**：`harness-api-20261117-b040241`（revision `b04024190`）\
-**A3 目录版本**：`catalog_version=10`\
-**B4 接口版本**：`interface_version=v2`（与本文档 V1.2 不是同一版本号）\
+**对应网关版本**：`harness-api-20261126-882ffc5`（2026-11-27 生产；P0 修复后以新镜像版本为准）\
+**A3 目录版本**：截至 2026-11-27 实测 `catalog_version=v12`；以实际接口响应为准\
+**B4 接口版本**：`interface_version=v2`（与本文档 V1.3 不是同一版本号）\
 **面向**：Harness 后端开发与联调
 
 本文档给出网关侧对外接口的当前调用方法。当前反馈结论见
@@ -207,16 +207,16 @@ ETag: W/"example-catalog-etag"
       "capabilities": []
     }
   ],
-  "catalog_version": "10",
+  "catalog_version": "12",
   "etag": "W/\"example-catalog-etag\""
 }
 ```
 
 > `etag` 与 `models` 均为示例值；JSON 仅说明响应结构，不是完整目录快照。
-> 2026-11-25 对齐后 A3 为 `chat=26`、`video=49`、`plan=17`、`image=10`、
+> 截至 2026-11-27，生产 A3 实测 `catalog_version=v12`，各池为 `chat=30`、`video=49`、`plan=17`、`image=10`、
 > `audio=0`；11-23 的 `video=83`、`plan=80` 为历史目录声明。模型选择以
 > [12-retest-model-list-20261123.md](./12-retest-model-list-20261123.md) 为准，
-> 不要按样例数量做校验。`models` 按模型 id 字典序返回，模型集合会随渠道与价格变化。
+> 不要按样例数量做校验。`models` 按模型 id 字典序返回，模型集合会随渠道与价格变化；`catalog_version` 以实际响应为准，不把某次快照写死。
 
 | 字段 | 说明 |
 | --- | --- |

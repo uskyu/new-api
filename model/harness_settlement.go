@@ -71,9 +71,11 @@ type HarnessSettlement struct {
 	// did not come from the platform, and such a request must not reach the
 	// platform's ledger feed.
 	HarnessRequestId string `json:"harness_request_id" gorm:"type:varchar(64);index:idx_harness_settlement_harness_request_id;default:''"`
-	HarnessRunId     string `json:"harness_run_id" gorm:"type:varchar(64);default:''"`
-	CreatedAt        int64  `json:"created_at" gorm:"bigint;index;default:0"`
-	SettledAt        int64  `json:"settled_at" gorm:"bigint;default:0"`
+	// HarnessRunId is varchar(96), wider than the middleware's 80-character
+	// contract limit, so an async task can settle with the full V2.3 run id.
+	HarnessRunId string `json:"harness_run_id" gorm:"type:varchar(96);default:''"`
+	CreatedAt    int64  `json:"created_at" gorm:"bigint;index;default:0"`
+	SettledAt    int64  `json:"settled_at" gorm:"bigint;default:0"`
 }
 
 func (HarnessSettlement) TableName() string {

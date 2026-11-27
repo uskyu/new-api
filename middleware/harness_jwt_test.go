@@ -507,6 +507,21 @@ func TestRequestIdCorrelatesHarnessHeaders(t *testing.T) {
 	assert.Equal(t, requestId, recorder.Header().Get(NewAPIRequestIdHeader))
 }
 
+func TestRequestIdKeepsEightyCharacterRunId(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	runId := "run_" + strings.Repeat("b", 76) // exactly 80 characters
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Request.Header.Set(HarnessRequestIdHeader, "hrq_01J8TESTREQUESTID")
+	c.Request.Header.Set(HarnessRunIdHeader, runId)
+
+	RequestId()(c)
+
+	assert.Equal(t, runId, GetHarnessRunId(c))
+	assert.Equal(t, runId, c.Request.Context().Value(HarnessRunIdContextKey))
+}
+
 func TestRequestIdIgnoresMalformedHarnessHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, testCase := range []struct {
