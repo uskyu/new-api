@@ -41,6 +41,7 @@ export const useDashboardStats = (
   performanceMetrics,
   navigate,
   t,
+  isAdminUser,
 ) => {
   const groupedStatsData = useMemo(
     () => [
@@ -56,14 +57,18 @@ export const useDashboardStats = (
             trendData: [],
             trendColor: '#3b82f6',
           },
-          {
-            title: t('历史消耗'),
-            value: renderQuota(userState?.user?.used_quota),
-            icon: <IconHistogram />,
-            avatarColor: 'purple',
-            trendData: [],
-            trendColor: '#8b5cf6',
-          },
+          ...(isAdminUser
+            ? [
+                {
+                  title: t('历史消耗'),
+                  value: renderQuota(userState?.user?.used_quota),
+                  icon: <IconHistogram />,
+                  avatarColor: 'purple',
+                  trendData: [],
+                  trendColor: '#8b5cf6',
+                },
+              ]
+            : []),
         ],
       },
       {
@@ -144,6 +149,7 @@ export const useDashboardStats = (
       performanceMetrics,
       navigate,
       t,
+      isAdminUser,
     ],
   );
 
