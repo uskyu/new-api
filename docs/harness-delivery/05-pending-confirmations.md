@@ -192,7 +192,7 @@ HTTP 400 REQUEST_INVALID
 ### 对 Harness 的要求
 
 - [ ] 所有模型调用（A1/A2/A4/A9）都必须同时携带两个关联头
-- [ ] 两个值都 ≤64 字符，字符集 `A-Z a-z 0-9 - _`
+- [ ] `X-Harness-Request-Id` ≤64 字符、`X-Harness-Run-Id` ≤80 字符，字符集 `A-Z a-z 0-9 - _`
 
 ---
 
@@ -235,7 +235,7 @@ total_amount = base_amount × group_ratio
 
 | 项 | 行为 |
 | --- | --- |
-| `X-Harness-Run-Id` | **必填**，≤64 字符。会写入每条 B1/B3 账本行，并在 B1 事件中返回 |
+| `X-Harness-Run-Id` | **必填**，≤80 字符。会写入每条 B1/B3 账本行，并在 B1 事件中返回 |
 | `X-Harness-Request-Id` | 必填，≤64 字符。账本主键，B1/B3 均按它查询 |
 | `X-Route-Group` | **可选**，仅对通过 Harness JWT 校验的调用方生效。`chat` 模型不传；`video` 池模型传 `video`；`image` 池模型传 `image`；`plan` 池模型传 `plan`；传未知池返回 403 |
 | `model` 字段 | 必须填 A3 `models[]` 中的真实模型 id，不是池 id。路由由网关决定，Harness 不选择档位 |

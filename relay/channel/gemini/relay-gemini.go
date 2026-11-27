@@ -217,6 +217,9 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			sr.Stop(streamErr)
 			return
 		}
+		if corrections := geminiResponse.NormalizeInlineDataMimeTypes(); len(corrections) > 0 {
+			data = string(patchGeminiInlineDataMimeJSON([]byte(data), corrections))
+		}
 
 		if len(geminiResponse.Candidates) == 0 && geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
 			info.PerformanceBusinessRejection = true

@@ -134,15 +134,18 @@ func TestHarnessGatewayEndToEnd(t *testing.T) {
 		})
 	})
 
-	// One settled ledger event the read APIs must return.
+	// One settled ledger event the read APIs must return. The run id is the full
+	// V2.3 80-character maximum, so this also proves the widened column and the
+	// B1 echo agree end to end.
 	common.QuotaPerUnit = 500_000
 	observedAt := time.Now().Add(-5 * time.Second).UnixMilli()
+	e2eRunId := strings.Repeat("r", 80)
 	require.NoError(t, model.AppendHarnessLedgerEvent(&model.HarnessLedgerEvent{
 		Stream:           model.HarnessLedgerStreamUsage,
 		EventType:        model.HarnessLedgerEventTypeUsage,
 		HarnessRequestId: "hrq_e2e_http",
 		GatewayRequestId: "gw_e2e_http",
-		RunId:            "run_e2e_http",
+		RunId:            e2eRunId,
 		Status:           model.HarnessLedgerStatusSettled,
 		UsageUnit:        "token",
 		PromptTokens:     11,
@@ -167,6 +170,7 @@ func TestHarnessGatewayEndToEnd(t *testing.T) {
 	}))
 
 	engine := gin.New()
+	engine.Use(middleware.RequestId())
 	SetHarnessInternalRouter(engine)
 
 	token := harnessE2ESign(t, key, "kid-e2e", "gateway.usage.read", "gateway.cost.read", "gateway.health.read", "gateway.catalog.read")
@@ -195,6 +199,7 @@ func TestHarnessGatewayEndToEnd(t *testing.T) {
 		Items []struct {
 			EventId   string `json:"event_id"`
 			RequestId string `json:"request_id"`
+			RunId     string `json:"run_id"`
 			Usage     struct {
 				// Pointers on purpose: "not measured" is published as JSON null, and
 				// a plain int would decode null as 0 and let a broken wire pass.
@@ -209,6 +214,7 @@ func TestHarnessGatewayEndToEnd(t *testing.T) {
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &usagePage))
 	require.Len(t, usagePage.Items, 1)
 	assert.Equal(t, "hrq_e2e_http", usagePage.Items[0].RequestId)
+	assert.Equal(t, e2eRunId, usagePage.Items[0].RunId, "B1 must echo the full 80-character run id")
 	require.NotNil(t, usagePage.Items[0].Usage.InputTokens, "a measured split must serialize as a number")
 	require.NotNil(t, usagePage.Items[0].Usage.OutputTokens)
 	assert.Equal(t, 11, *usagePage.Items[0].Usage.InputTokens)

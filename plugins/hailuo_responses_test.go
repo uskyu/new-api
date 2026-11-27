@@ -159,7 +159,7 @@ func TestHailuoArtifactContentProxy(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, &channel.TaskContentRequest{URL: signedURL, Method: http.MethodGet, Credentialless: true}, descriptor)
+			assert.Equal(t, &channel.TaskContentRequest{URL: signedURL, Method: http.MethodGet, Credentialless: true, MimeType: "video/mp4"}, descriptor)
 		})
 	}
 }
@@ -784,9 +784,10 @@ func TestHailuoThroughNewAPIGateway(t *testing.T) {
 				"task_id": "task_pub", "status": "Success", "file_id": "f1", "video_width": 1920, "video_height": 1080, "base_resp": success,
 			}},
 			wantContent: &channel.TaskContentRequest{
-				URL:     "https://gateway.example/v1/tasks/task_pub/artifacts/video/content",
-				Method:  http.MethodHead,
-				Headers: map[string]string{"Authorization": "Bearer sk-gateway"},
+				URL:      "https://gateway.example/v1/tasks/task_pub/artifacts/video/content",
+				Method:   http.MethodHead,
+				Headers:  map[string]string{"Authorization": "Bearer sk-gateway"},
+				MimeType: "video/mp4",
 			},
 		},
 		{
@@ -803,7 +804,7 @@ func TestHailuoThroughNewAPIGateway(t *testing.T) {
 				"id": "task_pub", "status": "succeeded", "resolution": "2K", "content": map[string]any{"url": "https://cdn.example/h3.mp4"},
 				"usage": map[string]any{"output_seconds": 8, "input_seconds": 7.5, "input_image_count": 0},
 			}}},
-			wantContent: &channel.TaskContentRequest{URL: "https://cdn.example/h3.mp4", Method: http.MethodHead, Credentialless: true},
+			wantContent: &channel.TaskContentRequest{URL: "https://cdn.example/h3.mp4", Method: http.MethodHead, Credentialless: true, MimeType: "video/mp4"},
 		},
 		{
 			name: "H3 failed by the gateway poller", presenter: "h3TaskStatus", wantStatus: "FAILURE", wantReason: "task timed out",

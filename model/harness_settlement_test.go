@@ -189,6 +189,28 @@ func TestHarnessSettlementPersistenceAcrossDialects(t *testing.T) {
 	}
 }
 
+func TestHarnessSettlementStoresEightyCharacterRunId(t *testing.T) {
+	runId := strings.Repeat("r", 80)
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			useHarnessSettlementDB(t, dialect)
+			row := &HarnessSettlement{
+				RequestId:        "req-80-run-" + dialect,
+				Status:           HarnessSettlementStatusSettled,
+				ModelName:        "seedance2-fast-720p-once-1",
+				HarnessRequestId: "hrq-80-run-" + dialect,
+				HarnessRunId:     runId,
+			}
+			require.NoError(t, UpsertHarnessSettlement(row))
+
+			var stored HarnessSettlement
+			require.NoError(t, DB.Where("request_id = ?", row.RequestId).First(&stored).Error)
+			assert.Equal(t, runId, stored.HarnessRunId,
+				"an 80-character run id must round-trip through the widened column")
+		})
+	}
+}
+
 func TestHarnessSettlementRejectsRowsWithoutRequestId(t *testing.T) {
 	require.NoError(t, DB.AutoMigrate(&HarnessSettlement{}))
 	t.Cleanup(func() { DB.Exec("DELETE FROM harness_settlements") })

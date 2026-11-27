@@ -20,7 +20,7 @@
 | 内容（可选） | `HEAD /v1/videos/{task_id}/content` | 探测大小/类型；历史 TA token 模型曾出现 HEAD 502，相关模型已下架，见第 4、7 节 |
 
 所有接口使用 Harness JWT，scope 为 `gateway.chat`。**提交接口**还必须带
-`X-Harness-Request-Id` 和 `X-Harness-Run-Id`（均 ≤64 字符）；查询和内容接口
+`X-Harness-Request-Id`（≤64 字符）和 `X-Harness-Run-Id`（≤80 字符）；查询和内容接口
 只需要 JWT。
 
 当前模型池与模型 id 以 A3 `GET /v1/models` 和
@@ -284,7 +284,7 @@ TA token 与 `grok-video1.5-480p-second` 的历史成功记录已从当前样例
 
 ## 8. 2026-11-23 复测与对账要求
 
-1. 每次模型调用携带 `X-Harness-Request-Id` 和 `X-Harness-Run-Id`，均为 1–64 字符。
+1. 每次模型调用携带 `X-Harness-Request-Id`（1–64 字符）和 `X-Harness-Run-Id`（1–80 字符）。
 2. `video` / `plan` 必须显式传对应 `X-Route-Group`；先核对第 12 号文档的精确
    模型 id，不要把 A3 条目数当成可调数量。
 3. 视频提交成功后只轮询原 task id，不因轮询超时盲目重提。

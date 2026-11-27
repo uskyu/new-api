@@ -354,14 +354,14 @@ func TaskArtifactContent(c *gin.Context) {
 		writeTaskArtifactProjectionError(c, err)
 		return
 	}
-	found := false
-	for _, artifact := range artifacts {
-		if artifact.Key == artifactKey {
-			found = true
+	var artifact relaychannel.TaskArtifact
+	for _, candidate := range artifacts {
+		if candidate.Key == artifactKey {
+			artifact = candidate
 			break
 		}
 	}
-	if !found {
+	if artifact.Key == "" {
 		writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 		return
 	}
@@ -392,6 +392,9 @@ func TaskArtifactContent(c *gin.Context) {
 		}
 		writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_plugin_error", "Artifact content plugin failed")
 		return
+	}
+	if strings.TrimSpace(descriptor.MimeType) == "" {
+		descriptor.MimeType = artifact.MimeType
 	}
 	if err := proxyTaskMedia(c, task, descriptor); err != nil {
 		writeTaskMediaProxyError(c, err)

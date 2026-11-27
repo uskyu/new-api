@@ -38,7 +38,7 @@ Harness 不能假设"每条 B3 事件都对应一条 B1 事件"。
 | `event_type` | string | ✓ | `usage` / `usage_correction` |
 | `request_id` | string | ✓ | Harness Request ID（`X-Harness-Request-Id`） |
 | `gateway_request_id` | string | ✓ | New API 请求 ID |
-| `run_id` | string | ✓ | Harness Run ID（`X-Harness-Run-Id`），必填且 1–64 字符，恒非空 |
+| `run_id` | string | ✓ | Harness Run ID（`X-Harness-Run-Id`），必填且 1–80 字符，恒非空 |
 | `usage_unit` | string | ✓ | 当前恒为 `token`，是已知字段限制；不表示媒体按 Token 计费（见 6.1） |
 | `usage` | object | ✓ | 见 2.1 |
 | `usage_source` | string | ✓ | `upstream` / `estimated` / `unavailable` |
@@ -47,11 +47,15 @@ Harness 不能假设"每条 B3 事件都对应一条 B1 事件"。
 | `record_version` | int | ✓ | 从 1 开始 |
 | `supersedes_event_id` | string\|null | ✓ | 首次为 `null` |
 
-`run_id` 来自请求头 `X-Harness-Run-Id`。该头是模型调用的必填头，1–64 字符，只允许
-`A-Z`、`a-z`、`0-9`、`-`、`_`，不强制前缀或 ULID。缺失、空值、非法字符或超过 64
+`run_id` 来自请求头 `X-Harness-Run-Id`。该头是模型调用的必填头，1–80 字符，只允许
+`A-Z`、`a-z`、`0-9`、`-`、`_`，不强制前缀或 ULID。缺失、空值、非法字符或超过 80
 字符时，网关在转发上游之前返回 `400 REQUEST_INVALID`，不产生费用和 B1/B3 事件，
 因此账本里不会出现 `run_id` 为空的事件。一个 run 可以包含多次模型调用，B1 事件按
-`request_id` 唯一、按 `run_id` 可聚合。
+`request_id` 唯一、按 `run_id` 可聚合。`X-Harness-Request-Id` 仍为 1–64 字符。
+
+存储层：`harness_ledger_events.run_id` 与 `harness_settlements.harness_run_id` 均为
+`varchar(96)`。升级必须先执行 DDL 扩列，再部署新应用，避免 80 字符 Run ID 写入时报
+`data too long` 并导致账本事务回滚。
 
 B3 成本记录按第四轮冻结的字段表**不返回** `run_id`，但账本行仍存储该值；需要时可由
 网关侧补充输出。
@@ -363,3 +367,4 @@ B1 `usage_unit` 和 B3 `billing_basis` 当前都固定为 `token`，这是已知
 | 2026-11-15 | V0.11（修订） | 异步任务用量来源修复：无 Token 用量时 B1 为 `usage_source=unavailable`，`input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_write_tokens` 均为 `null`，`split_known=false`，`total_tokens` 省略；仅有 `total_tokens` 时为 `usage_source=upstream`；B1 只在用量或用量元数据变化时追加事件，结算不再追加同值 `usage_correction`；B3 金额口径不变。已部署 `harness-api-20261115-de7fce8`，真实 Harness JWT 四模型 E2E 通过（Banana/PAI `unavailable`，GPT Image `upstream`，B3 金额不变） |
 | 2026-11-17 | V0.12 | Nano Banana 改为 Gemini 同步 `generateContent`：B1 为 `usage_source=estimated`（prompt Token 估算，图片本身不是 Token 用量），B3 按张固定价；旧异步合同停用。全模型验收结果见 `10-full-model-acceptance-20261117.md`：语言 35/38、图片 10/10、视频 55/61，6 个视频模型为上游阻塞。已部署 `harness-api-20261116-df87870` |
 | 2026-11-23 | V1.2 | Base URL 更新为 `https://testapi.soloai.chat`，对应 `harness-api-20261117-b040241`；Run ID 明确为必填 1–64 字符；异步视频 B1 固定 `unavailable` / Token `null` / `split_known=false` / `total_tokens` 省略；披露 B1 `usage_unit=token` 与 B3 `billing_basis=token` 的已知限制；媒体费用以 B3 `settled` 金额和提交时价格版本为准；补充 Nano Banana 同步、超时与 MIME 注意事项。事实源见第 11、12 号文档 |
+| 2026-11-27 | V1.3 | 当前口径修订：`run_id` / `X-Harness-Run-Id` 放宽为 1–80 字符（`X-Harness-Request-Id` 仍 1–64）；存储列 `harness_ledger_events.run_id`、`harness_settlements.harness_run_id` 为 `varchar(96)`，部署顺序为先扩列再发布应用 |

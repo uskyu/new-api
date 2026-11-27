@@ -489,6 +489,187 @@ func TestTaskArtifactContentFollowsHailuoRetrieveLink(t *testing.T) {
 	assert.Equal(t, []string{"GET range=bytes=0-3 authorization=", "GET range= authorization="}, ossRequests)
 }
 
+// An artifact's declared media type survives a URL without a file extension
+// and an upstream that only labels the bytes as application/octet-stream.
+func TestTaskArtifactContentUsesArtifactMimeTypeForExtensionlessURL(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("artifact-bytes"))
+	}))
+	defer upstream.Close()
+	allowPrivateTaskMediaTest(t)
+	previousMemoryCache := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCache })
+
+	// xAI declares the artifact type but leaves it out of its request.
+	task.Platform = constant.TaskPlatform("xai")
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{
+		Key: "xai", Name: "xAI", Version: "1.0.0", APIVersion: 1,
+	}}
+	task.SetData(map[string]any{
+		"status": "done",
+		"video":  map[string]any{"url": upstream.URL + "/media?Expires=1&Signature=sig"},
+	})
+	require.NoError(t, model.DB.Save(task).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", task.UserId)
+	c.Params = gin.Params{{Key: "key", Value: task.TaskID}, {Key: "artifact_key", Value: "video"}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks/"+task.TaskID+"/artifacts/video/content", nil)
+
+	TaskArtifactContent(c)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "video/mp4", recorder.Header().Get("Content-Type"))
+	assert.Equal(t, "14", recorder.Header().Get("Content-Length"))
+	assert.Equal(t, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "artifact-bytes", recorder.Body.String())
+}
+
+// A declared type wins over an upstream generic type at every method, while
+// range and length stay the upstream values.
+func TestProxyTaskMediaServesDeclaredTypeForGenericUpstream(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	body := []byte("0123456789")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Length", "10")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Header.Get("Range") != "" {
+			w.Header().Set("Content-Range", "bytes 0-3/10")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write(body[:4])
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	defer upstream.Close()
+	allowPrivateTaskMediaTest(t)
+
+	for _, testCase := range []struct {
+		name, method, rangeHeader string
+		status                    int
+		length, body              string
+	}{
+		{name: "HEAD 200", method: http.MethodHead, status: http.StatusOK, length: "10"},
+		{name: "GET 200", method: http.MethodGet, status: http.StatusOK, length: "10", body: string(body)},
+		{name: "Range 206", method: http.MethodGet, rangeHeader: "bytes=0-3", status: http.StatusPartialContent, length: "4", body: string(body[:4])},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(testCase.method, "/v1/tasks/"+task.TaskID+"/artifacts/video/content", nil)
+			if testCase.rangeHeader != "" {
+				c.Request.Header.Set("Range", testCase.rangeHeader)
+			}
+			require.NoError(t, proxyTaskMedia(c, task, &relaychannel.TaskContentRequest{
+				URL: upstream.URL, Method: http.MethodGet, MimeType: "video/mp4",
+			}))
+
+			assert.Equal(t, testCase.status, recorder.Code)
+			assert.Equal(t, "video/mp4", recorder.Header().Get("Content-Type"))
+			assert.Equal(t, testCase.length, recorder.Header().Get("Content-Length"))
+			assert.Equal(t, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
+			assert.Equal(t, testCase.body, recorder.Body.String())
+			if testCase.status == http.StatusPartialContent {
+				assert.Equal(t, "bytes 0-3/10", recorder.Header().Get("Content-Range"))
+			}
+		})
+	}
+}
+
+// Sniffing only identifies a payload from its first bytes, so a range that
+// starts inside the payload keeps the upstream type.
+func TestProxyTaskMediaSniffsOnlyFromResponseStart(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	jpeg := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		switch r.URL.Path {
+		case "/sniff-200":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(jpeg)
+		case "/sniff-from-zero":
+			w.Header().Set("Content-Range", "bytes 0-3/10")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write(jpeg[:4])
+		case "/sniff-middle":
+			w.Header().Set("Content-Range", "bytes 5-8/10")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write(jpeg[:4])
+		case "/clip.mp4":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("plain-bytes"))
+		default:
+			t.Errorf("unexpected upstream path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+	allowPrivateTaskMediaTest(t)
+
+	for _, testCase := range []struct {
+		name, path                string
+		status                    int
+		contentType, body, length string
+		contentRange              string
+	}{
+		{name: "200 sniffs the prefix", path: "/sniff-200", status: http.StatusOK, contentType: "image/jpeg", body: string(jpeg), length: "10"},
+		{name: "206 from zero sniffs", path: "/sniff-from-zero", status: http.StatusPartialContent, contentType: "image/jpeg", body: string(jpeg[:4]), length: "4", contentRange: "bytes 0-3/10"},
+		{name: "206 middle segment does not sniff", path: "/sniff-middle", status: http.StatusPartialContent, contentType: "application/octet-stream", body: string(jpeg[:4]), length: "4", contentRange: "bytes 5-8/10"},
+		{name: "URL extension", path: "/clip.mp4", status: http.StatusOK, contentType: "video/mp4", body: "plain-bytes", length: "11"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks/"+task.TaskID+"/artifacts/video/content", nil)
+
+			require.NoError(t, proxyTaskMedia(c, task, &relaychannel.TaskContentRequest{
+				URL: upstream.URL + testCase.path, Method: http.MethodGet,
+			}))
+
+			assert.Equal(t, testCase.status, recorder.Code)
+			assert.Equal(t, testCase.contentType, recorder.Header().Get("Content-Type"))
+			assert.Equal(t, testCase.length, recorder.Header().Get("Content-Length"))
+			assert.Equal(t, testCase.contentRange, recorder.Header().Get("Content-Range"))
+			assert.Equal(t, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
+			assert.Equal(t, testCase.body, recorder.Body.String())
+		})
+	}
+}
+
+func TestProxyTaskMediaBase64CorrectsDeclaredContentType(t *testing.T) {
+	jpeg := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
+	payload := base64.StdEncoding.EncodeToString(jpeg)
+
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		t.Run(method, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(method, "/content", nil)
+
+			require.NoError(t, writeTaskMediaBase64(c, "image/png", payload))
+
+			assert.Equal(t, http.StatusOK, recorder.Code)
+			assert.Equal(t, "image/jpeg", recorder.Header().Get("Content-Type"))
+			assert.Equal(t, "10", recorder.Header().Get("Content-Length"))
+			assert.Equal(t, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
+			if method == http.MethodHead {
+				assert.Empty(t, recorder.Body.String())
+			} else {
+				assert.Equal(t, jpeg, recorder.Body.Bytes())
+			}
+		})
+	}
+}
+
 func TestProjectedTaskArtifactValidationRejectsAmbiguousIdentity(t *testing.T) {
 	validated, err := validateProjectedTaskArtifacts([]relaychannel.TaskArtifact{
 		{Key: "video-main", Type: "video", MimeType: "video/mp4"},

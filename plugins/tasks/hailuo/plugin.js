@@ -789,7 +789,7 @@ export function buildContentRequest(ctx) {
   if (!fileID) {
     const url = h3ArtifactURL(ctx);
     if (!url) throw new Error("artifact_not_found");
-    return { url: url, method: ctx.clientRequest.method, credentialless: true };
+    return { url: url, method: ctx.clientRequest.method, credentialless: true, mimeType: "video/mp4" };
   }
   // The gateway resolves its MiniMax file itself and serves the video as the
   // artifact of its own task.
@@ -798,6 +798,7 @@ export function buildContentRequest(ctx) {
       url: ctx.baseUrl + "/v1/tasks/" + encodeURIComponent(ctx.upstreamTaskId) + "/artifacts/video/content",
       method: ctx.clientRequest.method,
       headers: { Authorization: "Bearer " + ctx.apiKey },
+      mimeType: "video/mp4",
     };
   }
   // MiniMax serves v1 videos only through the signed download_url that
@@ -816,7 +817,7 @@ export function buildContentRequest(ctx) {
   }
   const url = trimmed(response.body.file && response.body.file.download_url);
   if (!url) throw new Error("artifact_not_found");
-  return { url: url, method: "GET", credentialless: true };
+  return { url: url, method: "GET", credentialless: true, mimeType: "video/mp4" };
 }
 
 export function extractUsageOnComplete(_task, _taskResult, body) {

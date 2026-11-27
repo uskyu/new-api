@@ -11,7 +11,7 @@ GPT Image 2.5/2.6 使用同步 `POST /v1/images/generations`；Nano Banana 的�
 `candidates[].content.parts[].inlineData.data`，**不返回 task id，也不再使用
 `/v1/videos` 异步任务**。所有图片生成提交请求都要带 `X-Route-Group: image`，
 使用 Harness JWT，scope 为 `gateway.chat`；提交接口还需带
-`X-Harness-Request-Id` / `X-Harness-Run-Id`（均 1–64 字符）。
+`X-Harness-Request-Id`（1–64 字符）/ `X-Harness-Run-Id`（1–80 字符）。
 
 > **2026-11-25 实测**：`testapi.soloai.chat` 与 `papi.soloai.chat` 的 OpenResty 代理读超时已放宽到 600 秒。
 > Nano Banana 2.1 1K 公网 44.7 秒返回 200，4K 公网 109.5 秒返回 200；4K 响应约 26.9MB。

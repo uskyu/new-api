@@ -196,7 +196,7 @@ seedance2.5-1080p-token-with-video
 
 ## 8. 复测要求
 
-1. 每次模型调用携带 `X-Harness-Request-Id` 和 `X-Harness-Run-Id`，均为 1–64 字符。
+1. 每次模型调用携带 `X-Harness-Request-Id`（1–64 字符）和 `X-Harness-Run-Id`（1–80 字符）。
 2. `chat` 默认池；`image`、`video`、`plan` 必须显式传对应 `X-Route-Group`。
 3. 不要用响应体 `model` 反查账本；使用请求 ID 关联 B1/B3。
 4. 视频提交成功后只轮询原 task id，不因轮询超时盲目重提。

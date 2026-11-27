@@ -165,13 +165,27 @@ func priceHarnessTierCatalogModels(t *testing.T, modelNames ...string) {
 // writing the status line until the engine's ServeHTTP runs, so a directly
 // invoked handler would report 200 even for c.Status(304).
 func harnessTierCatalogTestRouter(authenticated bool) *gin.Engine {
+	var scopes []string
+	if authenticated {
+		scopes = []string{gatewayCatalogReadScopeForTest}
+	}
+	return harnessTierCatalogTestRouterWithScopes(scopes)
+}
+
+// harnessTierCatalogTestRouterWithScopes installs a verified principal holding
+// exactly the given scopes. A nil slice serves the request without a principal,
+// which is how an unauthenticated caller is modelled.
+func harnessTierCatalogTestRouterWithScopes(scopes []string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
+	// main.go mounts RequestId() globally; the test engine mirrors that so the
+	// contract body can be checked against the correlation header.
+	engine.Use(middleware.RequestId())
 	engine.Use(func(c *gin.Context) {
-		if authenticated {
+		if scopes != nil {
 			c.Set(middleware.HarnessPrincipalContextKey, middleware.HarnessPrincipal{
 				Subject: "harness-gateway",
-				Scopes:  []string{gatewayCatalogReadScopeForTest},
+				Scopes:  scopes,
 				JTI:     "jti-catalog",
 				TokenID: 1,
 			})
@@ -447,6 +461,80 @@ func TestGetHarnessTierCatalogRejectsUnverifiedCaller(t *testing.T) {
 	assert.NotContains(t, recorder.Body.String(), "chat")
 }
 
+// harnessTierCatalogErrorPayload decodes the full A3 error contract, including
+// request_id and details, without relying on the implementation struct.
+type harnessTierCatalogErrorPayload struct {
+	Error struct {
+		Code      string         `json:"code"`
+		Message   string         `json:"message"`
+		Retryable *bool          `json:"retryable"`
+		RequestId string         `json:"request_id"`
+		Details   map[string]any `json:"details"`
+	} `json:"error"`
+}
+
+func decodeHarnessTierCatalogError(t *testing.T, recorder *httptest.ResponseRecorder) harnessTierCatalogErrorPayload {
+	t.Helper()
+	var body harnessTierCatalogErrorPayload
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
+	return body
+}
+
+// TestGetHarnessTierCatalogMissingScopeAnswersContractBody pins the 403 a
+// verified credential without gateway.catalog.read receives: the contract body
+// names the missing scope so the platform can correct its authorization.
+func TestGetHarnessTierCatalogMissingScopeAnswersContractBody(t *testing.T) {
+	setupHarnessTierCatalogTestDB(t, map[string][]string{
+		"chat": {harnessTierCatalogTestTextModelA},
+	})
+	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
+		{ID: "chat", DisplayName: "通用对话", Kind: setting.HarnessCatalogKindText},
+	})
+
+	recorder := httptest.NewRecorder()
+	harnessTierCatalogTestRouterWithScopes([]string{"gateway.usage.read"}).ServeHTTP(recorder,
+		httptest.NewRequest(http.MethodGet, "/internal/v1/gateway/tier-catalog", nil))
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+
+	body := decodeHarnessTierCatalogError(t, recorder)
+	assert.Equal(t, "GATEWAY_UNAUTHORIZED", body.Error.Code)
+	assert.Contains(t, body.Error.Message, gatewayCatalogReadScopeForTest)
+	require.NotNil(t, body.Error.Retryable)
+	assert.False(t, *body.Error.Retryable, "a missing scope is a permanent caller error")
+	require.NotEmpty(t, body.Error.RequestId, "the A3 error must carry request_id")
+	assert.Equal(t, body.Error.RequestId, recorder.Header().Get(middleware.NewAPIRequestIdHeader))
+	assert.Equal(t, gatewayCatalogReadScopeForTest, body.Error.Details["required_scope"])
+	assert.NotContains(t, recorder.Body.String(), harnessTierCatalogTestTextModelA,
+		"a scope failure must not disclose catalog contents")
+}
+
+// TestGetHarnessTierCatalogRenderFailureIsRetryable pins the 5xx contract: a
+// database failure while rendering the catalog is retryable and still
+// correlatable, and the empty catalog is never served as a success.
+func TestGetHarnessTierCatalogRenderFailureIsRetryable(t *testing.T) {
+	setupHarnessTierCatalogTestDB(t, map[string][]string{
+		"chat": {harnessTierCatalogTestTextModelA},
+	})
+	configureHarnessTierCatalogTiers(t, []setting.HarnessCatalogTier{
+		{ID: "chat", DisplayName: "通用对话", Kind: setting.HarnessCatalogKindText},
+	})
+	// Removing the table makes the pool lookup fail the way a database outage
+	// would, without touching the settings path that supplies the tier list.
+	require.NoError(t, model.DB.Migrator().DropTable(&model.Channel{}))
+
+	recorder := requestHarnessTierCatalog(t, "", true)
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+
+	body := decodeHarnessTierCatalogError(t, recorder)
+	assert.Equal(t, "GATEWAY_UPSTREAM", body.Error.Code)
+	assert.NotEmpty(t, body.Error.Message)
+	require.NotNil(t, body.Error.Retryable)
+	assert.True(t, *body.Error.Retryable, "a gateway rendering failure is retryable")
+	require.NotEmpty(t, body.Error.RequestId, "the 5xx must carry request_id")
+	assert.Equal(t, body.Error.RequestId, recorder.Header().Get(middleware.NewAPIRequestIdHeader))
+	assert.NotContains(t, recorder.Body.String(), `"data"`, "a failed render must not answer a catalog")
+}
+
 // TestHarnessTierCatalogCapabilitiesMapping pins the endpoint-type to capability
 // mapping, including the "unknown means empty" rule: the catalog must never claim
 // a capability the gateway cannot verify.
@@ -642,5 +730,12 @@ func TestGetHarnessHealthStatusBranches(t *testing.T) {
 		assert.Equal(t, "v2", body.InterfaceVersion)
 		assert.Equal(t, "45fbb149", body.UpstreamBaseline)
 		assert.Regexp(t, timePattern, body.Time)
+		require.NotEmpty(t, body.RequestId, "the 503 must carry request_id")
+		assert.Equal(t, body.RequestId, recorder.Header().Get(middleware.NewAPIRequestIdHeader))
+		require.NotNil(t, body.Error, "the 503 must carry an error object")
+		assert.Equal(t, "GATEWAY_UPSTREAM", body.Error.Code)
+		assert.NotEmpty(t, body.Error.Message)
+		assert.True(t, body.Error.Retryable, "an unreachable database is retryable")
+		assert.Equal(t, body.RequestId, body.Error.RequestId)
 	})
 }

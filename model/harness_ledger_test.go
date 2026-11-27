@@ -110,6 +110,32 @@ func TestHarnessLedgerMigrateIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestHarnessLedgerStoresEightyCharacterRunId(t *testing.T) {
+	runId := strings.Repeat("r", 80)
+	for _, dialect := range harnessLedgerDialects() {
+		t.Run(dialect, func(t *testing.T) {
+			db := openHarnessLedgerDB(t, dialect)
+			previous := DB
+			DB = db
+			t.Cleanup(func() { DB = previous })
+
+			event := &HarnessLedgerEvent{
+				Stream:           HarnessLedgerStreamUsage,
+				EventType:        HarnessLedgerEventTypeUsage,
+				HarnessRequestId: "hrq_80_run_" + dialect,
+				RunId:            runId,
+				Status:           HarnessLedgerStatusSettled,
+			}
+			require.NoError(t, AppendHarnessLedgerEvent(event))
+
+			var stored HarnessLedgerEvent
+			require.NoError(t, db.Where("event_id = ?", event.EventId).First(&stored).Error)
+			assert.Equal(t, runId, stored.RunId,
+				"an 80-character run id must round-trip through the widened column")
+		})
+	}
+}
+
 func TestHarnessLedgerEventIdIsUniqueAndTimeOrdered(t *testing.T) {
 	const total = 100000
 	seen := make(map[string]struct{}, total)

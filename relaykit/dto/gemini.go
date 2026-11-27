@@ -559,6 +559,55 @@ type GeminiChatResponse struct {
 	HasUsageMetadata bool                      `json:"-"`
 }
 
+// GeminiInlineDataMimeCorrection identifies one inlineData part whose declared
+// MIME type disagreed with its actual first bytes. Callers that emit the raw
+// upstream JSON use the indexes to patch only that field instead of remarshal
+// the whole (possibly multi-megabyte) response.
+type GeminiInlineDataMimeCorrection struct {
+	CandidateIndex int
+	PartIndex      int
+	MimeType       string
+}
+
+// NormalizeInlineDataMimeTypes corrects an upstream image MIME declaration when
+// the base64 payload starts with a recognizable JPEG/PNG/WebP/GIF signature.
+// It only changes parts that are empty, generic, or already declared as an
+// image; a video/audio part is never re-labelled as an image based on a short
+// prefix. The returned corrections let native JSON writers patch the raw bytes.
+func (r *GeminiChatResponse) NormalizeInlineDataMimeTypes() []GeminiInlineDataMimeCorrection {
+	if r == nil {
+		return nil
+	}
+	var corrections []GeminiInlineDataMimeCorrection
+	for candidateIndex := range r.Candidates {
+		candidate := &r.Candidates[candidateIndex]
+		for partIndex := range candidate.Content.Parts {
+			part := &candidate.Content.Parts[partIndex]
+			if part.InlineData == nil || part.InlineData.Data == "" {
+				continue
+			}
+			sniffed := types.DetectBase64MediaContentType(part.InlineData.Data)
+			if sniffed == "" || !strings.HasPrefix(strings.ToLower(sniffed), "image/") {
+				continue
+			}
+			declared := strings.ToLower(strings.TrimSpace(strings.Split(part.InlineData.MimeType, ";")[0]))
+			if declared == sniffed {
+				continue
+			}
+			if declared != "" && !types.IsGenericMediaContentType(declared) && !strings.HasPrefix(declared, "image/") {
+				continue
+			}
+			part.InlineData.MimeType = sniffed
+			corrections = append(corrections, GeminiInlineDataMimeCorrection{
+				CandidateIndex: candidateIndex,
+				PartIndex:      partIndex,
+				MimeType:       sniffed,
+			})
+		}
+	}
+	return corrections
+}
+
 // UnmarshalJSON records whether Gemini returned usageMetadata while preserving
 // the historical wire shape that always marshals the usageMetadata field.
 //

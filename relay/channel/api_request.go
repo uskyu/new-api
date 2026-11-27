@@ -504,6 +504,20 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 			resp.Proto)
 	}
 
+	captureUpstreamResponseHeaders(c, resp)
+
+	_ = req.Body.Close()
+	_ = c.Request.Body.Close()
+	return resp, nil
+}
+
+// captureUpstreamResponseHeaders preserves the upstream request id and the
+// sanitized Retry-After for the final Harness error. It is used by both text and
+// task requests so a media submission 429 can carry the same hint.
+func captureUpstreamResponseHeaders(c *gin.Context, resp *http.Response) {
+	if c == nil || resp == nil {
+		return
+	}
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
@@ -511,10 +525,6 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		len(retryAfter) <= 256 && !strings.ContainsAny(retryAfter, "\r\n") {
 		c.Set(string(appconstant.ContextKeyUpstreamRetryAfter), retryAfter)
 	}
-
-	_ = req.Body.Close()
-	_ = c.Request.Body.Close()
-	return resp, nil
 }
 
 func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {

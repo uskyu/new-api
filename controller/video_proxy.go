@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +24,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
@@ -100,6 +103,9 @@ func VideoProxy(c *gin.Context) {
 							Method:  c.Request.Method,
 							Headers: taskArtifactClientHeaders(c.Request.Header),
 						})
+						if adaptorErr == nil && descriptor != nil && strings.TrimSpace(descriptor.MimeType) == "" {
+							descriptor.MimeType = artifact.MimeType
+						}
 					}
 				}
 				if adaptorErr != nil {
@@ -292,8 +298,24 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 	}
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusPartialContent, http.StatusNotModified, http.StatusRequestedRangeNotSatisfiable:
+		contentType := ""
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusPartialContent {
+			var contentTypeErr error
+			contentType, contentTypeErr = resolveTaskMediaContentType(descriptor, resp)
+			if contentTypeErr != nil {
+				return &taskMediaProxyError{
+					status: http.StatusBadGateway, code: "artifact_upstream_error",
+					message: "Failed to fetch artifact content", err: contentTypeErr,
+				}
+			}
+		}
 		copyTaskMediaResponseHeaders(c.Writer.Header(), resp.Header)
 		setTaskMediaResponseSecurityHeaders(c.Writer.Header())
+		if contentType != "" {
+			// One resolved value replaces every upstream Content-Type.
+			c.Writer.Header().Del("Content-Type")
+			c.Writer.Header().Set("Content-Type", contentType)
+		}
 		c.Status(resp.StatusCode)
 		c.Writer.WriteHeaderNow()
 		if c.Request.Method == http.MethodHead || resp.StatusCode == http.StatusNotModified {
@@ -633,6 +655,171 @@ func copyTaskMediaResponseHeaders(destination, source http.Header) {
 	}
 }
 
+// resolveTaskMediaContentType chooses the one Content-Type the artifact is
+// served with. The artifact's own declaration wins, then an upstream media
+// type, then a filename or URL extension, then the leading bytes when the
+// response starts at offset zero, and last the upstream generic value.
+func resolveTaskMediaContentType(descriptor *relaychannel.TaskContentRequest, resp *http.Response) (string, error) {
+	var fallback string
+	if descriptor != nil {
+		declared := validTaskMediaContentType(descriptor.MimeType)
+		if !types.IsGenericMediaContentType(declared) {
+			return declared, nil
+		}
+		fallback = declared
+	}
+	upstream := validTaskMediaContentType(resp.Header.Get("Content-Type"))
+	if types.IsMediaContentType(upstream) {
+		return upstream, nil
+	}
+	if upstream != "" {
+		fallback = upstream
+	}
+	if dispositionType := taskMediaContentTypeFromExtension(path.Ext(taskMediaDispositionFilename(resp.Header.Get("Content-Disposition")))); dispositionType != "" {
+		return dispositionType, nil
+	}
+	if resp.Request != nil && resp.Request.URL != nil {
+		if urlType := taskMediaContentTypeFromExtension(path.Ext(resp.Request.URL.Path)); urlType != "" {
+			return urlType, nil
+		}
+	}
+	if taskMediaResponseCanSniff(resp) {
+		detected, err := sniffTaskMediaContentType(resp)
+		if err != nil {
+			return "", err
+		}
+		if detected != "" {
+			return detected, nil
+		}
+	}
+	if fallback != "" {
+		return fallback, nil
+	}
+	return "application/octet-stream", nil
+}
+
+func validTaskMediaContentType(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 255 || !httpguts.ValidHeaderFieldValue(value) {
+		return ""
+	}
+	return value
+}
+
+func taskMediaDispositionFilename(disposition string) string {
+	disposition = strings.TrimSpace(disposition)
+	if disposition == "" {
+		return ""
+	}
+	_, params, err := mime.ParseMediaType(disposition)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(params["filename"])
+}
+
+func taskMediaContentTypeFromExtension(ext string) string {
+	switch strings.ToLower(strings.TrimPrefix(ext, ".")) {
+	case "mp4", "m4v":
+		return "video/mp4"
+	case "webm":
+		return "video/webm"
+	case "mov":
+		return "video/quicktime"
+	case "mkv":
+		return "video/x-matroska"
+	case "avi":
+		return "video/x-msvideo"
+	case "mp3":
+		return "audio/mpeg"
+	case "m4a":
+		return "audio/mp4"
+	case "wav":
+		return "audio/wav"
+	case "ogg", "oga":
+		return "audio/ogg"
+	case "flac":
+		return "audio/flac"
+	case "opus":
+		return "audio/opus"
+	case "jpg", "jpeg", "jfif":
+		return "image/jpeg"
+	case "png":
+		return "image/png"
+	case "webp":
+		return "image/webp"
+	case "gif":
+		return "image/gif"
+	case "avif":
+		return "image/avif"
+	case "bmp":
+		return "image/bmp"
+	case "tif", "tiff":
+		return "image/tiff"
+	case "heic":
+		return "image/heic"
+	case "heif":
+		return "image/heif"
+	}
+	return ""
+}
+
+func taskMediaResponseCanSniff(resp *http.Response) bool {
+	if resp == nil || resp.Body == nil {
+		return false
+	}
+	if resp.StatusCode == http.StatusOK {
+		return true
+	}
+	if resp.StatusCode != http.StatusPartialContent {
+		return false
+	}
+	// A range that does not start at zero begins inside the payload, so its
+	// bytes cannot identify the container.
+	return taskMediaRangeStartsAtZero(resp.Header.Get("Content-Range"))
+}
+
+func taskMediaRangeStartsAtZero(contentRange string) bool {
+	contentRange = strings.TrimSpace(contentRange)
+	if !strings.HasPrefix(strings.ToLower(contentRange), "bytes ") {
+		return false
+	}
+	start, _, ok := strings.Cut(strings.TrimSpace(contentRange[len("bytes "):]), "-")
+	if !ok {
+		return false
+	}
+	offset, err := strconv.ParseInt(strings.TrimSpace(start), 10, 64)
+	return err == nil && offset == 0
+}
+
+type taskMediaReplayBody struct {
+	io.Reader
+	io.Closer
+}
+
+// sniffTaskMediaContentType inspects at most the sniff window and replays it
+// before the rest of the upstream body. Content-Length, Content-Range and the
+// status stay those of the upstream response.
+func sniffTaskMediaContentType(resp *http.Response) (string, error) {
+	if resp == nil || resp.Body == nil {
+		return "", nil
+	}
+	sample := make([]byte, types.MediaSniffSampleBytes)
+	n, err := io.ReadFull(resp.Body, sample)
+	switch {
+	case err == nil, errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+	default:
+		return "", err
+	}
+	sample = sample[:n]
+	upstreamBody := resp.Body
+	resp.Body = &taskMediaReplayBody{
+		Reader: io.MultiReader(bytes.NewReader(sample), upstreamBody),
+		Closer: upstreamBody,
+	}
+	return types.DetectMediaContentType(sample), nil
+}
+
 func setTaskMediaResponseSecurityHeaders(header http.Header) {
 	header.Set("Cache-Control", "private, no-store")
 	header.Set("Content-Security-Policy", "sandbox; default-src 'none'")
@@ -677,14 +864,19 @@ func writeVideoDataURL(c *gin.Context, dataURL string) error {
 }
 
 // writeTaskMediaBase64 answers with media the upstream delivered as base64,
-// decoding it while it streams; HEAD gets the headers only. The media type
-// defaults to video/mp4.
+// decoding it while it streams; HEAD gets the headers only. The leading bytes
+// of the decoded payload correct a declared media type that names another
+// known format, and the media type defaults to video/mp4.
 func writeTaskMediaBase64(c *gin.Context, mimeType, payload string) error {
 	if mimeType == "" {
 		mimeType = "video/mp4"
 	}
 	if len(mimeType) > 255 || !httpguts.ValidHeaderFieldValue(mimeType) {
 		return fmt.Errorf("invalid data url media type")
+	}
+	if detected := types.DetectBase64MediaContentType(payload); detected != "" &&
+		strings.ToLower(strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0])) != detected {
+		mimeType = detected
 	}
 
 	var encoding *base64.Encoding

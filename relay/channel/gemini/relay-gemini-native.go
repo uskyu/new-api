@@ -35,6 +35,9 @@ func GeminiTextGenerationHandler(c *gin.Context, info *relaycommon.RelayInfo, re
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
+	if corrections := geminiResponse.NormalizeInlineDataMimeTypes(); len(corrections) > 0 {
+		responseBody = patchGeminiInlineDataMimeJSON(responseBody, corrections)
+	}
 	info.ObserveResponseModel(ojson.GetBytes(responseBody, "modelVersion").Str)
 	var grounding geminiGroundingCounter
 	grounding.observe(&geminiResponse)

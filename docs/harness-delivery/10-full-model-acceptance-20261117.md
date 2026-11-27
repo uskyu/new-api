@@ -148,7 +148,7 @@ B1 的 Token 数不代表图片费用；图片按张计费，费用只看 B3。`
 | 查询 | `GET /v1/videos/{task_id}` |
 | 内容 | `GET /v1/videos/{task_id}/content`（支持 `Range`/`HEAD`，按模型能力） |
 
-所有提交带 `Authorization: Bearer <gateway-token>`；任务提交还需 `X-Harness-Request-Id` / `X-Harness-Run-Id`（≤64 字符）。轮询和下载只需要 token。
+所有提交带 `Authorization: Bearer <gateway-token>`；任务提交还需 `X-Harness-Request-Id`（≤64 字符） / `X-Harness-Run-Id`（≤80 字符）。轮询和下载只需要 token。
 
 ### 4.2 各家族请求体
 
@@ -325,10 +325,12 @@ Muse：
 | A3 | `GET /v1/models`，`catalog_version=10` |
 | `Authorization` | 按接口使用 `Bearer $HARNESS_JWT` 或对应认证头；不在文档中写入真实 JWT/Key |
 | `X-Harness-Request-Id` | 必填，1–64 字符 |
-| `X-Harness-Run-Id` | 必填，1–64 字符 |
+| `X-Harness-Run-Id` | 必填，1–80 字符 |
 | `X-Route-Group` | `chat` 为默认池；`image`、`video`、`plan` 调用必须显式传对应池 |
 
-两个 Harness ID 的合法字符均为 `A-Z`、`a-z`、`0-9`、`-`、`_`，不强制 `hrq_` / `run_` 前缀，也不校验 ULID。缺失、空值、非法字符或超过 64 字符会在转发上游前返回 `400 REQUEST_INVALID`，不产生费用和 B1/B3 事件。
+两个 Harness ID 的合法字符均为 `A-Z`、`a-z`、`0-9`、`-`、`_`，不强制 `hrq_` / `run_` 前缀，也不校验 ULID。缺失、空值、非法字符，或 `X-Harness-Request-Id` 超过 64 字符、`X-Harness-Run-Id` 超过 80 字符，会在转发上游前返回 `400 REQUEST_INVALID`，不产生费用和 B1/B3 事件。
+
+> **2026-11-27 更新**：Run ID 上限已从 64 放宽到 80 字符，Request ID 仍为 64；本节为当前请求头口径，不改变下方 2026-11-17 的历史验收结果。
 
 ### 8.2 A3 目录候选与初步可调（2026-11-23 历史快照）
 

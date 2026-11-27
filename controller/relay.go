@@ -273,14 +273,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}
 
-	if _, isHarness := middleware.GetHarnessPrincipal(c); isHarness && harnessUpstreamFailure != nil &&
-		newAPIError != nil &&
-		(newAPIError.GetErrorCode() == types.ErrorCodeModelNotFound ||
-			newAPIError.GetErrorCode() == types.ErrorCodeGetChannelFailed) {
-		// A real upstream failure happened earlier; do not let the final
-		// no-candidate marker erase it. The caller sees the upstream class.
-		newAPIError = harnessUpstreamFailure
-	}
+	newAPIError = chooseHarnessRelayFailure(c, newAPIError, harnessUpstreamFailure)
 
 	useChannel := c.GetStringSlice("use_channel")
 	if len(useChannel) > 1 {

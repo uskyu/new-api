@@ -130,7 +130,7 @@ A3 返回的是资源池和渠道声明的真实模型 ID。2026-11-25 已将 21
 
 ### 3.5 已废止的旧口径
 
-- Run ID 上限不是 80，而是必填且 1–64 字符；两个关联 ID 均只允许 `A-Z`、`a-z`、`0-9`、`-`、`_`，不强制前缀或 ULID。
+- Run ID 上限曾按 64 校准；**2026-11-27 起放宽为必填 1–80 字符**，Request ID 仍为 1–64 字符；两个关联 ID 均只允许 `A-Z`、`a-z`、`0-9`、`-`、`_`，不强制前缀或 ULID。
 - Nano Banana 当前使用同步 Gemini 图片协议，不返回 task id；旧异步 `/v1/videos` 说明不代表当前正式协议。
 - A3 条目不等于当前均可直接调用；不得把历史 TA Token 模型或已下架 ID 当作当前在售模型。
 - 异步视频 B1 没有真实 usage 时为 `usage_source=unavailable`、Token 字段 `null`、`split_known=false`，`total_tokens` 省略；这不是 0 Token。
@@ -159,7 +159,7 @@ A3 返回的是资源池和渠道声明的真实模型 ID。2026-11-25 已将 21
 
 **第 4 步：准备请求头和资源池**
 
-- 每次模型调用必须携带 `X-Harness-Request-Id` 和 `X-Harness-Run-Id`，均为 1–64 字符。
+- 每次模型调用必须携带 `X-Harness-Request-Id`（1–64 字符）和 `X-Harness-Run-Id`（1–80 字符）。
 - `chat` 使用默认池，也可显式传 `X-Route-Group: chat`。
 - `image`、`video`、`plan` 必须显式传对应池；不存在的池返回 `403 access_denied`。
 - 对账使用 Request ID 关联 B1/B3，不要用响应体 `model` 反查账本。
@@ -204,10 +204,10 @@ A3 返回的是资源池和渠道声明的真实模型 ID。2026-11-25 已将 21
 
 ## 七、版本说明
 
-本文档为 **V1.3（2026-11-25 修订）**，对应网关 `harness-api-20261117-b040241`。2026-11-25 增量：21 个渠道与上游目录对齐，A3 变为 chat 26 / video 49 / image 10 / plan 17；7 个上游分组代表视频模型实测均 SUCCESS；OpenResty 长请求超时放宽到 600 秒；Nano Banana 1K/4K 公网通过，MIME 仍待修正。V1.2 的历史变化如下：
+本文档为 **V1.4（2026-11-27 修订）**。2026-11-27 增量：`X-Harness-Run-Id` 上限由 64 放宽到 **80 字符**（`X-Harness-Request-Id` 仍为 64）；账本列 `run_id` / `harness_run_id` 扩到 `varchar(96)`，升级顺序为先扩列再部署应用。本文档此前为 **V1.3（2026-11-25 修订）**，对应网关 `harness-api-20261117-b040241`。2026-11-25 增量：21 个渠道与上游目录对齐，A3 变为 chat 26 / video 49 / image 10 / plan 17；7 个上游分组代表视频模型实测均 SUCCESS；OpenResty 长请求超时放宽到 600 秒；Nano Banana 1K/4K 公网通过，MIME 仍待修正。V1.2 的历史变化如下：
 
 1. 测试 Base URL 统一为 `https://testapi.soloai.chat`。
-2. Run ID 校准为必填、1–64 字符，并明确合法字符与拒绝行为。
+2. Run ID 校准为必填、1–64 字符（2026-11-27 已放宽到 1–80），并明确合法字符与拒绝行为。
 3. 补充 `X-Route-Group`：`chat` 为默认池，`image` / `video` / `plan` 必须显式传对应池。
 4. 区分 A3 v10 目录声明与 2026-11-23 初步核实可调集合，不再承诺 A3 模型均可直接调用。
 5. 明确 Nano Banana 同步协议、长请求超时、MIME 校验与超时后先查账本 / 产物的重试规则。

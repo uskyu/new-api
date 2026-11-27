@@ -152,7 +152,7 @@ seedance2.5-1080p-token-with-video
 
 ## 4. P0 修复范围（本次提交）
 
-> 本节在代码合入后补充实际提交号与测试结果；当前为冻结范围。
+> 本节记录 P0 实际提交内容；提交号在合并到 `harness-api` 后回填。
 
 ### 4.1 Run ID 80
 
@@ -161,6 +161,7 @@ seedance2.5-1080p-token-with-video
 - `harness_ledger_events.run_id`、`harness_settlements.harness_run_id`：`varchar(64)` → `varchar(96)`。
 - 部署顺序：备份数据库 → 执行 DDL 扩列 → 部署新镜像；避免新代码写 80 字符时旧列报 `data too long` 导致账本事务回滚。
 - 验收：64、65、80 字符 Run ID 均 200；81 字符返回 400；B1 原样回显 80 字符；B3 同 request id 有记录。
+- 已补测试：`TestHarnessLedgerStoresEightyCharacterRunId`、`TestHarnessSettlementStoresEightyCharacterRunId`、`TestRequestIdKeepsEightyCharacterRunId`；`TestHarnessGatewayEndToEnd` 用 80 字符 Run ID 验证 B1 原样回显。
 
 ### 4.2 错误状态与追踪
 
@@ -178,12 +179,15 @@ seedance2.5-1080p-token-with-video
 
 归集依据每次渠道尝试记录，而不是只看最后一次错误。429/5xx 只有在真实发往上游后才进入对应归集；模型调用保留原生 OpenAI/Claude 外形，B1–B4 使用结构化 `code/message/retryable/request_id`。
 
+已实现：`middleware/harness_contract_error.go`、`controller/harness_relay_normalize.go`；B1/B3 的 401 走 contract envelope，A3/B4 错误补 `request_id/details`，verb guard 与 `/internal` 未知路径返回 contract 404；错误日志 `logs.other` 写入 `harness_request_id`/`harness_run_id`，供未来失败提交按原编号对账。
+
 ### 4.3 A3 Ability 过滤
 
-- `ResourcePoolModels` 的返回条件改为：池内启用渠道 + 该渠道该模型 `abilities.enabled=true` + 有效价格配置。
+- `ResourcePoolModelsWithError` 的返回条件改为：池内启用渠道 + 该渠道该模型 `abilities.enabled=true` + 有效价格配置。
 - 不把“金额是否为 0”当作无效价格；沿用现有 `ModelRatio` / `ModelPrice` / `billing_expr` 配置存在性判断。
 - DB 查询失败返回 500，不把空目录当正常目录，不推进 `catalog_version`。
 - 验收：禁用某模型 Ability 后 A3 不再返回该模型，ETag 变化，`catalog_version` 递增；重新启用后恢复。
+- 已补测试：`TestResourcePoolModelsRequiresEnabledAbility`、`TestHarnessTierCatalogAbilityFilteringIsPerPool`、`TestGetHarnessTierCatalogRenderFailureIsRetryable`。
 
 ### 4.4 MIME 归一化
 
@@ -191,12 +195,43 @@ seedance2.5-1080p-token-with-video
 - 206 中间段不 sniff；200 或 `Content-Range: bytes 0-` 才读 512 字节前缀，并用 `io.MultiReader` 回放，保持 `Content-Length`、`Content-Range` 和状态码不变。
 - Nano Banana：`candidates[].content.parts[].inlineData.mimeType` 按 base64 首字节识别 JPEG/PNG/WebP；同步与流式都修正，原生 JSON 用 `ojson` 精确 patch，保留未知字段。
 - 验收矩阵：视频 MP4 的 GET / HEAD / Range 206；图片 JPEG / PNG / WebP；不得只测一个 GET 就宣布完成。
+- 已实现：`relaykit/types/media_type.go`、`controller/video_proxy.go`、`controller/task.go`、`plugins/tasks/hailuo/plugin.js`、`relaykit/dto/gemini.go`、`relaykit/relayconvert/internal/gemini_chat/to_oai_chat_resp.go`、`relay/channel/gemini/*`；已补 MIME 的 HEAD/GET/206/base64/JPEG/PNG/WebP 测试。
 
 ### 4.5 三层验证
 
 1. 代码层：单元测试、三库迁移测试、异常分支测试、`go build ./...`。
 2. 接口层：实际 HTTP 请求检查状态码、body、`X-NewAPI-Request-Id`、`Retry-After`、ETag/304、MIME/Range。
 3. Harness 联调层：使用真实服务主体和测试渠道完成端到端验证；7 个代表模型只能写“冒烟”，不能写 49/17 全量通过。
+
+### 4.6 已执行验证（2026-11-27）
+
+| 检查 | 结果 |
+|---|---|
+| `go build ./...`（根模块） | 通过 |
+| `cd relaykit && GOWORK=off go build ./...` | 通过 |
+| `go test ./router` | 通过（含 `TestHarnessGatewayEndToEnd`、`TestHarnessTierCatalogConditionalGet`） |
+| `go test ./model` | 通过（含 80 字符 Run ID 落库/回显） |
+| `go test ./service` | 通过 |
+| `go test ./middleware -run 'Harness|RequestId|RateLimit'` | 通过 |
+| `go test ./controller -run 'TestProxyTaskMedia|TestTaskArtifactContent|TestLegacyVideo|TestHarnessTierCatalogAbility|TestGetHarnessHealth|TestNormalizeHarnessRelayError|TestSetRelayRetryAfter'` | 通过 |
+| `go test ./relay/channel/gemini` | 通过 |
+| `go test ./plugins -run TestHailuo` | 通过 |
+| `cd relaykit && GOWORK=off go test ./types ./dto ./relayconvert/...` | 通过 |
+
+已知环境问题：Windows 上 `go test ./controller` 全量仍有若干 `TempDir RemoveAll cleanup` 失败（SQLite 文件句柄未释放），失败用例集中在 Security Enrollment / Telegram OAuth / APITokenAudit，与本 P0 改动无关；`go test ./middleware` 全量同样有已知的 `TestAccessAndPanicLogsFollowLogRotation` 临时文件清理失败。定向测试均通过。
+
+### 4.7 数据库迁移说明
+
+生产 MySQL 先执行：
+
+```sql
+ALTER TABLE harness_ledger_events
+  MODIFY COLUMN run_id varchar(96) DEFAULT '';
+ALTER TABLE harness_settlements
+  MODIFY COLUMN harness_run_id varchar(96) DEFAULT '';
+```
+
+PostgreSQL 使用 `ALTER COLUMN ... TYPE varchar(96)`；SQLite 由 GORM AutoMigrate 重建表。执行前备份数据库；执行后确认两列宽度 ≥80，再部署新镜像。
 
 ---
 

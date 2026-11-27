@@ -87,7 +87,7 @@ A1/A2/A4/A9/A3 使用标准 `Bearer sk-...` 模型令牌。Harness JWT 会被网
 | --- | --- | --- | --- |
 | `Authorization` | Harness → New API | ✓ | `Bearer <JWT>` |
 | `X-Harness-Request-Id` | Harness → New API | ✓ | 一次模型调用一个，建议 `hrq_<ULID>`，≤64 字符 |
-| `X-Harness-Run-Id` | Harness → New API | ✓ | 一次任务执行一个，建议 `run_<ULID>`，≤64 字符 |
+| `X-Harness-Run-Id` | Harness → New API | ✓ | 一次任务执行一个，建议 `run_<ULID>`，≤80 字符（2026-11-27 起；旧版为 64） |
 | `X-Route-Group` | Harness → New API | ✗ | 资源池 id；不传走默认池，传未知池返回 403 |
 | `X-NewAPI-Request-Id` | New API → Harness | 响应头 | 网关请求 ID，账本 `gateway_request_id` 即此值 |
 
@@ -366,7 +366,7 @@ A1/A2/A4/A9/A3 使用标准 `Bearer sk-...` 模型令牌。Harness JWT 会被网
 **结论**：拒绝请求，返回 `400 REQUEST_INVALID`。网关已实施，不再等待确认。
 
 拒绝发生在转发上游之前，不产生费用，也不产生账本事件。`X-Harness-Request-Id`
-与 `X-Harness-Run-Id` 都必填，均 ≤64 字符。
+与 `X-Harness-Run-Id` 都必填：Request ID ≤64 字符，Run ID ≤80 字符（2026-11-27 起）。
 
 ---
 

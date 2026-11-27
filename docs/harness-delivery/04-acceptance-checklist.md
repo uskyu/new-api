@@ -132,7 +132,8 @@ curl -sS -X POST "http://<gateway>/v1/chat/completions" \
 
 **通过标准**：
 - [ ] 缺失 `X-Harness-Run-Id` → 400 `REQUEST_INVALID`
-- [ ] `X-Harness-Run-Id` 超过 64 字符 → 400
+- [ ] `X-Harness-Run-Id` 超过 80 字符 → 400
+- [ ] `X-Harness-Request-Id` 超过 64 字符 → 400
 - [ ] 未知资源池 → 403
 - [ ] 以上拒绝均不产生费用，也不产生 B1/B3 事件
 

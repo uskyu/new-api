@@ -79,6 +79,9 @@ func UsageFromGeminiMetadata(metadata *dto.GeminiUsageMetadata, fallbackPromptTo
 }
 
 func ResponseGeminiChat2OpenAI(id string, created int64, response *dto.GeminiChatResponse) *dto.OpenAITextResponse {
+	if response != nil {
+		response.NormalizeInlineDataMimeTypes()
+	}
 	fullTextResponse := dto.OpenAITextResponse{
 		Id:      id,
 		Object:  "chat.completion",
@@ -186,6 +189,9 @@ func ResponseGeminiChat2OpenAI(id string, created int64, response *dto.GeminiCha
 }
 
 func StreamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*dto.ChatCompletionsStreamResponse, bool) {
+	if geminiResponse != nil {
+		geminiResponse.NormalizeInlineDataMimeTypes()
+	}
 	choices := make([]dto.ChatCompletionsStreamResponseChoice, 0, len(geminiResponse.Candidates))
 	isStop := false
 	for _, candidate := range geminiResponse.Candidates {

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -56,6 +57,24 @@ func harnessUpstreamFailureCandidate(err *types.NewAPIError) bool {
 	return harnessUpstreamErrorTypes(err) && err.GetErrorCode() != types.ErrorCodeModelNotFound
 }
 
+// chooseHarnessRelayFailure makes a real upstream failure survive a later
+// no-candidate marker. It only applies to Harness callers; ordinary clients keep
+// the historical last-error behavior.
+func chooseHarnessRelayFailure(c *gin.Context, final, upstream *types.NewAPIError) *types.NewAPIError {
+	if final == nil || upstream == nil {
+		return final
+	}
+	if _, ok := middleware.GetHarnessPrincipal(c); !ok {
+		return final
+	}
+	switch final.GetErrorCode() {
+	case types.ErrorCodeModelNotFound, types.ErrorCodeGetChannelFailed:
+		return upstream
+	default:
+		return final
+	}
+}
+
 // setRelayRetryAfter copies a sanitized upstream Retry-After when present and
 // falls back to a conservative 60 seconds. It is called before any 429 response
 // is written, including streaming errors.
@@ -71,5 +90,15 @@ func setRelayRetryAfter(c *gin.Context) {
 }
 
 func validRetryAfter(value string) bool {
-	return value != "" && len(value) <= 256 && !strings.ContainsAny(value, "\r\n")
+	if value == "" || len(value) > 256 || strings.ContainsAny(value, "\r\n") {
+		return false
+	}
+	// RFC 9110 allows either delta-seconds or an HTTP-date. Anything else must
+	// fall back to the gateway's conservative default rather than become an
+	// invalid response header.
+	if seconds, err := strconv.ParseUint(value, 10, 32); err == nil {
+		return seconds <= 86400
+	}
+	_, err := http.ParseTime(value)
+	return err == nil
 }

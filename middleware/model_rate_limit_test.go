@@ -142,6 +142,65 @@ func TestModelMemoryRateLimitRejectionsReturnOpenAIError(t *testing.T) {
 	}
 }
 
+// TestModelRateLimit429CarriesRetryAfterAndCorrelation pins what a Harness
+// model call sees when the limiter rejects it: the native OpenAI body is
+// unchanged, Retry-After says when to come back (both backends), and the
+// gateway request id is exposed through the correlation header so the platform
+// can attach the 429 to its own request record.
+func TestModelRateLimit429CarriesRetryAfterAndCorrelation(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	for _, backend := range []string{"memory", "redis"} {
+		t.Run(backend, func(t *testing.T) {
+			subject := strconv.Itoa(7200000 + int(modelRateLimitTestUsers.Add(1)))
+			handler := memoryRateLimitHandler(subject, 60, 0, 1)
+			if backend == "redis" {
+				useRateLimitMiniRedis(t)
+				handler = redisRateLimitHandler(subject, 60, 0, 1)
+			}
+
+			router := gin.New()
+			router.Use(RequestId())
+			router.GET("/v1/chat/completions", func(c *gin.Context) {
+				// A verified Harness principal models the platform call path.
+				c.Set(HarnessPrincipalContextKey, HarnessPrincipal{
+					Subject: "harness-gateway",
+					Scopes:  []string{HarnessChatScope},
+				})
+			}, handler, func(c *gin.Context) {
+				c.Status(http.StatusOK)
+			})
+
+			require.Equal(t, http.StatusOK,
+				performRateLimitRequest(router, "/v1/chat/completions", "127.0.0.1:1000").Code)
+
+			limited := performRateLimitRequest(router, "/v1/chat/completions", "127.0.0.1:1000")
+			require.Equal(t, http.StatusTooManyRequests, limited.Code)
+
+			retryAfter := limited.Header().Get("Retry-After")
+			require.NotEmpty(t, retryAfter, "a 429 must tell the caller when to retry")
+			seconds, err := strconv.Atoi(retryAfter)
+			require.NoError(t, err, "Retry-After must be delta-seconds")
+			assert.Greater(t, seconds, 0)
+
+			requestId := limited.Header().Get(NewAPIRequestIdHeader)
+			require.NotEmpty(t, requestId, "a Harness model call must carry X-NewAPI-Request-Id")
+			assert.Equal(t, requestId, limited.Header().Get(common.RequestIdKey))
+
+			var payload struct {
+				Error map[string]any `json:"error"`
+			}
+			require.NoError(t, common.Unmarshal(limited.Body.Bytes(), &payload))
+			assert.Equal(t, "new_api_error", payload.Error["type"])
+			assert.NotContains(t, payload.Error, "retryable",
+				"model calls keep the native shape, not the contract envelope")
+			assert.NotContains(t, payload.Error, "request_id")
+			message, _ := payload.Error["message"].(string)
+			assert.Contains(t, message, "request id: "+requestId,
+				"the native body keeps the correlation id inside the message")
+		})
+	}
+}
+
 // A group with its own limit counts each user's requests on its own; groups
 // without one keep sharing the user's global limit.
 func TestModelRateLimitCountsConfiguredGroupsSeparately(t *testing.T) {

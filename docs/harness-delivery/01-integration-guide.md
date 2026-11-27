@@ -34,9 +34,9 @@ Messages / Gemini 原生）。网关侧在以下方面与官方协议不同：
   档位选择渠道。A3 条目不保证当前均可调用，模型选择以第 12 号可复测清单为准。
 - `X-Route-Group` 仅对通过 Harness JWT 校验的调用方生效。`chat` 模型不传（默认
   `chat` 池）；`video` / `image` / `plan` 池模型必须显式传对应池 id，见第二节。
-- 每次模型调用必须携带 `X-Harness-Request-Id` 和 `X-Harness-Run-Id`，均为 1–64
-  字符，合法字符为 `A-Z`、`a-z`、`0-9`、`-`、`_`；不强制 `hrq_` / `run_` 前缀，
-  不校验 ULID 格式。
+- 每次模型调用必须携带 `X-Harness-Request-Id`（1–64 字符）和 `X-Harness-Run-Id`
+  （1–80 字符），合法字符为 `A-Z`、`a-z`、`0-9`、`-`、`_`；不强制 `hrq_` / `run_`
+  前缀，不校验 ULID 格式。
 - 鉴权用 Harness JWT（见鉴权指南）。
 - 响应头返回 `X-NewAPI-Request-Id`。
 
@@ -70,12 +70,13 @@ Messages / Gemini 原生）。网关侧在以下方面与官方协议不同：
 | --- | --- | --- | --- |
 | `Authorization` | Harness → 网关 | ✓ | `Bearer <JWT>` |
 | `X-Harness-Request-Id` | Harness → 网关 | ✓ | 一次模型调用一个，**1–64 字符**，只允许 `A-Z`、`a-z`、`0-9`、`-`、`_` |
-| `X-Harness-Run-Id` | Harness → 网关 | ✓ | 一次任务执行一个，**1–64 字符**，只允许 `A-Z`、`a-z`、`0-9`、`-`、`_` |
+| `X-Harness-Run-Id` | Harness → 网关 | ✓ | 一次任务执行一个，**1–80 字符**，只允许 `A-Z`、`a-z`、`0-9`、`-`、`_` |
 | `X-Route-Group` | Harness → 网关 | 视池而定 | `chat` 可不传（默认池）；`video` / `image` / `plan` 必须传对应池 id；仅经验证的 Harness 调用方可用 |
 | `X-NewAPI-Request-Id` | 网关 → Harness | 响应头 | 网关请求 ID，即账本中的 `gateway_request_id` |
 
 两个关联 ID 都必须非空，不强制 `hrq_` / `run_` 前缀，也不校验 ULID 格式。缺失、
-空值、非法字符或超过 64 字符时，网关在**转发上游之前**返回：
+空值、非法字符，或 `X-Harness-Request-Id` 超过 64 字符、`X-Harness-Run-Id` 超过
+80 字符时，网关在**转发上游之前**返回：
 
 ```http
 HTTP/1.1 400 Bad Request
@@ -85,8 +86,9 @@ HTTP/1.1 400 Bad Request
 {"error":{"code":"REQUEST_INVALID","message":"X-Harness-Run-Id is required","type":"new_api_error"}}
 ```
 
-即：被拒绝的调用不会产生费用，也不会产生 B1/B3 事件。超过 64 字符的值会被拒绝，
-而不是截断；旧文档中的 80 字符上限已废止。
+即：被拒绝的调用不会产生费用，也不会产生 B1/B3 事件。超限值会被拒绝，而不是
+截断。**2026-11-27 起：`X-Harness-Run-Id` 上限为 80 字符，`X-Harness-Request-Id`
+仍为 64 字符**；把 Run ID 写成 64 上限的旧表述已废止。
 
 **为什么两个 ID 都必填**：`X-Harness-Request-Id` 是账本主键（B1/B3 都按它查）；
 `X-Harness-Run-Id` 会写入每条账本行并在 B1 事件中返回，让同一轮任务的多次调用
@@ -813,3 +815,4 @@ curl -sS -N -X POST "https://testapi.soloai.chat/v1/chat/completions" \
 | 2026-11-17 | V0.13 | 资源池语义更新：`video` 为按秒视频模型（PAI 按秒、TA 按秒、video-line 按秒），`plan` 为按次视频模型（TA token、PAI 按次、Wan 按次、video-line 按次）；新增 Seedance 2.5 Flash 5 个规格（3 个按秒进 `video`、2 个按次进 `plan`）及价格摘要；补充 Flash 按秒上游不返回 `usage` 时网关按请求 `seconds` 估算参考秒的结算口径。对应网关 `harness-api-20261117-b040241`（revision `b04024190`），A3 实测 `catalog_version` `"10"`：chat 26 / video 83 / plan 80 / image 10 / audio 0 |
 | 2026-11-23 | V1.2 | Base URL 更新为 `https://testapi.soloai.chat`；Run ID 校准为必填 1–64 字符；明确 `X-Route-Group` 必填规则；区分 A3 v10 目录声明与初步核实可调 `chat=26` / `image=10` / `video=49` / `plan=17`；补充 Nano Banana 同步协议、超时与 MIME、异步视频 B1 `unavailable/null`、B1/B3 `token` 单位字段限制、实际错误体、分页 clamp 200、BatchGet 100 ID / 500 事件、A5 404 与 `/api/pricing` 非合同口径。事实源见第 11、12 号文档 |
 | 2026-11-25 | V1.3 | 渠道 `models` 与上游 `/v1/models` 对齐，A3 变为 `chat=26` / `video=49` / `image=10` / `plan=17`；7 个上游分组代表视频模型实测最终全部 SUCCESS；OpenResty 代理超时放宽到 600 秒；Nano Banana 1K/4K 公网通过，MIME 仍待修正 |
+| 2026-11-27 | V1.4 | `X-Harness-Run-Id` 上限由 64 放宽到 **80 字符**（1–80）；`X-Harness-Request-Id` 保持 1–64 字符。账本列 `run_id` / `harness_run_id` 扩到 `varchar(96)`；升级顺序为先扩列再部署应用 |
