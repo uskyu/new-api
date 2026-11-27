@@ -152,7 +152,7 @@ seedance2.5-1080p-token-with-video
 
 ## 4. P0 修复范围（本次提交）
 
-> 本节记录 P0 实际提交内容；提交号在合并到 `harness-api` 后回填。
+> 本节记录 P0 实际提交内容；代码提交为 `7868b83e2`（`feat/harness-v23-p0` → `harness-api`），此前的地基提交为 `241181d59`。镜像与部署版本以 GHCR 构建结果为准。
 
 ### 4.1 Run ID 80
 
