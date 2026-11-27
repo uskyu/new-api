@@ -209,7 +209,7 @@ seedance2.5-1080p-token-with-video
 |---|---|
 | `go build ./...`（根模块） | 通过 |
 | `cd relaykit && GOWORK=off go build ./...` | 通过 |
-| `go test ./router` | 通过（含 `TestHarnessGatewayEndToEnd`、`TestHarnessTierCatalogConditionalGet`） |
+| `go test ./router` | 通过（含 `TestHarnessGatewayEndToEnd`、`TestHarnessTierCatalogConditionalGet`、`TestHarnessP0ModelCallE2E`） |
 | `go test ./model` | 通过（含 80 字符 Run ID 落库/回显） |
 | `go test ./service` | 通过 |
 | `go test ./middleware -run 'Harness|RequestId|RateLimit'` | 通过 |
@@ -219,6 +219,8 @@ seedance2.5-1080p-token-with-video
 | `cd relaykit && GOWORK=off go test ./types ./dto ./relayconvert/...` | 通过 |
 
 已知环境问题：Windows 上 `go test ./controller` 全量仍有若干 `TempDir RemoveAll cleanup` 失败（SQLite 文件句柄未释放），失败用例集中在 Security Enrollment / Telegram OAuth / APITokenAudit，与本 P0 改动无关；`go test ./middleware` 全量同样有已知的 `TestAccessAndPanicLogsFollowLogRotation` 临时文件清理失败。定向测试均通过。
+
+本地已补真实 HTTP + 自签 Harness JWT 的端到端用例 `TestHarnessP0ModelCallE2E`（提交 `a453ca77e`）：SQLite + mock OpenAI 上游，用 80 字符 Run ID 完成模型调用，B1 batchGet 原样回显 80 字符；81 字符在 dispatch 前返回 400 且 mock 上游调用数不增加；同一 engine 的 A3 返回 ETag，带 `If-None-Match` 请求得到 304。
 
 ### 4.7 数据库迁移说明
 
