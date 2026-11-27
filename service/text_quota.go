@@ -41,6 +41,7 @@ type textQuotaSummary struct {
 	CacheCreationRatio5m     float64
 	CacheCreationRatio1h     float64
 	Quota                    int
+	FixedPriceBilling        bool
 	IsClaudeUsageSemantic    bool
 	UsageSemantic            string
 	WebSearchPrice           float64
@@ -62,6 +63,19 @@ func cacheWriteTokensTotal(summary textQuotaSummary) int {
 		return splitCacheWriteTokens
 	}
 	return summary.CacheCreationTokens
+}
+
+// hasBillableUsage reports whether this request should incur any charge.
+// Claude reports cache tokens separately from ordinary input and output.
+// A request can carry zero ordinary tokens yet still be billable via cache,
+// fixed pricing, web/file search, image generation, or audio input, so token
+// count alone is not sufficient to decide.
+func (s *textQuotaSummary) hasBillableUsage() bool {
+	return s.FixedPriceBilling || s.TotalTokens > 0 ||
+		(s.IsClaudeUsageSemantic && (s.CacheTokens > 0 || s.CacheCreationTokens > 0 ||
+			s.CacheCreationTokens5m > 0 || s.CacheCreationTokens1h > 0)) ||
+		s.WebSearchCallCount > 0 || s.ClaudeWebSearchCallCount > 0 ||
+		s.FileSearchCallCount > 0 || s.ImageGenerationCallPrice > 0 || s.AudioInputPrice > 0
 }
 
 func isLegacyClaudeDerivedOpenAIUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
@@ -91,6 +105,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		CacheCreationRatio:   relayInfo.PriceData.CacheCreationRatio,
 		CacheCreationRatio5m: relayInfo.PriceData.CacheCreation5mRatio,
 		CacheCreationRatio1h: relayInfo.PriceData.CacheCreation1hRatio,
+		FixedPriceBilling:    relayInfo != nil && relayInfo.PriceData.UsePrice && relayInfo.PriceData.ModelPrice > 0,
 		UsageSemantic:        usageSemanticFromUsage(relayInfo, usage),
 	}
 	summary.IsClaudeUsageSemantic = summary.UsageSemantic == "anthropic"
@@ -272,7 +287,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		summary.Quota = common.QuotaFromDecimal(quotaCalculateDecimal)
 	}
 
-	if summary.TotalTokens == 0 {
+	if !summary.hasBillableUsage() {
 		summary.Quota = 0
 	} else if !ratio.IsZero() && summary.Quota == 0 {
 		summary.Quota = 1
@@ -319,7 +334,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		extraContent = append(extraContent, fmt.Sprintf("Image Generation Call 花费 %s", decimal.NewFromFloat(summary.ImageGenerationCallPrice).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
 	}
 
-	if summary.TotalTokens == 0 {
+	if !summary.hasBillableUsage() {
 		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
 	} else {

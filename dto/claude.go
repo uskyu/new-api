@@ -108,6 +108,10 @@ type ClaudeMessageSource struct {
 type ClaudeMessage struct {
 	Role    string `json:"role"`
 	Content any    `json:"content"`
+	// OutputConfig carries per-message effort (beta): an effort-only system
+	// message has empty content and the new level in output_config.effort.
+	// It is passed through to upstream unchanged.
+	OutputConfig json.RawMessage `json:"output_config,omitempty"`
 }
 
 func (c *ClaudeMessage) IsStringContent() bool {

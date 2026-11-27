@@ -123,7 +123,10 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			return
 		}
 		data = string(normalizeResponsesPayload([]byte(data), streamResponse.Response, "response."))
-		sendResponsesStreamData(c, streamResponse, data)
+		if err := helper.ResponseChunkData(c, streamResponse, data); err != nil {
+			sr.Stop(err)
+			return
+		}
 		switch streamResponse.Type {
 		case "response.completed", "response.done":
 			if streamResponse.Response != nil {
@@ -136,6 +139,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					c.Set("image_generation_call_size", streamResponse.Response.GetSize())
 				}
 			}
+			sr.Done()
+			return
 		case "response.output_text.delta":
 			// 处理输出文本
 			responseTextBuilder.WriteString(streamResponse.Delta)
@@ -175,7 +180,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	// Emit the terminal sentinel only for streams that ended normally. Truncated
 	// streams (timeout, scanner error, ping failure, client disconnect) must not
 	// look like a clean completion to the client.
-	if info != nil && info.StreamStatus != nil && info.StreamStatus.IsNormalEnd() {
+	if info != nil && info.StreamStatus != nil && info.StreamStatus.IsNormalEnd() && !info.StreamStatus.HasErrors() {
 		helper.Done(c)
 	}
 	return usage, nil

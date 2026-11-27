@@ -1102,17 +1102,34 @@ func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse)
 			FinishReason: constant.FinishReasonStop,
 		}
 		if len(candidate.Content.Parts) > 0 {
-			var texts []string
+			var content strings.Builder
 			var toolCalls []dto.ToolCallResponse
+			appended := 0
+			lastWasText := false
+			writeSep := func(text bool) {
+				if appended > 0 && !(text && lastWasText) {
+					content.WriteByte('\n')
+				}
+				appended++
+				lastWasText = text
+			}
 			for _, part := range candidate.Content.Parts {
 				if part.InlineData != nil {
 					// 媒体内容
+					writeSep(false)
 					if strings.HasPrefix(part.InlineData.MimeType, "image") {
-						imgText := "![image](data:" + part.InlineData.MimeType + ";base64," + part.InlineData.Data + ")"
-						texts = append(texts, imgText)
+						content.WriteString("![image](data:")
+						content.WriteString(part.InlineData.MimeType)
+						content.WriteString(";base64,")
+						content.WriteString(part.InlineData.Data)
+						content.WriteByte(')')
 					} else {
 						// 其他媒体类型，直接显示链接
-						texts = append(texts, fmt.Sprintf("[media](data:%s;base64,%s)", part.InlineData.MimeType, part.InlineData.Data))
+						content.WriteString("[media](data:")
+						content.WriteString(part.InlineData.MimeType)
+						content.WriteString(";base64,")
+						content.WriteString(part.InlineData.Data)
+						content.WriteByte(')')
 					}
 				} else if part.FunctionCall != nil {
 					choice.FinishReason = constant.FinishReasonToolCalls
@@ -1123,14 +1140,21 @@ func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse)
 					choice.Message.ReasoningContent = &part.Text
 				} else {
 					if part.ExecutableCode != nil {
-						texts = append(texts, "```"+part.ExecutableCode.Language+"\n"+part.ExecutableCode.Code+"\n```")
+						writeSep(false)
+						content.WriteString("```")
+						content.WriteString(part.ExecutableCode.Language)
+						content.WriteByte('\n')
+						content.WriteString(part.ExecutableCode.Code)
+						content.WriteString("\n```")
 					} else if part.CodeExecutionResult != nil {
-						texts = append(texts, "```output\n"+part.CodeExecutionResult.Output+"\n```")
-					} else {
-						// 过滤掉空行
-						if part.Text != "\n" {
-							texts = append(texts, part.Text)
-						}
+						writeSep(false)
+						content.WriteString("```output\n")
+						content.WriteString(part.CodeExecutionResult.Output)
+						content.WriteString("\n```")
+					} else if part.Text != "" {
+						// 纯文本按原顺序逐字拼接，不额外插入分隔
+						writeSep(true)
+						content.WriteString(part.Text)
 					}
 				}
 			}
@@ -1138,7 +1162,7 @@ func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse)
 				choice.Message.SetToolCalls(toolCalls)
 				isToolCall = true
 			}
-			choice.Message.SetStringContent(strings.Join(texts, "\n"))
+			choice.Message.SetStringContent(content.String())
 
 		}
 		if candidate.FinishReason != nil {
@@ -1192,9 +1216,18 @@ func streamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*d
 				//Role: "assistant",
 			},
 		}
-		var texts []string
+		var content strings.Builder
 		isTools := false
 		isThought := false
+		appended := 0
+		lastWasText := false
+		writeSep := func(text bool) {
+			if appended > 0 && !(text && lastWasText) {
+				content.WriteByte('\n')
+			}
+			appended++
+			lastWasText = text
+		}
 		if candidate.FinishReason != nil {
 			// Map Gemini FinishReason to OpenAI finish_reason
 			switch *candidate.FinishReason {
@@ -1230,8 +1263,12 @@ func streamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*d
 		for _, part := range candidate.Content.Parts {
 			if part.InlineData != nil {
 				if strings.HasPrefix(part.InlineData.MimeType, "image") {
-					imgText := "![image](data:" + part.InlineData.MimeType + ";base64," + part.InlineData.Data + ")"
-					texts = append(texts, imgText)
+					writeSep(false)
+					content.WriteString("![image](data:")
+					content.WriteString(part.InlineData.MimeType)
+					content.WriteString(";base64,")
+					content.WriteString(part.InlineData.Data)
+					content.WriteByte(')')
 				}
 			} else if part.FunctionCall != nil {
 				isTools = true
@@ -1242,23 +1279,32 @@ func streamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*d
 
 			} else if part.Thought {
 				isThought = true
-				texts = append(texts, part.Text)
+				writeSep(false)
+				content.WriteString(part.Text)
 			} else {
 				if part.ExecutableCode != nil {
-					texts = append(texts, "```"+part.ExecutableCode.Language+"\n"+part.ExecutableCode.Code+"\n```\n")
+					writeSep(false)
+					content.WriteString("```")
+					content.WriteString(part.ExecutableCode.Language)
+					content.WriteByte('\n')
+					content.WriteString(part.ExecutableCode.Code)
+					content.WriteString("\n```\n")
 				} else if part.CodeExecutionResult != nil {
-					texts = append(texts, "```output\n"+part.CodeExecutionResult.Output+"\n```\n")
-				} else {
-					if part.Text != "\n" {
-						texts = append(texts, part.Text)
-					}
+					writeSep(false)
+					content.WriteString("```output\n")
+					content.WriteString(part.CodeExecutionResult.Output)
+					content.WriteString("\n```\n")
+				} else if part.Text != "" {
+					// 纯文本按原顺序逐字拼接，不额外插入分隔
+					writeSep(true)
+					content.WriteString(part.Text)
 				}
 			}
 		}
 		if isThought {
-			choice.Delta.SetReasoningContent(strings.Join(texts, "\n"))
+			choice.Delta.SetReasoningContent(content.String())
 		} else {
-			choice.Delta.SetContentString(strings.Join(texts, "\n"))
+			choice.Delta.SetContentString(content.String())
 		}
 		if isTools {
 			choice.FinishReason = &constant.FinishReasonToolCalls
@@ -1563,7 +1609,13 @@ func GeminiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	// Google has not yet clarified how embedding models will be billed
 	// refer to openai billing method to use input tokens billing
 	// https://platform.openai.com/docs/guides/embeddings#what-are-embeddings
-	usage := service.ResponseText2Usage(c, "", info.UpstreamModelName, info.GetEstimatePromptTokens())
+	var usage *dto.Usage
+	if upstream := geminiResponse.UsageMetadata.GeminiUsageMetadata(); upstream != nil {
+		upstreamUsage := buildUsageFromGeminiMetadata(*upstream, info.GetEstimatePromptTokens())
+		usage = &upstreamUsage
+	} else {
+		usage = service.ResponseText2Usage(c, "", info.UpstreamModelName, info.GetEstimatePromptTokens())
+	}
 	openAIResponse.Usage = *usage
 
 	jsonResponse, jsonErr := common.Marshal(openAIResponse)

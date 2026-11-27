@@ -599,7 +599,7 @@ func ResponseOpenAI2Claude(openAIResponse *dto.OpenAITextResponse, info *relayco
 				claudeContent.Type = "tool_use"
 				claudeContent.Id = toolUse.ID
 				claudeContent.Name = toolUse.Function.Name
-				var mapParams map[string]interface{}
+				var mapParams map[string]json.RawMessage
 				if err := common.Unmarshal([]byte(toolUse.Function.Arguments), &mapParams); err == nil {
 					claudeContent.Input = mapParams
 				} else {
@@ -807,9 +807,10 @@ func ResponseOpenAI2Gemini(openAIResponse *dto.OpenAITextResponse, info *relayco
 	geminiResponse := &dto.GeminiChatResponse{
 		Candidates: make([]dto.GeminiChatCandidate, 0, len(openAIResponse.Choices)),
 		UsageMetadata: dto.GeminiUsageMetadata{
-			PromptTokenCount:     openAIResponse.PromptTokens,
-			CandidatesTokenCount: openAIResponse.CompletionTokens,
-			TotalTokenCount:      openAIResponse.PromptTokens + openAIResponse.CompletionTokens,
+			PromptTokenCount:        openAIResponse.PromptTokens,
+			CandidatesTokenCount:    openAIResponse.CompletionTokens,
+			TotalTokenCount:         openAIResponse.PromptTokens + openAIResponse.CompletionTokens,
+			CachedContentTokenCount: geminiCachedContentTokenCount(&openAIResponse.Usage),
 		},
 	}
 
@@ -913,6 +914,7 @@ func StreamResponseOpenAI2Gemini(openAIResponse *dto.ChatCompletionsStreamRespon
 		geminiResponse.UsageMetadata.PromptTokenCount = openAIResponse.Usage.PromptTokens
 		geminiResponse.UsageMetadata.CandidatesTokenCount = openAIResponse.Usage.CompletionTokens
 		geminiResponse.UsageMetadata.TotalTokenCount = openAIResponse.Usage.TotalTokens
+		geminiResponse.UsageMetadata.CachedContentTokenCount = geminiCachedContentTokenCount(openAIResponse.Usage)
 	}
 
 	for _, choice := range openAIResponse.Choices {
@@ -982,4 +984,19 @@ func StreamResponseOpenAI2Gemini(openAIResponse *dto.ChatCompletionsStreamRespon
 	}
 
 	return geminiResponse
+}
+
+// geminiCachedContentTokenCount 返回计入 prompt token 的缓存命中 token 数。
+// Chat usage 将其放在 PromptTokensDetails，流式状态归一化后放在 InputTokensDetails。
+func geminiCachedContentTokenCount(usage *dto.Usage) int {
+	if usage == nil {
+		return 0
+	}
+	if usage.PromptTokensDetails.CachedTokens > 0 {
+		return usage.PromptTokensDetails.CachedTokens
+	}
+	if usage.InputTokensDetails != nil && usage.InputTokensDetails.CachedTokens > 0 {
+		return usage.InputTokensDetails.CachedTokens
+	}
+	return 0
 }

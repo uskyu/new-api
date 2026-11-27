@@ -849,18 +849,34 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
-	if claudeInfo.Usage.PromptTokens == 0 {
-		//上游出错
+	if claudeInfo == nil {
+		return
 	}
-	if claudeInfo.Usage.CompletionTokens == 0 || !claudeInfo.Done {
+	if claudeInfo.Usage == nil {
+		claudeInfo.Usage = &dto.Usage{}
+	}
+	// Claude input_tokens excludes cache reads and writes, so a fully cached
+	// prompt reports zero input; the prompt is uncounted only when the total
+	// with cache is zero as well. Zero output is uncounted only when content
+	// was streamed, so a refusal before any output keeps its zeros.
+	missingInputUsage := buildOpenAIStyleUsageFromClaudeUsage(claudeInfo.Usage).PromptTokens == 0
+	missingOutputUsage := claudeInfo.Usage.CompletionTokens == 0 && claudeInfo.ResponseText.Len() > 0
+	if missingInputUsage || missingOutputUsage || !claudeInfo.Done {
 		if common.DebugEnabled {
 			common.SysLog("claude response usage is not complete, maybe upstream error")
 		}
-		claudeInfo.Usage = service.ResponseText2Usage(c, claudeInfo.ResponseText.String(), info.UpstreamModelName, claudeInfo.Usage.PromptTokens)
+		// 只补缺失字段，不整份覆盖——保留 message_start 已拿到的 cache 字段
+		fallback := service.ResponseText2Usage(c, claudeInfo.ResponseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		if missingOutputUsage ||
+			(!claudeInfo.Done && fallback.CompletionTokens > claudeInfo.Usage.CompletionTokens) {
+			claudeInfo.Usage.CompletionTokens = fallback.CompletionTokens
+		}
+		if missingInputUsage {
+			claudeInfo.Usage.PromptTokens = fallback.PromptTokens
+		}
+		claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
 	}
-	if claudeInfo.Usage != nil {
-		claudeInfo.Usage.UsageSemantic = "anthropic"
-	}
+	claudeInfo.Usage.UsageSemantic = "anthropic"
 
 	if info.RelayFormat == types.RelayFormatClaude {
 		//
