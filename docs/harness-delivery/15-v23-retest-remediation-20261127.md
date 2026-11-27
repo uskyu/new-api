@@ -233,6 +233,26 @@ ALTER TABLE harness_settlements
 
 PostgreSQL 使用 `ALTER COLUMN ... TYPE varchar(96)`；SQLite 由 GORM AutoMigrate 重建表。执行前备份数据库；执行后确认两列宽度 ≥80，再部署新镜像。
 
+### 4.8 生产接口实测（2026-11-27）
+
+**部署版本**：`ghcr.io/uskyu/new-api:harness-api-20261127-7868b83`（digest `sha256:425289d36375958420705b43d757e133db1b0aa1d9eaa2c4afb8da5979725cc5`）。\
+**数据库**：`harness_ledger_events.run_id`、`harness_settlements.harness_run_id` 已从 `varchar(64)` 扩到 `varchar(96)`。\
+**备份**：`/opt/new-api/backups/newapi_db_before_p0_20261127-145749.sql.gz`、`docker-compose.yml.before-p0-20261127-145749`。
+
+| 实测 | 结果 |
+|---|---|
+| `POST /v1/chat/completions` 不存在的模型 | 503，`code=model_not_found`，响应头 `X-NewAPI-Request-Id` 与 body 内 request id 一致 |
+| `POST /v1/chat/completions` `gpt-6.2-sol` | 200，内容 `OK` |
+| `GET /internal/v1/gateway/usage-events` 无凭证 | 401 contract body，含 `GATEWAY_UNAUTHORIZED` / `retryable=false` / `request_id` |
+| `GET /internal/v1/gateway/health` 无凭证 | 401 contract body，含 `GATEWAY_UNAUTHORIZED` / `retryable=false` / `request_id` |
+| `POST /internal/v1/gateway/usage-eventsXYZ` | 404 contract body，含 `REQUEST_NOT_FOUND` / `retryable=false` / `request_id` |
+| MiniMax `task_MOLgzFAGo10aBU4AZrTd0CHWcIDF7P4v` HEAD | 200，`Content-Type: video/mp4`，`X-Content-Type-Options: nosniff` |
+| 同任务 `Range: bytes=0-15` | 206，`Content-Type: video/mp4`，`Content-Range: bytes 0-15/525952`，body 前缀 `00000020 66747970 69736f6d`（MP4 `ftypisom`） |
+| 同任务完整 GET | 200，`Content-Type: video/mp4`，`Content-Length: 525952` |
+| Nano Banana `Nano Banana 2.1 1K` 原生 generateContent | 200，`inlineData.mimeType=image/jpeg`，base64 实际首字节 `ffd8ffe0`（JPEG） |
+
+仍需 Harness 持真实 JWT 复测：64/65/80 字符 Run ID 与 B1 原样回显、81 字符 400、A3 ETag/304 与按池 Ability、401/403 错误体、429 `Retry-After`。这些用例无法用网关自己的 sk 测试 token 代替 Harness JWT。
+
 ---
 
 ## 5. P1（暂缓，不纳入本次 P0）
