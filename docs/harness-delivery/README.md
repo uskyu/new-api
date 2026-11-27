@@ -2,7 +2,7 @@
 
 **版本**：V1.4（2026-11-27 修订）\
 **测试 Base URL**：`https://testapi.soloai.chat`\
-**对应网关版本**：`harness-api-20261126-882ffc5`（2026-11-27 生产；P0 修复后以新镜像版本为准）\
+**对应网关版本**：`harness-api-20261127-7868b83`（2026-11-27 生产；P0 修复版本）\
 **A3 目录版本**：截至 2026-11-27 实测 `catalog_version=v12`；以实际接口响应为准\
 **B4 接口版本**：`interface_version=v2`（与本文档 V1.4 不是同一版本号）\
 **本次主交付**：[联调反馈差异与处理指引 V1.0（DOCX）](./releases/Harness_联调反馈差异与处理指引_V1.0_2026-11-23.docx) —— 只讲差异、处理动作和复测标准；完整手册为参考\
@@ -73,8 +73,8 @@
 | 项 | 当前值 |
 | --- | --- |
 | HTTPS Base URL | `https://testapi.soloai.chat` |
-| 网关版本 | `harness-api-20261117-b040241` |
-| A3 | `GET /v1/models`；2026-11-25 对齐后为 chat 26 / video 49 / image 10 / plan 17，`catalog_version` 自动递增 |
+| 网关版本 | `harness-api-20261127-7868b83` |
+| A3 | `GET /v1/models`；2026-11-27 实测 `catalog_version=v12`，chat 30 / video 49 / image 10 / plan 17，`catalog_version` 自动递增 |
 | B4 | `GET /internal/v1/gateway/health`，`interface_version=v2` |
 | Harness 内网访问 | 同 VPC 内当前域名解析到 `10.245.222.6`，HTTPS 443 正常 |
 | 公网访问 | 受当前 DNS / 入口配置影响；公网复测前需由运维确认解析与安全组 |

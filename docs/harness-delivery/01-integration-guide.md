@@ -2,7 +2,7 @@
 
 **版本**：V1.3（2026-11-27 修订）\
 **测试 Base URL**：`https://testapi.soloai.chat`\
-**对应网关版本**：`harness-api-20261126-882ffc5`（2026-11-27 生产；P0 修复后以新镜像版本为准）\
+**对应网关版本**：`harness-api-20261127-7868b83`（2026-11-27 生产；P0 修复版本）\
 **A3 目录版本**：截至 2026-11-27 实测 `catalog_version=v12`；以实际接口响应为准\
 **B4 接口版本**：`interface_version=v2`（与本文档 V1.3 不是同一版本号）\
 **面向**：Harness 后端开发与联调
@@ -122,9 +122,9 @@ HTTP/1.1 400 Bad Request
 | 传 `audio` | 使用语音池；该池当前无可用模型，调用会失败 |
 | 传不存在的池 id | `403 access_denied`，消息 `requested resource pool is not configured` |
 
-2026-11-25 渠道声明已与上游 `/v1/models` 对齐，A3 当前返回
-`chat=26`、`video=49`、`plan=17`、`image=10`、`audio=0`。A3 已与可调清单一致；
-精确模型 ID、复测备注与已下架清单仍以第 12 号文档为准。
+2026-11-27 生产 A3 实测 `catalog_version=v12`，返回
+`chat=30`、`video=49`、`plan=17`、`image=10`、`audio=0`。A3 已与可调清单一致；
+2026-11-25 的 `chat=26` 是 11-26 上游同步前快照，当前以 30 为准。精确模型 ID、复测备注与已下架清单仍以第 12 号文档为准。
 
 跨池重复本身合法，同一模型可以出现在多个池；池只限制可选渠道集合，不会重写模型
 ID。A3 的 `capabilities` 是池级端点类型汇总，可能包含 `chat` / `stream` / `tools`
