@@ -266,7 +266,7 @@ PostgreSQL 使用 `ALTER COLUMN ... TYPE varchar(96)`；SQLite 由 GORM AutoMigr
 - Pending 状态机：`pending_dispatch` / `not_dispatched` / `dispatched_unknown` / `settled` / `refunded` / `unreconciled`。
 - 请求丢失、重复提交、退款和最终结算的状态管理。
 
-P1 开工前必须先冻结字段契约和状态转换；不得边改数据库边和 Harness 商量字段。
+P1 开工前必须先冻结字段契约和状态转换；不得边改数据库边和 Harness 商量字段。P1-0 只读审计结果见 [`16-p1-media-billing-audit-20261128.md`](./16-p1-media-billing-audit-20261128.md)。
 
 ---
 
