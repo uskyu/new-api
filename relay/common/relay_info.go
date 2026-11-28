@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/convmeta"
 	kitreasoning "github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	hosttypes "github.com/QuantumNous/new-api/types"
 
@@ -177,6 +178,14 @@ type RelayInfo struct {
 	TieredBillingSnapshot *billingexpr.BillingSnapshot
 	BillingRequestInput   *billingexpr.RequestInput
 	BillingImageCount     *int
+	// MediaLedgerEnabled is the P1-A switch sampled once when this relay info
+	// is created. Task submission persists it on the task billing context so a
+	// task that completes after an option change keeps the mode it started in.
+	MediaLedgerEnabled bool
+	// MediaFacts is the internal fact list the B1 media_usage block is rendered
+	// from. It stays empty while the switch is off, which leaves the ledger
+	// byte-for-byte identical to the previous release.
+	MediaFacts MediaFacts
 	// ImageRequestCount is the effective quantity sent on the current attempt;
 	// ImageQuotaBeforeGroup is the frozen legacy estimate before request ratios.
 	ImageRequestCount     int
@@ -249,6 +258,7 @@ func (info *RelayInfo) UpdateImageCount(count int64) {
 	if info == nil || count <= 0 || count > int64(dto.MaxImageN) {
 		return
 	}
+	info.RecordObservedImageCount(count)
 	if info.PriceData.UsePrice {
 		info.PriceData.AddOtherRatio("n", float64(count))
 	}
@@ -256,6 +266,24 @@ func (info *RelayInfo) UpdateImageCount(count int64) {
 		n := int(count)
 		info.BillingImageCount = &n
 	}
+}
+
+// RecordObservedImageCount records the actual image count in the media ledger
+// without touching the billed quantity. GPT Image's billing path already calls
+// this through UpdateImageCount; Nano Banana calls it directly because its price
+// is fixed per request and feeding the count into BillingImageCount would change
+// the amount if the upstream ever returned multiple images.
+func (info *RelayInfo) RecordObservedImageCount(count int64) {
+	if info == nil || !info.MediaLedgerEnabled || count <= 0 {
+		return
+	}
+	_ = info.MediaFacts.SetQuantity(
+		MediaFactNameImageCount,
+		MediaDimensionImage,
+		MediaUnitImage,
+		MediaFactSourceObserved,
+		strconv.FormatInt(count, 10),
+	)
 }
 
 func (info *RelayInfo) RequestedImageCount() int {
@@ -623,6 +651,11 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	info := &RelayInfo{
 		Request:         request,
 		ReasoningEffort: reasoningEffort,
+
+		// Sampling the option here freezes it for the whole relay, including
+		// retries and streams. Task submission copies the value onto the task
+		// billing context for the completion path.
+		MediaLedgerEnabled: setting.HarnessMediaLedgerEnabled(),
 
 		RequestId:  reqId,
 		UserId:     common.GetContextKeyInt(c, constant.ContextKeyUserId),

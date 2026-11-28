@@ -656,6 +656,9 @@ type harnessSettlementCorrelation struct {
 	UsageUnit        string
 	UsageSource      string
 	IsEstimated      bool
+	// MediaFacts is the canonical fact JSON attached to a B1 event. Empty means
+	// the request carries no media facts, which is also the switch-off state.
+	MediaFacts string
 }
 
 // harnessUsageUnitToken is the default billing basis. The platform treats token
@@ -998,6 +1001,7 @@ func recordHarnessSettlement(settlement *model.HarnessSettlement, money harnessS
 		UsageUnit:        correlation.UsageUnit,
 		UsageSource:      correlation.UsageSource,
 		IsEstimated:      correlation.IsEstimated,
+		MediaFacts:       correlation.MediaFacts,
 	})
 }
 
@@ -1074,6 +1078,14 @@ func harnessUsageEventIfChanged(settlement *model.HarnessSettlement, money harne
 		version = previous.RecordVersion + 1
 		supersedes = &previous.EventId
 	}
+	// A correction triggered by a token/usage change may arrive without a fact
+	// list (for example a completion that only learned the total). Facts are
+	// append-only, so the new version inherits the facts already published; it
+	// must never erase them just because the later settle did not repeat them.
+	mediaFacts := correlation.MediaFacts
+	if mediaFacts == "" && previous != nil {
+		mediaFacts = previous.MediaFacts
+	}
 	return &model.HarnessLedgerEvent{
 		Stream:            model.HarnessLedgerStreamUsage,
 		EventType:         harnessUsageEventTypeForStatus(settlement.Status, supersedes != nil),
@@ -1092,6 +1104,7 @@ func harnessUsageEventIfChanged(settlement *model.HarnessSettlement, money harne
 		SplitUnknown:      settlement.SplitUnknown,
 		UsageSource:       correlation.UsageSource,
 		IsEstimated:       correlation.IsEstimated,
+		MediaFacts:        mediaFacts,
 		BillingBasis:      correlation.UsageUnit,
 		PricingVersion:    money.PriceVersion,
 		RecordVersion:     version,
@@ -1113,6 +1126,10 @@ func harnessUsageDiffers(previous *model.HarnessLedgerEvent, settlement *model.H
 		previous.SplitUnknown != settlement.SplitUnknown ||
 		previous.UsageSource != correlation.UsageSource ||
 		previous.IsEstimated != correlation.IsEstimated ||
+		// Facts are append-only observations: a settle that carries no facts
+		// must not erase facts already published by an earlier settle of the
+		// same request. Only a non-empty changed list is a new usage fact.
+		(correlation.MediaFacts != "" && previous.MediaFacts != correlation.MediaFacts) ||
 		previous.UsageUnit != correlation.UsageUnit ||
 		previous.RunId != correlation.HarnessRunId
 }
@@ -1372,6 +1389,11 @@ func recordRelayHarnessSettlement(ctx *gin.Context, relayInfo *relaycommon.Relay
 	// full usage object, and a request that obtained no usage at all says so
 	// instead of reporting a measured zero.
 	correlation := harnessSettlementCorrelationFromContext(ctx)
+	// The switch is sampled on the relay info, which is frozen for the whole
+	// request; an empty fact list keeps the switch-off wire exactly unchanged.
+	if relayInfo.MediaLedgerEnabled && !relayInfo.MediaFacts.IsEmpty() {
+		correlation.MediaFacts = relayInfo.MediaFacts.CanonicalJSON()
+	}
 	correlation.UsageSource, correlation.IsEstimated = harnessUsageProvenance(
 		ctx != nil && common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens),
 		harnessUsageHasMeasurement(usage),
@@ -1471,6 +1493,13 @@ func recordTaskHarnessSettlement(task *model.Task, status string, quota int, usa
 	} else if task.PrivateData.Execution != nil {
 		correlation.HarnessRequestId = task.PrivateData.Execution.HarnessRequestID
 		correlation.HarnessRunId = task.PrivateData.Execution.HarnessRunID
+	}
+	// The media switch and facts were frozen at submission on the task billing
+	// context. Completion runs in a different process with no request context,
+	// so this row is the durable source; an empty MediaFacts means the task was
+	// submitted with the switch off.
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.MediaLedger {
+		correlation.MediaFacts = bc.MediaFacts
 	}
 	recordHarnessSettlement(settlement, harnessSettlementMoneyForTask(task, status, quota), correlation)
 }

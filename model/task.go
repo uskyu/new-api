@@ -175,6 +175,14 @@ type TaskBillingContext struct {
 	OriginModelName string                       `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
 	PerCallBilling  bool                         `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
 	TieredSnapshot  *billingexpr.BillingSnapshot `json:"tiered_snapshot,omitempty"`
+	// MediaLedger freezes the P1-A switch at submission. A task that completes
+	// after an operator changes the option keeps the mode it started in, so its
+	// pending and settled B1 events are consistent.
+	MediaLedger bool `json:"media_ledger,omitempty"`
+	// MediaFacts is the canonical internal fact JSON captured at submission.
+	// The completion path reads it from the task row because the request
+	// context is gone by then.
+	MediaFacts string `json:"media_facts,omitempty"`
 	// Procurement freezes the procurement-side pricing inputs so a task that
 	// settles hours after submission books the price that applied when it was
 	// submitted. Without it, editing a procurement group ratio during the task's

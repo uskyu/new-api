@@ -32,6 +32,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/shopspring/decimal"
 )
 
 func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
@@ -609,6 +610,73 @@ func newTaskProcurementContext(relayInfo *relaycommon.RelayInfo, result *relay.T
 	return frozen
 }
 
+// taskMediaFacts captures the media facts known at submission. A per-call or
+// usage-priced task has no upstream seconds yet, so output_seconds is explicitly
+// unavailable; requested_seconds is recorded when the task payload carries it.
+// The canonical JSON is persisted on the task billing context and reused by the
+// completion path, which runs after the request context is gone.
+func taskMediaFacts(relayInfo *relaycommon.RelayInfo, taskData []byte) string {
+	if relayInfo == nil || !relayInfo.MediaLedgerEnabled {
+		return ""
+	}
+	// Plan and video models both submit through /v1/videos. Other task modes
+	// (an async image task, audio) are outside A1's fact capture and must not be
+	// mislabelled as video.
+	if !strings.HasPrefix(relayInfo.RequestURLPath, "/v1/videos") {
+		return ""
+	}
+	_ = relayInfo.MediaFacts.SetUnavailable(
+		relaycommon.MediaFactNameOutputSeconds,
+		relaycommon.MediaDimensionVideo,
+		relaycommon.MediaUnitVideoSecond,
+	)
+	if seconds, ok := taskRequestedSeconds(relayInfo, taskData); ok {
+		_ = relayInfo.MediaFacts.SetQuantity(
+			relaycommon.MediaFactNameRequestedSeconds,
+			relaycommon.MediaDimensionVideo,
+			relaycommon.MediaUnitVideoSecond,
+			relaycommon.MediaFactSourceRequest,
+			seconds,
+		)
+	}
+	return relayInfo.MediaFacts.CanonicalJSON()
+}
+
+func taskRequestedSeconds(relayInfo *relaycommon.RelayInfo, taskData []byte) (string, bool) {
+	// The upstream task payload is the most literal source; OtherRatios is a
+	// billing estimate and only a fallback.
+	if len(taskData) > 0 {
+		var payload map[string]any
+		if err := common.Unmarshal(taskData, &payload); err == nil {
+			raw, ok := payload["seconds"]
+			if !ok {
+				raw, ok = payload["duration"]
+			}
+			if ok {
+				switch value := raw.(type) {
+				case float64:
+					if value > 0 {
+						return decimal.NewFromFloat(value).String(), true
+					}
+				case int:
+					if value > 0 {
+						return decimal.NewFromInt(int64(value)).String(), true
+					}
+				case string:
+					parsed, err := decimal.NewFromString(value)
+					if err == nil && parsed.IsPositive() {
+						return parsed.String(), true
+					}
+				}
+			}
+		}
+	}
+	if seconds, ok := relayInfo.PriceData.OtherRatios()["seconds"]; ok && seconds > 0 {
+		return decimal.NewFromFloat(seconds).String(), true
+	}
+	return "", false
+}
+
 // executeTaskSubmission owns the retry, billing, and persistence lifecycle.
 // It deliberately performs no client response writes so JSON and protocol
 // presenters share the same durable task barrier. Its cancellation semantics
@@ -813,6 +881,8 @@ func executeTaskSubmissionWith(
 		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
 		TieredSnapshot:  relayInfo.TieredBillingSnapshot,
 		Procurement:     newTaskProcurementContext(relayInfo, result),
+		MediaLedger:     relayInfo.MediaLedgerEnabled,
+		MediaFacts:      taskMediaFacts(relayInfo, result.TaskData),
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData

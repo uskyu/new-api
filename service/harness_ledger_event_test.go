@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -71,6 +72,9 @@ func TestRecordHarnessSettlementAppendsBothStreams(t *testing.T) {
 	assert.Equal(t, harnessUsageSourceUpstream, usageEvents[0].UsageSource)
 	assert.Equal(t, 1, usageEvents[0].RecordVersion)
 	assert.Nil(t, usageEvents[0].SupersedesEventId)
+	assert.Empty(t, usageEvents[0].MediaFacts)
+	wire := usageEventFromLedgerEvent(usageEvents[0])
+	assert.Nil(t, wire.MediaUsage, "the switch-off wire must not grow a media block")
 
 	var costEvents []model.HarnessLedgerEvent
 	require.NoError(t, model.DB.Where("stream = ?", model.HarnessLedgerStreamCost).Find(&costEvents).Error)
@@ -257,7 +261,246 @@ func TestRecordTaskHarnessSettlementUsageSource(t *testing.T) {
 	})
 }
 
-// TestRecordHarnessSettlementRefundSupersedes covers the correction chain: a
+// ledgerMediaFactsJSON builds the canonical fact list used by the media tests:
+// requested_seconds from the request plus output_seconds either unavailable or
+// measured. A nil output means the gateway learned nothing about it.
+func ledgerMediaFactsJSON(t *testing.T, requested *string, output *string, outputSource string) string {
+	t.Helper()
+	var facts relaycommon.MediaFacts
+	if requested != nil {
+		require.NoError(t, facts.SetQuantity(
+			relaycommon.MediaFactNameRequestedSeconds,
+			relaycommon.MediaDimensionVideo,
+			relaycommon.MediaUnitVideoSecond,
+			relaycommon.MediaFactSourceRequest,
+			*requested,
+		))
+	}
+	if output == nil {
+		require.NoError(t, facts.SetUnavailable(
+			relaycommon.MediaFactNameOutputSeconds,
+			relaycommon.MediaDimensionVideo,
+			relaycommon.MediaUnitVideoSecond,
+		))
+	} else {
+		require.NoError(t, facts.SetQuantity(
+			relaycommon.MediaFactNameOutputSeconds,
+			relaycommon.MediaDimensionVideo,
+			relaycommon.MediaUnitVideoSecond,
+			outputSource,
+			*output,
+		))
+	}
+	return facts.CanonicalJSON()
+}
+
+func harnessMediaFactByName(t *testing.T, usage *HarnessMediaUsage, name string) HarnessMediaFact {
+	t.Helper()
+	require.NotNil(t, usage)
+	for _, fact := range usage.Facts {
+		if fact.Name == name {
+			return fact
+		}
+	}
+	require.FailNowf(t, "missing media fact", "fact %q not found", name)
+	return HarnessMediaFact{}
+}
+
+// TestRecordTaskHarnessSettlementMediaFactsVersionChain pins the P1-A task
+// chain: the submit facts are published on pending B1, a settle with unchanged
+// facts adds no usage event, and a completion that learns the actual value
+// appends exactly one correction without repricing the task.
+func TestRecordTaskHarnessSettlementMediaFactsVersionChain(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	const gatewayRequestID = "gw-media-facts"
+	task := ledgerUsageTestTask("task-media-facts", gatewayRequestID,
+		"hrq_media_facts", "run_media_facts", "seedance2.5-flash-480p-once-2", 4500)
+	requested := "5"
+	task.PrivateData.BillingContext.MediaLedger = true
+	task.PrivateData.BillingContext.MediaFacts = ledgerMediaFactsJSON(t, &requested, nil, "")
+
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusPending, task.Quota)
+	usages := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamUsage)
+	require.Len(t, usages, 1)
+	wire := usageEventFromLedgerEvent(usages[0])
+	require.NotNil(t, wire.MediaUsage)
+	assert.Equal(t, relaycommon.MediaFactsVersion, wire.MediaUsage.Version)
+	output := harnessMediaFactByName(t, wire.MediaUsage, relaycommon.MediaFactNameOutputSeconds)
+	assert.Nil(t, output.Quantity, "unknown output must be null, never zero")
+	assert.Equal(t, relaycommon.MediaFactSourceUnavailable, output.Source)
+	requestedFact := harnessMediaFactByName(t, wire.MediaUsage, relaycommon.MediaFactNameRequestedSeconds)
+	requestedQuantity, ok := requestedFact.Quantity.(string)
+	require.True(t, ok, "video seconds stay a decimal string")
+	assert.Equal(t, "5", requestedQuantity)
+	assert.Equal(t, relaycommon.MediaFactSourceRequest, requestedFact.Source)
+
+	encoded, err := common.Marshal(wire)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"quantity":"5"`, "video seconds are a JSON string")
+	assert.Contains(t, string(encoded), `"quantity":null`, "unknown stays JSON null")
+
+	costs := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+	require.Len(t, costs, 1)
+
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota)
+	usages = harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamUsage)
+	require.Len(t, usages, 1, "the same facts on settle are not a new usage fact")
+	costs = harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+	require.Len(t, costs, 2, "the status transition is a cost-side fact")
+	assert.Equal(t, costs[0].BaseAmount, costs[1].BaseAmount, "media facts must not reprice the task")
+	assert.Equal(t, costs[0].TotalAmount, costs[1].TotalAmount, "media facts must not reprice the task")
+
+	actual := "5"
+	task.PrivateData.BillingContext.MediaFacts = ledgerMediaFactsJSON(t, &requested, &actual, relaycommon.MediaFactSourceUpstream)
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota)
+
+	usages = harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamUsage)
+	require.Len(t, usages, 2, "learning the output is exactly one usage correction")
+	correction := usages[1]
+	assert.Equal(t, model.HarnessLedgerEventTypeUsageCorrection, correction.EventType)
+	assert.Equal(t, 2, correction.RecordVersion)
+	require.NotNil(t, correction.SupersedesEventId)
+	assert.Equal(t, usages[0].EventId, *correction.SupersedesEventId)
+	wire = usageEventFromLedgerEvent(correction)
+	output = harnessMediaFactByName(t, wire.MediaUsage, relaycommon.MediaFactNameOutputSeconds)
+	outputQuantity, ok := output.Quantity.(string)
+	require.True(t, ok, "video seconds stay a decimal string")
+	assert.Equal(t, "5", outputQuantity)
+	assert.Equal(t, relaycommon.MediaFactSourceUpstream, output.Source)
+
+	costs = harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+	require.Len(t, costs, 2, "a fact correction append no cost event when the amount did not change")
+	assert.Equal(t, costs[0].BaseAmount, costs[1].BaseAmount)
+}
+
+// TestRecordTaskHarnessSettlementIgnoresMediaFactsWhenSwitchOff pins the
+// gate: facts present on the task row but MediaLedger false must leave the B1
+// wire and the version chain exactly as they were before P1-A.
+func TestRecordTaskHarnessSettlementIgnoresMediaFactsWhenSwitchOff(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	const gatewayRequestID = "gw-media-off"
+	task := ledgerUsageTestTask("task-media-off", gatewayRequestID,
+		"hrq_media_off", "run_media_off", "seedance2.5-flash-480p-once-2", 4500)
+	requested := "5"
+	task.PrivateData.BillingContext.MediaFacts = ledgerMediaFactsJSON(t, &requested, nil, "")
+	// MediaLedger stays false: the submit path did not capture the switch.
+
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusPending, task.Quota)
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota)
+
+	usages := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamUsage)
+	require.Len(t, usages, 1, "the switch-off path emits exactly the pre-existing B1 events")
+	assert.Empty(t, usages[0].MediaFacts)
+	wire := usageEventFromLedgerEvent(usages[0])
+	assert.Nil(t, wire.MediaUsage)
+	encoded, err := common.Marshal(wire)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "media_usage", "the switch-off wire must stay byte-shape compatible")
+
+	costs := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+	require.Len(t, costs, 2)
+	assert.Empty(t, costs[0].MediaFacts)
+	assert.Empty(t, costs[1].MediaFacts)
+}
+
+// TestRecordTaskHarnessSettlementKeepsMediaFactsOnTokenCorrection covers the
+// correction path where a token change triggers a new B1 version but the settle
+// carries no fact list. The new version must inherit the facts, not erase them.
+func TestRecordTaskHarnessSettlementKeepsMediaFactsOnTokenCorrection(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	const gatewayRequestID = "gw-media-token-correction"
+	task := ledgerUsageTestTask("task-media-token-correction", gatewayRequestID,
+		"hrq_media_token_correction", "run_media_token_correction", "async-video-model", 4500)
+	requested := "5"
+	task.PrivateData.BillingContext.MediaLedger = true
+	task.PrivateData.BillingContext.MediaFacts = ledgerMediaFactsJSON(t, &requested, nil, "")
+
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusPending, task.Quota)
+	usages := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamUsage)
+	require.Len(t, usages, 1)
+	publishedFacts := usages[0].MediaFacts
+	require.NotEmpty(t, publishedFacts)
+
+	task.PrivateData.BillingContext.MediaFacts = ""
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota, 5000)
+
+	usages = harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamUsage)
+	require.Len(t, usages, 2, "learning the total is a usage correction")
+	correction := usages[1]
+	assert.Equal(t, 2, correction.RecordVersion)
+	assert.Equal(t, publishedFacts, correction.MediaFacts, "the correction must inherit the published facts")
+	assert.True(t, correction.TotalTokensKnown)
+	assert.NotNil(t, usageEventFromLedgerEvent(correction).MediaUsage)
+
+	costs := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+	require.Len(t, costs, 2)
+	assert.Equal(t, costs[0].BaseAmount, costs[1].BaseAmount, "a token correction must not reprice the task")
+}
+
+// TestRecordHarnessSettlementPublishesImageMediaFacts covers the synchronous
+// image path: the B1 event carries the observed count, while the cost event
+// keeps the existing token basis and amount.
+func TestRecordHarnessSettlementPublishesImageMediaFacts(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	var facts relaycommon.MediaFacts
+	require.NoError(t, facts.SetQuantity(
+		relaycommon.MediaFactNameImageCount,
+		relaycommon.MediaDimensionImage,
+		relaycommon.MediaUnitImage,
+		relaycommon.MediaFactSourceObserved,
+		"1",
+	))
+	settlement := &model.HarnessSettlement{
+		RequestId: "gw-image-media",
+		Status:    model.HarnessSettlementStatusSettled,
+		ModelName: "gpt-image-2.6-flare",
+	}
+	correlation := harnessSettlementCorrelation{
+		HarnessRequestId: "hrq_image_media",
+		UsageUnit:        harnessUsageUnitToken,
+		UsageSource:      harnessUsageSourceUpstream,
+		MediaFacts:       facts.CanonicalJSON(),
+	}
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(nil, 9_000, 0, "gpt-image-2.6-flare"), correlation)
+
+	usages := harnessLedgerStreamCount(t, "gw-image-media", model.HarnessLedgerStreamUsage)
+	require.Len(t, usages, 1)
+	wire := usageEventFromLedgerEvent(usages[0])
+	require.NotNil(t, wire.MediaUsage)
+	count := harnessMediaFactByName(t, wire.MediaUsage, relaycommon.MediaFactNameImageCount)
+	assert.Equal(t, int64(1), count.Quantity, "image counts are integers on the wire")
+	assert.Equal(t, relaycommon.MediaFactSourceObserved, count.Source)
+
+	encoded, err := common.Marshal(wire)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"quantity":1`, "image count is a JSON integer")
+
+	costs := harnessLedgerStreamCount(t, "gw-image-media", model.HarnessLedgerStreamCost)
+	require.Len(t, costs, 1)
+	assert.Equal(t, "token", costs[0].BillingBasis)
+	assert.Empty(t, costs[0].MediaFacts)
+}
+
 // refund must append a new cost event that points at the settled one and carries
 // the cumulative net amount of zero, never a delta.
 func TestRecordHarnessSettlementRefundSupersedes(t *testing.T) {

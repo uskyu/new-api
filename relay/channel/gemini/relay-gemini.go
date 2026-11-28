@@ -172,6 +172,36 @@ func geminiResponseInlineImageCount(response *dto.GeminiChatResponse) int {
 	return count
 }
 
+// geminiInlineDataIsImage distinguishes generated images from other inline
+// media (audio, PDFs, etc.). A missing MIME type is treated as an image
+// candidate because Nano Banana responses may omit or under-specify it and the
+// MIME normalizer runs before this check; an explicit non-image type is not.
+func geminiInlineDataIsImage(data *dto.GeminiInlineData) bool {
+	if data == nil {
+		return false
+	}
+	mime := strings.ToLower(data.MimeType)
+	return mime == "" || strings.HasPrefix(mime, "image/")
+}
+
+// geminiResponseInlineDataCount is the media-ledger count: every image
+// inlineData part is one generated image. Non-image inline payloads are
+// excluded so an audio response is never published with dimension=image.
+func geminiResponseInlineDataCount(response *dto.GeminiChatResponse) int {
+	if response == nil {
+		return 0
+	}
+	count := 0
+	for _, candidate := range response.Candidates {
+		for _, part := range candidate.Content.Parts {
+			if geminiInlineDataIsImage(part.InlineData) {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse) *dto.OpenAITextResponse {
 	return relayconvert.ResponseGeminiChat2OpenAI(helper.GetResponseID(c), common.GetTimestamp(), response)
 }
@@ -204,6 +234,7 @@ func handleFinalStream(c *gin.Context, info *relaycommon.RelayInfo, resp *dto.Ch
 func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, callback func(data string, geminiResponse *dto.GeminiChatResponse) bool) (*dto.Usage, *types.NewAPIError) {
 	var usage = &dto.Usage{}
 	var imageCount int
+	var mediaImageCount int
 	var hasBillableUsageMetadata bool
 	var streamErr error
 	var accumulatedUsageMetadata *dto.GeminiUsageMetadata
@@ -245,11 +276,18 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		// 统计图片数量
 		for _, candidate := range geminiResponse.Candidates {
 			for _, part := range candidate.Content.Parts {
-				if part.InlineData != nil && part.InlineData.MimeType != "" {
+				if part.InlineData == nil {
+					continue
+				}
+				if geminiInlineDataIsImage(part.InlineData) {
+					mediaImageCount++
+				}
+				if part.InlineData.MimeType != "" {
 					imageCount++
 				}
 			}
 		}
+		info.RecordObservedImageCount(int64(mediaImageCount))
 		responseText.WriteString(geminiResponseUsageText(&geminiResponse))
 
 		// 更新使用量统计
@@ -429,6 +467,7 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	grounding.observe(&geminiResponse)
 	grounding.commit(info)
 	countGeminiBillableFunctionCalls(info, &geminiResponse)
+	info.RecordObservedImageCount(int64(geminiResponseInlineDataCount(&geminiResponse)))
 	if len(geminiResponse.Candidates) == 0 {
 		usage := buildUsageFromGeminiResponse(c, info, &geminiResponse)
 
@@ -591,6 +630,7 @@ func GeminiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 	// each image has fixed 258 tokens
 	const imageTokens = 258
 	generatedImages := len(openAIResponse.Data)
+	info.RecordObservedImageCount(int64(generatedImages))
 
 	usage := &dto.Usage{
 		PromptTokens:     imageTokens * generatedImages, // each generated image has fixed 258 tokens

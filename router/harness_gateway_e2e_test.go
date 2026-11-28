@@ -152,7 +152,9 @@ func TestHarnessGatewayEndToEnd(t *testing.T) {
 		CompletionTokens: 22,
 		UsageSource:      "upstream",
 		BillingBasis:     "token",
-		ObservedAtMs:     observedAt,
+		// P1-A additive fact block: this is the shape Harness reads from B1.
+		MediaFacts:   `{"version":1,"facts":[{"name":"count","dimension":"image","quantity":"1","unit":"image","source":"observed"}]}`,
+		ObservedAtMs: observedAt,
 	}))
 	require.NoError(t, model.AppendHarnessLedgerEvent(&model.HarnessLedgerEvent{
 		Stream:           model.HarnessLedgerStreamCost,
@@ -208,6 +210,10 @@ func TestHarnessGatewayEndToEnd(t *testing.T) {
 				TotalTokens  *int `json:"total_tokens"`
 				SplitKnown   bool `json:"split_known"`
 			} `json:"usage"`
+			MediaUsage *struct {
+				Version int              `json:"version"`
+				Facts   []map[string]any `json:"facts"`
+			} `json:"media_usage"`
 		} `json:"items"`
 		HasMore bool `json:"has_more"`
 	}
@@ -220,6 +226,13 @@ func TestHarnessGatewayEndToEnd(t *testing.T) {
 	assert.Equal(t, 11, *usagePage.Items[0].Usage.InputTokens)
 	assert.Equal(t, 22, *usagePage.Items[0].Usage.OutputTokens)
 	assert.True(t, usagePage.Items[0].Usage.SplitKnown)
+	require.NotNil(t, usagePage.Items[0].MediaUsage)
+	assert.Equal(t, 1, usagePage.Items[0].MediaUsage.Version)
+	require.Len(t, usagePage.Items[0].MediaUsage.Facts, 1)
+	assert.Equal(t, "count", usagePage.Items[0].MediaUsage.Facts[0]["name"])
+	assert.Equal(t, "image", usagePage.Items[0].MediaUsage.Facts[0]["dimension"])
+	assert.Equal(t, float64(1), usagePage.Items[0].MediaUsage.Facts[0]["quantity"], "image count must be a JSON number")
+	assert.Equal(t, "observed", usagePage.Items[0].MediaUsage.Facts[0]["source"])
 	assert.False(t, usagePage.HasMore)
 
 	// B3 list must return the cost record with USD amounts.

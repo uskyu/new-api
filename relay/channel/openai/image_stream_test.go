@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -66,6 +67,7 @@ func TestImageExpressionUsesCompletedCountAndProtectsAbortedStreams(t *testing.T
 				c, _, resp, info = newDisconnectingImageStream(t, tc.body, "first")
 			}
 			info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{EstimatedImageCount: &tc.requested}
+			info.MediaLedgerEnabled = true
 			if tc.stream {
 				_, err := OpenaiImageStreamHandler(c, info, resp)
 				require.Nil(t, err)
@@ -79,6 +81,20 @@ func TestImageExpressionUsesCompletedCountAndProtectsAbortedStreams(t *testing.T
 			}
 			assert.Equal(t, tc.want, count)
 			assert.Empty(t, info.PriceData.OtherRatios(), "expression quantities must not add a legacy multiplier")
+
+			// The media ledger records the actual count when the handler observed
+			// one. An empty body or an aborted stream retains the requested count
+			// for billing but must not fabricate an observed image fact.
+			if !info.MediaFacts.IsEmpty() {
+				facts, err := relaycommon.ParseMediaFacts(info.MediaFacts.CanonicalJSON())
+				require.NoError(t, err)
+				require.NotNil(t, facts)
+				require.Len(t, facts.Facts, 1)
+				assert.Equal(t, relaycommon.MediaFactNameImageCount, facts.Facts[0].Name)
+				require.NotNil(t, facts.Facts[0].Quantity)
+				assert.Equal(t, strconv.Itoa(tc.want), *facts.Facts[0].Quantity)
+				assert.Equal(t, relaycommon.MediaFactSourceObserved, facts.Facts[0].Source)
+			}
 		})
 	}
 }

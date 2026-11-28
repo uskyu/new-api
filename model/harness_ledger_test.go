@@ -397,3 +397,91 @@ func TestHarnessLedgerAppendRejectsInvalidEvents(t *testing.T) {
 		EventType: HarnessLedgerEventTypeUsage,
 	}), ErrHarnessLedgerInvalid)
 }
+
+// TestTaskBillingContextMediaFactsJSONRoundTrip proves the submit-time switch
+// and facts survive the task private_data serialization, which is what makes
+// the completion path resume after a restart.
+func TestTaskBillingContextMediaFactsJSONRoundTrip(t *testing.T) {
+	mediaFacts := `{"version":1,"facts":[{"name":"requested_seconds","dimension":"video","quantity":"5","unit":"video_second","source":"request"}]}`
+	source := TaskPrivateData{BillingContext: &TaskBillingContext{MediaLedger: true, MediaFacts: mediaFacts}}
+	value, err := source.Value()
+	require.NoError(t, err)
+
+	var decoded TaskPrivateData
+	require.NoError(t, decoded.Scan(value))
+	require.NotNil(t, decoded.BillingContext)
+	assert.True(t, decoded.BillingContext.MediaLedger)
+	assert.Equal(t, mediaFacts, decoded.BillingContext.MediaFacts)
+}
+
+// TestHarnessLedgerMediaFactsColumnUpgradesLegacyTable simulates the deployed
+// table from the previous release (no media_facts column), then runs the same
+// AutoMigrate startup uses and checks the column is added without losing the
+// legacy row.
+func TestHarnessLedgerMediaFactsColumnUpgradesLegacyTable(t *testing.T) {
+	for _, dialect := range harnessLedgerDialects() {
+		t.Run(dialect, func(t *testing.T) {
+			useHarnessLedgerDB(t, dialect)
+			require.NoError(t, DB.Migrator().DropColumn(&HarnessLedgerEvent{}, "media_facts"))
+			require.False(t, DB.Migrator().HasColumn(&HarnessLedgerEvent{}, "media_facts"),
+				"the fixture must start from the previous release schema")
+
+			require.NoError(t, DB.Table("harness_ledger_events").Create(map[string]any{
+				"stream":             HarnessLedgerStreamUsage,
+				"event_id":           "ue_legacy_media_facts",
+				"event_type":         HarnessLedgerEventTypeUsage,
+				"harness_request_id": "hrq_legacy_media_facts",
+				"gateway_request_id": "gw_legacy_media_facts",
+				"record_version":     1,
+				"observed_at_ms":     time.Now().UnixMilli(),
+			}).Error)
+
+			require.NoError(t, DB.AutoMigrate(&HarnessLedgerEvent{}))
+			require.True(t, DB.Migrator().HasColumn(&HarnessLedgerEvent{}, "media_facts"))
+
+			var stored HarnessLedgerEvent
+			require.NoError(t, DB.Where("event_id = ?", "ue_legacy_media_facts").First(&stored).Error)
+			assert.Equal(t, "hrq_legacy_media_facts", stored.HarnessRequestId)
+			assert.Empty(t, stored.MediaFacts, "the upgraded legacy row keeps the empty default")
+		})
+	}
+}
+
+// survives AutoMigrate and a write/read cycle on every supported database, and
+// that a legacy row without facts reads back as the empty default.
+func TestHarnessLedgerMediaFactsRoundTripAcrossDialects(t *testing.T) {
+	for _, dialect := range harnessLedgerDialects() {
+		t.Run(dialect, func(t *testing.T) {
+			useHarnessLedgerDB(t, dialect)
+			require.True(t, DB.Migrator().HasColumn(&HarnessLedgerEvent{}, "media_facts"),
+				"AutoMigrate must add the additive media_facts column")
+
+			mediaFacts := `{"version":1,"facts":[{"name":"count","dimension":"image","quantity":"1","unit":"image","source":"observed"}]}`
+			event := &HarnessLedgerEvent{
+				Stream:           HarnessLedgerStreamUsage,
+				EventType:        HarnessLedgerEventTypeUsage,
+				HarnessRequestId: "hrq_media_facts",
+				GatewayRequestId: "gw_media_facts",
+				MediaFacts:       mediaFacts,
+				ObservedAtMs:     time.Now().UnixMilli(),
+			}
+			require.NoError(t, AppendHarnessLedgerEvent(event))
+
+			var stored HarnessLedgerEvent
+			require.NoError(t, DB.Where("event_id = ?", event.EventId).First(&stored).Error)
+			assert.Equal(t, mediaFacts, stored.MediaFacts)
+
+			legacy := &HarnessLedgerEvent{
+				Stream:           HarnessLedgerStreamCost,
+				EventType:        HarnessLedgerEventTypeCost,
+				HarnessRequestId: "hrq_legacy_facts",
+				GatewayRequestId: "gw_legacy_facts",
+				ObservedAtMs:     time.Now().UnixMilli(),
+			}
+			require.NoError(t, AppendHarnessLedgerEvent(legacy))
+			var storedLegacy HarnessLedgerEvent
+			require.NoError(t, DB.Where("event_id = ?", legacy.EventId).First(&storedLegacy).Error)
+			assert.Empty(t, storedLegacy.MediaFacts, "a row written without facts keeps the empty default")
+		})
+	}
+}

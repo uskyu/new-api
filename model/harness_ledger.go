@@ -84,12 +84,19 @@ type HarnessLedgerEvent struct {
 	// insert, so a row that genuinely means "unknown" would silently become
 	// "known". Keeping the flag false-by-default makes the unknown case the one
 	// that must be written explicitly.
-	SplitUnknown bool    `json:"split_unknown" gorm:"default:false"`
-	UsageSource  string  `json:"usage_source" gorm:"type:varchar(16);default:''"`
-	IsEstimated  bool    `json:"is_estimated" gorm:"default:false"`
-	BaseAmount   string  `json:"base_amount" gorm:"type:varchar(64);default:''"`
-	TotalAmount  string  `json:"total_amount" gorm:"type:varchar(64);default:''"`
-	GroupRatio   float64 `json:"group_ratio" gorm:"default:0"`
+	SplitUnknown bool   `json:"split_unknown" gorm:"default:false"`
+	UsageSource  string `json:"usage_source" gorm:"type:varchar(16);default:''"`
+	IsEstimated  bool   `json:"is_estimated" gorm:"default:false"`
+	// MediaFacts is the canonical JSON fact list of a B1 row. It stays empty for
+	// cost rows, legacy rows and every request while the P1-A switch is off.
+	// varchar rather than text keeps the column non-nullable with a default on
+	// MySQL 5.7, which rejects defaults on TEXT. json:"-" keeps the internal
+	// canonical form out of any accidental model serialization; the B1 wire is
+	// rendered separately in service/harness_ledger_query.go.
+	MediaFacts  string  `json:"-" gorm:"type:varchar(4096);default:''"`
+	BaseAmount  string  `json:"base_amount" gorm:"type:varchar(64);default:''"`
+	TotalAmount string  `json:"total_amount" gorm:"type:varchar(64);default:''"`
+	GroupRatio  float64 `json:"group_ratio" gorm:"default:0"`
 	// TaxRatePercent is legacy: the supplier tax was removed from procurement
 	// billing. The column and its JSON field are kept for wire compatibility with
 	// existing consumers, and new rows always write zero.

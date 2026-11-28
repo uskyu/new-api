@@ -194,6 +194,105 @@ func TestGeminiChatHandlerCompletionTokensExcludeToolUsePromptTokens(t *testing.
 	require.Equal(t, 1120, usage.CompletionTokenDetails.ReasoningTokens)
 }
 
+func TestGeminiChatHandlerRecordsObservedInlineImageCount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat:        types.RelayFormatGemini,
+		OriginModelName:    "Nano Banana 2.1 1K",
+		MediaLedgerEnabled: true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "Nano Banana 2.1 1K",
+		},
+	}
+	payload := dto.GeminiChatResponse{
+		Candidates: []dto.GeminiChatCandidate{{
+			Content: dto.GeminiChatContent{
+				Role: "model",
+				Parts: []dto.GeminiPart{
+					{InlineData: &dto.GeminiInlineData{MimeType: "image/png", Data: "aGVsbG8="}},
+					{InlineData: &dto.GeminiInlineData{Data: "d29ybGQ="}},
+					{InlineData: &dto.GeminiInlineData{MimeType: "audio/wav", Data: "YXVkaW8="}},
+				},
+			},
+		}},
+		UsageMetadata: dto.GeminiUsageMetadata{
+			PromptTokenCount:     13,
+			CandidatesTokenCount: 1024,
+			TotalTokenCount:      1037,
+		},
+	}
+	body, err := common.Marshal(payload)
+	require.NoError(t, err)
+
+	usage, newAPIError := GeminiChatHandler(c, info, &http.Response{Body: io.NopCloser(bytes.NewReader(body))})
+	require.Nil(t, newAPIError)
+	require.NotNil(t, usage)
+	require.Equal(t, 1037, usage.TotalTokens, "media counting must not change the existing token settlement")
+
+	facts, err := relaycommon.ParseMediaFacts(info.MediaFacts.CanonicalJSON())
+	require.NoError(t, err)
+	require.NotNil(t, facts)
+	require.Len(t, facts.Facts, 1)
+	assert.Equal(t, relaycommon.MediaFactNameImageCount, facts.Facts[0].Name)
+	require.NotNil(t, facts.Facts[0].Quantity)
+	assert.Equal(t, "2", *facts.Facts[0].Quantity)
+	assert.Equal(t, relaycommon.MediaFactSourceObserved, facts.Facts[0].Source)
+}
+
+func TestGeminiStreamHandlerRecordsCumulativeInlineImageCount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 300
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName:    "Nano Banana 2.1 1K",
+		MediaLedgerEnabled: true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "Nano Banana 2.1 1K",
+		},
+	}
+
+	frame := func(data string, extra ...*dto.GeminiInlineData) string {
+		parts := []dto.GeminiPart{{InlineData: &dto.GeminiInlineData{MimeType: "image/png", Data: data}}}
+		for _, inline := range extra {
+			parts = append(parts, dto.GeminiPart{InlineData: inline})
+		}
+		chunk := dto.GeminiChatResponse{
+			Candidates: []dto.GeminiChatCandidate{{
+				Content: dto.GeminiChatContent{
+					Role:  "model",
+					Parts: parts,
+				},
+			}},
+		}
+		encoded, err := common.Marshal(chunk)
+		require.NoError(t, err)
+		return "data: " + string(encoded) + "\n"
+	}
+	streamBody := frame("Zmlyc3Q=") + frame("c2Vjb25k", &dto.GeminiInlineData{MimeType: "audio/wav", Data: "YXVkaW8="}) + "data: [DONE]\n"
+
+	usage, newAPIError := geminiStreamHandler(c, info, &http.Response{Body: io.NopCloser(strings.NewReader(streamBody))},
+		func(_ string, _ *dto.GeminiChatResponse) bool { return true })
+	require.Nil(t, newAPIError)
+	require.NotNil(t, usage)
+
+	facts, err := relaycommon.ParseMediaFacts(info.MediaFacts.CanonicalJSON())
+	require.NoError(t, err)
+	require.NotNil(t, facts)
+	require.Len(t, facts.Facts, 1)
+	assert.Equal(t, relaycommon.MediaFactNameImageCount, facts.Facts[0].Name)
+	require.NotNil(t, facts.Facts[0].Quantity)
+	assert.Equal(t, "2", *facts.Facts[0].Quantity)
+	assert.Equal(t, relaycommon.MediaFactSourceObserved, facts.Facts[0].Source)
+}
+
 func TestGeminiStreamHandlerCompletionTokensExcludeToolUsePromptTokens(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

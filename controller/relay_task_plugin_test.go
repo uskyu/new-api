@@ -690,3 +690,28 @@ func TestExecuteTaskSubmissionRefundsWhenFinalReserveFails(t *testing.T) {
 	assert.Equal(t, 1, billing.refunds)
 	assert.False(t, c.Writer.Written())
 }
+
+func TestTaskMediaFactsCapturesRequestFacts(t *testing.T) {
+	info := &relaycommon.RelayInfo{MediaLedgerEnabled: true, RequestURLPath: "/v1/videos"}
+	raw := taskMediaFacts(info, []byte(`{"seconds":5}`))
+	facts, err := relaycommon.ParseMediaFacts(raw)
+	require.NoError(t, err)
+	require.NotNil(t, facts)
+	require.Len(t, facts.Facts, 2)
+
+	output := facts.Facts[0]
+	assert.Equal(t, relaycommon.MediaFactNameOutputSeconds, output.Name)
+	assert.Nil(t, output.Quantity, "a task without completion facts must say unavailable, not zero")
+	assert.Equal(t, relaycommon.MediaFactSourceUnavailable, output.Source)
+
+	requested := facts.Facts[1]
+	assert.Equal(t, relaycommon.MediaFactNameRequestedSeconds, requested.Name)
+	require.NotNil(t, requested.Quantity)
+	assert.Equal(t, "5", *requested.Quantity)
+	assert.Equal(t, relaycommon.MediaFactSourceRequest, requested.Source)
+
+	disabled := &relaycommon.RelayInfo{RequestURLPath: "/v1/videos"}
+	assert.Empty(t, taskMediaFacts(disabled, []byte(`{"seconds":5}`)), "the switch-off path must not record facts")
+	imageTask := &relaycommon.RelayInfo{MediaLedgerEnabled: true, RequestURLPath: "/v1/images/generations"}
+	assert.Empty(t, taskMediaFacts(imageTask, []byte(`{"seconds":5}`)), "A1 must not label an image task as video")
+}

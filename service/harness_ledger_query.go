@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
 // Harness ledger read-side limits agreed with the platform. Exceeding them is a
@@ -63,6 +65,7 @@ type HarnessUsageEvent struct {
 	Usage             HarnessUsageEventAmounts `json:"usage"`
 	UsageSource       string                   `json:"usage_source"`
 	IsEstimated       bool                     `json:"is_estimated"`
+	MediaUsage        *HarnessMediaUsage       `json:"media_usage,omitempty"`
 	ObservedAt        string                   `json:"observed_at"`
 	RecordVersion     int                      `json:"record_version"`
 	SupersedesEventId *string                  `json:"supersedes_event_id"`
@@ -86,6 +89,27 @@ type HarnessUsageEventAmounts struct {
 	// SplitKnown false means input/output were not reported separately; the two
 	// fields are then null and only total_tokens may carry a value.
 	SplitKnown bool `json:"split_known"`
+}
+
+// HarnessMediaUsage is the additive B1 media fact block. Each fact carries its
+// own source, so a request can report requested_seconds from the request next
+// to output_seconds from upstream without flattening both into one provenance.
+// A nil Quantity is unknown, never a measured zero.
+type HarnessMediaUsage struct {
+	Version int                `json:"version"`
+	Facts   []HarnessMediaFact `json:"facts"`
+}
+
+type HarnessMediaFact struct {
+	Name      string `json:"name"`
+	Dimension string `json:"dimension"`
+	// Quantity is an integer for image counts and a decimal string for video
+	// seconds; nil means unknown. The internal canonical form stays a string so
+	// the ledger diff is exact, and this field applies the wire type the frozen
+	// contract assigns to each dimension.
+	Quantity any    `json:"quantity"`
+	Unit     string `json:"unit"`
+	Source   string `json:"source"`
 }
 
 // HarnessCostBilling mirrors the existing settlement billing block so B3 reuses
@@ -156,10 +180,58 @@ func usageEventFromLedgerEvent(e model.HarnessLedgerEvent) HarnessUsageEvent {
 		Usage:             harnessUsageAmounts(e),
 		UsageSource:       e.UsageSource,
 		IsEstimated:       e.IsEstimated,
+		MediaUsage:        harnessMediaUsageFromLedgerEvent(e.MediaFacts),
 		ObservedAt:        formatHarnessObservedAt(e.ObservedAtMs),
 		RecordVersion:     e.RecordVersion,
 		SupersedesEventId: e.SupersedesEventId,
 	}
+}
+
+// harnessMediaUsageFromLedgerEvent renders the stored canonical facts. An
+// invalid row is logged and omitted rather than exposed with a guess.
+func harnessMediaUsageFromLedgerEvent(raw string) *HarnessMediaUsage {
+	facts, err := relaycommon.ParseMediaFacts(raw)
+	if err != nil {
+		common.SysLog(common.LogText("harness ledger: skipping invalid media facts: %s", err.Error()))
+		return nil
+	}
+	if facts == nil {
+		return nil
+	}
+	usage := &HarnessMediaUsage{
+		Version: facts.Version,
+		Facts:   make([]HarnessMediaFact, 0, len(facts.Facts)),
+	}
+	for _, fact := range facts.Facts {
+		usage.Facts = append(usage.Facts, HarnessMediaFact{
+			Name:      fact.Name,
+			Dimension: fact.Dimension,
+			Quantity:  harnessMediaFactQuantity(fact),
+			Unit:      fact.Unit,
+			Source:    fact.Source,
+		})
+	}
+	return usage
+}
+
+// harnessMediaFactQuantity renders the frozen wire type per dimension: image
+// counts are integers, video seconds keep the exact decimal string. A value that
+// cannot be represented as an integer stays a string rather than being rounded.
+func harnessMediaFactQuantity(fact relaycommon.MediaFact) any {
+	if fact.Quantity == nil {
+		return nil
+	}
+	if fact.Dimension == relaycommon.MediaDimensionImage {
+		value, err := strconv.ParseInt(*fact.Quantity, 10, 64)
+		if err != nil {
+			// Normalization rejects fractional image counts on write, so this
+			// only protects against a corrupted row. Never publish a string
+			// where the contract promises an integer.
+			return nil
+		}
+		return value
+	}
+	return *fact.Quantity
 }
 
 // harnessUsageAmounts publishes the stored token figures, keeping "not measured"

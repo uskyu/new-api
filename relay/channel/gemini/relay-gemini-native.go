@@ -43,6 +43,7 @@ func GeminiTextGenerationHandler(c *gin.Context, info *relaycommon.RelayInfo, re
 	grounding.observe(&geminiResponse)
 	grounding.commit(info)
 	countGeminiBillableFunctionCalls(info, &geminiResponse)
+	info.RecordObservedImageCount(int64(geminiResponseInlineDataCount(&geminiResponse)))
 
 	if len(geminiResponse.Candidates) == 0 && geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
 		info.PerformanceBusinessRejection = true

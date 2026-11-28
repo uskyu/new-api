@@ -38,6 +38,7 @@ func GeminiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	grounding.observe(&geminiResponse)
 	grounding.commit(info)
 	countGeminiBillableFunctionCalls(info, &geminiResponse)
+	info.RecordObservedImageCount(int64(geminiResponseInlineDataCount(&geminiResponse)))
 	if len(geminiResponse.Candidates) == 0 {
 		usage := buildUsageFromGeminiResponse(c, info, &geminiResponse)
 		if geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
