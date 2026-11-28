@@ -4,7 +4,7 @@
 **生产基线**：`harness-api-20261127-7868b83`，A3 `catalog_version=v12`。\
 **审计范围**：media 池 76 个条目（video 49 + plan 17 + image 10）；按唯一模型 ID 去重后同为 76 个。\
 **数据来源**：生产只读 `billing_setting.billing_expr` / `ModelPrice` / `ModelRatio` / `abilities` / `channels` / `harness_settlements` / `harness_ledger_events`，本地代码与生产日志；未对 76 个模型逐个付费调用。\
-**P1-A 状态**：2026-11-28 冻结；A1 已合并 `c6ae2a125`（MySQL 生产口径验证通过）；A2 第一切片已落地代码与定向测试，A2 整体未验收；PostgreSQL 待补。冻结基线、wire 契约与验收矩阵见 §10。
+**P1-A 状态**：2026-11-28 冻结；A1 已合并 `c6ae2a125`（MySQL 生产口径验证通过）；A2 第一切片已合并 `c5544b5c7`，Package/GHCR 成功，A2 整体未验收；PostgreSQL 待补。冻结基线、wire 契约与验收矩阵见 §10。
 
 ## 1. 结论
 
@@ -500,6 +500,8 @@ A2 开工时把 §10.3/§10.4 与最终 JSON 示例作为“实现基线通知�
 TA 零结算修复、PAI C 组实际秒改价、完整表达式对 Harness 开放、P1-B Pending/幂等/异常退款状态机，均不纳入 A2。
 
 ### 10.10 A2 第一切片进度（2026-11-28）
+
+> 合并状态（2026-11-29）：A2 第一切片已提交 `c5544b5c7` 并推送 `harness-api`；`Package harness-api` 与 GHCR 镜像发布成功（workflow tag 规则：`harness-api-20261128-c5544b5`）；生产未部署，开关默认关闭。以下为代码与测试状态，A2 整体仍未验收。
 
 已落地（待整体验收）：
 
