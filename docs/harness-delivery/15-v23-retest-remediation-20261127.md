@@ -255,7 +255,7 @@ PostgreSQL 使用 `ALTER COLUMN ... TYPE varchar(96)`；SQLite 由 GORM AutoMigr
 
 仍需 Harness 持真实 JWT 复测：64/65/80 字符 Run ID 与 B1 原样回显、81 字符 400、A3 ETag/304 与按池 Ability、401/403 错误体、429 `Retry-After`。这些用例无法用网关自己的 sk 测试 token 代替 Harness JWT。
 
-> **P0.1 待办（2026-11-28 P1-0 审计发现）**：Plan 池的 `seedance2.5-flash-480p-once-2` / `-720p-once-2` 在 A3 和渠道 69 中存在，但 `supplyvideo` 插件仍只声明 `-once-1`；生产真实调用返回 400 `invalid_api_platform`，未创建任务、无费用。P0 在这两个模型上不能宣布完整通过，需单独 P0.1 热修插件模型声明后再复测。详见 [16 号审计](./16-p1-media-billing-audit-20261128.md)。
+> **P0.1 已热修（2026-11-28）**：Plan 池的 `seedance2.5-flash-480p-once-2` / `-720p-once-2` 原先在 A3 和渠道 69 中存在，但 `supplyvideo` 插件只声明 `-once-1`；已补插件声明（提交 `ae5b00b6d`，镜像 `harness-api-20261128-ae5b00b` 已部署）。生产零费用校验通过：两个模型缺 prompt 均返回插件校验 `field prompt is required`，不再是 `invalid_api_platform`。实际 $0.85/$1.20 付费生成/完成结算未跑，待 Harness 联调或用单独预算复测。详见 [16 号审计](./16-p1-media-billing-audit-20261128.md)。
 
 ---
 

@@ -8,10 +8,10 @@
 ## 1. 结论
 
 1. New API 的**内部计价能力已经存在**：图片张数、视频秒数、按次固定价、阶梯表达式、结算金额都能算。
-2. 缺口在**计量事实到 B1/B3 的传递**：当前所有媒体 B1 都是 `usage_unit=token`、token 字段 `null`、`split_known=false`、`usage_source=unavailable`；B3 只有 `billing_basis=token` + 金额，没有 quantity/components。
+2. 缺口在**计量事实到 B1/B3 的传递**：当前 49 个 video + 17 个 plan 的 B1 都是 `usage_unit=token`、token 字段 `null`、`split_known=false`、`usage_source=unavailable`；B3 只有 `billing_basis=token` + 金额，没有 quantity/components。图片 B1 不同：GPT Image 有上游 token 数据、Nano Banana 有估算/上游 token 数据，但都没有 `image_count`；B3 同样没有 image quantity。总述不能把图片说成 token 全空。
 3. 不是所有模型都能直接复用：视频 49 个条目中，14 个 A 型（实际秒可用，只缺 B1/B3），19 个 B 型（实际输出 + 估算参考混用），8 个 C 型（完成实测被结算跳过），8 个 D 型（上游完成秒缺失/不确定）。Plan 17 个是 per_call 固定表达式，主要缺 B3 的 `per_call` + quantity。
 4. 图片 10 个：GPT Image 4 个内部已按实际 `data[]` 数量调整 ModelPrice（A+C）；Nano Banana 6 个当前固定 1 张/请求，`candidateCount` 未进入计价（C+D，若未来上游支持多图则升级 B+C）。
-5. **发现一个当前生产阻断项**：Plan 池的 `seedance2.5-flash-480p-once-2` / `-720p-once-2` 在 A3 和渠道 69 中存在，但 `supplyvideo` 插件只声明 `-once-1`；生产真实调用返回 400 `invalid_api_platform`，未创建任务、无费用。这个需要在 P1 之前作为 P0.1 热修。
+5. **P0.1 已热修**：Plan 池的 `seedance2.5-flash-480p-once-2` / `-720p-once-2` 在 A3 和渠道 69 中存在，但 `supplyvideo` 插件原先只声明 `-once-1`；生产真实调用返回 400 `invalid_api_platform`。已补插件声明（提交 `ae5b00b6d`，镜像 `harness-api-20261128-ae5b00b` 已部署），生产零费用校验已通过；尚未跑 $0.85/$1.20 的真实生成完成结算。
 6. 媒体账本扩展必须 additive：历史行保持 token；B1 新增 `media_usage`，B3 新增 `billing_quantity`/`billing_components`；顶层 `billing_basis` 的新枚举必须提前通知 Harness，`mixed` 不能单方面启用。
 
 ## 2. 分级口径
@@ -71,7 +71,8 @@
 - 生产 A3/plan 与渠道 69 有 `seedance2.5-flash-480p-once-2`、`seedance2.5-flash-720p-once-2`。
 - `plugins/tasks/supplyvideo/plugin.js` 只声明 `-once-1`；`isKnownModel`/`modelProfile` 对 `-once-2` 不支持。
 - 生产真实调用 `seedance2.5-flash-480p-once-2` 返回 **400 `invalid_api_platform`**，未创建任务、无费用。
-- 这不是 P1 账本问题，而是 **当前 A3/插件目录漂移的 P0.1 阻断项**；应先修插件模型声明（补 `-once-2`，清理插件中已不在生产池的 `-once-1` 及 5 个 call 模型），再谈 P1。
+- 这不是 P1 账本问题，而是 **当前 A3/插件目录漂移的 P0.1 阻断项**。已补 `-once-2` 两个模型（提交 `ae5b00b6d`，镜像 `harness-api-20261128-ae5b00b`）；生产用缺 prompt 的零费用请求验证，两个模型均返回插件校验 `field prompt is required`，不再是 `invalid_api_platform`。实际付费生成/完成结算未跑，避免 $0.85/$1.20 成本；本地 `TestSupplyVideoDecodeRequest` 已覆盖 `-once-2` 解码与 per-call facts。
+- 旧 `-once-1` 与其他插件历史模型未批量删除：插件支持范围与当前生产启用范围不必完全一致，避免影响历史任务和已部署实例。后续可加“A3 目录 ⊆ 插件支持”的部署前检查，而不是靠删模型对齐。
 - 同批目录漂移还包括：`billing_expr` 里仍有 4 个未进入任何 video 池的 `SECOND_MODELS`（`grok-video1.5-480p-second`、`minimax-h3-max-480p/768p/1080p-second`）；插件 `models` 声明也多于生产 abilities。P0.1 应一并清理或明确标记历史。
 
 ## 6. B1/B3 账本缺口
@@ -185,7 +186,7 @@
 
 ## 8. 实施边界建议
 
-- **P0.1（先修，独立于 P1）**：`supplyvideo` 插件补 `-once-2` 两个模型；清理插件中已不在生产池的 5 个 call 模型；生产真实调用复测 400 消失。
+- **P0.1（已完成热修，独立于 P1）**：`supplyvideo` 插件已补 `-once-2` 两个模型（`ae5b00b6d`），镜像 `harness-api-20261128-ae5b00b` 已部署；生产零费用路由校验通过。旧模型不批量删除；建议后续增加 A3 目录与插件支持范围的一致性检查。
 - **P1-A（媒体用量与账本扩展）**：B1 `media_usage`、B3 `billing_quantity/components`；图片/视频事实贯通；先做图片和 Plan per_call，再做视频秒。
 - **P1-B（异步结算可靠性）**：Pending、not_dispatched、dispatched_unknown、idempotency、未知结果、退款、修正；高风险，单独交付。
 - P1-A 与 P1-B 不捆绑；P1 单独报价、单独确认，不并入原 ¥4,000/20 天 P0 范围。
