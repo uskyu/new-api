@@ -123,6 +123,15 @@ type HarnessCostBilling struct {
 	TotalAmount    string  `json:"total_amount"`
 }
 
+// HarnessBillingComponent explains one counted basis inside a B3 cost record.
+// Amount remains authoritative in billing.base_amount/total_amount; components
+// are the auditable quantity breakdown.
+type HarnessBillingComponent struct {
+	Basis    string `json:"basis"`
+	Quantity string `json:"quantity"`
+	Source   string `json:"source"`
+}
+
 // HarnessCostRecord is the B3 event payload.
 type HarnessCostRecord struct {
 	EventId                 string             `json:"event_id"`
@@ -135,9 +144,17 @@ type HarnessCostRecord struct {
 	Billing                 HarnessCostBilling `json:"billing"`
 	BillingBasis            string             `json:"billing_basis"`
 	ProcurementPriceVersion string             `json:"procurement_price_version"`
-	RecordVersion           int                `json:"record_version"`
-	SupersedesEventId       *string            `json:"supersedes_event_id"`
-	ObservedAt              string             `json:"observed_at"`
+	// P1-A2 additive fields; omitted for token-only events and while the media
+	// switch is off.
+	BillingQuantity        *string                   `json:"billing_quantity,omitempty"`
+	BillingQuantitySource  string                    `json:"billing_quantity_source,omitempty"`
+	BillingComponents      []HarnessBillingComponent `json:"billing_components,omitempty"`
+	CostCalculationVersion string                    `json:"cost_calculation_version,omitempty"`
+	BillingExprHash        string                    `json:"billing_expr_hash,omitempty"`
+	BillingExprVersion     int                       `json:"billing_expr_version,omitempty"`
+	RecordVersion          int                       `json:"record_version"`
+	SupersedesEventId      *string                   `json:"supersedes_event_id"`
+	ObservedAt             string                    `json:"observed_at"`
 }
 
 // formatHarnessObservedAt renders the millisecond RFC3339 UTC timestamp the
@@ -273,10 +290,48 @@ func costRecordFromLedgerEvent(e model.HarnessLedgerEvent) HarnessCostRecord {
 		},
 		BillingBasis:            e.BillingBasis,
 		ProcurementPriceVersion: e.PricingVersion,
+		BillingQuantity:         harnessOptionalDecimalString(e.BillingQuantity),
+		BillingQuantitySource:   e.BillingQuantitySource,
+		BillingComponents:       harnessBillingComponentsFromJSON(e.BillingComponents),
+		CostCalculationVersion:  harnessCostAuditVersion(e),
+		BillingExprHash:         e.BillingExprHash,
+		BillingExprVersion:      e.BillingExprVersion,
 		RecordVersion:           e.RecordVersion,
 		SupersedesEventId:       e.SupersedesEventId,
 		ObservedAt:              formatHarnessObservedAt(e.ObservedAtMs),
 	}
+}
+
+// harnessOptionalDecimalString keeps token-only/switch-off events free of the
+// optional media fields.
+func harnessOptionalDecimalString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+// harnessBillingComponentsFromJSON renders the stored breakdown. A corrupt row
+// is logged and omitted rather than published with guessed components.
+func harnessBillingComponentsFromJSON(raw string) []HarnessBillingComponent {
+	if raw == "" {
+		return nil
+	}
+	var components []HarnessBillingComponent
+	if err := common.Unmarshal([]byte(raw), &components); err != nil {
+		common.SysLog(common.LogText("harness ledger: skipping invalid billing components: %s", err.Error()))
+		return nil
+	}
+	return components
+}
+
+// harnessCostAuditVersion exposes the internal calculation version only when
+// the row carries P1-A2 media evidence; the token-only legacy wire is unchanged.
+func harnessCostAuditVersion(e model.HarnessLedgerEvent) string {
+	if e.BillingQuantity == "" && e.BillingComponents == "" && e.BillingExprHash == "" {
+		return ""
+	}
+	return e.CostCalculationVersion
 }
 
 // ParseHarnessLedgerCursor validates an inbound cursor against the expected

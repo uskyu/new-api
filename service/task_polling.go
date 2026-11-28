@@ -652,6 +652,10 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 // settlement ledger is closed whenever no billing-adjustment path did it.
 func finalizeTerminalTask(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) {
 	perfmetrics.RecordTaskResult(task, taskResult)
+	// Fold P1-A2 media facts into the billing context before any settlement
+	// path runs, so per-call, tiered, token-fallback and refund branches all
+	// publish the same completion evidence.
+	MergeTaskCompletionMediaFacts(task, taskResult)
 	billingSettled := settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
 	if billingSettled {
 		// RecalculateTaskQuota already closed the ledger with the actual amount.

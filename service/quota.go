@@ -659,6 +659,15 @@ type harnessSettlementCorrelation struct {
 	// MediaFacts is the canonical fact JSON attached to a B1 event. Empty means
 	// the request carries no media facts, which is also the switch-off state.
 	MediaFacts string
+	// P1-A2 B3 media fields. BillingBasis is the commercial basis of the cost
+	// event; UsageUnit stays the legacy token unit for B1 compatibility.
+	BillingBasis          string
+	BillingQuantity       string
+	BillingQuantitySource string
+	BillingComponents     string
+	BillingExpr           string
+	BillingExprHash       string
+	BillingExprVersion    int
 }
 
 // harnessUsageUnitToken is the default billing basis. The platform treats token
@@ -996,12 +1005,19 @@ func recordHarnessSettlement(settlement *model.HarnessSettlement, money harnessS
 		return
 	}
 	appendHarnessSettlementEvents(settlement, money, harnessSettlementCorrelation{
-		HarnessRequestId: settlement.HarnessRequestId,
-		HarnessRunId:     settlement.HarnessRunId,
-		UsageUnit:        correlation.UsageUnit,
-		UsageSource:      correlation.UsageSource,
-		IsEstimated:      correlation.IsEstimated,
-		MediaFacts:       correlation.MediaFacts,
+		HarnessRequestId:      settlement.HarnessRequestId,
+		HarnessRunId:          settlement.HarnessRunId,
+		UsageUnit:             correlation.UsageUnit,
+		UsageSource:           correlation.UsageSource,
+		IsEstimated:           correlation.IsEstimated,
+		MediaFacts:            correlation.MediaFacts,
+		BillingBasis:          correlation.BillingBasis,
+		BillingQuantity:       correlation.BillingQuantity,
+		BillingQuantitySource: correlation.BillingQuantitySource,
+		BillingComponents:     correlation.BillingComponents,
+		BillingExpr:           correlation.BillingExpr,
+		BillingExprHash:       correlation.BillingExprHash,
+		BillingExprVersion:    correlation.BillingExprVersion,
 	})
 }
 
@@ -1148,7 +1164,7 @@ func harnessCostEventIfChanged(settlement *model.HarnessSettlement, money harnes
 	}
 	return &model.HarnessLedgerEvent{
 		Stream:           model.HarnessLedgerStreamCost,
-		EventType:        harnessCostEventTypeForStatus(settlement.Status, previous, money),
+		EventType:        harnessCostEventTypeForStatus(settlement.Status, previous, money, correlation),
 		HarnessRequestId: correlation.HarnessRequestId,
 		GatewayRequestId: settlement.RequestId,
 		RunId:            correlation.HarnessRunId,
@@ -1170,13 +1186,28 @@ func harnessCostEventIfChanged(settlement *model.HarnessSettlement, money harnes
 		// Legacy field kept in the B3 payload for wire compatibility; the supplier
 		// tax was removed from billing, so it is always zero.
 		TaxRatePercent:         0,
-		BillingBasis:           correlation.UsageUnit,
+		BillingBasis:           harnessCostBillingBasis(correlation),
+		BillingQuantity:        correlation.BillingQuantity,
+		BillingQuantitySource:  correlation.BillingQuantitySource,
+		BillingComponents:      correlation.BillingComponents,
+		BillingExpr:            correlation.BillingExpr,
+		BillingExprHash:        correlation.BillingExprHash,
+		BillingExprVersion:     correlation.BillingExprVersion,
 		PricingVersion:         money.PriceVersion,
 		CostCalculationVersion: money.CostCalculationVersion,
 		RecordVersion:          version,
 		SupersedesEventId:      supersedes,
 		ObservedAtMs:           time.Now().UnixMilli(),
 	}
+}
+
+// harnessCostBillingBasis keeps the legacy token basis for requests without a
+// P1-A2 media correlation; media cost events carry the commercial basis.
+func harnessCostBillingBasis(correlation harnessSettlementCorrelation) string {
+	if correlation.BillingBasis != "" {
+		return correlation.BillingBasis
+	}
+	return correlation.UsageUnit
 }
 
 // harnessCostDiffers reports whether a settle changes anything the B3 feed shows.
@@ -1194,7 +1225,7 @@ func harnessCostDiffers(previous *model.HarnessLedgerEvent, settlement *model.Ha
 		previous.Currency != money.Currency ||
 		previous.PricingVersion != money.PriceVersion ||
 		previous.CostCalculationVersion != money.CostCalculationVersion ||
-		previous.BillingBasis != correlation.UsageUnit ||
+		harnessCostDescriptionChanged(previous, correlation) ||
 		previous.RunId != correlation.HarnessRunId
 }
 
@@ -1324,7 +1355,7 @@ func harnessUsageEventTypeForStatus(status string, hasPrevious bool) string {
 // pre-group base. Editing the procurement group ratio moves total_amount while
 // base_amount stays put, and calling that a status_change would report an
 // unchanged cost for a request whose cost actually changed.
-func harnessCostEventTypeForStatus(status string, previous *model.HarnessLedgerEvent, money harnessSettlementMoney) string {
+func harnessCostEventTypeForStatus(status string, previous *model.HarnessLedgerEvent, money harnessSettlementMoney, correlation harnessSettlementCorrelation) string {
 	if previous == nil {
 		// The first event of a request is never a correction: there is nothing it
 		// could supersede, whatever state it starts in.
@@ -1333,10 +1364,22 @@ func harnessCostEventTypeForStatus(status string, previous *model.HarnessLedgerE
 	if status == model.HarnessSettlementStatusRefunded {
 		return model.HarnessLedgerEventTypeRefund
 	}
-	if harnessCostAmountChanged(previous, money) {
+	if harnessCostAmountChanged(previous, money) || harnessCostDescriptionChanged(previous, correlation) {
 		return model.HarnessLedgerEventTypeCostCorrection
 	}
 	return model.HarnessLedgerEventTypeStatusChange
+}
+
+// harnessCostDescriptionChanged reports whether the P1-A2 billing explanation
+// moved even when the money did not. A quantity/component/basis correction is a
+// cost-side fact and must not be published as a mere status_change.
+func harnessCostDescriptionChanged(previous *model.HarnessLedgerEvent, correlation harnessSettlementCorrelation) bool {
+	return previous.BillingBasis != harnessCostBillingBasis(correlation) ||
+		previous.BillingQuantity != correlation.BillingQuantity ||
+		previous.BillingQuantitySource != correlation.BillingQuantitySource ||
+		previous.BillingComponents != correlation.BillingComponents ||
+		previous.BillingExprHash != correlation.BillingExprHash ||
+		previous.BillingExprVersion != correlation.BillingExprVersion
 }
 
 // harnessCostAmountChanged reports whether the money a cost event states has moved
@@ -1394,6 +1437,7 @@ func recordRelayHarnessSettlement(ctx *gin.Context, relayInfo *relaycommon.Relay
 	if relayInfo.MediaLedgerEnabled && !relayInfo.MediaFacts.IsEmpty() {
 		correlation.MediaFacts = relayInfo.MediaFacts.CanonicalJSON()
 	}
+	applyHarnessMediaBilling(&correlation, harnessSyncMediaBilling(relayInfo))
 	correlation.UsageSource, correlation.IsEstimated = harnessUsageProvenance(
 		ctx != nil && common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens),
 		harnessUsageHasMeasurement(usage),
@@ -1500,6 +1544,11 @@ func recordTaskHarnessSettlement(task *model.Task, status string, quota int, usa
 	// submitted with the switch off.
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.MediaLedger {
 		correlation.MediaFacts = bc.MediaFacts
+		// A refunded cost event must not claim a commercial quantity the
+		// platform never bought. B1 may still describe the facts it observed.
+		if status != model.HarnessSettlementStatusRefunded {
+			applyHarnessMediaBilling(&correlation, harnessTaskMediaBilling(bc))
+		}
 	}
 	recordHarnessSettlement(settlement, harnessSettlementMoneyForTask(task, status, quota), correlation)
 }

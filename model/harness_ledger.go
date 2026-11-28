@@ -116,11 +116,22 @@ type HarnessLedgerEvent struct {
 	//
 	// json:"-" keeps it internal: the platform-facing schema is frozen and no
 	// audit-only field may enter it without agreement.
-	CostCalculationVersion string  `json:"-" gorm:"type:varchar(32);default:''"`
-	RecordVersion          int     `json:"record_version" gorm:"default:1"`
-	SupersedesEventId      *string `json:"supersedes_event_id" gorm:"type:varchar(64)"`
-	ObservedAtMs           int64   `json:"observed_at_ms" gorm:"bigint;index:idx_harness_ledger_observed_at_ms;index:idx_harness_ledger_batch,priority:2;default:0"`
-	CreatedAt              int64   `json:"created_at" gorm:"bigint;default:0"`
+	CostCalculationVersion string `json:"-" gorm:"type:varchar(32);default:''"`
+	// P1-A2 B3 media fields. They stay empty for token-only rows and while the
+	// single media switch is off, so the legacy wire shape is unchanged.
+	BillingQuantity       string `json:"-" gorm:"type:varchar(64);default:''"`
+	BillingQuantitySource string `json:"-" gorm:"type:varchar(16);default:''"`
+	// BillingComponents is canonical JSON of []HarnessBillingComponent.
+	BillingComponents string `json:"-" gorm:"type:varchar(2048);default:''"`
+	// BillingExpr is the internal expression snapshot; only its hash and
+	// version are exposed on B3.
+	BillingExpr        string  `json:"-" gorm:"type:varchar(2048);default:''"`
+	BillingExprHash    string  `json:"-" gorm:"type:varchar(64);default:''"`
+	BillingExprVersion int     `json:"-" gorm:"default:0"`
+	RecordVersion      int     `json:"record_version" gorm:"default:1"`
+	SupersedesEventId  *string `json:"supersedes_event_id" gorm:"type:varchar(64)"`
+	ObservedAtMs       int64   `json:"observed_at_ms" gorm:"bigint;index:idx_harness_ledger_observed_at_ms;index:idx_harness_ledger_batch,priority:2;default:0"`
+	CreatedAt          int64   `json:"created_at" gorm:"bigint;default:0"`
 }
 
 func (HarnessLedgerEvent) TableName() string {

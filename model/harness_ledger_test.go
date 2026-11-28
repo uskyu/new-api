@@ -415,16 +415,27 @@ func TestTaskBillingContextMediaFactsJSONRoundTrip(t *testing.T) {
 }
 
 // TestHarnessLedgerMediaFactsColumnUpgradesLegacyTable simulates the deployed
-// table from the previous release (no media_facts column), then runs the same
-// AutoMigrate startup uses and checks the column is added without losing the
-// legacy row.
+// table from the previous release by removing every P1-A2 additive column, then
+// runs the same AutoMigrate startup uses and checks all of them are added
+// without losing the legacy row.
 func TestHarnessLedgerMediaFactsColumnUpgradesLegacyTable(t *testing.T) {
+	newColumns := []string{
+		"media_facts",
+		"billing_quantity",
+		"billing_quantity_source",
+		"billing_components",
+		"billing_expr",
+		"billing_expr_hash",
+		"billing_expr_version",
+	}
 	for _, dialect := range harnessLedgerDialects() {
 		t.Run(dialect, func(t *testing.T) {
 			useHarnessLedgerDB(t, dialect)
-			require.NoError(t, DB.Migrator().DropColumn(&HarnessLedgerEvent{}, "media_facts"))
-			require.False(t, DB.Migrator().HasColumn(&HarnessLedgerEvent{}, "media_facts"),
-				"the fixture must start from the previous release schema")
+			for _, column := range newColumns {
+				require.NoError(t, DB.Migrator().DropColumn(&HarnessLedgerEvent{}, column))
+				require.False(t, DB.Migrator().HasColumn(&HarnessLedgerEvent{}, column),
+					"the fixture must start from the previous release schema")
+			}
 
 			require.NoError(t, DB.Table("harness_ledger_events").Create(map[string]any{
 				"stream":             HarnessLedgerStreamUsage,
@@ -437,12 +448,65 @@ func TestHarnessLedgerMediaFactsColumnUpgradesLegacyTable(t *testing.T) {
 			}).Error)
 
 			require.NoError(t, DB.AutoMigrate(&HarnessLedgerEvent{}))
-			require.True(t, DB.Migrator().HasColumn(&HarnessLedgerEvent{}, "media_facts"))
+			for _, column := range newColumns {
+				require.True(t, DB.Migrator().HasColumn(&HarnessLedgerEvent{}, column),
+					"AutoMigrate must add the additive column %s", column)
+			}
 
 			var stored HarnessLedgerEvent
 			require.NoError(t, DB.Where("event_id = ?", "ue_legacy_media_facts").First(&stored).Error)
 			assert.Equal(t, "hrq_legacy_media_facts", stored.HarnessRequestId)
 			assert.Empty(t, stored.MediaFacts, "the upgraded legacy row keeps the empty default")
+			assert.Empty(t, stored.BillingQuantity, "the upgraded legacy row keeps the empty default")
+			assert.Empty(t, stored.BillingQuantitySource, "the upgraded legacy row keeps the empty default")
+			assert.Empty(t, stored.BillingComponents, "the upgraded legacy row keeps the empty default")
+			assert.Empty(t, stored.BillingExpr, "the upgraded legacy row keeps the empty default")
+			assert.Empty(t, stored.BillingExprHash, "the upgraded legacy row keeps the empty default")
+			assert.Zero(t, stored.BillingExprVersion, "the upgraded legacy row keeps the empty default")
+		})
+	}
+}
+
+// TestHarnessLedgerCostBillingFieldsRoundTripAcrossDialects proves the P1-A2
+// B3 columns survive a write/read cycle unchanged on every supported database,
+// so the platform sees the exact quantity breakdown and expression identity the
+// settlement derived.
+func TestHarnessLedgerCostBillingFieldsRoundTripAcrossDialects(t *testing.T) {
+	const components = `[{"basis":"video_second","quantity":"10","source":"request"},{"basis":"reference_video_second","quantity":"2","source":"request"}]`
+	expression := `u("requested_seconds") + u("reference_seconds")`
+	for _, dialect := range harnessLedgerDialects() {
+		t.Run(dialect, func(t *testing.T) {
+			useHarnessLedgerDB(t, dialect)
+
+			event := &HarnessLedgerEvent{
+				Stream:                HarnessLedgerStreamCost,
+				EventType:             HarnessLedgerEventTypeCost,
+				HarnessRequestId:      "hrq_billing_fields_" + dialect,
+				GatewayRequestId:      "gw_billing_fields_" + dialect,
+				Status:                HarnessLedgerStatusSettled,
+				Currency:              "USD",
+				BaseAmount:            "0.0200000000",
+				TotalAmount:           "0.0200000000",
+				BillingBasis:          "video_second",
+				BillingQuantity:       "12",
+				BillingQuantitySource: "request",
+				BillingComponents:     components,
+				BillingExpr:           expression,
+				BillingExprHash:       "hash-reference-seconds",
+				BillingExprVersion:    2,
+				ObservedAtMs:          time.Now().UnixMilli(),
+			}
+			require.NoError(t, AppendHarnessLedgerEvent(event))
+
+			var stored HarnessLedgerEvent
+			require.NoError(t, DB.Where("event_id = ?", event.EventId).First(&stored).Error)
+			assert.Equal(t, "video_second", stored.BillingBasis)
+			assert.Equal(t, "12", stored.BillingQuantity)
+			assert.Equal(t, "request", stored.BillingQuantitySource)
+			assert.Equal(t, components, stored.BillingComponents)
+			assert.Equal(t, expression, stored.BillingExpr)
+			assert.Equal(t, "hash-reference-seconds", stored.BillingExprHash)
+			assert.Equal(t, 2, stored.BillingExprVersion)
 		})
 	}
 }

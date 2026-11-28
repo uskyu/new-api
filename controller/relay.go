@@ -639,7 +639,50 @@ func taskMediaFacts(relayInfo *relaycommon.RelayInfo, taskData []byte) string {
 			seconds,
 		)
 	}
+	// The plugin's submit facts carry the request-side reference/seconds values
+	// even when the task payload does not repeat them. Copy only those request
+	// facts; output/input stay unavailable until completion reports upstream
+	// usage, so a request estimate is never published as a measurement.
+	if snapshot := relayInfo.TieredBillingSnapshot; snapshot != nil {
+		if quantity, ok := taskUsageFactQuantity(snapshot.UsageFacts["seconds"]); ok {
+			_ = relayInfo.MediaFacts.SetQuantity(
+				relaycommon.MediaFactNameRequestedSeconds,
+				relaycommon.MediaDimensionVideo,
+				relaycommon.MediaUnitVideoSecond,
+				relaycommon.MediaFactSourceRequest,
+				quantity,
+			)
+		}
+		if quantity, ok := taskUsageFactQuantity(snapshot.UsageFacts["reference_seconds"]); ok {
+			_ = relayInfo.MediaFacts.SetQuantity(
+				relaycommon.MediaFactNameReferenceSeconds,
+				relaycommon.MediaDimensionVideo,
+				relaycommon.MediaUnitVideoSecond,
+				relaycommon.MediaFactSourceRequest,
+				quantity,
+			)
+		}
+	}
 	return relayInfo.MediaFacts.CanonicalJSON()
+}
+
+func taskUsageFactQuantity(value any) (string, bool) {
+	switch typed := value.(type) {
+	case float64:
+		if typed > 0 {
+			return decimal.NewFromFloat(typed).String(), true
+		}
+	case int:
+		if typed > 0 {
+			return decimal.NewFromInt(int64(typed)).String(), true
+		}
+	case string:
+		parsed, err := decimal.NewFromString(typed)
+		if err == nil && parsed.IsPositive() {
+			return parsed.String(), true
+		}
+	}
+	return "", false
 }
 
 func taskRequestedSeconds(relayInfo *relaycommon.RelayInfo, taskData []byte) (string, bool) {
@@ -883,6 +926,11 @@ func executeTaskSubmissionWith(
 		Procurement:     newTaskProcurementContext(relayInfo, result),
 		MediaLedger:     relayInfo.MediaLedgerEnabled,
 		MediaFacts:      taskMediaFacts(relayInfo, result.TaskData),
+	}
+	// An immediate terminal result never reaches finalizeTerminalTask; fold its
+	// completion facts here so the same B1/B3 projection sees them.
+	if result.Immediate != nil {
+		service.MergeTaskCompletionMediaFacts(task, result.Immediate)
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData

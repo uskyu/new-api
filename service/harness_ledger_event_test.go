@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -374,8 +375,16 @@ func TestRecordTaskHarnessSettlementMediaFactsVersionChain(t *testing.T) {
 	assert.Equal(t, relaycommon.MediaFactSourceUpstream, output.Source)
 
 	costs = harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
-	require.Len(t, costs, 2, "a fact correction append no cost event when the amount did not change")
-	assert.Equal(t, costs[0].BaseAmount, costs[1].BaseAmount)
+	require.Len(t, costs, 3, "the newly known billed quantity is a cost-side fact")
+	quantityEvent := costs[2]
+	assert.Equal(t, model.HarnessLedgerEventTypeCostCorrection, quantityEvent.EventType,
+		"a billed-quantity change is a cost correction even when the amount is unchanged")
+	assert.Equal(t, "video_second", quantityEvent.BillingBasis)
+	assert.Equal(t, "5", quantityEvent.BillingQuantity)
+	assert.Equal(t, relaycommon.MediaFactSourceUpstream, quantityEvent.BillingQuantitySource)
+	assert.NotEmpty(t, quantityEvent.BillingComponents)
+	assert.Equal(t, costs[1].BaseAmount, quantityEvent.BaseAmount, "the quantity correction must not reprice the task")
+	assert.Equal(t, costs[1].TotalAmount, quantityEvent.TotalAmount, "the quantity correction must not reprice the task")
 }
 
 // TestRecordTaskHarnessSettlementIgnoresMediaFactsWhenSwitchOff pins the
@@ -411,6 +420,19 @@ func TestRecordTaskHarnessSettlementIgnoresMediaFactsWhenSwitchOff(t *testing.T)
 	require.Len(t, costs, 2)
 	assert.Empty(t, costs[0].MediaFacts)
 	assert.Empty(t, costs[1].MediaFacts)
+	for _, cost := range costs {
+		assert.Equal(t, "token", cost.BillingBasis)
+		assert.Empty(t, cost.BillingQuantity)
+		assert.Empty(t, cost.BillingQuantitySource)
+		assert.Empty(t, cost.BillingComponents)
+		assert.Empty(t, cost.BillingExprHash)
+		assert.Zero(t, cost.BillingExprVersion)
+		encodedCost, err := common.Marshal(costRecordFromLedgerEvent(cost))
+		require.NoError(t, err)
+		assert.NotContains(t, string(encodedCost), "billing_quantity")
+		assert.NotContains(t, string(encodedCost), "billing_components")
+		assert.NotContains(t, string(encodedCost), "cost_calculation_version")
+	}
 }
 
 // TestRecordTaskHarnessSettlementKeepsMediaFactsOnTokenCorrection covers the
@@ -499,6 +521,239 @@ func TestRecordHarnessSettlementPublishesImageMediaFacts(t *testing.T) {
 	require.Len(t, costs, 1)
 	assert.Equal(t, "token", costs[0].BillingBasis)
 	assert.Empty(t, costs[0].MediaFacts)
+}
+
+// TestRecordTaskHarnessSettlementPlanPerCallBilling pins the plan/fixed-price
+// case: one accepted call is exactly one billed unit, explained by the frozen
+// expression snapshot rather than by any request-second figure.
+func TestRecordTaskHarnessSettlementPlanPerCallBilling(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	const gatewayRequestID = "gw-plan-per-call"
+	task := ledgerUsageTestTask("task-plan-per-call", gatewayRequestID,
+		"hrq_plan_per_call", "run_plan_per_call", "seedance2-fast-720p-once-1", 4500)
+	requested := "5"
+	bc := task.PrivateData.BillingContext
+	bc.MediaLedger = true
+	bc.MediaFacts = ledgerMediaFactsJSON(t, &requested, nil, "")
+	bc.PerCallBilling = true
+	bc.TieredSnapshot = &billingexpr.BillingSnapshot{
+		ExprString:  `fixed(0.02)`,
+		ExprHash:    "hash-plan-per-call",
+		ExprVersion: 3,
+	}
+
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusPending, task.Quota)
+
+	costs := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+	require.Len(t, costs, 1)
+	wire := costRecordFromLedgerEvent(costs[0])
+	assert.Equal(t, "per_call", wire.BillingBasis)
+	require.NotNil(t, wire.BillingQuantity)
+	assert.Equal(t, "1", *wire.BillingQuantity)
+	assert.Equal(t, relaycommon.MediaFactSourceRequest, wire.BillingQuantitySource)
+	require.Len(t, wire.BillingComponents, 1)
+	assert.Equal(t, HarnessBillingComponent{
+		Basis: "per_call", Quantity: "1", Source: relaycommon.MediaFactSourceRequest,
+	}, wire.BillingComponents[0])
+	assert.Equal(t, "hash-plan-per-call", wire.BillingExprHash)
+	assert.Equal(t, 3, wire.BillingExprVersion)
+	assert.NotEmpty(t, wire.CostCalculationVersion, "media evidence exposes the calculation version")
+}
+
+// TestRecordTaskHarnessSettlementPerCallRequestSeconds pins the C group: a
+// per-call-priced task without an expression bills the seconds frozen in the
+// request, and an unavailable output fact must not replace that value.
+func TestRecordTaskHarnessSettlementPerCallRequestSeconds(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	const gatewayRequestID = "gw-per-call-request-seconds"
+	task := ledgerUsageTestTask("task-per-call-request-seconds", gatewayRequestID,
+		"hrq_per_call_request_seconds", "run_per_call_request_seconds", "seedance2-fast-720p-once-1", 4500)
+	requested := "10"
+	bc := task.PrivateData.BillingContext
+	bc.MediaLedger = true
+	bc.PerCallBilling = true
+	bc.MediaFacts = ledgerMediaFactsJSON(t, &requested, nil, "")
+
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusPending, task.Quota)
+
+	costs := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+	require.Len(t, costs, 1)
+	wire := costRecordFromLedgerEvent(costs[0])
+	assert.Equal(t, "video_second", wire.BillingBasis)
+	require.NotNil(t, wire.BillingQuantity)
+	assert.Equal(t, "10", *wire.BillingQuantity)
+	assert.Equal(t, relaycommon.MediaFactSourceRequest, wire.BillingQuantitySource)
+	require.Len(t, wire.BillingComponents, 1)
+	assert.Equal(t, HarnessBillingComponent{
+		Basis: "video_second", Quantity: "10", Source: relaycommon.MediaFactSourceRequest,
+	}, wire.BillingComponents[0])
+}
+
+// TestRecordTaskHarnessSettlementOutputSecondsBilling pins the A/TA group: the
+// billed quantity is the measured output only, so an unknown output leaves the
+// quantity absent and a later upstream measurement appends a new cost event
+// without repricing the task.
+func TestRecordTaskHarnessSettlementOutputSecondsBilling(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	const gatewayRequestID = "gw-output-seconds"
+	task := ledgerUsageTestTask("task-output-seconds", gatewayRequestID,
+		"hrq_output_seconds", "run_output_seconds", "seedance-output-seconds", 4500)
+	requested := "10"
+	bc := task.PrivateData.BillingContext
+	bc.MediaLedger = true
+	bc.MediaFacts = ledgerMediaFactsJSON(t, &requested, nil, "")
+	bc.TieredSnapshot = &billingexpr.BillingSnapshot{
+		ExprString:  `u("output_seconds") * 0.1`,
+		ExprHash:    "hash-output-seconds",
+		ExprVersion: 4,
+	}
+
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusPending, task.Quota)
+
+	costs := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+	require.Len(t, costs, 1)
+	wire := costRecordFromLedgerEvent(costs[0])
+	assert.Equal(t, "video_second", wire.BillingBasis)
+	assert.Nil(t, wire.BillingQuantity, "an unknown output must not borrow the request estimate")
+	assert.Equal(t, "hash-output-seconds", wire.BillingExprHash)
+	assert.Equal(t, 4, wire.BillingExprVersion)
+
+	actual := "8.5"
+	bc.MediaFacts = ledgerMediaFactsJSON(t, &requested, &actual, relaycommon.MediaFactSourceUpstream)
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusSettled, task.Quota)
+
+	costs = harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+	require.Len(t, costs, 2, "learning the output seconds is a cost-side fact")
+	assert.Equal(t, costs[0].BaseAmount, costs[1].BaseAmount, "the quantity correction must not reprice the task")
+	assert.Equal(t, costs[0].TotalAmount, costs[1].TotalAmount, "the quantity correction must not reprice the task")
+	wire = costRecordFromLedgerEvent(costs[1])
+	assert.Equal(t, "video_second", wire.BillingBasis)
+	require.NotNil(t, wire.BillingQuantity)
+	assert.Equal(t, "8.5", *wire.BillingQuantity)
+	assert.Equal(t, relaycommon.MediaFactSourceUpstream, wire.BillingQuantitySource)
+	require.Len(t, wire.BillingComponents, 1)
+	assert.Equal(t, HarnessBillingComponent{
+		Basis: "video_second", Quantity: "8.5", Source: relaycommon.MediaFactSourceUpstream,
+	}, wire.BillingComponents[0])
+}
+
+// TestRecordTaskHarnessSettlementReferenceSecondsBilling pins the B group: the
+// expression bills requested plus reference seconds and the B3 components keep
+// both quantities separately auditable.
+func TestRecordTaskHarnessSettlementReferenceSecondsBilling(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	const gatewayRequestID = "gw-reference-seconds"
+	task := ledgerUsageTestTask("task-reference-seconds", gatewayRequestID,
+		"hrq_reference_seconds", "run_reference_seconds", "seedance-reference-seconds", 4500)
+	var facts relaycommon.MediaFacts
+	require.NoError(t, facts.SetQuantity(
+		relaycommon.MediaFactNameRequestedSeconds,
+		relaycommon.MediaDimensionVideo,
+		relaycommon.MediaUnitVideoSecond,
+		relaycommon.MediaFactSourceRequest,
+		"10",
+	))
+	require.NoError(t, facts.SetQuantity(
+		relaycommon.MediaFactNameReferenceSeconds,
+		relaycommon.MediaDimensionVideo,
+		relaycommon.MediaUnitVideoSecond,
+		relaycommon.MediaFactSourceRequest,
+		"2",
+	))
+	bc := task.PrivateData.BillingContext
+	bc.MediaLedger = true
+	bc.MediaFacts = facts.CanonicalJSON()
+	bc.TieredSnapshot = &billingexpr.BillingSnapshot{
+		ExprString:  `u("requested_seconds") + u("reference_seconds")`,
+		ExprHash:    "hash-reference-seconds",
+		ExprVersion: 2,
+	}
+
+	recordTaskHarnessSettlement(task, model.HarnessSettlementStatusPending, task.Quota)
+
+	costs := harnessLedgerStreamCount(t, gatewayRequestID, model.HarnessLedgerStreamCost)
+	require.Len(t, costs, 1)
+	wire := costRecordFromLedgerEvent(costs[0])
+	assert.Equal(t, "video_second", wire.BillingBasis)
+	require.NotNil(t, wire.BillingQuantity)
+	assert.Equal(t, "12", *wire.BillingQuantity)
+	assert.Equal(t, relaycommon.MediaFactSourceRequest, wire.BillingQuantitySource)
+	assert.Equal(t, []HarnessBillingComponent{
+		{Basis: "video_second", Quantity: "10", Source: relaycommon.MediaFactSourceRequest},
+		{Basis: "reference_video_second", Quantity: "2", Source: relaycommon.MediaFactSourceRequest},
+	}, wire.BillingComponents)
+	assert.Equal(t, "hash-reference-seconds", wire.BillingExprHash)
+	assert.Equal(t, 2, wire.BillingExprVersion)
+}
+
+// TestRecordHarnessSettlementTokenOnlyOmitsMediaBillingFields pins legacy B3 parity:
+// a token-only event has no media evidence, so the additive P1-A2 fields must
+// not appear on the wire at all.
+func TestRecordHarnessSettlementTokenOnlyOmitsMediaBillingFields(t *testing.T) {
+	ledgerTestDB(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	t.Cleanup(func() { common.QuotaPerUnit = originalQuotaPerUnit })
+	common.QuotaPerUnit = 500_000
+
+	settlement := &model.HarnessSettlement{
+		RequestId:        "gw-token-only-wire",
+		Status:           model.HarnessSettlementStatusSettled,
+		ModelName:        "economy",
+		PromptTokens:     10,
+		CompletionTokens: 20,
+	}
+	correlation := harnessSettlementCorrelation{
+		HarnessRequestId: "hrq_token_only_wire",
+		UsageUnit:        harnessUsageUnitToken,
+		UsageSource:      harnessUsageSourceUpstream,
+	}
+	recordHarnessSettlement(settlement, harnessSettlementMoneyForQuota(nil, 500_000, 0, "economy"), correlation)
+
+	costs := harnessLedgerStreamCount(t, "gw-token-only-wire", model.HarnessLedgerStreamCost)
+	require.Len(t, costs, 1)
+	wire := costRecordFromLedgerEvent(costs[0])
+	assert.Equal(t, "token", wire.BillingBasis)
+	assert.Nil(t, wire.BillingQuantity)
+	assert.Empty(t, wire.BillingQuantitySource)
+	assert.Empty(t, wire.BillingComponents)
+	assert.Empty(t, wire.CostCalculationVersion)
+	assert.Empty(t, wire.BillingExprHash)
+	assert.Zero(t, wire.BillingExprVersion)
+
+	encoded, err := common.Marshal(wire)
+	require.NoError(t, err)
+	for _, field := range []string{
+		"billing_quantity",
+		"billing_quantity_source",
+		"billing_components",
+		"cost_calculation_version",
+		"billing_expr_hash",
+		"billing_expr_version",
+	} {
+		assert.NotContains(t, string(encoded), `"`+field+`"`,
+			"the token-only wire must stay byte-shape compatible")
+	}
 }
 
 // refund must append a new cost event that points at the settled one and carries

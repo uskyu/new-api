@@ -4,7 +4,7 @@
 **生产基线**：`harness-api-20261127-7868b83`，A3 `catalog_version=v12`。\
 **审计范围**：media 池 76 个条目（video 49 + plan 17 + image 10）；按唯一模型 ID 去重后同为 76 个。\
 **数据来源**：生产只读 `billing_setting.billing_expr` / `ModelPrice` / `ModelRatio` / `abilities` / `channels` / `harness_settlements` / `harness_ledger_events`，本地代码与生产日志；未对 76 个模型逐个付费调用。\
-**P1-A 状态**：2026-11-28 冻结；A1 已合并 `c6ae2a125`（MySQL 生产口径验证通过），A2 未开始，PostgreSQL 待补；冻结基线、wire 契约与验收矩阵见 §10。
+**P1-A 状态**：2026-11-28 冻结；A1 已合并 `c6ae2a125`（MySQL 生产口径验证通过）；A2 第一切片已落地代码与定向测试，A2 整体未验收；PostgreSQL 待补。冻结基线、wire 契约与验收矩阵见 §10。
 
 ## 1. 结论
 
@@ -498,3 +498,22 @@ A2 开工时把 §10.3/§10.4 与最终 JSON 示例作为“实现基线通知�
 **7. 不做项**
 
 TA 零结算修复、PAI C 组实际秒改价、完整表达式对 Harness 开放、P1-B Pending/幂等/异常退款状态机，均不纳入 A2。
+
+### 10.10 A2 第一切片进度（2026-11-28）
+
+已落地（待整体验收）：
+
+- B3 账本列与 wire：`billing_quantity`、`billing_quantity_source`、`billing_components`、`billing_basis`、`cost_calculation_version`、`billing_expr_hash`、`billing_expr_version`；`procurement_price_version` 沿用。
+- B3 diff：`harnessCostDiffers` 比较数量/来源/组件/basis/表达式 hash/version；数量变化生成 `cost_correction` 版本链，金额不变不重复计费。
+- 完成事实合并：`MergeTaskCompletionMediaFacts` 在 `finalizeTerminalTask` 结算前合并 `TaskInfo.UsageFacts`；immediate terminal 在 `LogTaskConsumption` 前合并；缺失键不覆盖已发布事实。
+- 基础派生：Plan `per_call`、C 组请求秒、A 组 output（缺失不伪造）、B 组 requested+reference、D 组 seconds、同步图片 observed/requested。
+- 退款抑制：`refunded` B3 不输出 quantity/components/basis 媒体字段。
+- TA ZeroSettlement 识别测试：`status=settled`、`total_amount=0`、无 `billing_quantity`，标记“已识别、未修复”。
+
+已验证：
+
+- `go test ./service`（全量）通过。
+- `go test ./model`（SQLite + MySQL 8.0.43）账本迁移、旧表升级、B3 字段 roundtrip 通过；PostgreSQL 跳过。
+- `go test -p 1 ./relay/common ./relay/channel/openai ./relay/channel/gemini ./router`、`./controller` 定向、`./relay` 通过。
+
+未完成：49 个视频模型的完整夹具矩阵与每类代表模型真实上游调用（需预算）、全量 `go test ./...`（本机 OOM）、PostgreSQL 实库、Harness 联调、生产部署。A2 整体仍未验收。
