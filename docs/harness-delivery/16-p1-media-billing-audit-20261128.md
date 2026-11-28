@@ -4,7 +4,7 @@
 **生产基线**：`harness-api-20261127-7868b83`，A3 `catalog_version=v12`。\
 **审计范围**：media 池 76 个条目（video 49 + plan 17 + image 10）；按唯一模型 ID 去重后同为 76 个。\
 **数据来源**：生产只读 `billing_setting.billing_expr` / `ModelPrice` / `ModelRatio` / `abilities` / `channels` / `harness_settlements` / `harness_ledger_events`，本地代码与生产日志；未对 76 个模型逐个付费调用。\
-**P1-A 状态**：2026-11-28 冻结；A1 已合并 `c6ae2a125`（MySQL 生产口径验证通过）；A2 第一切片已合并 `c5544b5c7`，Package/GHCR 成功，A2 整体未验收；PostgreSQL 待补。冻结基线、wire 契约与验收矩阵见 §10。
+**P1-A 状态**：2026-11-28 冻结；A1 已合并 `c6ae2a125`（MySQL 生产口径验证通过）；A2 第一切片已合并 `c5544b5c7`，2026-11-29 已部署生产 `harness-api-20261128-c5544b5`（媒体开关关闭）；A2 整体未验收；PostgreSQL 待补。冻结基线、wire 契约与验收矩阵见 §10。
 
 ## 1. 结论
 
@@ -427,7 +427,7 @@ P1-B 仍独立冻结：未知受理、重复提交/幂等、异常退款、人�
 
 ### 10.8 A1 实现与合并状态（2026-11-28）
 
-> **状态更新（2026-11-28）**：A1 已合并到 `harness-api`（`c6ae2a125`），`Package harness-api` 与 GHCR 镜像发布成功（`harness-api-20261128-c6ae2a1` / `harness-latest`）；MySQL 8.0.43 账本迁移/升级/读写通过；生产未部署，开关默认关闭；PostgreSQL 未验证。以下开发过程记录保留，不覆盖历史。
+> **状态更新（2026-11-29）**：A1 已合并到 `harness-api`（`c6ae2a125`），A2 第一切片已合并（`c5544b5c7`）；2026-11-29 生产已部署 `harness-api-20261128-c5544b5`，媒体开关保持关闭。MySQL 8.0.43 账本迁移/升级/读写通过；PostgreSQL 未验证。以下开发过程记录保留，不覆盖历史。
 
 已实现（分支 `feat/harness-p1a-media-ledger`）：
 
@@ -501,7 +501,7 @@ TA 零结算修复、PAI C 组实际秒改价、完整表达式对 Harness 开�
 
 ### 10.10 A2 第一切片进度（2026-11-28）
 
-> 合并状态（2026-11-29）：A2 第一切片已提交 `c5544b5c7` 并推送 `harness-api`；`Package harness-api` 与 GHCR 镜像发布成功（workflow tag 规则：`harness-api-20261128-c5544b5`）；生产未部署，开关默认关闭。以下为代码与测试状态，A2 整体仍未验收。
+> 合并状态（2026-11-29）：A2 第一切片已提交 `c5544b5c7` 并推送 `harness-api`；`Package harness-api` 与 GHCR 镜像发布成功；2026-11-29 已部署生产 `harness-api-20261128-c5544b5`，媒体开关关闭。以下为代码与测试状态，A2 整体仍未验收。
 
 已落地（待整体验收）：
 
@@ -518,4 +518,18 @@ TA 零结算修复、PAI C 组实际秒改价、完整表达式对 Harness 开�
 - `go test ./model`（SQLite + MySQL 8.0.43）账本迁移、旧表升级、B3 字段 roundtrip 通过；PostgreSQL 跳过。
 - `go test -p 1 ./relay/common ./relay/channel/openai ./relay/channel/gemini ./router`、`./controller` 定向、`./relay` 通过。
 
-未完成：49 个视频模型的完整夹具矩阵与每类代表模型真实上游调用（需预算）、全量 `go test ./...`（本机 OOM）、PostgreSQL 实库、Harness 联调、生产部署。A2 整体仍未验收。
+未完成：49 个视频模型的完整夹具矩阵与每类代表模型真实上游调用（需预算）、全量 `go test ./...`（本机 OOM）、PostgreSQL 实库、Harness 联调。A2 整体仍未验收。
+
+### 10.11 生产部署与冒烟（2026-11-29）
+
+- 镜像：`ghcr.io/uskyu/new-api:harness-api-20261128-c5544b5`，pull digest `sha256:c677003c1cb24d25be56812ed1170c8e0f0bf344fd52dba4ed7eab90f9b8cd05`
+- 旧版本：`harness-api-20261128-ae5b00b`
+- 部署前备份：`/opt/new-api/backups/newapi_db_before_p1a2-20261128-170131.sql.gz`（6.17MB）、`/opt/new-api/backups/docker-compose.yml.before-p1a2-20261128-170131`
+- 健康：容器 healthy；`/api/status` 200；版本头 `X-New-Api-Version: harness-api-20261128-c5544b5`
+- 只读检查：`/api/pricing` 200（71948 bytes）；有效分组临时 token 的 `/v1/models` 200
+- 零费用路由：不存在模型返回 503 `model_not_found`，响应含 request id；临时 token 已删除
+- 内部契约：`/internal/v1/gateway/health` 无凭证 401，`GATEWAY_UNAUTHORIZED`/`retryable=false`/`request_id`
+- 数据库：`harness_ledger_events` 新增七列已存在（`media_facts`、`billing_quantity`、`billing_quantity_source`、`billing_components`、`billing_expr`、`billing_expr_hash`、`billing_expr_version`）；现有 ledger 行 3976；启动日志无迁移错误
+- 开关：`HarnessMediaLedgerEnabled` 不存在，媒体账本保持关闭
+- 未执行：Harness JWT/B1/B3 媒体真实联调、付费上游调用；A2 整体未验收
+- 回滚：恢复上述 compose 备份并重建旧镜像即可；数据库新增列是 additive，旧镜像可继续运行

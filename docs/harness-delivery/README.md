@@ -2,7 +2,7 @@
 
 **版本**：V1.4（2026-11-27 修订）\
 **测试 Base URL**：`https://testapi.soloai.chat`\
-**对应网关版本**：`harness-api-20261127-7868b83`（2026-11-27 生产；P0 修复版本）\
+**对应网关版本**：`harness-api-20261128-c5544b5`（2026-11-29 生产；A1/A2 第一切片，媒体账本开关关闭，外部 B1/B3 仍按 V1.4 契约）\
 **A3 目录版本**：截至 2026-11-27 实测 `catalog_version=v12`；以实际接口响应为准\
 **B4 接口版本**：`interface_version=v2`（与本文档 V1.4 不是同一版本号）\
 **本次主交付**：[联调反馈差异与处理指引 V1.0（DOCX）](./releases/Harness_联调反馈差异与处理指引_V1.0_2026-11-23.docx) —— 只讲差异、处理动作和复测标准；完整手册为参考\
@@ -74,7 +74,7 @@
 | 项 | 当前值 |
 | --- | --- |
 | HTTPS Base URL | `https://testapi.soloai.chat` |
-| 网关版本 | `harness-api-20261127-7868b83` |
+| 网关版本 | `harness-api-20261128-c5544b5`（2026-11-29 生产；媒体账本开关关闭） |
 | A3 | `GET /v1/models`；2026-11-27 实测 `catalog_version=v12`，chat 30 / video 49 / image 10 / plan 17，`catalog_version` 自动递增 |
 | B4 | `GET /internal/v1/gateway/health`，`interface_version=v2` |
 | Harness 内网访问 | 同 VPC 内当前域名解析到 `10.245.222.6`，HTTPS 443 正常 |
