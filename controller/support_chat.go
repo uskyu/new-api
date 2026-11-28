@@ -109,8 +109,17 @@ func parseSupportMessageQuery(c *gin.Context) (int, int) {
 }
 
 // GetCurrentSupportConversation 获取当前用户进行中的客服会话，没有则返回 null。
+// include_closed=1 时返回最近一段会话（含已关闭），用于恢复上一段聊天记录。
 func GetCurrentSupportConversation(c *gin.Context) {
-	conversation, err := model.GetOpenSupportConversationByUserId(c.GetInt("id"))
+	var (
+		conversation *model.SupportConversation
+		err          error
+	)
+	if c.Query("include_closed") == "1" {
+		conversation, err = model.GetLatestSupportConversationByUserId(c.GetInt("id"))
+	} else {
+		conversation, err = model.GetOpenSupportConversationByUserId(c.GetInt("id"))
+	}
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
 		return
@@ -253,7 +262,7 @@ func CloseSupportConversation(c *gin.Context) {
 
 // ListAdminSupportConversations 管理端分页列出客服会话。
 func ListAdminSupportConversations(c *gin.Context) {
-	status := c.DefaultQuery("status", model.SupportConversationStatusOpen)
+	status := c.Query("status")
 	if status != model.SupportConversationStatusOpen && status != model.SupportConversationStatusClosed {
 		status = ""
 	}

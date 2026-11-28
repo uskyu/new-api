@@ -81,6 +81,25 @@ func GetOpenSupportConversationByUserId(userId int) (*SupportConversation, error
 	return &conversation, nil
 }
 
+// GetLatestSupportConversationByUserId 获取用户最近一段会话（包含已关闭会话）。
+// 客户重新打开客服面板时用它恢复上一段历史记录。
+func GetLatestSupportConversationByUserId(userId int) (*SupportConversation, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	var conversation SupportConversation
+	err := DB.Where("user_id = ?", userId).
+		Order("id DESC").
+		First(&conversation).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &conversation, nil
+}
+
 // GetOrCreateSupportConversation 获取或创建用户当前进行中的会话。
 // 同一用户只保留一个 open 会话，通过事务和进程内互斥锁保证并发安全。
 func GetOrCreateSupportConversation(userId int) (*SupportConversation, error) {

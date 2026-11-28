@@ -355,6 +355,7 @@ const SupportChatWidget = () => {
   const lastMessageIdRef = useRef(0);
   const pollTimerRef = useRef(null);
   const refreshMessagesRef = useRef(null);
+  const startPollingRef = useRef(null);
   const messageListRef = useRef(null);
   const mountedRef = useRef(true);
   const composerAttachmentsRef = useRef([]);
@@ -706,10 +707,11 @@ const SupportChatWidget = () => {
         loadMessages(conversationId);
       }
     };
+    startPollingRef.current = startPolling;
 
     const bootstrap = async () => {
       const existing = conversationRef.current;
-      if (existing && existing.status !== 'closed') {
+      if (existing) {
         setConversationErrorKey('');
         setMessagesErrorKey('');
         setIsCreating(false);
@@ -729,6 +731,46 @@ const SupportChatWidget = () => {
       setConversationErrorKey('');
       setMessagesErrorKey('');
       setIsLoadingMessages(false);
+
+      try {
+        const latestResponse = await API.get(
+          `${CONVERSATION_ENDPOINT}/current`,
+          {
+            params: { include_closed: 1 },
+            skipErrorHandler: true,
+            disableDuplicate: true,
+          },
+        );
+        if (!active) {
+          return;
+        }
+
+        const latest = normalizeConversation(unwrapPayload(latestResponse));
+        if (latest) {
+          conversationRef.current = latest;
+          setConversation(latest);
+          setIsCreating(false);
+          await loadMessages(latest.id, {
+            initial: messagesRef.current.length === 0,
+          });
+          if (
+            active &&
+            conversationRef.current?.status !== 'closed'
+          ) {
+            startPolling(latest.id);
+          }
+          return;
+        }
+      } catch {
+        if (!active) {
+          return;
+        }
+        setConversationErrorKey('加载会话失败');
+        setIsCreating(false);
+        setIsLoadingMessages(false);
+        return;
+      }
+
       conversationRef.current = null;
       setConversation(null);
       messagesRef.current = [];
@@ -801,6 +843,7 @@ const SupportChatWidget = () => {
       active = false;
       stopPolling();
       refreshMessagesRef.current = null;
+      startPollingRef.current = null;
     };
   }, [isOpen, visible, isLoggedIn]);
 
@@ -1129,6 +1172,49 @@ const SupportChatWidget = () => {
     }
   };
 
+  const handleStartNewConversation = async () => {
+    if (isCreating) {
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      const response = await API.post(
+        CONVERSATION_ENDPOINT,
+        {},
+        { skipErrorHandler: true },
+      );
+      if (!mountedRef.current) {
+        return;
+      }
+
+      const payload = unwrapPayload(response);
+      const normalized = normalizeConversation(payload);
+      if (!normalized) {
+        throw new Error('Invalid support conversation response');
+      }
+
+      conversationRef.current = normalized;
+      setConversation(normalized);
+      messagesRef.current = [];
+      lastMessageIdRef.current = 0;
+      setMessages([]);
+      setConversationErrorKey('');
+      setMessagesErrorKey('');
+      startPollingRef.current?.(normalized.id);
+      refreshMessagesRef.current?.(normalized.id);
+    } catch (error) {
+      if (!mountedRef.current) {
+        return;
+      }
+      showError(error?.response?.data?.message || t('加载会话失败'));
+    } finally {
+      if (mountedRef.current) {
+        setIsCreating(false);
+      }
+    }
+  };
+
   if (!visible) {
     return null;
   }
@@ -1414,6 +1500,20 @@ const SupportChatWidget = () => {
               onClick={handleCloseConversation}
             >
               {t('关闭会话')}
+            </Button>
+          </div>
+        )}
+        {conversation && conversationClosed && (
+          <div className='support-chat-panel__actions'>
+            <Button
+              theme='borderless'
+              type='tertiary'
+              size='small'
+              loading={isCreating}
+              disabled={isCreating}
+              onClick={handleStartNewConversation}
+            >
+              {t('开始新会话')}
             </Button>
           </div>
         )}

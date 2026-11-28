@@ -688,3 +688,109 @@ func TestSupportChatAppearanceSettings(t *testing.T) {
 		assert.NotEmpty(t, response.Message)
 	}
 }
+
+func TestGetCurrentSupportConversationCanIncludeLatestClosed(t *testing.T) {
+	db := setupSupportAttachmentControllerTestDB(t)
+
+	closed := model.SupportConversation{
+		UserId:    4100,
+		Status:    model.SupportConversationStatusClosed,
+		CreatedAt: 100,
+		UpdatedAt: 200,
+		ClosedAt:  300,
+	}
+	require.NoError(t, db.Create(&closed).Error)
+	open := model.SupportConversation{
+		UserId:    4100,
+		Status:    model.SupportConversationStatusOpen,
+		CreatedAt: 400,
+		UpdatedAt: 500,
+	}
+	require.NoError(t, db.Create(&open).Error)
+	latestClosed := model.SupportConversation{
+		UserId:    4100,
+		Status:    model.SupportConversationStatusClosed,
+		CreatedAt: 600,
+		UpdatedAt: 700,
+		ClosedAt:  800,
+	}
+	require.NoError(t, db.Create(&latestClosed).Error)
+
+	ctx, recorder := newSupportAttachmentTestContext(
+		t,
+		http.MethodGet,
+		"/api/support/conversation/current?include_closed=1",
+		nil,
+		"",
+		4100,
+		common.RoleCommonUser,
+		nil,
+	)
+	GetCurrentSupportConversation(ctx)
+	response := decodeSupportAttachmentResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+
+	var conversation model.SupportConversation
+	require.NoError(t, common.Unmarshal(response.Data, &conversation))
+	assert.Equal(t, latestClosed.Id, conversation.Id)
+	assert.Equal(t, model.SupportConversationStatusClosed, conversation.Status)
+
+	ctx, recorder = newSupportAttachmentTestContext(
+		t,
+		http.MethodGet,
+		"/api/support/conversation/current",
+		nil,
+		"",
+		4100,
+		common.RoleCommonUser,
+		nil,
+	)
+	GetCurrentSupportConversation(ctx)
+	response = decodeSupportAttachmentResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	require.NoError(t, common.Unmarshal(response.Data, &conversation))
+	assert.Equal(t, open.Id, conversation.Id)
+	assert.Equal(t, model.SupportConversationStatusOpen, conversation.Status)
+}
+
+func TestListAdminSupportConversationsDefaultsToAllStatuses(t *testing.T) {
+	db := setupSupportAttachmentControllerTestDB(t)
+
+	open := model.SupportConversation{
+		UserId:    4200,
+		Status:    model.SupportConversationStatusOpen,
+		CreatedAt: 100,
+		UpdatedAt: 200,
+	}
+	require.NoError(t, db.Create(&open).Error)
+	closed := model.SupportConversation{
+		UserId:    4200,
+		Status:    model.SupportConversationStatusClosed,
+		CreatedAt: 300,
+		UpdatedAt: 400,
+		ClosedAt:  500,
+	}
+	require.NoError(t, db.Create(&closed).Error)
+
+	ctx, recorder := newSupportAttachmentTestContext(
+		t,
+		http.MethodGet,
+		"/api/support/admin/conversations",
+		nil,
+		"",
+		1,
+		common.RoleAdminUser,
+		nil,
+	)
+	ListAdminSupportConversations(ctx)
+	response := decodeSupportAttachmentResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+
+	var data struct {
+		Items []model.SupportConversation `json:"items"`
+		Total int                         `json:"total"`
+	}
+	require.NoError(t, common.Unmarshal(response.Data, &data))
+	assert.Equal(t, 2, data.Total)
+	assert.Len(t, data.Items, 2)
+}

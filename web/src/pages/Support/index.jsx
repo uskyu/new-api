@@ -249,7 +249,7 @@ const Support = () => {
   }, []);
   const currentUserId = currentUser.id ?? getUserIdFromLocalStorage();
 
-  const [statusFilter, setStatusFilter] = useState('open');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [conversations, setConversations] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
