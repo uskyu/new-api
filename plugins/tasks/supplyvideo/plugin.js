@@ -270,6 +270,8 @@ const PAI_MODELS = {
   "seedance2.5-flash-720p-second-2": { kind: "second", minSeconds: 5, maxSeconds: 30, flash: true, maxVideos: 0 },
   "seedance2.5-flash-480p-once-1": { kind: "call", minSeconds: 5, maxSeconds: 30, flash: true },
   "seedance2.5-flash-720p-once-1": { kind: "call", minSeconds: 5, maxSeconds: 30, flash: true },
+  "seedance2.5-flash-480p-once-2": { kind: "call", minSeconds: 5, maxSeconds: 30, flash: true },
+  "seedance2.5-flash-720p-once-2": { kind: "call", minSeconds: 5, maxSeconds: 30, flash: true },
   "wan3-480p-second-1": { kind: "second", minSeconds: 2, maxSeconds: 30 },
   "wan3-480p-second-2": { kind: "second", minSeconds: 2, maxSeconds: 30 },
   "wan3-720p-second-1": { kind: "second", minSeconds: 2, maxSeconds: 30 },

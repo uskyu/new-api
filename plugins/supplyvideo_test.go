@@ -74,6 +74,8 @@ var supplyVideoPaiCallModels = []string{
 	"seedance2.5-720p-once",
 	"seedance2.5-flash-480p-once-1",
 	"seedance2.5-flash-720p-once-1",
+	"seedance2.5-flash-480p-once-2",
+	"seedance2.5-flash-720p-once-2",
 	"wan3-720p-once",
 	"wan3-1080p-once",
 }
@@ -607,6 +609,24 @@ func TestSupplyVideoDecodeRequest(t *testing.T) {
 			"model": supplyVideo480NoVideo, "requestBody": decoded["requestBody"],
 		})
 		assert.Equal(t, map[string]any{"tokens": float64(0), "resolution": "480p", "video_input": "none"}, facts)
+	})
+
+	t.Run("flash once-2 plan models decode as per-call", func(t *testing.T) {
+		for _, model := range []string{
+			"seedance2.5-flash-480p-once-2",
+			"seedance2.5-flash-720p-once-2",
+		} {
+			decoded, err := supplyVideoDecode(t, plugin, model, map[string]any{
+				"model": model, "prompt": "a cat", "seconds": 5,
+			})
+			require.NoError(t, err, model)
+			assert.Equal(t, "submit", decoded["kind"], model)
+			assert.Equal(t, "text_to_video", decoded["action"], model)
+			facts := supplyVideoCall(t, plugin, "extractUsage", map[string]any{
+				"model": model, "requestBody": decoded["requestBody"],
+			})
+			assert.Empty(t, facts, "per-call models must not report usage facts")
+		}
 	})
 
 	t.Run("size maps the explicitly documented 720p orientations", func(t *testing.T) {
