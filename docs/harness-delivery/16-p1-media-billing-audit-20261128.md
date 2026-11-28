@@ -4,7 +4,7 @@
 **生产基线**：`harness-api-20261127-7868b83`，A3 `catalog_version=v12`。\
 **审计范围**：media 池 76 个条目（video 49 + plan 17 + image 10）；按唯一模型 ID 去重后同为 76 个。\
 **数据来源**：生产只读 `billing_setting.billing_expr` / `ModelPrice` / `ModelRatio` / `abilities` / `channels` / `harness_settlements` / `harness_ledger_events`，本地代码与生产日志；未对 76 个模型逐个付费调用。\
-**P1-A 状态**：2026-11-28 冻结，A1 开发中；冻结基线、wire 契约与验收矩阵见 §10。
+**P1-A 状态**：2026-11-28 冻结；A1 已合并 `c6ae2a125`（MySQL 生产口径验证通过），A2 未开始，PostgreSQL 待补；冻结基线、wire 契约与验收矩阵见 §10。
 
 ## 1. 结论
 
@@ -425,7 +425,9 @@ P1-B 仍独立冻结：未知受理、重复提交/幂等、异常退款、人�
 
 本期不做：媒体计费口径变更（TA 零结算修复、PAI C 组实际秒改价）、完整表达式对 Harness 开放、P1-B 状态机。
 
-### 10.8 A1 实现状态（2026-11-28）
+### 10.8 A1 实现与合并状态（2026-11-28）
+
+> **状态更新（2026-11-28）**：A1 已合并到 `harness-api`（`c6ae2a125`），`Package harness-api` 与 GHCR 镜像发布成功（`harness-api-20261128-c6ae2a1` / `harness-latest`）；MySQL 8.0.43 账本迁移/升级/读写通过；生产未部署，开关默认关闭；PostgreSQL 未验证。以下开发过程记录保留，不覆盖历史。
 
 已实现（分支 `feat/harness-p1a-media-ledger`）：
 
@@ -450,4 +452,49 @@ P1-B 仍独立冻结：未知受理、重复提交/幂等、异常退款、人�
 
 生产环境使用 MySQL；本次 MySQL 8.0.43 实库的 AutoMigrate、旧表升级、写入/读取已通过。PostgreSQL 仍是项目三库规范的一部分，补齐前不能宣称三库兼容。
 
-未完成：PostgreSQL 实库验证（本机 `TEST_POSTGRES_DSN` 未配置、无 PostgreSQL 服务/WSL/Docker）、全量回归、Harness 契约确认。按项目规则，**当前不得宣称三库兼容或 A1 完成**。
+未完成：PostgreSQL 实库验证（本机 `TEST_POSTGRES_DSN` 未配置、无 PostgreSQL 服务/WSL/Docker）、全量回归、Harness 联调。按生产 MySQL 口径 A1 已闭环；按项目三库规范，当前不得宣称三库兼容。A2 未开始。
+
+### 10.9 A2 实现清单（2026-11-28 冻结，未开始）
+
+A2 覆盖 49 个视频模型：TA A 组 14、PAI B 组 19、PAI C 组 8、D 组 8。不要求 49 个模型全部付费生成；代码路径/夹具全覆盖，每类代表模型做有预算的真实调用。
+
+**1. 视频 Facts 采集**
+
+- TA 14：上游 `output_seconds` / `input_seconds` 有则记 `upstream`，缺失记 `unavailable`；不改金额。
+- PAI B 19：`output_seconds` 实测记 `upstream`，`reference_seconds` 记 `request`，两者 source 分开；表达式不变。
+- PAI C 8：轮询完成观测通道独立捕获实际输出秒；B1 记录 `upstream`，金额继续按现有请求秒规则。
+- D 8：有 `usage.seconds` 记 `upstream`，没有则保留 `request`/`estimated` 事实并把 `output_seconds` 记 `unavailable`；不得一律标 unavailable。
+
+**2. 完成事实合并**
+
+完成轮询把实际用量合并进 `TaskBillingContext.MediaFacts`，`recordTaskHarnessSettlement` 读取并进入 settlement correlation；B1 diff 正常产生 `record_version + 1` / `supersedes_event_id`，空事实不得擦除已发布 facts。
+
+**3. B3 商业账本字段**
+
+- `billing_basis`：allowlist 草案 `token` / `image` / `video_second` / `reference_video_second` / `per_call`；`mixed` 仅在 Harness 明确同意后使用。
+- `billing_quantity` + `billing_quantity_source`。
+- `billing_components[]`：每项 `basis` / `quantity` / `source`；金额仍以 `billing.base_amount` / `total_amount` 为权威。
+- B3 diff：`harnessCostDiffers` 比较 quantity、source、components、basis；金额未变不得产生 cost 事件，数量变化产生正常版本链。
+- 历史行保持 `billing_basis=token`，不回填、不改写。
+
+**4. 表达式快照与版本暴露**
+
+- `HarnessLedgerEvent` 新增 `BillingExpr`、`BillingExprHash`、`BillingExprVersion`（A2 迁移列）。
+- B3 wire 新增 `cost_calculation_version`、`billing_expr_hash`、`billing_expr_version`；`procurement_price_version` 已存在，沿用字段名。
+- `CostCalculationVersion`、`PricingVersion` 内部已有，不从零开发；A2 只补 B3 暴露与表达式快照持久化。
+
+**5. 验收与测试**
+
+- 49 模型夹具覆盖 A/B/C/D 组；代表模型真实调用有预算上限。
+- 金额/扣费/退款不变，含 TVC 退款路径与 PAI C 组。
+- TA ZeroSettlement：`status=settled`、`total_amount=0`、无 `billing_quantity`；标记“已识别、未修复”。
+- 开关关闭 golden：B1/B3 JSON、事件条数、`record_version` 与旧版一致；历史行不回填。
+- MySQL 8.0.43 + SQLite 迁移/升级/重启；PostgreSQL 待补；全量测试在 CI/高内存环境重跑。
+
+**6. 契约沟通**
+
+A2 开工时把 §10.3/§10.4 与最终 JSON 示例作为“实现基线通知”发给 Harness，不等审批、不停止开发；给对方一个异议窗口。`billing_basis` 新枚举、数量来源和金额解释仍需保持可对账，若对方提出差异，按具体差异协商。
+
+**7. 不做项**
+
+TA 零结算修复、PAI C 组实际秒改价、完整表达式对 Harness 开放、P1-B Pending/幂等/异常退款状态机，均不纳入 A2。
