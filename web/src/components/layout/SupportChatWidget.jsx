@@ -886,7 +886,14 @@ const SupportChatWidget = () => {
       height: rect.height,
       moved: false,
     };
-    element.setPointerCapture?.(event.pointerId);
+    // Capture the actual clickable child. Capturing the outer entry retargets
+    // pointerup to the container, so the final click lands on the container and
+    // never reaches the caption/button onClick handlers.
+    const captureTarget =
+      event.target?.closest?.(
+        '.support-chat-entry__caption, .support-chat-fab',
+      ) || element;
+    captureTarget.setPointerCapture?.(event.pointerId);
   };
 
   const handleEntryPointerMove = (event) => {
